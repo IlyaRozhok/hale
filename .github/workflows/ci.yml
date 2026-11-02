@@ -18,6 +18,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm check:colors
+      # Skips itself when private/transactions.csv is absent (it is git-ignored).
+      - run: pnpm golden:classify
   image:
     runs-on: ubuntu-latest
     steps:

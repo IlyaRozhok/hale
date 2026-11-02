@@ -8,6 +8,7 @@ import { ImportService } from "./import.service";
 import { JOB_CLOCK, JobRunner } from "./jobs/job-runner";
 import { MonoClient } from "./mono.client";
 import { MonoController } from "./mono.controller";
+import { OWN_IDENTITY, ReclassifyService } from "../transactions/reclassify.service";
 import { RateGate } from "./rate-gate";
 import { ReconcileService } from "./reconcile.service";
 import { WebhookBodyErrorFilter } from "./webhook-body.filter";
@@ -27,6 +28,12 @@ import { WebhookService } from "./webhook.service";
     },
     { provide: JOB_CLOCK, useValue: { now: () => Date.now() } },
     JobRunner,
+    {
+      provide: OWN_IDENTITY,
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig) => ({ ownNames: config.OWNER_NAMES, ownIbans: [], ownJars: [] }),
+    },
+    ReclassifyService,
     ImportService,
     WebhookService,
     ReconcileService,
@@ -34,6 +41,6 @@ import { WebhookService } from "./webhook.service";
     { provide: APP_FILTER, useClass: WebhookBodyErrorFilter },
   ],
   controllers: [WebhookController, MonoController],
-  exports: [MonoClient, RateGate, ImportService, JobRunner],
+  exports: [MonoClient, RateGate, ImportService, JobRunner, ReclassifyService],
 })
 export class MonoModule {}

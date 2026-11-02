@@ -27,6 +27,7 @@ export async function makeConfig(
     DATABASE_URL: databaseUrl,
     JWT_SECRET: "test-secret-test-secret-test-secret-1234",
     OWNER_PASSWORD_HASH: await argon2.hash(TEST_PASSWORD),
+    OWNER_NAMES: [],
     PORT: 0,
     ...over,
   };

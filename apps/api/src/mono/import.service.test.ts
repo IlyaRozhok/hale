@@ -8,6 +8,7 @@ import { JobRunner, MAX_ATTEMPTS } from "./jobs/job-runner";
 import { MonoApiError } from "./mono.errors";
 import type { MonoClient } from "./mono.client";
 import type { MonoStatementItem } from "./mono.schemas";
+import { ReclassifyService } from "../transactions/reclassify.service";
 
 const NOW_MS = Date.UTC(2026, 10, 2, 12, 0, 0);
 const NOW_S = NOW_MS / 1000;
@@ -303,5 +304,41 @@ describe("JobRunner", () => {
     const [ra, rb] = await Promise.all([a.runOnce(), b.runOnce()]);
     expect([ra, rb].filter(Boolean)).toHaveLength(1);
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("classification after upsert", () => {
+  const reclassifier = () =>
+    new ReclassifyService(ds, new JobRunner(ds, clock), { ownNames: [], ownIbans: [], ownJars: [] });
+
+  it("types rows once a window is imported", async () => {
+    const t = NOW_S - 3600;
+    const client = {
+      clientInfo: vi.fn(async () => clientInfo),
+      statement: vi.fn(async (id: string) => (id === "acc-uah" ? [item("c1", t, { mcc: 5812 })] : [])),
+    } as unknown as MonoClient;
+    const runner = new JobRunner(ds, clock);
+    const service = new ImportService(ds, client, runner, clock, reclassifier());
+    service.onModuleInit();
+    await service.enqueueHistory(daysAgo(10));
+    await drain(runner);
+    const tx = await ds.getRepository(Transaction).findOneByOrFail({ external_id: "c1" });
+    expect([tx.type, tx.category, tx.type_source]).toEqual(["spend", "cafe", "auto"]);
+  });
+
+  it("types a single upserted item (webhook, reconcile)", async () => {
+    const { service } = setup(async () => []);
+    await service.syncAccounts();
+    const account = await ds.getRepository(Account).findOneByOrFail({ external_id: "acc-uah" });
+    const withClassifier = new ImportService(
+      ds,
+      {} as unknown as MonoClient,
+      new JobRunner(ds, clock),
+      clock,
+      reclassifier(),
+    );
+    const tx = await withClassifier.upsertStatementItem(account.id, item("w1", NOW_S - 60, { mcc: 5411 }));
+    expect(tx.type).toBe("spend");
+    expect(tx.category).toBe("groceries");
   });
 });

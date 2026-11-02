@@ -9,7 +9,9 @@
     "typecheck": "pnpm -r --if-present run typecheck && tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
-    "check:colors": "node scripts/check-raw-colors.mjs"
+    "check:colors": "node scripts/check-raw-colors.mjs",
+    "golden:classify": "pnpm --filter @tablo/api exec tsx ../../scripts/golden-classify.ts",
+    "golden:import": "pnpm --filter @tablo/api exec tsx ../../scripts/golden-import.ts"
   },
   "packageManager": "pnpm@12.16.1",
   "devDependencies": {

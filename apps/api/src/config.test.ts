@@ -20,6 +20,14 @@ describe("loadConfig", () => {
     expect(cfg.PORT).toBe(3000);
   });
 
+  it("splits OWNER_NAMES on semicolons and defaults to none", () => {
+    expect(loadConfig(valid).OWNER_NAMES).toEqual([]);
+    expect(loadConfig({ ...valid, OWNER_NAMES: " Test Owner; Owner Test ;" }).OWNER_NAMES).toEqual([
+      "Test Owner",
+      "Owner Test",
+    ]);
+  });
+
   it("throws when JWT_SECRET is missing", () => {
     expect(() => loadConfig(without("JWT_SECRET"))).toThrow(/JWT_SECRET/);
   });

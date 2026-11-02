@@ -16,6 +16,12 @@ const schema = z.object({
     (v) => (v === "" ? undefined : typeof v === "string" ? v.replace(/\/+$/, "") : v),
     z.url().optional(),
   ),
+  // Owner's names as the bank prints them, ";"-separated; lets classify() recognise transfers
+  // from the owner's own accounts. Optional.
+  OWNER_NAMES: z.preprocess(
+    (v) => (typeof v === "string" ? v.split(";").map((n) => n.trim()).filter(Boolean) : []),
+    z.array(z.string()),
+  ),
   PORT: z.coerce.number().int().min(0).max(65535).default(3000),
 });
 

@@ -1,9 +1,10 @@
-import { Inject, Injectable, type OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, Optional, type OnModuleInit } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { Account, Job, Transaction } from "../db/entities";
 import { JOB_CLOCK, type JobClock, JobRunner } from "./jobs/job-runner";
 import { MonoClient } from "./mono.client";
 import type { MonoClientInfo, MonoStatementItem } from "./mono.schemas";
+import { ReclassifyService } from "../transactions/reclassify.service";
 import { planWindows, splitWindow } from "./windows";
 
 export const WINDOW_JOB_KIND = "history.window";
@@ -40,6 +41,7 @@ export class ImportService implements OnModuleInit {
     @Inject(MonoClient) private readonly client: MonoClient,
     @Inject(JobRunner) private readonly runner: JobRunner,
     @Inject(JOB_CLOCK) private readonly clock: JobClock,
+    @Optional() @Inject(ReclassifyService) private readonly reclassifier?: ReclassifyService,
   ) {}
 
   onModuleInit(): void {
@@ -116,10 +118,20 @@ export class ImportService implements OnModuleInit {
         return;
       }
     }
-    for (const item of items) await this.upsertStatementItem(account.id, item);
+    const ids: number[] = [];
+    for (const item of items) ids.push((await this.upsertRow(account.id, item)).id);
+    await this.reclassifier?.reclassifyIds(ids);
   }
 
+  /** Upserts one item and classifies it (type and category are never taken from the bank). */
   async upsertStatementItem(accountId: number, item: MonoStatementItem): Promise<Transaction> {
+    const tx = await this.upsertRow(accountId, item);
+    if (!this.reclassifier) return tx;
+    await this.reclassifier.reclassifyIds([tx.id]);
+    return this.ds.getRepository(Transaction).findOneByOrFail({ id: tx.id });
+  }
+
+  private async upsertRow(accountId: number, item: MonoStatementItem): Promise<Transaction> {
     const account = await this.ds.getRepository(Account).findOneByOrFail({ id: accountId });
     let fxRate: number | null = null;
     let amountUah: number | null = item.amount;
