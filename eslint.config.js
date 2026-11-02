@@ -7,4 +7,6 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   { languageOptions: { globals: { ...globals.node } } },
+  // jest.mock factories run before imports are hoisted, so they must use require().
+  { files: ["apps/mobile/**/*.test.tsx"], rules: { "@typescript-eslint/no-require-imports": "off" } },
 );

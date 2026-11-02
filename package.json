@@ -8,7 +8,7 @@
   "scripts": {
     "typecheck": "pnpm -r --if-present run typecheck && tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
-    "test": "vitest run",
+    "test": "vitest run && pnpm --filter @tablo/mobile run test:jest",
     "check:colors": "node scripts/check-raw-colors.mjs",
     "golden:classify": "pnpm --filter @tablo/api exec tsx ../../scripts/golden-classify.ts",
     "golden:import": "pnpm --filter @tablo/api exec tsx ../../scripts/golden-import.ts",

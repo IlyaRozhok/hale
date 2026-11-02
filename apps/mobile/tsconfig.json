@@ -4,7 +4,7 @@
     "jsx": "react-native",
     "noEmit": true,
     "lib": ["ES2022"],
-    "types": ["react"]
+    "types": ["react", "jest"]
   },
   "include": ["src", "index.ts"]
 }

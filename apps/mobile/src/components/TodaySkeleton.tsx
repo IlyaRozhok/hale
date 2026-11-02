@@ -1,0 +1,28 @@
+import { StyleSheet, View } from "react-native";
+import { tokens } from "@tablo/tokens";
+import { Glass } from "./Glass";
+import { LAYOUT } from "./layout";
+
+const { color, radius, space } = tokens;
+
+/** Same geometry as the loaded screen, so nothing jumps when data arrives. */
+export function TodaySkeleton() {
+  return (
+    <View testID="today-skeleton" style={styles.root} accessibilityLabel="Загрузка">
+      <View style={[styles.bar, { width: 120, height: LAYOUT.eyebrow }]} />
+      <View style={[styles.bar, { width: 220, height: LAYOUT.amount }]} />
+      <View style={[styles.bar, { width: 150, height: LAYOUT.note }]} />
+      <Glass style={{ height: LAYOUT.accountsPanel }}>
+        <View />
+      </Glass>
+      <Glass style={{ height: LAYOUT.upcomingPanel }}>
+        <View />
+      </Glass>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { gap: space.lg },
+  bar: { backgroundColor: color.surface.raised, borderRadius: radius.md },
+});

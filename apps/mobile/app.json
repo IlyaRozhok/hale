@@ -5,12 +5,17 @@
     "version": "0.0.1",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "platforms": ["ios"],
+    "platforms": [
+      "ios"
+    ],
     "newArchEnabled": true,
     "ios": {
       "bundleIdentifier": "com.irozhok.tablo",
       "supportsTablet": false
     },
-    "plugins": ["expo-dev-client"]
+    "plugins": [
+      "expo-dev-client",
+      "expo-secure-store"
+    ]
   }
 }

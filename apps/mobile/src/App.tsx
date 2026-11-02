@@ -1,71 +1,111 @@
-import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import Slider from "@react-native-community/slider";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AppState, StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { DarkTheme, NavigationContainer, type NavigationProp, type ParamListBase } from "@react-navigation/native";
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { QueryClient, focusManager } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { tokens } from "@tablo/tokens";
-import { LimitVisual, type LimitMode } from "./metal";
+import { API_URL } from "./config";
+import { createApi } from "./api/client";
+import { ApiProvider } from "./api/context";
+import { createStorePersister, shouldPersist } from "./api/persist";
+import { CACHE_KEY, TOKEN_KEY, keychain } from "./api/secureStore";
+import { Login } from "./screens/Login";
+import { Stub } from "./screens/Stub";
+import { Today } from "./screens/Today";
 
-const { color, space, radius, type, touchMin } = tokens;
-const MODES: { id: LimitMode; label: string }[] = [
-  { id: "mercury", label: "Ртуть" },
-  { id: "ring", label: "Кольцо" },
-];
+const { color, type } = tokens;
+const DAY = 24 * 60 * 60 * 1000;
+const DEVICE_NAME = "iPhone";
 
-/** Demo screen for the metal prototype: level slider and mode toggle. */
-export default function App() {
-  const [mode, setMode] = useState<LimitMode>("mercury");
-  const [level, setLevel] = useState(0.72);
+const theme = {
+  ...DarkTheme,
+  colors: { ...DarkTheme.colors, background: color.surface.base, card: color.surface.inset, text: color.fg.default, primary: color.fg.default, border: color.surface.inset },
+};
+
+const Tabs = createBottomTabNavigator();
+
+function TodayTab({ navigation }: { navigation: NavigationProp<ParamListBase> }) {
+  return <Today onOpenActivity={() => navigation.navigate("Activity")} />;
+}
+const ActivityTab = () => <Stub title="Операции" />;
+const SettingsTab = () => <Stub title="Настройки" />;
+
+function Main() {
   return (
-    <View style={styles.root}>
-      <StatusBar style="light" />
-      <View style={styles.visual}>
-        <LimitVisual mode={mode} level={level} />
-      </View>
-      <View style={styles.panel}>
-        <Text style={styles.value}>{Math.round(level * 100)}%</Text>
-        <Slider
-          minimumValue={0}
-          maximumValue={1}
-          value={level}
-          onValueChange={setLevel}
-          minimumTrackTintColor={color.fg.default}
-          maximumTrackTintColor={color.data.track}
-          thumbTintColor={color.fg.default}
-          accessibilityLabel="Уровень"
-        />
-        <View style={styles.toggle}>
-          {MODES.map((m) => (
-            <Pressable
-              key={m.id}
-              accessibilityRole="button"
-              accessibilityState={{ selected: mode === m.id }}
-              onPress={() => setMode(m.id)}
-              style={[styles.seg, mode === m.id && styles.segOn]}
-            >
-              <Text style={[styles.segText, mode === m.id && styles.segTextOn]}>{m.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-      </View>
-    </View>
+    <NavigationContainer theme={theme}>
+      <Tabs.Navigator
+        screenOptions={{
+          headerShown: false,
+          tabBarActiveTintColor: color.fg.default,
+          tabBarInactiveTintColor: color.fg.subtle,
+          tabBarLabelStyle: type.label,
+          tabBarIcon: () => null,
+          tabBarIconStyle: { display: "none" },
+        }}
+      >
+        <Tabs.Screen name="Today" component={TodayTab} options={{ title: "Сегодня" }} />
+        <Tabs.Screen name="Activity" component={ActivityTab} options={{ title: "Операции" }} />
+        <Tabs.Screen name="Settings" component={SettingsTab} options={{ title: "Настройки" }} />
+      </Tabs.Navigator>
+    </NavigationContainer>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: color.surface.base, paddingTop: 64 },
-  visual: { flex: 1, margin: space.lg },
-  panel: { padding: space.xl, gap: space.lg, backgroundColor: color.surface.inset },
-  value: { ...type.display, color: color.fg.default },
-  toggle: { flexDirection: "row", gap: space.sm },
-  seg: {
-    flex: 1,
-    minHeight: touchMin,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: radius.lg,
-    backgroundColor: color.surface.raised,
-  },
-  segOn: { backgroundColor: color.accent.default },
-  segText: { ...type.label, color: color.fg.muted },
-  segTextOn: { color: color.accent.fgOnAccent },
-});
+export default function App() {
+  // undefined: still reading the Keychain; null: signed out.
+  const [token, setToken] = useState<string | null | undefined>(undefined);
+
+  const client = useMemo(
+    () => new QueryClient({ defaultOptions: { queries: { gcTime: 7 * DAY, retry: 1 } } }),
+    [],
+  );
+  const persister = useMemo(() => createStorePersister(keychain, CACHE_KEY), []);
+
+  const signOut = useCallback(async () => {
+    setToken(null);
+    client.clear();
+    await Promise.allSettled([keychain.remove(TOKEN_KEY), persister.removeClient()]);
+  }, [client, persister]);
+
+  const api = useMemo(
+    () => createApi({ baseUrl: API_URL, getToken: () => keychain.get(TOKEN_KEY), onUnauthorized: () => void signOut() }),
+    [signOut],
+  );
+
+  useEffect(() => {
+    keychain.get(TOKEN_KEY).then(
+      (t) => setToken(t),
+      () => setToken(null),
+    );
+  }, []);
+
+  // Refresh when the app comes back to the foreground.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (s) => focusManager.setFocused(s === "active"));
+    return () => sub.remove();
+  }, []);
+
+  const signedIn = async (t: string) => {
+    await keychain.set(TOKEN_KEY, t);
+    setToken(t);
+  };
+
+  return (
+    <SafeAreaProvider>
+      <StatusBar style="light" />
+      <PersistQueryClientProvider
+        client={client}
+        persistOptions={{ persister, maxAge: 7 * DAY, dehydrateOptions: { shouldDehydrateQuery: shouldPersist } }}
+      >
+        <ApiProvider api={api}>
+          {token === undefined ? <View style={styles.blank} /> : token === null ? <Login deviceName={DEVICE_NAME} onSignedIn={signedIn} /> : <Main />}
+        </ApiProvider>
+      </PersistQueryClientProvider>
+    </SafeAreaProvider>
+  );
+}
+
+const styles = StyleSheet.create({ blank: { flex: 1, backgroundColor: color.surface.base } });
