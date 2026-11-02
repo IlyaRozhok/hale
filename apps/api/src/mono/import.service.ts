@@ -142,11 +142,12 @@ export class ImportService implements OnModuleInit {
        ON CONFLICT (external_id) DO UPDATE SET
          description=EXCLUDED.description, comment=EXCLUDED.comment, mcc=EXCLUDED.mcc,
          amount=EXCLUDED.amount,
-         amount_uah=COALESCE(
-           EXCLUDED.amount_uah,
-           ROUND(EXCLUDED.amount * transactions.fx_rate)::bigint
-         ),
-         fx_rate=COALESCE(EXCLUDED.fx_rate, transactions.fx_rate),
+         amount_uah=CASE
+           WHEN transactions.fx_rate IS NOT NULL
+             THEN ROUND(EXCLUDED.amount * transactions.fx_rate)::bigint
+           ELSE EXCLUDED.amount_uah
+         END,
+         fx_rate=COALESCE(transactions.fx_rate, EXCLUDED.fx_rate),
          hold=EXCLUDED.hold, counter_iban=EXCLUDED.counter_iban,
          counter_name=EXCLUDED.counter_name, raw=EXCLUDED.raw`,
       [

@@ -107,6 +107,7 @@ describe("webhook route", () => {
     await request(http()).post(url2).send({}).expect(200);
     await request(http()).post(url2).set("Content-Type", "application/json").send("{not json").expect(200);
     await request(http()).post("/mono/webhook/wrong").set("Content-Type", "application/json").send("{not json").expect(404);
+    await request(http()).post("/mono/webhook/%").set("Content-Type", "application/json").send("{not json").expect(404);
     expect(await ds.query("SELECT 1 FROM jobs WHERE kind='webhook.item'")).toHaveLength(0);
   });
 

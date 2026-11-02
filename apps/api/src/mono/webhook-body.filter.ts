@@ -6,6 +6,15 @@ import type { AppConfig } from "../config";
 import { secretMatches } from "./webhook.controller";
 
 const BODY_ERROR_STATUSES = new Set([400, 413, 415]);
+/** Undecodable segments (e.g. a lone %) cannot match any secret; never throw here. */
+function safeDecode(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return "";
+  }
+}
+
 const WEBHOOK_PATH = /^\/mono\/webhook\/([^/?]+)/;
 
 /**
@@ -39,7 +48,7 @@ export class WebhookBodyErrorFilter extends BaseExceptionFilter {
         BODY_ERROR_STATUSES.has(exception.getStatus())
       ) {
         const res = http.getResponse<Response>();
-        if (secretMatches(decodeURIComponent(match[1]!), this.config.MONO_WEBHOOK_SECRET)) {
+        if (secretMatches(safeDecode(match[1]!), this.config.MONO_WEBHOOK_SECRET)) {
           this.log.warn(`webhook ignored: unreadable body (${exception.getStatus()})`);
           res.status(200).end();
         } else {

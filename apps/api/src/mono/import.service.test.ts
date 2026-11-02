@@ -249,12 +249,26 @@ describe("upsertStatementItem fx recompute", () => {
     const t = NOW_S - 100;
     const first = await service.upsertStatementItem(acc.id, item("fx1", t, { hold: true, amount: -100 }));
     expect(first.amount_uah).toBe(-4000);
-    // no rate row available any more; the stored per-row rate must still be used
-    await ds.query("TRUNCATE fx_rates");
+    // a newer rate appears; the row keeps its stored rate
+    await ds.query("INSERT INTO fx_rates VALUES ('USD', $1, 50)", [new Date(NOW_MS + 1000)]);
+    const same = await service.upsertStatementItem(acc.id, item("fx1", t, { hold: true, amount: -100 }));
+    expect(same.fx_rate).toBe(40);
+    expect(same.amount_uah).toBe(-4000);
     const second = await service.upsertStatementItem(acc.id, item("fx1", t, { hold: false, amount: -120 }));
     expect(second.amount).toBe(-120);
     expect(second.fx_rate).toBe(40);
     expect(second.amount_uah).toBe(-4800);
+    // no rate at all any more: still the stored rate
+    await ds.query("TRUNCATE fx_rates");
+    const third = await service.upsertStatementItem(acc.id, item("fx1", t, { amount: -130 }));
+    expect(third.amount_uah).toBe(-5200);
+    // a row with no stored rate picks up the current one
+    const fresh = await service.upsertStatementItem(acc.id, item("fx2", t, { amount: -10 }));
+    expect(fresh.amount_uah).toBeNull();
+    await ds.query("INSERT INTO fx_rates VALUES ('USD', $1, 50)", [new Date(NOW_MS + 2000)]);
+    const filled = await service.upsertStatementItem(acc.id, item("fx2", t, { amount: -10 }));
+    expect(filled.fx_rate).toBe(50);
+    expect(filled.amount_uah).toBe(-500);
   });
 });
 
