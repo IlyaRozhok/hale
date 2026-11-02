@@ -30,12 +30,12 @@ export const CASH_MCCS: ReadonlySet<number> = new Set([6010, 6011]);
 export const MERCHANTS: readonly { pattern: RegExp; category: Category }[] = [
   { pattern: /\b(uklon|bolt|uber|taxi|таксі)\b/i, category: "transport" },
   { pattern: /(нова пошта|nova poshta|укрпошта|ukrposhta)/i, category: "shopping" },
-  { pattern: /(сільпо|silpo|атб|\batb\b|varus|варус|novus|новус|metro|fora|фора|ашан|auchan|ekomarket)/i, category: "groceries" },
+  { pattern: /(сільпо|silpo|(?<![\p{L}])атб(?![\p{L}])|\batb\b|varus|варус|novus|новус|ekomarket|ашан|auchan)/iu, category: "groceries" },
   { pattern: /(glovo|wolt|bolt food|mcdonald|kfc|sushiya|aroma kava)/i, category: "cafe" },
   { pattern: /(lifecell|vodafone|київстар|kyivstar|tenet|datagroup|volia)/i, category: "telecom" },
   { pattern: /(netflix|spotify|youtube|apple\.com|google|icloud|megogo|nvidia|openai|anthropic|github|notion)/i, category: "subscriptions" },
-  { pattern: /(аптека|apteka|подорожник|анц|bla?go|фармація)/i, category: "health" },
-  { pattern: /(rozetka|розетка|епіцентр|epicentr|comfy|allo|алло|foxtrot|фокстрот|citrus|цитрус)/i, category: "shopping" },
+  { pattern: /(аптека|apteka|подорожник|фармація)/i, category: "health" },
+  { pattern: /(rozetka|розетка|епіцентр|epicentr|comfy|foxtrot|фокстрот|citrus|цитрус)/i, category: "shopping" },
 ];
 
 /** MCC to category, exact codes first, then ranges. */
