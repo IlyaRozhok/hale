@@ -10,7 +10,7 @@ import type {
   TxTypeDto,
 } from "@tablo/contracts";
 import { DataSource, type EntityManager } from "typeorm";
-import { type TxType, typeCategory } from "../domain/classify";
+import { type TxType, isWeakRuleValue, normaliseText, typeCategory } from "../domain/classify";
 import { PlanService } from "../plan/plan.service";
 import { counterKeySql } from "./counter-key";
 import { PLAN_TYPES } from "./reclassify.service";
@@ -62,10 +62,16 @@ const view = (r: Row): TransactionDto => ({
 
 const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6})\|(\d{1,10})$/;
 const encodeCursor = (r: Row) => Buffer.from(`${r.ts}|${r.id}`).toString("base64url");
+const MAX_INT4 = 2_147_483_647;
 function decodeCursor(c: string): { ts: string; id: number } | null {
   const m = CURSOR.exec(Buffer.from(c, "base64url").toString("utf8"));
-  return m ? { ts: m[1]!, id: Number(m[2]) } : null;
+  if (!m) return null;
+  const id = Number(m[2]);
+  return id <= MAX_INT4 ? { ts: m[1]!, id } : null;
 }
+
+/** Types whose rows can settle a planned payment; a row retyped to anything else frees it. */
+const SETTLING_TYPES: ReadonlySet<string> = new Set(["obligation", "debt_payment", "tax"]);
 
 /** Owner label to the type it stands for; the other three stay spending. */
 const LABEL_TYPE: Record<RecipientLabelName, TxType> = {
@@ -116,11 +122,11 @@ export class TransactionsService {
   async edit(id: number, p: TransactionPatch): Promise<TransactionEditDto> {
     const base = (
       await this.ds.query(
-        `SELECT t.type, t.counter_iban, t.counter_name, t.description, ${KEY} AS counter_key ${FROM} WHERE t.id=$1`,
+        `SELECT t.type, t.amount::float8 AS amount, t.counter_iban, t.counter_name, t.description, ${KEY} AS counter_key ${FROM} WHERE t.id=$1`,
         [id],
       )
     )[0] as
-      | { type: string | null; counter_iban: string | null; counter_name: string | null; description: string; counter_key: string }
+      | { type: string | null; amount: number; counter_iban: string | null; counter_name: string | null; description: string; counter_key: string }
       | undefined;
     if (!base) throw new NotFoundException("transaction not found");
     const ruleType = p.type ?? base.type;
@@ -128,11 +134,15 @@ export class TransactionsService {
 
     const changed = await this.ds.transaction(async (m) => {
       if (p.applyToSimilar && ruleType) {
+        // A name that is short or a generic bank text would catch strangers: rows are still
+        // changed, but no rule is stored for it.
         const rule = ruleFor(base);
-        if (!rule.value) throw new UnprocessableEntityException("the row has nothing to match similar rows by");
-        await this.saveRule(m, rule.kind, rule.value, ruleType, p.category ?? null, null);
+        if (rule.kind === "iban" || !isWeakRuleValue(rule.value)) {
+          await this.saveRule(m, rule.kind, rule.value, ruleType, p.category ?? null, null, base.amount < 0 ? "out" : "in");
+        }
       }
-      return this.apply(m, p.applyToSimilar ? { key: base.counter_key } : { id }, p.type ?? null, p.category ?? null);
+      const scope = p.applyToSimilar ? { key: base.counter_key, sign: Math.sign(base.amount) } : { id };
+      return this.apply(m, scope, p.type ?? null, p.category ?? null);
     });
     if (p.type) await this.settle(changed, p.type);
     const row = await this.one(id);
@@ -149,11 +159,10 @@ export class TransactionsService {
       )
     )[0] as { counter_name: string | null; description: string } | undefined;
     if (!sample) throw new NotFoundException("recipient not found");
-    const value = (sample.counter_name?.trim() || sample.description.trim()).trim();
-    if (!value) throw new UnprocessableEntityException("the recipient has no name to match by");
+    const value = normaliseText(sample.counter_name?.trim() || sample.description);
     const type = LABEL_TYPE[label];
     const changed = await this.ds.transaction(async (m) => {
-      await this.saveRule(m, "recipient", value, type, null, label);
+      if (!isWeakRuleValue(value)) await this.saveRule(m, "recipient", value, type, null, label, "out");
       return this.apply(m, { key: counterKey, relabel: true }, type, null);
     });
     await this.settle(changed, type);
@@ -162,7 +171,7 @@ export class TransactionsService {
 
   private async apply(
     m: EntityManager,
-    scope: { id: number } | { key: string; relabel?: boolean },
+    scope: { id: number } | { key: string; relabel?: boolean; sign?: number },
     type: TxType | null,
     category: string | null,
   ): Promise<number[]> {
@@ -173,7 +182,8 @@ export class TransactionsService {
       where = `t.id = $4`;
     } else {
       args.push(scope.key);
-      where = `${KEY} = $4${scope.relabel ? ` AND t.amount < 0 AND t.type IN ('person_transfer','obligation','debt_payment')` : ""}`;
+      if (scope.sign) args.push(scope.sign);
+      where = `${KEY} = $4${scope.sign ? " AND sign(t.amount) = $5" : ""}${scope.relabel ? ` AND t.amount < 0 AND t.type IN ('person_transfer','obligation','debt_payment')` : ""}`;
     }
     const rows: { id: number }[] = await m.query(
       `WITH u AS (UPDATE transactions SET
@@ -190,8 +200,19 @@ export class TransactionsService {
     return rows.map((r) => r.id);
   }
 
-  /** Planned payments see the new type exactly as they would after classification. */
+  /**
+   * Planned payments follow the new type: a row that no longer settles one frees it (a payment
+   * marked paid by hand has no transaction and stays paid); otherwise the row is matched as after
+   * classification.
+   */
   private async settle(ids: readonly number[], type: string): Promise<void> {
+    if (ids.length === 0) return;
+    if (!SETTLING_TYPES.has(type)) {
+      await this.ds.query(
+        `UPDATE scheduled_payments SET transaction_id = NULL, paid_at = NULL WHERE transaction_id = ANY($1::int[])`,
+        [ids],
+      );
+    }
     if (!PLAN_TYPES.has(type as TxType)) return;
     for (const id of ids) await this.plan.onClassified(id, type);
   }
@@ -203,11 +224,15 @@ export class TransactionsService {
     type: string,
     category: string | null,
     label: string | null,
+    direction: "in" | "out",
   ): Promise<void> {
-    await m.query(`DELETE FROM rules WHERE match_kind=$1 AND lower(match_value)=lower($2)`, [kind, value]);
     await m.query(
-      `INSERT INTO rules (match_kind, match_value, type, category, label) VALUES ($1,$2,$3,$4,$5)`,
-      [kind, value, type, category, label],
+      `DELETE FROM rules WHERE match_kind=$1 AND lower(match_value)=lower($2) AND direction IS NOT DISTINCT FROM $3`,
+      [kind, value, direction],
+    );
+    await m.query(
+      `INSERT INTO rules (match_kind, match_value, type, category, label, direction) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [kind, value, type, category, label, direction],
     );
   }
 
@@ -223,6 +248,6 @@ function ruleFor(r: { counter_iban: string | null; counter_name: string | null; 
   value: string;
 } {
   if (r.counter_iban) return { kind: "iban", value: r.counter_iban };
-  if (r.counter_name?.trim()) return { kind: "recipient", value: r.counter_name.trim() };
-  return { kind: "merchant", value: r.description.trim().replace(/\s+/g, " ").toLowerCase() };
+  if (r.counter_name?.trim()) return { kind: "recipient", value: normaliseText(r.counter_name) };
+  return { kind: "merchant", value: normaliseText(r.description) };
 }

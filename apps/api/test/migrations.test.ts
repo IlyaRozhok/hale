@@ -49,6 +49,7 @@ describe("migrations", () => {
     await ds.undoLastMigration();
     await ds.undoLastMigration();
     await ds.undoLastMigration();
+    await ds.undoLastMigration();
     expect(await listTables(url)).toEqual([]);
     await ds.destroy();
   });

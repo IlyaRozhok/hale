@@ -138,8 +138,8 @@ export class ReclassifyService implements OnModuleInit {
   }
 
   private async loadContext(): Promise<ClassifyContext> {
-    const rules: { match_kind: ClassifyRule["matchKind"]; match_value: string; type: string; category: string | null }[] =
-      await this.ds.query(`SELECT match_kind, match_value, type, category FROM rules ORDER BY id`);
+    const rules: { match_kind: ClassifyRule["matchKind"]; match_value: string; type: string; category: string | null; direction: "in" | "out" | null }[] =
+      await this.ds.query(`SELECT match_kind, match_value, type, category, direction FROM rules ORDER BY id`);
     const accounts: { kind: string; iban: string | null; title: string | null }[] = await this.ds.query(
       `SELECT kind, iban, title FROM accounts WHERE iban IS NOT NULL OR title IS NOT NULL`,
     );
@@ -152,6 +152,7 @@ export class ReclassifyService implements OnModuleInit {
         matchValue: r.match_value,
         type: r.type as TxType,
         category: r.category,
+        direction: r.direction,
       })),
     };
   }

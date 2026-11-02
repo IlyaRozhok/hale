@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classify, findOwnPairs, type ClassifyContext, type ClassifyInput } from "./classify";
+import { classify, findOwnPairs, isWeakRuleValue, type ClassifyContext, type ClassifyInput } from "./classify";
 
 const ctx = (over: Partial<ClassifyContext> = {}): ClassifyContext => ({
   ownIbans: new Set(["UA00OWN0001"]),
@@ -33,8 +33,9 @@ describe("classify order", () => {
         { matchKind: "recipient", matchValue: "landlord", type: "obligation", category: "rent" },
       ],
     });
+    expect(classify(tx({ counterName: "Mr Landlord", mcc: 4829, description: "Тест Тестовий" }), c).type).toBe("person_transfer");
     expect(classify(tx({ counterIban: "UA11X", mcc: 4829 }), c).type).toBe("obligation");
-    expect(classify(tx({ counterName: "Mr Landlord", mcc: 4829 }), c).type).toBe("obligation");
+    expect(classify(tx({ counterName: "  LANDLORD ", mcc: 4829 }), c).type).toBe("obligation");
     expect(classify(tx({ counterName: "Other", mcc: 4829, description: "Тест Тестовий" }), c).type).toBe(
       "person_transfer",
     );
@@ -210,5 +211,23 @@ describe("default categories and fop income", () => {
   it("any incoming money on the fop account is income", () => {
     const r = classify(tx({ accountKind: "fop", amount: 1_000_000, mcc: 4829, description: "Payment from client" }), ctx());
     expect(r.type).toBe("income");
+  });
+});
+
+describe("rule direction", () => {
+  it("an out rule ignores incoming money and an in rule ignores outgoing", () => {
+    const rule = (direction: "in" | "out" | null) =>
+      ctx({ rules: [{ matchKind: "iban", matchValue: "UA1", type: "obligation", direction }] });
+    expect(classify(tx({ counterIban: "UA1", mcc: 4829, amount: -100 }), rule("out")).type).toBe("obligation");
+    expect(classify(tx({ counterIban: "UA1", mcc: 4829, amount: 100 }), rule("out")).type).not.toBe("obligation");
+    expect(classify(tx({ counterIban: "UA1", mcc: 4829, amount: -100 }), rule("in")).type).not.toBe("obligation");
+    expect(classify(tx({ counterIban: "UA1", mcc: 4829, amount: 100 }), rule(null)).type).toBe("obligation");
+  });
+
+  it("flags short and generic rule values", () => {
+    expect(isWeakRuleValue("Ivan")).toBe(false);
+    expect(isWeakRuleValue(" Al ")).toBe(true);
+    expect(isWeakRuleValue("Переказ")).toBe(true);
+    expect(isWeakRuleValue("  ПЕРЕКАЗ   коштів")).toBe(true);
   });
 });

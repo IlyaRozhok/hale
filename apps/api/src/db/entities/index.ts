@@ -50,6 +50,7 @@ export class Rule {
   @Column({ type: "text" }) type!: string;
   @Column({ type: "text", nullable: true }) category!: string | null;
   @Column({ type: "text", nullable: true }) label!: string | null;
+  @Column({ type: "text", nullable: true }) direction!: "in" | "out" | null;
 }
 
 @Entity("expected_incomes")

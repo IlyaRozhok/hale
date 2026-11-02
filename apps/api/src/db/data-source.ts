@@ -8,6 +8,7 @@ import { OwnIdentityNeedsLabel1793836800000 } from "./migrations/0004-own-identi
 import { PlanLinks1793923200000 } from "./migrations/0005-plan-links";
 import { RecurringPayments1794009600000 } from "./migrations/0006-recurring-payments";
 import { BridgePlanBasis1794096000000 } from "./migrations/0007-bridge-plan-basis";
+import { RuleDirection1794182400000 } from "./migrations/0008-rule-direction";
 
 export const migrations = [
   Init1793577600000,
@@ -17,6 +18,7 @@ export const migrations = [
   PlanLinks1793923200000,
   RecurringPayments1794009600000,
   BridgePlanBasis1794096000000,
+  RuleDirection1794182400000,
 ];
 
 export function createDataSource(url: string): DataSource {

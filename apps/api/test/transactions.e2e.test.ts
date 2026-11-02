@@ -58,6 +58,7 @@ interface TxOver {
   amountUah?: number | null;
   fxRate?: number | null;
   category?: string | null;
+  mcc?: number | null;
 }
 async function tx(accountId: number, o: TxOver = {}): Promise<number> {
   seq++;
@@ -65,13 +66,13 @@ async function tx(accountId: number, o: TxOver = {}): Promise<number> {
   return (
     await ds.query(
       `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, fx_rate,
-                                 counter_iban, counter_name, type, category, type_source, needs_label, raw)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'{"secret":"raw"}') RETURNING id`,
+                                 counter_iban, counter_name, type, category, type_source, needs_label, mcc, raw)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'{"secret":"raw"}') RETURNING id`,
       [
         `tx-${seq}`, accountId, at, at.slice(0, 10), o.description ?? "Shop", o.amount ?? -10_000,
         o.amountUah === undefined ? (o.amount ?? -10_000) : o.amountUah, o.fxRate ?? null,
         o.iban ?? null, o.name ?? null, o.type === undefined ? "spend" : o.type, o.category ?? null,
-        o.source === undefined ? "auto" : o.source, o.needsLabel ?? false,
+        o.source === undefined ? "auto" : o.source, o.needsLabel ?? false, o.mcc ?? null,
       ],
     )
   )[0].id;
@@ -86,6 +87,8 @@ describe("GET /transactions", () => {
     await api.get("/transactions?limit=0").expect(400);
     await api.get("/transactions?type=nope").expect(400);
     await api.get("/transactions?cursor=garbage").expect(400);
+    const huge = Buffer.from("2026-11-18T10:00:00.000000|3000000000").toString("base64url");
+    await api.get(`/transactions?cursor=${huge}`).expect(400);
     await api.get("/transactions?needsLabel=maybe").expect(400);
   });
 
@@ -212,8 +215,8 @@ describe("PATCH /transactions/:id", () => {
     const other = await tx(a, { description: "Bolt", at: "2026-10-05T10:00:00.000Z" });
     const res = await api.patch(`/transactions/${t}`, { type: "person_transfer", applyToSimilar: true }).expect(200);
     expect(res.body.updated).toBe(3);
-    const rules = await ds.query(`SELECT match_kind, match_value, type FROM rules`);
-    expect(rules).toEqual([{ match_kind: "merchant", match_value: "uklon", type: "person_transfer" }]);
+    const rules = await ds.query(`SELECT match_kind, match_value, type, direction FROM rules`);
+    expect(rules).toEqual([{ match_kind: "merchant", match_value: "uklon", type: "person_transfer", direction: "out" }]);
     for (const id of [t, same, sameKeyOtherAccount]) {
       expect(await row("SELECT type, type_source FROM transactions WHERE id=$1", [id])).toEqual({
         type: "person_transfer",
@@ -325,7 +328,7 @@ describe("POST /recipients/label", () => {
     }
     expect((await row("SELECT needs_label FROM transactions WHERE id=$1", [unrelated])).needs_label).toBe(true);
     expect(await ds.query(`SELECT match_kind, match_value, type, label FROM rules`)).toEqual([
-      { match_kind: "recipient", match_value: "Olena K", type: "person_transfer", label: "help" },
+      { match_kind: "recipient", match_value: "olena k", type: "person_transfer", label: "help" },
     ]);
 
     const after = await api.get("/today").expect(200);
@@ -365,5 +368,94 @@ describe("POST /recipients/label", () => {
     );
     await api.post("/recipients/label", { counterKey: key, label: "obligation" }).expect(201);
     expect((await row(`SELECT transaction_id FROM scheduled_payments`)).transaction_id).toBe(t1);
+  });
+});
+
+describe("rule safety", () => {
+  const reclassifyIds = (ids: number[]) => app.get(ReclassifyService).reclassifyIds(ids);
+
+  it("a recipient rule matches the whole normalised name, not a substring", async () => {
+    const a = await account();
+    const t = await tx(a, { name: "Olena K", description: "Переказ", type: "person_transfer", needsLabel: true });
+    const key = (await api.get("/transactions").expect(200)).body.items[0].counterKey as string;
+    await api.post("/recipients/label", { counterKey: key, label: "help" }).expect(201);
+    const same = await tx(a, { name: "  OLENA    k ", description: "x", type: null, source: null });
+    const longer = await tx(a, { name: "Olena Kovalenko", description: "y", type: null, source: null });
+    const inDesc = await tx(a, { name: null, description: "Payment to Olena K shop", mcc: null, type: null, source: null });
+    await reclassifyIds([same, longer, inDesc]);
+    expect((await row("SELECT type_source FROM transactions WHERE id=$1", [same])).type_source).toBe("rule");
+    expect((await row("SELECT type_source FROM transactions WHERE id=$1", [longer])).type_source).not.toBe("rule");
+    expect((await row("SELECT type_source FROM transactions WHERE id=$1", [inDesc])).type_source).not.toBe("rule");
+    expect((await row("SELECT type_source FROM transactions WHERE id=$1", [t])).type_source).toBe("owner");
+  });
+
+  it("a short name or a generic bank text creates no rule but still labels the rows", async () => {
+    const a = await account();
+    const short = await tx(a, { name: "Al", description: "Переказ", type: "person_transfer", needsLabel: true });
+    const generic = await tx(a, { name: null, description: " Переказ  ", type: "person_transfer", needsLabel: true });
+    const items = (await api.get("/transactions").expect(200)).body.items as { id: number; counterKey: string }[];
+    const k = (id: number) => items.find((i) => i.id === id)!.counterKey;
+    expect((await api.post("/recipients/label", { counterKey: k(short), label: "help" }).expect(201)).body).toEqual({ updated: 1 });
+    expect((await api.post("/recipients/label", { counterKey: k(generic), label: "one_off" }).expect(201)).body).toEqual({ updated: 1 });
+    expect((await row("SELECT count(*)::int AS n FROM rules")).n).toBe(0);
+    expect((await row("SELECT type_source, needs_label FROM transactions WHERE id=$1", [generic]))).toEqual({
+      type_source: "owner",
+      needs_label: false,
+    });
+    // Same through PATCH.
+    const g2 = await tx(a, { name: null, description: "Оплата", type: "spend" });
+    await api.patch(`/transactions/${g2}`, { type: "cash_out", applyToSimilar: true }).expect(200);
+    expect((await row("SELECT count(*)::int AS n FROM rules")).n).toBe(0);
+    expect((await row("SELECT type FROM transactions WHERE id=$1", [g2])).type).toBe("cash_out");
+  });
+
+  it("applyToSimilar keeps to the direction of the edited row, and so does its rule", async () => {
+    const a = await account("fop");
+    const out = await tx(a, { iban: IBAN, name: "Ivan P", amount: -5_000, type: "person_transfer" });
+    const inn = await tx(a, { iban: IBAN, name: "Ivan P", amount: 7_000, type: "person_in" });
+    const res = await api.patch(`/transactions/${out}`, { type: "obligation", applyToSimilar: true }).expect(200);
+    expect(res.body.updated).toBe(1);
+    expect((await row("SELECT type, type_source FROM transactions WHERE id=$1", [inn]))).toEqual({
+      type: "person_in",
+      type_source: "auto",
+    });
+    expect((await row("SELECT direction FROM rules")).direction).toBe("out");
+    const inLater = await tx(a, { iban: IBAN, name: "Ivan P", amount: 9_000, mcc: 4829, type: null, source: null });
+    const outLater = await tx(a, { iban: IBAN, name: "Ivan P", amount: -9_000, mcc: 4829, type: null, source: null });
+    await reclassifyIds([inLater, outLater]);
+    expect((await row("SELECT type FROM transactions WHERE id=$1", [outLater])).type).toBe("obligation");
+    expect((await row("SELECT type FROM transactions WHERE id=$1", [inLater])).type).toBe("income");
+  });
+
+  it("retyping away from obligation or debt_payment frees the planned payment", async () => {
+    const a = await account();
+    await ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Rent',1700000,'UAH','2026-11-18')`,
+    );
+    const t = await tx(a, { amount: -1_700_000, description: "Landlord" });
+    await api.patch(`/transactions/${t}`, { type: "obligation" }).expect(200);
+    expect((await row("SELECT transaction_id FROM scheduled_payments")).transaction_id).toBe(t);
+    await api.patch(`/transactions/${t}`, { type: "spend" }).expect(200);
+    expect(await row("SELECT transaction_id, paid_at FROM scheduled_payments")).toEqual({ transaction_id: null, paid_at: null });
+  });
+
+  it("a recipient label that leaves obligation frees it; a manual payment stays paid", async () => {
+    const a = await account();
+    await ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Support',80000,'UAH','2026-11-05')`,
+    );
+    await ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, paid_at) VALUES ('obligation','Manual',1,'UAH','2026-11-06', now())`,
+    );
+    await tx(a, { name: "Olena K", description: "Переказ", type: "person_transfer", needsLabel: true, amount: -80_000, at: "2026-11-05T10:00:00.000Z" });
+    const key = (await api.get("/transactions").expect(200)).body.items[0].counterKey as string;
+    await api.post("/recipients/label", { counterKey: key, label: "obligation" }).expect(201);
+    expect((await row("SELECT paid_at FROM scheduled_payments WHERE name='Support'")).paid_at).not.toBeNull();
+    await api.post("/recipients/label", { counterKey: key, label: "help" }).expect(201);
+    expect(await row("SELECT transaction_id, paid_at FROM scheduled_payments WHERE name='Support'")).toEqual({
+      transaction_id: null,
+      paid_at: null,
+    });
+    expect((await row("SELECT paid_at FROM scheduled_payments WHERE name='Manual'")).paid_at).not.toBeNull();
   });
 });

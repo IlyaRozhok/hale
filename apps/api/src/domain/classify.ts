@@ -41,6 +41,8 @@ export interface ClassifyRule {
   matchValue: string;
   type: TxType;
   category?: string | null;
+  /** Only outgoing ('out') or incoming ('in') money; null or absent means both. */
+  direction?: "in" | "out" | null;
 }
 
 export interface ClassifyContext {
@@ -85,7 +87,24 @@ const REFUND = /^(скасування|повернення платежу)/i;
 const REFUND_OF_TRANSFER = /переказ/i;
 const FROM_PREFIX = /^від:/i;
 
+/** Trimmed, lower-cased, whitespace collapsed: the form recipient rules compare in. */
+export const normaliseText = (s: string): string => lc(s).trim().replace(/\s+/g, " ");
+
+const GENERIC_BANK_TEXT = new Set([
+  "переказ", "перекази", "переказ коштів", "переказ на картку", "переказ з картки", "поповнення",
+  "поповнення картки", "списання", "оплата", "платіж", "транзакція", "p2p", "p2p переказ", "transfer",
+  "payment", "перевод",
+]);
+
+/** Too short or too generic to identify one counterparty: no rule is made from it. */
+export function isWeakRuleValue(value: string): boolean {
+  const v = normaliseText(value);
+  return v.length < 4 || GENERIC_BANK_TEXT.has(v);
+}
+
 function ruleMatches(rule: ClassifyRule, tx: ClassifyInput): boolean {
+  if (rule.direction === "out" && tx.amount >= 0) return false;
+  if (rule.direction === "in" && tx.amount <= 0) return false;
   const v = lc(rule.matchValue);
   if (!v) return false;
   switch (rule.matchKind) {
@@ -93,8 +112,11 @@ function ruleMatches(rule: ClassifyRule, tx: ClassifyInput): boolean {
       return tx.counterIban === rule.matchValue;
     case "merchant":
       return lc(tx.description).includes(v);
-    case "recipient":
-      return lc(tx.counterName ?? "").includes(v) || lc(tx.description).includes(v);
+    case "recipient": {
+      // The whole name or the whole description, never a fragment of either.
+      const n = normaliseText(rule.matchValue);
+      return normaliseText(tx.counterName ?? "") === n || normaliseText(tx.description) === n;
+    }
   }
 }
 
