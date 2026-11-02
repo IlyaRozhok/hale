@@ -202,6 +202,67 @@ describe.skipIf(!pgBin)("backup.sh / restore-check.sh", () => {
     expect(readFileSync(log, "utf8")).toContain("backup exit=3");
   });
 
+  it("cron-run reads a real argon2 hash env file without sourcing it", () => {
+    const db = `src_${++n}`;
+    psql("postgres", `create database ${db}`);
+    psql(
+      db,
+      "create table jobs (id serial primary key, kind text not null, status text not null, attempts int, last_error text)",
+    );
+    const envFile = join(dir, "prod.env");
+    writeFileSync(
+      envFile,
+      [
+        "DOMAIN=example.test",
+        "OWNER_PASSWORD_HASH='$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$aGFzaGhhc2hoYXNoaGFzaA'",
+        "JWT_SECRET=$HOME$undefined_var",
+        `DATABASE_URL='${url(db)}'`,
+        "",
+      ].join("\n"),
+    );
+    const log = join(dir, "jobs2.log");
+    const env = { PATH: process.env.PATH ?? "", PSQL: bin("psql"), ENV_FILE: envFile, LOG_FILE: log };
+    const ok = run("cron-run.sh", env, ["noop", "true"]);
+    expect(ok.status, ok.stderr).toBe(0);
+    const bad = run("cron-run.sh", env, ["backup", "sh", "-c", "echo $DATABASE_URL >&2; exit 4"]);
+    expect(bad.status).toBe(4);
+    expect(readFileSync(log, "utf8")).toContain(url(db));
+    expect(psql(db, "select kind from jobs")).toBe("backup.failed");
+  });
+
+  it("full mode without a key fails instead of downgrading to shallow", () => {
+    const backups = mkdtempSync(join(dir, "nokey-"));
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+    writeFileSync(join(backups, `tablo-${stamp}.sql.gz.age`), "age-encryption.org/v1\nrest");
+    const r = run("restore-check.sh", { PATH: process.env.PATH ?? "", BACKUP_DIR: backups });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("full mode needs AGE_IDENTITY_FILE");
+  });
+
+  it("deploy.sh exits non-zero when a step fails and zero when health passes", () => {
+    const fake = join(dir, "fake-ssh.sh");
+    writeFileSync(fake, 'cat >/dev/null 2>&1 || true\n[ -z "$FAIL_ON" ] || { case "$*" in *"$FAIL_ON"*) exit 1;; esac; }\n');
+    const env = (extra: Record<string, string>) => ({
+      PATH: process.env.PATH ?? "",
+      DEPLOY_HOST: "203.0.113.1",
+      DOMAIN: "example.test",
+      SSH_CMD: `bash ${fake}`,
+      HEALTH_RETRIES: "1",
+      ...extra,
+    });
+    const failBuild = run("deploy.sh", env({ FAIL_ON: "docker build", CURL: "true" }));
+    expect(failBuild.status).not.toBe(0);
+    expect(failBuild.stdout).not.toContain("deploy ok");
+    const failMig = run("deploy.sh", env({ FAIL_ON: "mig.js", CURL: "true" }));
+    expect(failMig.status).not.toBe(0);
+    const failHealth = run("deploy.sh", env({ CURL: "false", HEALTH_RETRIES: "1" }));
+    expect(failHealth.status).not.toBe(0);
+    expect(failHealth.stderr).toContain("/health did not return 200");
+    const ok = run("deploy.sh", env({ CURL: "true" }));
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(ok.stdout).toContain("deploy ok");
+  });
+
   it("shallow mode accepts a fresh age-shaped backup and rejects a stale or plain one", () => {
     const backups = mkdtempSync(join(dir, "shallow-"));
     const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");

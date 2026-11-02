@@ -6,12 +6,12 @@
 #   checks every expected table exists and that transactions >= baseline.
 #   Baseline = max of EXPECTED_MIN_TX, the backup's .manifest, and the row
 #   count in SOURCE_URL (when given). With no baseline at all it fails.
-# Shallow mode (the server's weekly cron: it has no private key):
+# Shallow mode (explicit --shallow only; the server's weekly cron has no key):
 #   checks the latest backup exists, is recent, non-empty and age-encrypted.
 #
 # Env:
 #   BACKUP_DIR | RCLONE_REMOTE   where backups live (as in backup.sh)
-#   DECRYPT_CMD | AGE_IDENTITY_FILE   full mode (default: age -d -i FILE)
+#   DECRYPT_CMD | AGE_IDENTITY_FILE   required unless --shallow (age -d -i FILE)
 #   RESTORE_ADMIN_URL   admin URL of a scratch Postgres to restore into; when
 #                       unset, a postgres:16 docker container is started
 #   SOURCE_URL, EXPECTED_MIN_TX, EXPECTED_TABLES (space-separated override)
@@ -33,7 +33,8 @@ if [ "$mode" = full ] && [ -z "${DECRYPT_CMD:-}" ]; then
   if [ -n "${AGE_IDENTITY_FILE:-}" ]; then
     DECRYPT_CMD="age -d -i $AGE_IDENTITY_FILE"
   else
-    mode=shallow
+    # Never downgrade silently: a forgotten key must not look like success.
+    fail "full mode needs AGE_IDENTITY_FILE or DECRYPT_CMD (pass --shallow to only check freshness)"
   fi
 fi
 

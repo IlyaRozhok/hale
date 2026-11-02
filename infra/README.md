@@ -38,11 +38,18 @@ Then run, in order:
    `RCLONE_CONFIG_HZ_TYPE=s3`, `RCLONE_CONFIG_HZ_PROVIDER=Other`,
    `RCLONE_CONFIG_HZ_ENDPOINT=https://<location>.your-objectstorage.com`,
    `RCLONE_CONFIG_HZ_ACCESS_KEY_ID`, `RCLONE_CONFIG_HZ_SECRET_ACCESS_KEY`.
-   Avoid `$` and quotes in values. (`API_IMAGE` is written by the deploy.)
-5. In GitHub, add repository secrets `DEPLOY_HOST` (server IP), `DEPLOY_SSH_KEY`
-   (a private key authorised on the server), `DEPLOY_KNOWN_HOSTS` (output of
-   `ssh-keyscan IP`) and `DEPLOY_DOMAIN`. Then run the "Deploy" workflow from the
-   Actions tab (it is `workflow_dispatch` only and never runs on push).
+   Wrap EVERY value in single quotes, e.g.
+   `OWNER_PASSWORD_HASH='$argon2id$v=19$m=65536,t=3,p=4$...'`. Docker Compose
+   treats single-quoted values literally; unquoted `$` would be interpolated and
+   corrupt the hash (login would fail). Do not double the `$`. The backup cron
+   reads only the variables it needs from this file as plain data (quotes
+   stripped, nothing evaluated). (`API_IMAGE` is written by `deploy.sh`.)
+5. Deploy from your machine (port 22 is open to your IP only, so GitHub
+   Actions cannot deploy; CI only builds the image to catch breakage):
+   `DEPLOY_HOST=<server ip> DOMAIN=<domain> infra/deploy.sh`.
+   It ships the committed tree (`git archive HEAD`) over SSH, builds the image
+   on the server, runs migrations, starts the stack and polls
+   `https://<domain>/health`; any failing step exits non-zero.
 6. Verify: `curl -i https://<domain>/health` returns 200, and from your machine
    `nc -vz <ip> 5432` fails (closed).
 7. Run one backup by hand and prove you can restore it (see below) before
@@ -59,6 +66,8 @@ Then run, in order:
   does not have, so run it from your machine, at least monthly:
   `AGE_IDENTITY_FILE=~/tablo-backup.key RCLONE_REMOTE=... RCLONE_CONFIG_HZ_*=... infra/restore-check.sh`
   (needs docker, or `RESTORE_ADMIN_URL` pointing at a scratch Postgres).
+- Full mode without a key fails; it never silently downgrades. Only an explicit
+  `--shallow` skips the restore.
 - The server's weekly cron (Sunday 04:00 UTC) runs `restore-check.sh --shallow`:
   latest backup exists, is under 36 h old, is non-empty and age-encrypted.
 - Failures of either cron job are appended to `/var/log/tablo-jobs.log` and
@@ -66,6 +75,10 @@ Then run, in order:
   `restore_check.failed`, `status` = `failed`, `last_error`).
 
 ## Local verification
+
+`infra/verify-bundle.sh` runs `pnpm deploy --prod` (as the Dockerfile does) into
+a temp dir outside the repo and proves the built API resolves its dependencies
+from there, without Docker.
 
 `pnpm test` runs `infra/test/scripts.test.ts`, which starts a throwaway
 Postgres from locally installed binaries (set `PG_BIN` if they are not on

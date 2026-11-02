@@ -2,11 +2,30 @@
 # Runs a job script for cron: logs output, and on failure records a row in the
 # `jobs` table so the failure is visible in the app database.
 # Usage: cron-run.sh <job-name> <command> [args...]
-# Env: ENV_FILE (sourced if set), LOG_FILE, DATABASE_URL, PSQL
+# Env: ENV_FILE (parsed, not sourced), LOG_FILE, DATABASE_URL, PSQL
 set -uo pipefail
 name=${1:?job name}; shift
-# shellcheck disable=SC1090
-if [ -n "${ENV_FILE:-}" ]; then set -a; . "$ENV_FILE"; set +a; fi
+# Read ONLY the variables the jobs need from ENV_FILE. The file is parsed as
+# data, never sourced: it also holds docker-compose values such as an argon2
+# hash ('$argon2id$...') that a shell would expand (and `set -u` would abort on).
+# Surrounding single or double quotes are stripped; no other processing.
+load_env() {
+  local line key val
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      DATABASE_URL=* | AGE_RECIPIENT=* | RCLONE_REMOTE=* | RCLONE_CONFIG_*=* | BACKUP_DIR=* | RETENTION_DAYS=* | MAX_AGE_HOURS=*) ;;
+      *) continue ;;
+    esac
+    key=${line%%=*}
+    val=${line#*=}
+    case "$val" in
+      \'*\') val=${val#\'}; val=${val%\'} ;;
+      \"*\") val=${val#\"}; val=${val%\"} ;;
+    esac
+    export "$key=$val"
+  done < "$1"
+}
+if [ -n "${ENV_FILE:-}" ]; then load_env "$ENV_FILE"; fi
 LOG_FILE=${LOG_FILE:-/var/log/tablo-jobs.log}
 PSQL=${PSQL:-psql}
 out=$(mktemp); trap 'rm -f "$out"' EXIT
