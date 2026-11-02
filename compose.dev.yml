@@ -1,0 +1,15 @@
+# Local development database. Tests do not need this: they start an
+# embedded Postgres themselves.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: tablo
+      POSTGRES_PASSWORD: tablo
+      POSTGRES_DB: tablo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
