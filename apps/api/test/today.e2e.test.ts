@@ -41,7 +41,7 @@ beforeEach(async () => {
      RESTART IDENTITY CASCADE`,
   );
   await ds.query(
-    `UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, last_sync_at=NULL, tracking_start='2026-01-01'`,
+    `UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, last_sync_at=NULL, last_contact_at=NULL, tracking_start='2026-01-01'`,
   );
   at("2026-11-02T10:00:00Z");
 });
@@ -462,6 +462,17 @@ describe("sync status", () => {
     expect(old.state.dailyLimit).toBe(100_000);
     await ds.query(`UPDATE settings SET last_sync_at='2026-11-02T08:00:00Z'`);
     expect((await today()).syncStale).toBe(false);
+  });
+
+  it("is not stale on a quiet day when the bank still answers the balance refresh", async () => {
+    await account("black", 1_000_000);
+    await income("fop", "2026-11-12");
+    await ds.query(`UPDATE settings SET last_sync_at='2026-11-01T20:00:00Z', last_contact_at='2026-11-02T09:30:00Z'`);
+    const r = await today();
+    expect(r.syncStale).toBe(false);
+    expect(r.syncedAt).toBe("2026-11-02T09:30:00.000Z");
+    await ds.query(`UPDATE settings SET last_contact_at='2026-11-02T03:00:00Z'`);
+    expect((await today()).syncStale).toBe(true);
   });
 });
 

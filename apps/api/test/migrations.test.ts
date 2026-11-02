@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import pg from "pg";
-import { createDataSource } from "../src/db/data-source";
+import { createDataSource, migrations } from "../src/db/data-source";
 import { createTestDatabase } from "./db";
 
 const TABLES = [
@@ -42,15 +42,7 @@ describe("migrations", () => {
       "transactions.needs_label",
     ]);
 
-    await ds.undoLastMigration();
-    await ds.undoLastMigration();
-    await ds.undoLastMigration();
-    await ds.undoLastMigration();
-    await ds.undoLastMigration();
-    await ds.undoLastMigration();
-    await ds.undoLastMigration();
-    await ds.undoLastMigration();
-    await ds.undoLastMigration();
+    for (let i = 0; i < migrations.length; i++) await ds.undoLastMigration();
     expect(await listTables(url)).toEqual([]);
     await ds.destroy();
   });

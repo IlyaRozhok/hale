@@ -142,6 +142,31 @@ describe("webhook route", () => {
   });
 });
 
+describe("webhook balance", () => {
+  const deliver = async (id: string, time: number, balance: number) => {
+    await request(http()).post(`/mono/webhook/${SECRET}`).send(body("acc-1", hookItem(id, { time, balance }))).expect(200);
+    await app.get(JobRunner).runOnce();
+  };
+  const balance = async () => (await ds.query("SELECT balance::int AS b FROM accounts WHERE external_id='acc-1'"))[0].b as number;
+  const T = 1_790_000_000;
+
+  it("takes the balance from a newer item and ignores an older one", async () => {
+    await deliver("b1", T, 90_000);
+    expect(await balance()).toBe(90_000);
+    await deliver("b2", T + 60, 80_000);
+    expect(await balance()).toBe(80_000);
+    await deliver("b0", T - 60, 95_000); // delivered late
+    expect(await balance()).toBe(80_000);
+    expect(await ds.query("SELECT 1 FROM transactions")).toHaveLength(3);
+  });
+
+  it("does not undo a client-info balance taken after the item", async () => {
+    await ds.query("UPDATE accounts SET balance=70000, balance_at=to_timestamp($1)", [T + 120]);
+    await deliver("b3", T, 90_000);
+    expect(await balance()).toBe(70_000);
+  });
+});
+
 describe("POST /mono/import", () => {
   const login = async () => {
     const { TEST_PASSWORD } = await import("./app");

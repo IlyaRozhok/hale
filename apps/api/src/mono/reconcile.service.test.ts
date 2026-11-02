@@ -30,7 +30,7 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   await ds.query("TRUNCATE jobs, transactions, accounts, fx_rates RESTART IDENTITY CASCADE");
-  await ds.query("UPDATE settings SET last_sync_at = NULL");
+  await ds.query("UPDATE settings SET last_sync_at = NULL, last_contact_at = NULL");
 });
 
 function make(
@@ -103,6 +103,33 @@ describe("ReconcileService.runDaily", () => {
     await expect(service.runDaily()).rejects.toThrow(/boom/);
     const [s] = await ds.query("SELECT last_sync_at FROM settings");
     expect(s.last_sync_at).toBeNull();
+  });
+});
+
+describe("ReconcileService.refreshBalances", () => {
+  it("updates balances and the contact time with one client-info call, nothing else", async () => {
+    const { client, service } = make();
+    await service.refreshBalances();
+    expect(client.clientInfo).toHaveBeenCalledTimes(1);
+    expect(client.statement).not.toHaveBeenCalled();
+    expect(client.setWebhook).not.toHaveBeenCalled();
+    const [a] = await ds.query("SELECT balance::int AS balance FROM accounts");
+    expect(a.balance).toBe(777);
+    const [s] = await ds.query("SELECT last_contact_at, last_sync_at FROM settings");
+    expect(new Date(s.last_contact_at).getTime()).toBe(NOW_MS);
+    expect(s.last_sync_at).toBeNull();
+  });
+
+  it("does nothing without a token and records no contact on failure", async () => {
+    const none = make({}, {});
+    await none.service.hourlyRefresh();
+    expect(none.client.clientInfo).not.toHaveBeenCalled();
+
+    const { client, service } = make();
+    client.clientInfo.mockRejectedValueOnce(new Error("down"));
+    await expect(service.hourlyRefresh()).resolves.toBeUndefined();
+    const [s] = await ds.query("SELECT last_contact_at FROM settings");
+    expect(s.last_contact_at).toBeNull();
   });
 });
 

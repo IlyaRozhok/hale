@@ -7,7 +7,7 @@ import { Account } from "../db/entities";
 import { ImportService } from "./import.service";
 import { JOB_CLOCK, type JobClock } from "./jobs/job-runner";
 import { MonoClient } from "./mono.client";
-import { markSynced } from "./sync-status";
+import { markContact, markSynced } from "./sync-status";
 
 export const RECONCILE_DAYS = 7;
 const DAY_S = 86_400;
@@ -37,6 +37,23 @@ export class ReconcileService implements OnApplicationBootstrap {
     } catch (e) {
       this.log.error(`daily reconcile failed: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  /** A quiet day has no webhook items: this keeps balances fresh and shows the bank is still in touch. */
+  @Cron("30 * * * *", { timeZone: "Europe/Kyiv" })
+  async hourlyRefresh(): Promise<void> {
+    try {
+      await this.refreshBalances();
+    } catch (e) {
+      this.log.warn(`hourly client-info refresh failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /** One client-info call (through the rate gate): balances and the contact time. Throws on failure. */
+  async refreshBalances(): Promise<void> {
+    if (!this.config.MONOBANK_TOKEN) return;
+    await this.imports.syncAccounts(await this.client.clientInfo());
+    await markContact(this.ds, new Date(this.clock.now()));
   }
 
   /** Last 7 days for every account, plus balances and the webhook check. Throws on failure. */

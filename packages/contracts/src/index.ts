@@ -209,7 +209,7 @@ export interface TodayDto {
   questions: { id: string; kind: "usdc_arrived" | "income_date" | "recipient_label"; text: string }[];
   badCases: { id: string; text: string }[];
   runOutOn: string | null;
-  /** Last successful sync, null if there was none yet. */
+  /** Last successful contact with the bank (webhook item, reconcile or balance refresh), null if there was none yet. */
   syncedAt: string | null;
   syncStale: boolean;
   limitVisual: "mercury" | "ring";

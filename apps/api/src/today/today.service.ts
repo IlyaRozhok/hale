@@ -261,11 +261,12 @@ export class TodayService {
     const settings = (
       await m.query(
         `SELECT lifestyle_cap::float8 AS lifestyle_cap, food_floor::float8 AS food_floor, tax_rate_bp,
-                esv_quarter::float8 AS esv_quarter, limit_visual, last_sync_at, tracking_start::text AS tracking_start FROM settings WHERE id=1`,
+                esv_quarter::float8 AS esv_quarter, limit_visual, GREATEST(last_sync_at, last_contact_at) AS last_contact,
+                tracking_start::text AS tracking_start FROM settings WHERE id=1`,
       )
     )[0] as {
       lifestyle_cap: number; food_floor: number; tax_rate_bp: number; esv_quarter: number;
-      limit_visual: "mercury" | "ring"; last_sync_at: Date | null; tracking_start: string;
+      limit_visual: "mercury" | "ring"; last_contact: Date | null; tracking_start: string;
     };
 
     const rates = await this.rates(m);
@@ -411,7 +412,7 @@ export class TodayService {
       plan: planRow
         ? { id: planRow.id, dailyAmount: planRow.daily_amount, creditPlan: planRow.credit_plan, basis: planRow.basis }
         : null,
-      syncedAt: settings.last_sync_at,
+      syncedAt: settings.last_contact,
       limitVisual: settings.limit_visual,
     };
   }

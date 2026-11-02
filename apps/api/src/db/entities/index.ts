@@ -132,6 +132,7 @@ export class Settings {
   @Column({ type: "bigint", transformer: bt, default: 0 }) esv_quarter!: number;
   @Column({ type: "text", default: "mercury" }) limit_visual!: "mercury" | "ring";
   @Column({ type: "timestamptz", nullable: true }) last_sync_at!: Date | null;
+  @Column({ type: "timestamptz", nullable: true }) last_contact_at!: Date | null;
   @Column({ type: "date", default: () => "CURRENT_DATE" }) tracking_start!: string;
 }
 
