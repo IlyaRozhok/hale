@@ -309,7 +309,15 @@ describe("bridge mode", () => {
     const r = await today();
     expect(r.state).toMatchObject({ mode: "bridge", daysLeft: 18, free: -1_197_000, dailyLimit: 45_000 });
     expect(r.state.bridge).toMatchObject({ creditNeeded: 2_007_000, shortfall: 0, recommendedDaily: 45_000 });
+    expect(r.state.bridge.confirmed).toBe(false);
     expect(await plans()).toHaveLength(0);
+  });
+
+  it("reports the plan as confirmed once one is saved", async () => {
+    await setup();
+    const saved = await api.post("/bridge", { dailyAmount: 100_000 }).expect(201);
+    expect(saved.body.state.bridge.confirmed).toBe(true);
+    expect((await today()).state.bridge.confirmed).toBe(true);
   });
 
   it("saves the choice, keeps credit_plan on ordinary spending, and recomputes it on new payments or a new income date", async () => {

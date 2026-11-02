@@ -152,6 +152,8 @@ export interface BridgeStateDto {
   maxDailyWithinCredit: number;
   shortfall: number;
   overPlan: boolean;
+  /** True when the owner has an open, confirmed bridge plan. */
+  confirmed: boolean;
 }
 
 export interface DailyStateDto {

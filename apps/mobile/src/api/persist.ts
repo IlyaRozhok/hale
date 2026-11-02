@@ -10,17 +10,29 @@ export interface KeyValueStore {
 /** A TanStack Query persister over any small key-value store (the Keychain in the app). */
 export function createStorePersister(store: KeyValueStore, key: string): Persister {
   return {
-    persistClient: (client: PersistedClient) => store.set(key, JSON.stringify(client)),
-    restoreClient: async () => {
-      const raw = await store.get(key);
-      if (raw === null) return undefined;
+    // The cache is a convenience: a failing store must never break the screen.
+    persistClient: async (client: PersistedClient) => {
       try {
-        return JSON.parse(raw) as PersistedClient;
+        await store.set(key, JSON.stringify(client));
+      } catch {
+        // ignored
+      }
+    },
+    restoreClient: async () => {
+      try {
+        const raw = await store.get(key);
+        return raw === null ? undefined : (JSON.parse(raw) as PersistedClient);
       } catch {
         return undefined;
       }
     },
-    removeClient: () => store.remove(key),
+    removeClient: async () => {
+      try {
+        await store.remove(key);
+      } catch {
+        // ignored
+      }
+    },
   };
 }
 

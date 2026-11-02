@@ -418,7 +418,7 @@ export class TodayService {
 
     return {
       date: f.date,
-      state,
+      state: { ...state, bridge: state.bridge ? { ...state.bridge, confirmed: plan !== null } : null },
       usdRate: f.usdRate,
       rateStale: f.rateStale,
       accounts: { own: f.slots.own, credit: f.credit, fop: f.slots.fop, binance: f.slots.binance },

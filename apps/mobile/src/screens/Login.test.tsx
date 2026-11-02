@@ -49,3 +49,18 @@ describe("Login", () => {
     expect(StyleSheet.flatten(button.props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
   });
 });
+
+describe("Login, storage failure", () => {
+  it("shows a clear error and lets the owner try again when the token cannot be saved", async () => {
+    const api = fakeApi();
+    const onSignedIn = jest.fn(async () => {
+      throw new Error("keychain");
+    });
+    await renderWith(<Login onSignedIn={onSignedIn} deviceName="iPhone" />, api);
+    await fireEvent.changeText(screen.getByLabelText("Пароль"), "secret");
+    await fireEvent.press(screen.getByText("Войти"));
+    expect(await screen.findByText("Не удалось сохранить вход на этом устройстве. Попробуйте ещё раз.")).toBeTruthy();
+    await fireEvent.press(screen.getByText("Войти"));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledTimes(2));
+  });
+});

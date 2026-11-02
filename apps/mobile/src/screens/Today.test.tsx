@@ -24,9 +24,10 @@ const bridgeState = (bridge: Partial<BridgeStateDto> = {}): DailyStateDto => ({
   leftToday: 45000,
   level: 1,
   needsIncomeDate: false,
-  bridge: { creditNeeded: 2007000, recommendedDaily: 45000, maxDailyWithinCredit: 56000, shortfall: 0, overPlan: false, ...bridge },
+  bridge: { creditNeeded: 2007000, recommendedDaily: 45000, maxDailyWithinCredit: 56000, shortfall: 0, overPlan: false, confirmed: false, ...bridge },
 });
-const levelOf = () => screen.getByTestId("limit-visual").props.accessibilityHint as string;
+const HIDDEN = { includeHiddenElements: true };
+const levelOf = () => screen.getByTestId("limit-visual", HIDDEN).props.accessibilityHint as string;
 
 describe("Today, normal mode", () => {
   it("shows the limit, accounts and upcoming payments, USD alongside", async () => {
@@ -178,6 +179,54 @@ describe("Today, bridge", () => {
     expect(screen.queryByText("Подтвердить план")).toBeNull();
   });
 
+  it("unmoved, the slider shows the server's exact amount and confirm sends it unrounded", async () => {
+    const state = { ...bridgeState(), dailyLimit: 47300, leftToday: 47300 };
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ state })) });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    const slider = await screen.findByLabelText("Сумма в день");
+    expect(slider.props.value).toBe(47300);
+    expect(screen.getByText("₴473 · $11")).toBeTruthy();
+    expect(screen.getByText("₴20,070")).toBeTruthy();
+    await tick(400);
+    expect(api.previewBridge).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByText("Подтвердить план"));
+    await tick(0);
+    expect(api.chooseBridge).toHaveBeenCalledWith(47300);
+  });
+
+  it("a confirmed plan shows calm feedback and no button until the amount changes", async () => {
+    const api = fakeApi({ today: bridgeToday({ confirmed: true }) });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    expect(await screen.findByText(/План подтверждён/)).toBeTruthy();
+    expect(screen.queryByText("Подтвердить план")).toBeNull();
+    await fireEvent(screen.getByLabelText("Сумма в день"), "valueChange", 60000);
+    await tick(310);
+    await waitFor(() => expect(api.previewBridge).toHaveBeenCalledWith(60000));
+    await tick(50);
+    expect(screen.getByText("Подтвердить план")).toBeTruthy();
+  });
+
+  it("a failed preview says so, offers retry and keeps confirm disabled", async () => {
+    const previewBridge = jest.fn(async () => {
+      throw new NetworkError();
+    });
+    const api = fakeApi({ today: bridgeToday(), previewBridge });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await fireEvent(await screen.findByLabelText("Сумма в день"), "valueChange", 60000);
+    await tick(310);
+    expect(await screen.findByText("Не удалось пересчитать")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Подтвердить план" }).props.accessibilityState.disabled).toBe(true);
+    await fireEvent.press(screen.getByText("Повторить"));
+    await tick(50);
+    expect(previewBridge).toHaveBeenCalledTimes(2);
+  });
+
+  it("describes the slider value for assistive tech", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: bridgeToday() }));
+    const slider = await screen.findByLabelText("Сумма в день");
+    expect(slider.props.accessibilityValue).toEqual({ text: "₴450 в день" });
+  });
+
   it("confirms the chosen amount", async () => {
     const api = fakeApi({ today: bridgeToday() });
     await renderWith(<Today onOpenActivity={noop} />, api);
@@ -188,6 +237,39 @@ describe("Today, bridge", () => {
     await fireEvent.press(screen.getByText("Подтвердить план"));
     await tick(0);
     expect(api.chooseBridge).toHaveBeenCalledWith(50000);
+  });
+});
+
+describe("Today, accessibility and old data", () => {
+  it("hides the metal from assistive tech and labels the amount as one phrase", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+    await screen.findByText("Сегодня можно");
+    let node = screen.getByTestId("limit-visual", HIDDEN).parent;
+    while (node && node.props.accessibilityElementsHidden !== true) node = node.parent;
+    expect(node).toBeTruthy();
+    expect(screen.getByLabelText("Сегодня можно ₴720, из ₴1,000 на день")).toBeTruthy();
+  });
+
+  it("announces a stale sync as an alert", async () => {
+    const stale = todayFixture({ syncStale: true });
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => stale) }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+  });
+
+  it("marks figures from an earlier day instead of presenting them as today's", async () => {
+    const client = makeClient();
+    client.setQueryData(["today"], todayFixture({ date: "2026-11-01" }));
+    const api = fakeApi({ today: jest.fn(() => new Promise<never>(() => undefined)) });
+    const now = () => new Date("2026-11-02T10:00:00Z");
+    await renderWith(<Today onOpenActivity={noop} now={now} />, api, client);
+    expect(await screen.findByText("Показаны данные за 01.11, не за сегодня.")).toBeTruthy();
+  });
+
+  it("shows no earlier-day note for today's data", async () => {
+    const now = () => new Date("2026-11-02T10:00:00Z");
+    await renderWith(<Today onOpenActivity={noop} now={now} />, fakeApi());
+    await screen.findByText("Сегодня можно");
+    expect(screen.queryByText(/не за сегодня/)).toBeNull();
   });
 });
 

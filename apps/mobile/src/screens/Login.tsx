@@ -6,7 +6,7 @@ import { NetworkError, UnauthorizedError } from "../api/client";
 
 const { color, radius, space, touchMin, type } = tokens;
 
-type Props = { onSignedIn: (token: string) => void; deviceName: string };
+type Props = { onSignedIn: (token: string) => void | Promise<void>; deviceName: string };
 
 export function Login({ onSignedIn, deviceName }: Props) {
   const api = useApi();
@@ -18,8 +18,9 @@ export function Login({ onSignedIn, deviceName }: Props) {
     if (busy || password.length === 0) return;
     setBusy(true);
     setError(null);
+    let token: string;
     try {
-      onSignedIn(await api.login(password, deviceName));
+      token = await api.login(password, deviceName);
     } catch (e) {
       setError(
         e instanceof UnauthorizedError
@@ -28,6 +29,13 @@ export function Login({ onSignedIn, deviceName }: Props) {
             ? "Нет связи с сервером. Проверьте интернет."
             : "Не получилось войти. Попробуйте чуть позже.",
       );
+      setBusy(false);
+      return;
+    }
+    try {
+      await onSignedIn(token);
+    } catch {
+      setError("Не удалось сохранить вход на этом устройстве. Попробуйте ещё раз.");
       setBusy(false);
     }
   };

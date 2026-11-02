@@ -9,9 +9,11 @@ const { color, radius, space } = tokens;
 export function TodaySkeleton() {
   return (
     <View testID="today-skeleton" style={styles.root} accessibilityLabel="Загрузка">
-      <View style={[styles.bar, { width: 120, height: LAYOUT.eyebrow }]} />
-      <View style={[styles.bar, { width: 220, height: LAYOUT.amount }]} />
-      <View style={[styles.bar, { width: 150, height: LAYOUT.note }]} />
+      <Glass style={styles.header}>
+        <View style={[styles.bar, { width: 120, height: LAYOUT.eyebrow }]} />
+        <View style={[styles.bar, { width: 220, height: LAYOUT.amount }]} />
+        <View style={[styles.bar, { width: 150, height: LAYOUT.note }]} />
+      </Glass>
       <Glass style={{ height: LAYOUT.accountsPanel }}>
         <View />
       </Glass>
@@ -24,5 +26,6 @@ export function TodaySkeleton() {
 
 const styles = StyleSheet.create({
   root: { gap: space.lg },
+  header: { gap: space.xs },
   bar: { backgroundColor: color.surface.raised, borderRadius: radius.md },
 });

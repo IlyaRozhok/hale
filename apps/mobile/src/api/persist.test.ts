@@ -31,6 +31,26 @@ describe("store persister", () => {
   });
 });
 
+describe("failing store", () => {
+  const broken: KeyValueStore = {
+    get: async () => {
+      throw new Error("keychain");
+    },
+    set: async () => {
+      throw new Error("keychain");
+    },
+    remove: async () => {
+      throw new Error("keychain");
+    },
+  };
+  it("never rejects", async () => {
+    const p = createStorePersister(broken, "key");
+    await expect(p.persistClient(client)).resolves.toBeUndefined();
+    await expect(p.restoreClient()).resolves.toBeUndefined();
+    await expect(p.removeClient()).resolves.toBeUndefined();
+  });
+});
+
 describe("shouldPersist", () => {
   it("keeps only a successful Today query", () => {
     const q = (key: unknown[], status: string) => ({ queryKey: key, state: { status } }) as never;

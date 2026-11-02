@@ -24,16 +24,20 @@ const roundToStep = (v: number) => Math.max(MIN, Math.round(v / STEP) * STEP);
 /** The bridge plan: pick a daily amount, see the credit it needs, confirm if it fits the limit. */
 export function BridgePlan({ state, usdRate, onConfirm, confirming }: Props) {
   const base = state.bridge;
-  const initial = state.dailyLimit > 0 ? state.dailyLimit : (base?.recommendedDaily ?? MIN);
+  // Unmoved, the slider shows the server's exact amount, so the numbers beside it are the server's too.
+  const current = state.dailyLimit > 0 ? state.dailyLimit : (base?.recommendedDaily ?? MIN);
   const [moved, setMoved] = useState<number | null>(null);
-  const value = moved ?? roundToStep(initial);
-  const preview = useBridgePreview(moved);
+  const value = moved ?? current;
+  const changed = moved !== null && moved !== current;
+  const preview = useBridgePreview(changed ? moved : null);
   if (!base) return null;
 
-  const max = Math.ceil((Math.max(base.recommendedDaily, base.maxDailyWithinCredit) * 2) / STEP) * STEP;
-  const fresh = moved === null || preview?.dailyAmount === moved;
-  const shown = moved !== null && preview ? preview : { creditNeeded: base.creditNeeded, shortfall: base.shortfall };
+  const max = Math.max(Math.ceil((Math.max(base.recommendedDaily, base.maxDailyWithinCredit) * 2) / STEP) * STEP, MIN + STEP, value);
+  const fresh = !changed || preview.data?.dailyAmount === moved;
+  const shown = changed && preview.data ? preview.data : { creditNeeded: base.creditNeeded, shortfall: base.shortfall };
   const daily = formatUsd(value, usdRate);
+  const needsAction = !base.confirmed || changed;
+  const canConfirm = fresh && !confirming && !preview.failed;
 
   return (
     <Glass style={styles.stack}>
@@ -48,9 +52,10 @@ export function BridgePlan({ state, usdRate, onConfirm, confirming }: Props) {
       </View>
       <Slider
         accessibilityLabel="Сумма в день"
+        accessibilityValue={{ text: `${formatMoney(value)} в день` }}
         style={styles.slider}
-        minimumValue={MIN}
-        maximumValue={Math.max(max, MIN + STEP)}
+        minimumValue={Math.min(MIN, value)}
+        maximumValue={max}
         step={STEP}
         value={value}
         onValueChange={(v: number) => setMoved(roundToStep(v))}
@@ -58,20 +63,32 @@ export function BridgePlan({ state, usdRate, onConfirm, confirming }: Props) {
         maximumTrackTintColor={color.data.track}
         thumbTintColor={color.fg.default}
       />
-      {fresh && shown.shortfall > 0 ? (
+      {preview.failed && (
+        <View style={styles.stack}>
+          <Text style={styles.text}>Не удалось пересчитать</Text>
+          <Pressable accessibilityRole="button" onPress={preview.retry} style={styles.confirm}>
+            <Text style={styles.confirmText}>Повторить</Text>
+          </Pressable>
+        </View>
+      )}
+      {!preview.failed && fresh && shown.shortfall > 0 ? (
         <Text style={styles.text}>
           Не хватает {formatMoney(shown.shortfall)}: столько выходит за кредитный лимит. Попробуйте сумму поменьше.
         </Text>
-      ) : (
+      ) : needsAction ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ disabled: !fresh || confirming }}
-          disabled={!fresh || confirming}
+          accessibilityState={{ disabled: !canConfirm }}
+          disabled={!canConfirm}
           onPress={() => onConfirm(value)}
-          style={[styles.confirm, (!fresh || confirming) && styles.pending]}
+          style={[styles.confirm, !canConfirm && styles.pending]}
         >
           <Text style={styles.confirmText}>Подтвердить план</Text>
         </Pressable>
+      ) : (
+        <Text style={styles.text} accessibilityRole="text">
+          План подтверждён: {formatMoney(value)} в день.
+        </Text>
       )}
     </Glass>
   );

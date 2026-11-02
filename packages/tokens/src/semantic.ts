@@ -1,4 +1,4 @@
-import { palette as p, whiteAlpha } from "./palette";
+import { palette as p, blackAlpha, whiteAlpha } from "./palette";
 
 /** Semantic Silver tokens. Surfaces are opaque; translucent fills live in surface.glass. */
 export const color = {
@@ -15,6 +15,8 @@ export const color = {
     overlay: p.graphite[700],
     selected: p.silver[100],
     glass: whiteAlpha(0.14),
+    /** Dark scrim for every panel and text that sits over the liquid metal (design §8). */
+    overMetal: blackAlpha(0.75),
   },
   // No hue: statuses differ by lightness, so every status must also carry a text label.
   status: {

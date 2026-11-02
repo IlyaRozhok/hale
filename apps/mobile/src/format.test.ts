@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dueLabel, formatMoney, formatMoneyWithUsd, formatStamp, formatUsd, shiftDate } from "./format";
+import { dueLabel, formatMoney, kyivDate, formatMoneyWithUsd, formatStamp, formatUsd, shiftDate } from "./format";
 
 describe("formatMoney", () => {
   it("groups thousands with commas and rounds to whole hryvnias", () => {
@@ -28,6 +28,15 @@ describe("formatUsd / formatMoneyWithUsd", () => {
 
   it("returns both parts", () => {
     expect(formatMoneyWithUsd(1032500, 41.25)).toEqual({ uah: "₴10,325", usd: "$250" });
+  });
+});
+
+describe("kyivDate", () => {
+  it("rolls over at Kyiv midnight, not UTC", () => {
+    expect(kyivDate(new Date("2026-11-01T21:30:00Z"))).toBe("2026-11-01"); // UTC+2
+    expect(kyivDate(new Date("2026-11-01T22:30:00Z"))).toBe("2026-11-02");
+    expect(kyivDate(new Date("2026-07-01T20:30:00Z"))).toBe("2026-07-01"); // UTC+3
+    expect(kyivDate(new Date("2026-07-01T21:30:00Z"))).toBe("2026-07-02");
   });
 });
 

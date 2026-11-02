@@ -27,7 +27,7 @@ export function useBridgePreview(value: number | null) {
     enabled: settled !== null,
     placeholderData: (previous) => previous,
   });
-  return query.data;
+  return { data: query.data, failed: query.isError, retry: () => void query.refetch() };
 }
 
 export function useChooseBridge() {

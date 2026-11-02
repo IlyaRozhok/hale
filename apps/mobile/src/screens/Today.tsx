@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@tablo/tokens";
 import type { TodayDto } from "@tablo/contracts";
 import { LimitVisual } from "../metal";
-import { formatMoney, formatStamp, formatUsd } from "../format";
+import { formatMoney, formatStamp, formatUsd, kyivDate } from "../format";
 import { useChooseBridge, useConfirmIncome, useSetIncomeDate, useToday } from "../api/queries";
 import { AccountsList } from "../components/AccountsList";
 import { BadCaseCard } from "../components/BadCaseCard";
@@ -18,10 +18,13 @@ import { Upcoming } from "../components/Upcoming";
 
 const { color, radius, space, touchMin, type } = tokens;
 
-type Props = { onOpenActivity: () => void };
+type Props = { onOpenActivity: () => void; /** Test seam for the current moment. */ now?: () => Date };
 
-function freshnessLines(data: TodayDto, offlineSince: number | null): string[] {
+function freshnessLines(data: TodayDto, offlineSince: number | null, now: Date): string[] {
   const lines: string[] = [];
+  if (data.date !== kyivDate(now)) {
+    lines.push(`Показаны данные за ${data.date.slice(8, 10)}.${data.date.slice(5, 7)}, не за сегодня.`);
+  }
   if (offlineSince !== null) {
     lines.push(`Нет связи. Показаны данные от ${formatStamp(new Date(offlineSince).toISOString())}.`);
   }
@@ -35,7 +38,7 @@ function freshnessLines(data: TodayDto, offlineSince: number | null): string[] {
   return lines;
 }
 
-export function Today({ onOpenActivity }: Props) {
+export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const insets = useSafeAreaInsets();
   const today = useToday();
   const confirmIncome = useConfirmIncome();
@@ -86,21 +89,24 @@ export function Today({ onOpenActivity }: Props) {
 
   return (
     <View style={styles.root}>
-      <View style={styles.metal} pointerEvents="none">
+      <View style={styles.metal} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <LimitVisual mode={data.limitVisual} level={level} />
       </View>
       <ScrollView
         contentContainerStyle={[styles.content, { paddingTop: top, paddingBottom: insets.bottom + space.xl }]}
         refreshControl={<RefreshControl refreshing={today.isRefetching && !today.isPending} onRefresh={() => void today.refetch()} />}
       >
-        <StaleBanner lines={freshnessLines(data, offlineSince)} />
-        <View>
+        <StaleBanner lines={freshnessLines(data, offlineSince, now())} />
+        <Glass
+          accessible
+          accessibilityLabel={`Сегодня можно ${formatMoney(state.leftToday)}, из ${formatMoney(state.dailyLimit)} на день`}
+        >
           <Text style={styles.eyebrow}>Сегодня можно</Text>
           <Text style={styles.amount}>{formatMoney(state.leftToday)}</Text>
           <Text style={styles.note}>{`из ${formatMoney(state.dailyLimit)} на день`}</Text>
           {usd ? <Text style={styles.subtle}>{usd} сейчас</Text> : null}
           {state.leftToday <= 0 && <Text style={styles.note}>Лимит на сегодня использован. Завтра будет новый.</Text>}
-        </View>
+        </Glass>
 
         {state.mode === "bridge" && state.bridge && (
           <BridgePlan

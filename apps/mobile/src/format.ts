@@ -56,3 +56,8 @@ export function formatStamp(iso: string, now: Date = new Date()): string {
   const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
   return sameDay ? `сегодня ${time}` : `${two(d.getDate())}.${two(d.getMonth() + 1)} ${time}`;
 }
+
+/** Today's calendar date in Kyiv, as the server counts days. */
+export function kyivDate(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+}

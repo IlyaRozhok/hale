@@ -7,7 +7,7 @@ const { color, radius, space, type } = tokens;
 export function StaleBanner({ lines }: { lines: string[] }) {
   if (lines.length === 0) return null;
   return (
-    <View style={styles.box} accessibilityRole="text">
+    <View style={styles.box} accessible accessibilityRole="alert">
       {lines.map((l) => (
         <Text key={l} style={styles.text}>
           {l}
