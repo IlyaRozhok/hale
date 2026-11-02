@@ -345,7 +345,7 @@ describe("bridge mode", () => {
     expect(r.state.bridge.overPlan).toBe(true);
     const bad = r.badCases.find((b: { id: string }) => b.id.startsWith("bridge_over_plan:"));
     // the id carries the plan id, so a later plan that goes over alerts again
-    expect(bad.id).toBe(`bridge_over_plan:${(await plans())[0].id}`);
+    expect(bad.id).toBe(`bridge_over_plan:${(await ds.query(`SELECT id FROM bridge_plans`))[0].id}`);
     expect(bad.text).toContain("Минус вышел за план моста на ₴");
     expect(bad.text).toMatch(/закончатся|уже нет/);
   });
