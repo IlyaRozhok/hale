@@ -97,6 +97,18 @@ describe("enqueueHistory", () => {
     await service.enqueueHistory(daysAgo(75));
     expect(await ds.getRepository(Job).count()).toBe(9);
   });
+
+  it("queues a window again once it has failed for good, and only once", async () => {
+    const { service } = setup(async () => []);
+    await service.enqueueHistory(daysAgo(5));
+    const before = await ds.getRepository(Job).count();
+    await ds.query(`UPDATE jobs SET status='failed' WHERE payload->>'accountId'='acc-usd'`);
+    await service.enqueueHistory(daysAgo(5));
+    await service.enqueueHistory(daysAgo(5));
+    expect(await ds.getRepository(Job).count()).toBe(before + 1);
+    const again = await ds.query(`SELECT status FROM jobs WHERE payload->>'accountId'='acc-usd' ORDER BY id`);
+    expect(again.map((j: { status: string }) => j.status)).toEqual(["failed", "pending"]);
+  });
 });
 
 describe("import run", () => {
@@ -348,6 +360,54 @@ describe("classification after upsert", () => {
     await drain(runner);
     const kinds = await ds.query(`SELECT kind FROM jobs WHERE kind='reclassify'`);
     expect(kinds).toHaveLength(1);
+  });
+
+  const failing = (fails: (id: string) => boolean) => {
+    const client = {
+      clientInfo: vi.fn(async () => clientInfo),
+      statement: vi.fn(async (id: string) => {
+        if (fails(id)) throw new Error("boom");
+        return [];
+      }),
+    } as unknown as MonoClient;
+    const runner = new JobRunner(ds, clock);
+    const service = new ImportService(ds, client, runner, clock, reclassifier());
+    service.onModuleInit();
+    return { service, runner };
+  };
+  const reclassifyJobs = () => ds.query(`SELECT 1 FROM jobs WHERE kind='reclassify'`);
+  const untilFailed = async (runner: JobRunner) => {
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await drain(runner);
+      now += 24 * 3600_000;
+    }
+  };
+
+  it("queues the reclassify when the last window fails for good", async () => {
+    const { service, runner } = failing(() => true);
+    await service.enqueueHistory(daysAgo(5));
+    await drain(runner);
+    expect(await reclassifyJobs()).toHaveLength(0); // still retrying
+    await untilFailed(runner);
+    expect(await ds.query(`SELECT 1 FROM jobs WHERE kind=$1 AND status <> 'failed'`, [WINDOW_JOB_KIND])).toHaveLength(0);
+    expect(await reclassifyJobs()).toHaveLength(1);
+  });
+
+  it("queues the reclassify when the last window succeeds after another one failed", async () => {
+    const { service, runner } = failing((id) => id === "acc-uah");
+    await service.enqueueHistory(daysAgo(5));
+    await untilFailed(runner);
+    expect(await reclassifyJobs()).toHaveLength(1);
+  });
+
+  it("does not queue the reclassify while another window is still waiting", async () => {
+    const { service, runner } = failing((id) => id === "acc-uah");
+    await service.enqueueHistory(daysAgo(5));
+    await ds.query(`UPDATE jobs SET attempts=$1 WHERE payload->>'accountId'='acc-uah'`, [MAX_ATTEMPTS - 1]);
+    await ds.query(`UPDATE jobs SET run_after=$1 WHERE payload->>'accountId'<>'acc-uah'`, [new Date(now + 3600_000)]);
+    await drain(runner);
+    expect(await ds.query(`SELECT 1 FROM jobs WHERE status='failed'`)).toHaveLength(1);
+    expect(await reclassifyJobs()).toHaveLength(0);
   });
 
   it("types a single upserted item (webhook, reconcile)", async () => {

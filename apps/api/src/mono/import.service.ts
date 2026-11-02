@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, type OnModuleInit } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { Account, Job, Transaction } from "../db/entities";
-import { JOB_CLOCK, type JobClock, JobRunner } from "./jobs/job-runner";
+import { JOB_CLOCK, type JobClock, JobRunner, isFinalFailure } from "./jobs/job-runner";
 import { MonoClient } from "./mono.client";
 import type { MonoClientInfo, MonoStatementItem } from "./mono.schemas";
 import { ReclassifyService } from "../transactions/reclassify.service";
@@ -104,12 +104,22 @@ export class ImportService implements OnModuleInit {
     await this.ds.query(
       `INSERT INTO jobs (kind, payload, run_after)
        SELECT $1, $2::jsonb, $3
-        WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE kind=$1 AND payload=$2::jsonb)`,
+        WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE kind=$1 AND payload=$2::jsonb AND status <> 'failed')`,
       [WINDOW_JOB_KIND, payload, new Date(this.clock.now())],
     );
   }
 
   private async runWindow(job: Job): Promise<void> {
+    try {
+      await this.importWindow(job);
+    } catch (e) {
+      // The history that did arrive still gets classified, even if the last window gives up.
+      if (isFinalFailure(job, e)) await this.reclassifyAfterLastWindow(job.id);
+      throw e;
+    }
+  }
+
+  private async importWindow(job: Job): Promise<void> {
     const { accountId, from, to } = job.payload as WindowPayload;
     const account = await this.ds.getRepository(Account).findOneByOrFail({ external_id: accountId });
     const items = await this.client.statement(accountId, from, to);

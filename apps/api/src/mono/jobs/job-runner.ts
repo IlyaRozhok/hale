@@ -14,6 +14,11 @@ export const JOB_TICK_MS = 10_000;
 const RETRY_BASE_MS = 60_000;
 const DEFAULT_RETRY_AFTER_S = 60;
 
+/** True when this failure ends the job for good: a rate limit never does, it costs no attempt. */
+export function isFinalFailure(job: Pick<Job, "attempts">, e: unknown): boolean {
+  return !(e instanceof MonoApiError && e.status === 429) && job.attempts + 1 >= MAX_ATTEMPTS;
+}
+
 export type JobHandler = (job: Job) => Promise<void>;
 export interface JobClock {
   now(): number;
@@ -110,7 +115,7 @@ export class JobRunner implements OnApplicationBootstrap {
       return;
     }
     const attempts = job.attempts + 1;
-    if (attempts >= MAX_ATTEMPTS) {
+    if (isFinalFailure(job, e)) {
       this.log.warn(`job ${job.id} (${job.kind}) failed permanently: ${message}`);
       await this.ds.query(
         `UPDATE jobs SET status='failed', attempts=$2, last_error=$3 WHERE id=$1`,
