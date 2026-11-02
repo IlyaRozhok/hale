@@ -7,7 +7,8 @@
  * (incomes by source, payments by kind + name + due
  * date, recurring series by name, balances by name), so running it again changes nothing.
  * Settings are written only while the settings row is still at its defaults.
- * Recurring series become payments through the API's daily job, not here.
+ * Today's fixed limit is removed: it was computed without this data. Income events and recurring
+ * payments are made by the API on restart or within the hour, not here.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -116,6 +117,7 @@ export async function applySeed(db: Queryable, seed: SeedFile, now: Date = new D
       [b.name, b.amount, b.currency, b.counts_as_own ?? true],
     );
   }
+  await db.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [today]);
   return result;
 }
 

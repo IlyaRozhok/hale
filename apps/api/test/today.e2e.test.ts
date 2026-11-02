@@ -3,6 +3,7 @@ import request from "supertest";
 import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
+import { applySeed, parseSeed } from "../../../scripts/seed-private";
 import { PlanService } from "../src/plan/plan.service";
 import { Clock } from "../src/today/clock";
 
@@ -144,6 +145,57 @@ describe("daily limit snapshot", () => {
     const r = await today();
     expect(r.state.dailyLimit).toBe(100_000);
     expect(r.state.leftToday).toBe(70_000);
+  });
+});
+
+describe("the first day", () => {
+  // Anonymised: shapes and arithmetic only.
+  const seed = parseSeed(
+    JSON.stringify({
+      expected_incomes: [{ source: "fop", amount: 500_000, currency: "UAH", window_start_day: 15, window_end_day: 25 }],
+      recurring: [{ name: "Rent", amount: 100_000, currency: "UAH", day_of_month: 6 }],
+    }),
+  );
+  const NOW = new Date("2026-11-02T10:00:00Z");
+  // 25 November is 23 days away; the rent on the 6th comes out first.
+  const correct = Math.floor((1_000_000 - 100_000) / 23);
+
+  it("before the seed the job freezes a 30-day limit; after seed and restart the same day has the right one", async () => {
+    await account("black", 1_000_000);
+    const before = await today();
+    expect(before.state).toMatchObject({ daysLeft: 30, dailyLimit: Math.floor(1_000_000 / 30), needsIncomeDate: true });
+    expect(before.questions.map((q: { id: string }) => q.id)).toEqual(["income_date"]);
+
+    await applySeed(ds, seed, NOW);
+    expect(await ds.query(`SELECT 1 FROM daily_snapshots`)).toHaveLength(0);
+    await app.get(PlanService).onApplicationBootstrap(); // the restart in checklist step 11
+
+    const after = await today();
+    expect(after.state).toMatchObject({ daysLeft: 23, dailyLimit: correct, needsIncomeDate: false });
+    expect(after.questions).toEqual([]);
+  });
+
+  it("a job that freezes the limit between the seed and the generation does not keep it wrong", async () => {
+    await account("black", 1_000_000);
+    await today();
+    await applySeed(ds, seed, NOW);
+    expect((await today()).state.dailyLimit).toBe(Math.floor(1_000_000 / 30)); // the 15-minute job, nothing generated yet
+    await app.get(PlanService).hourlyJob();
+    expect((await today()).state).toMatchObject({ daysLeft: 23, dailyLimit: correct });
+  });
+
+  it("repeated generation does not rewrite the day's limit or add rows", async () => {
+    await account("black", 1_000_000);
+    await applySeed(ds, seed, NOW);
+    const plan = app.get(PlanService);
+    await plan.hourlyJob();
+    const fixed = (await today()).state.dailyLimit;
+    const count = async () => (await ds.query(`SELECT (SELECT count(*) FROM income_events)::int + (SELECT count(*) FROM scheduled_payments)::int AS n`))[0].n;
+    const rows = await count();
+    await ds.query(`UPDATE accounts SET balance=500000`);
+    await plan.hourlyJob();
+    expect(await count()).toBe(rows);
+    expect((await today()).state.dailyLimit).toBe(fixed);
   });
 });
 

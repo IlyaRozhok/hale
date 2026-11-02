@@ -107,6 +107,17 @@ describe("Today, questions", () => {
     await waitFor(() => expect(screen.queryByText("Когда ожидается следующий доход?")).toBeNull());
   });
 
+  it("with no income event there is no route to Activity: a hint about the settings instead", async () => {
+    const questions = [{ id: "income_date", kind: "income_date" as const, text: "Когда ожидается следующий доход?" }];
+    const onOpenActivity = jest.fn();
+    await renderWith(<Today onOpenActivity={onOpenActivity} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    expect(await screen.findByText(/задаётся в настройках плана/)).toBeTruthy();
+    await fireEvent.press(screen.getByText("Когда ожидается следующий доход?"));
+    expect(onOpenActivity).not.toHaveBeenCalled();
+    expect(screen.queryByText("Через неделю")).toBeNull();
+    expect(screen.queryByRole("button", { name: /доход/ })).toBeNull();
+  });
+
   it("a recipient question opens the label sheet for that recipient, and the card goes away once answered", async () => {
     const questions = [{ id: "recipient_label:0123456789abcdef", kind: "recipient_label" as const, text: "Кто это: Иван?" }];
     const onOpenActivity = jest.fn();

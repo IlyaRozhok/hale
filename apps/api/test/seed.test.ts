@@ -61,6 +61,13 @@ describe("seed-private", () => {
     expect((await ds.query(`SELECT tracking_start::text AS d FROM settings`))[0].d).toBe("2026-11-02");
   });
 
+  it("removes the day's fixed limit in Kyiv, and no other day's", async () => {
+    await ds.query(`INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ('2026-11-01',1,'normal'), ('2026-11-02',2,'normal')`);
+    await applySeed(ds, parseSeed(SEED), new Date("2026-11-01T22:30:00Z"));
+    expect(await ds.query(`SELECT local_date::text AS d FROM daily_snapshots`)).toEqual([{ d: "2026-11-01" }]);
+    await ds.query(`DELETE FROM daily_snapshots`);
+  });
+
   it("names the quarter of its tax rows and replaces that quarter's estimate", async () => {
     expect((await ds.query(`SELECT tax_quarter FROM scheduled_payments WHERE name='Tax'`))[0].tax_quarter).toBe("2026-Q3");
     const noQuarter = await ds.query(`SELECT 1 FROM scheduled_payments WHERE kind<>'tax' AND tax_quarter IS NOT NULL`);

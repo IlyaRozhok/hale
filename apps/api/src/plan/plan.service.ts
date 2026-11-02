@@ -53,20 +53,38 @@ export class PlanService implements OnApplicationBootstrap {
   /** Catch up after downtime; the unique key makes this safe to repeat. */
   async onApplicationBootstrap(): Promise<void> {
     try {
-      await this.generateEvents();
-      await this.generateRecurring();
-      await this.linkTaxTransactions();
+      await this.generate();
       await this.ensureTaxEstimate();
     } catch (e) {
       this.log.warn(`event generation failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  @Cron("0 4 * * *", { timeZone: "Europe/Kyiv" })
-  async dailyJob(): Promise<void> {
-    await this.generateEvents();
-    await this.generateRecurring();
+  /** Hourly, so that a seed or a new template reaches the limit the same day. */
+  @Cron("0 * * * *", { timeZone: "Europe/Kyiv" })
+  async hourlyJob(): Promise<void> {
+    try {
+      await this.generate();
+    } catch (e) {
+      this.log.warn(`event generation failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /**
+   * Generation, safe to repeat. A template that gets its first rows here (just seeded, say) was not in
+   * the day's limit if a job fixed it in the meantime, so the limit is recomputed. Later months' rows
+   * leave the fixed limit alone.
+   */
+  private async generate(): Promise<void> {
+    const today = kyivDate(this.clock.now());
+    const [{ fresh }] = (await this.ds.query(
+      `SELECT EXISTS (SELECT 1 FROM expected_incomes x WHERE NOT EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id))
+           OR EXISTS (SELECT 1 FROM recurring_payments r WHERE r.active AND NOT EXISTS (SELECT 1 FROM scheduled_payments p WHERE p.recurring_id = r.id)) AS fresh`,
+    )) as [{ fresh: boolean }];
+    await this.generateEvents(today);
+    await this.generateRecurring(today);
     await this.linkTaxTransactions();
+    if (fresh) await this.ds.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [today]);
   }
 
   /** Just after midnight on the first day of a quarter this is what keeps the reserve in place. */
