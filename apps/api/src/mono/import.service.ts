@@ -3,7 +3,7 @@ import { DataSource } from "typeorm";
 import { Account, Job, Transaction } from "../db/entities";
 import { JOB_CLOCK, type JobClock, JobRunner } from "./jobs/job-runner";
 import { MonoClient } from "./mono.client";
-import type { MonoStatementItem } from "./mono.schemas";
+import type { MonoClientInfo, MonoStatementItem } from "./mono.schemas";
 import { planWindows, splitWindow } from "./windows";
 
 export const WINDOW_JOB_KIND = "history.window";
@@ -13,7 +13,7 @@ export const WINDOW_JOB_KIND = "history.window";
  */
 export const SPLIT_THRESHOLD = 500;
 
-const CURRENCY_CODES: Record<number, string> = {
+export const CURRENCY_CODES: Record<number, string> = {
   980: "UAH", 840: "USD", 978: "EUR", 826: "GBP", 985: "PLN", 756: "CHF", 203: "CZK",
 };
 const ACCOUNT_KINDS = new Set(["black", "white", "fop"]);
@@ -48,20 +48,32 @@ export class ImportService implements OnModuleInit {
 
   /** Syncs accounts and jars, then queues one job per statement window since `from`. */
   async enqueueHistory(from: Date): Promise<void> {
-    const info = await this.client.clientInfo();
     const toSec = Math.floor(this.clock.now() / 1000);
     const fromSec = Math.floor(from.getTime() / 1000);
-    const balanceAt = new Date(this.clock.now());
+    const accountIds = await this.syncAccounts();
+    for (const id of accountIds) {
+      for (const [wFrom, wTo] of planWindows(fromSec, toSec)) {
+        await this.enqueueWindow({ accountId: id, from: wFrom, to: wTo });
+      }
+    }
+  }
 
+  /**
+   * Upserts accounts and jars (balance, credit limit) from client-info, which is fetched
+   * unless the caller already has it. Returns the monobank ids it wrote.
+   */
+  async syncAccounts(info?: MonoClientInfo): Promise<string[]> {
+    const data = info ?? (await this.client.clientInfo());
+    const balanceAt = new Date(this.clock.now());
     const accounts = [
-      ...info.accounts.map((a) => ({
+      ...data.accounts.map((a) => ({
         id: a.id,
         kind: ACCOUNT_KINDS.has(a.type) ? a.type : "other",
         currency: currencyName(a.currencyCode),
         balance: a.balance,
         creditLimit: a.creditLimit,
       })),
-      ...info.jars.map((j) => ({
+      ...data.jars.map((j) => ({
         id: j.id,
         kind: "jar",
         currency: currencyName(j.currencyCode),
@@ -78,10 +90,8 @@ export class ImportService implements OnModuleInit {
                credit_limit=EXCLUDED.credit_limit, balance_at=EXCLUDED.balance_at`,
         [a.id, a.kind, a.currency, a.balance, a.creditLimit, balanceAt],
       );
-      for (const [wFrom, wTo] of planWindows(fromSec, toSec)) {
-        await this.enqueueWindow({ accountId: a.id, from: wFrom, to: wTo });
-      }
     }
+    return accounts.map((a) => a.id);
   }
 
   private async enqueueWindow(p: WindowPayload): Promise<void> {
@@ -132,7 +142,10 @@ export class ImportService implements OnModuleInit {
        ON CONFLICT (external_id) DO UPDATE SET
          description=EXCLUDED.description, comment=EXCLUDED.comment, mcc=EXCLUDED.mcc,
          amount=EXCLUDED.amount,
-         amount_uah=COALESCE(EXCLUDED.amount_uah, transactions.amount_uah),
+         amount_uah=COALESCE(
+           EXCLUDED.amount_uah,
+           ROUND(EXCLUDED.amount * transactions.fx_rate)::bigint
+         ),
          fx_rate=COALESCE(EXCLUDED.fx_rate, transactions.fx_rate),
          hold=EXCLUDED.hold, counter_iban=EXCLUDED.counter_iban,
          counter_name=EXCLUDED.counter_name, raw=EXCLUDED.raw`,

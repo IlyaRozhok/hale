@@ -1,11 +1,18 @@
 import { Module } from "@nestjs/common";
+import { APP_FILTER } from "@nestjs/core";
 import { ScheduleModule } from "@nestjs/schedule";
 import { APP_CONFIG } from "../config.module";
 import type { AppConfig } from "../config";
+import { FxService } from "./fx.service";
 import { ImportService } from "./import.service";
 import { JOB_CLOCK, JobRunner } from "./jobs/job-runner";
 import { MonoClient } from "./mono.client";
+import { MonoController } from "./mono.controller";
 import { RateGate } from "./rate-gate";
+import { ReconcileService } from "./reconcile.service";
+import { WebhookBodyErrorFilter } from "./webhook-body.filter";
+import { WebhookController } from "./webhook.controller";
+import { WebhookService } from "./webhook.service";
 
 /** Single RateGate and MonoClient for the whole app, so the 60 s spacing is global. */
 @Module({
@@ -21,7 +28,12 @@ import { RateGate } from "./rate-gate";
     { provide: JOB_CLOCK, useValue: { now: () => Date.now() } },
     JobRunner,
     ImportService,
+    WebhookService,
+    ReconcileService,
+    FxService,
+    { provide: APP_FILTER, useClass: WebhookBodyErrorFilter },
   ],
+  controllers: [WebhookController, MonoController],
   exports: [MonoClient, RateGate, ImportService, JobRunner],
 })
 export class MonoModule {}

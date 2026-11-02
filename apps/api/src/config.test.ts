@@ -38,3 +38,23 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...valid, MONOBANK_TOKEN: "tok" }).MONOBANK_TOKEN).toBe("tok");
   });
 });
+
+describe("loadConfig webhook settings", () => {
+  it("leaves MONO_WEBHOOK_SECRET and PUBLIC_URL optional, empty counts as unset", () => {
+    const cfg = loadConfig({ ...valid, MONO_WEBHOOK_SECRET: "", PUBLIC_URL: "" });
+    expect(cfg.MONO_WEBHOOK_SECRET).toBeUndefined();
+    expect(cfg.PUBLIC_URL).toBeUndefined();
+  });
+
+  it("accepts a secret and a public URL, rejects a short secret or a bad URL", () => {
+    const cfg = loadConfig({
+      ...valid,
+      MONO_WEBHOOK_SECRET: "s".repeat(24),
+      PUBLIC_URL: "https://tablo.example.com/",
+    });
+    expect(cfg.MONO_WEBHOOK_SECRET).toBe("s".repeat(24));
+    expect(cfg.PUBLIC_URL).toBe("https://tablo.example.com");
+    expect(() => loadConfig({ ...valid, MONO_WEBHOOK_SECRET: "short" })).toThrow(/MONO_WEBHOOK_SECRET/);
+    expect(() => loadConfig({ ...valid, PUBLIC_URL: "not a url" })).toThrow(/PUBLIC_URL/);
+  });
+});

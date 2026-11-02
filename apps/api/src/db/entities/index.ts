@@ -111,6 +111,7 @@ export class Settings {
   @Column({ type: "integer", default: 600 }) tax_rate_bp!: number;
   @Column({ type: "bigint", transformer: bt, default: 0 }) esv_quarter!: number;
   @Column({ type: "text", default: "mercury" }) limit_visual!: "mercury" | "ring";
+  @Column({ type: "timestamptz", nullable: true }) last_sync_at!: Date | null;
 }
 
 @Entity("bridge_plans")

@@ -6,6 +6,16 @@ const schema = z.object({
   OWNER_PASSWORD_HASH: z.string().startsWith("$argon2", "must be an argon2 hash"),
   // Optional at boot: the owner adds it later; MonoClient throws if it is missing when called.
   MONOBANK_TOKEN: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
+  // Both optional: reconcile and webhook install skip (one log line) while any is unset.
+  // The secret sits in a URL path, so it is limited to URL-safe characters.
+  MONO_WEBHOOK_SECRET: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.string().regex(/^[A-Za-z0-9_-]{24,}$/, "must be 24+ URL-safe characters (A-Z a-z 0-9 _ -)").optional(),
+  ),
+  PUBLIC_URL: z.preprocess(
+    (v) => (v === "" ? undefined : typeof v === "string" ? v.replace(/\/+$/, "") : v),
+    z.url().optional(),
+  ),
   PORT: z.coerce.number().int().min(0).max(65535).default(3000),
 });
 

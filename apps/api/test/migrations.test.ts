@@ -32,6 +32,9 @@ describe("migrations", () => {
     expect(settings[0].tax_rate_bp).toBe(600);
     expect(settings[0].limit_visual).toBe("mercury");
 
+    expect(settings[0]).toHaveProperty("last_sync_at", null);
+
+    await ds.undoLastMigration();
     await ds.undoLastMigration();
     await ds.undoLastMigration();
     expect(await listTables(url)).toEqual([]);

@@ -240,6 +240,24 @@ describe("upsertStatementItem", () => {
   });
 });
 
+describe("upsertStatementItem fx recompute", () => {
+  it("recomputes amount_uah from the stored fx_rate when the amount changes", async () => {
+    const { service } = setup(async () => []);
+    await service.enqueueHistory(daysAgo(1));
+    const acc = await ds.getRepository(Account).findOneByOrFail({ external_id: "acc-usd" });
+    await ds.query("INSERT INTO fx_rates VALUES ('USD', $1, 40)", [daysAgo(0)]);
+    const t = NOW_S - 100;
+    const first = await service.upsertStatementItem(acc.id, item("fx1", t, { hold: true, amount: -100 }));
+    expect(first.amount_uah).toBe(-4000);
+    // no rate row available any more; the stored per-row rate must still be used
+    await ds.query("TRUNCATE fx_rates");
+    const second = await service.upsertStatementItem(acc.id, item("fx1", t, { hold: false, amount: -120 }));
+    expect(second.amount).toBe(-120);
+    expect(second.fx_rate).toBe(40);
+    expect(second.amount_uah).toBe(-4800);
+  });
+});
+
 describe("JobRunner", () => {
   it("leaves failed backup rows and kinds without a handler alone", async () => {
     await ds.query(

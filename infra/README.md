@@ -55,6 +55,31 @@ Then run, in order:
 7. Run one backup by hand and prove you can restore it (see below) before
    trusting the cron.
 
+## Owner gate: monobank token, webhook and history import
+
+Nothing here has been run. Until the token is set, reconcile and webhook install
+skip with one log line and nothing fails. Get a personal token at
+https://api.monobank.ua/ (log in with the monobank app).
+
+1. On the server, add to `/opt/tablo/infra/.env` (single-quoted like the rest):
+   `MONOBANK_TOKEN='<token>'` and
+   `MONO_WEBHOOK_SECRET='<24+ chars of A-Za-z0-9_->'` (e.g. `openssl rand -hex 24`).
+   `PUBLIC_URL` is set by `compose.yml` to `https://$DOMAIN`.
+2. Restart the api: `ssh root@IP 'cd /opt/tablo/infra && docker compose up -d api'`.
+   On start it compares the webhook in `client-info` with
+   `https://$DOMAIN/mono/webhook/<secret>` and registers it if it differs.
+3. Sign in to get an owner token, then start the history import from 1 Jan 2025:
+   `TOKEN=$(curl -s https://$DOMAIN/auth/login -H 'content-type: application/json' -d '{"password":"<owner password>","deviceName":"cli"}' | jq -r .token)`
+   `curl -i -X POST https://$DOMAIN/mono/import -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"from":"2025-01-01"}'`
+   Expect `202`. monobank allows one request per 60 s, so the import runs in the
+   background for a while (one request per account per 31-day window); it
+   resumes by itself after a restart.
+4. Check: `docker compose exec postgres psql -U tablo -c "select count(*) from transactions"`
+   grows; `select kind,status,count(*) from jobs group by 1,2` shows
+   `history.window` going from `pending` to `done`; spend a small amount and
+   see a `webhook.item` job turn `done` and the row appear; `select last_sync_at from settings`
+   is recent. The daily reconcile runs at 04:00 Kyiv time.
+
 ## Backups
 
 - `backup.sh` (cron 03:15 UTC): `pg_dump | gzip | age -r <public key>` to Hetzner
