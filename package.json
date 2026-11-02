@@ -12,12 +12,14 @@
     "check:colors": "node scripts/check-raw-colors.mjs",
     "golden:classify": "pnpm --filter @tablo/api exec tsx ../../scripts/golden-classify.ts",
     "golden:import": "pnpm --filter @tablo/api exec tsx ../../scripts/golden-import.ts",
-    "seed:private": "pnpm --filter @tablo/api exec tsx ../../scripts/seed-private.ts"
+    "seed:private": "pnpm --filter @tablo/api exec tsx ../../scripts/seed-private.ts",
+    "coverage:domain": "vitest run --coverage --coverage.include=\"apps/api/src/domain/*.ts\" --coverage.exclude=\"**/*.test.ts\" --coverage.thresholds.lines=95 apps/api/src/domain"
   },
   "packageManager": "pnpm@12.16.1",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.6",
+    "@vitest/coverage-v8": "5.0.5",
     "eslint": "^10.14.0",
     "globals": "^17.14.0",
     "typescript": "^6.0.3",

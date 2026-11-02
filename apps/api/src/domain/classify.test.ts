@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classify, type ClassifyContext, type ClassifyInput } from "./classify";
+import { classify, findOwnPairs, type ClassifyContext, type ClassifyInput } from "./classify";
 
 const ctx = (over: Partial<ClassifyContext> = {}): ClassifyContext => ({
   ownIbans: new Set(["UA00OWN0001"]),
@@ -163,5 +163,52 @@ describe("people", () => {
     expect(classify(tx({ description: "Від: Тест Тестовий", amount: 10000, mcc: 4829 }), ctx())).toMatchObject({
       type: "person_in",
     });
+  });
+});
+
+describe("findOwnPairs", () => {
+  it("pairs opposite rows of equal amount on different accounts within the window", () => {
+    const rows = [
+      { id: 1, accountId: 1, at: 0, amount: -5000 },
+      { id: 2, accountId: 2, at: 60_000, amount: 5000 },
+      { id: 3, accountId: 1, at: 0, amount: -7000 },
+      { id: 4, accountId: 1, at: 0, amount: 7000 },
+      { id: 5, accountId: 3, at: 0, amount: -9000 },
+      { id: 6, accountId: 4, at: 20 * 60_000, amount: 9000 },
+    ];
+    expect([...findOwnPairs(rows)].sort()).toEqual([1, 2]);
+  });
+});
+
+describe("default categories and fop income", () => {
+  it("owner rules without a category fall back to the type default", () => {
+    const c = ctx({
+      rules: [
+        { matchKind: "merchant", matchValue: "rentco", type: "obligation" },
+        { matchKind: "merchant", matchValue: "shopx", type: "spend" },
+        { matchKind: "merchant", matchValue: "gift", type: "person_in" },
+        { matchKind: "merchant", matchValue: "pay", type: "income" },
+        { matchKind: "merchant", matchValue: "atm1", type: "cash_in" },
+        { matchKind: "merchant", matchValue: "jar1", type: "goal_contribution" },
+        { matchKind: "merchant", matchValue: "debt1", type: "debt_payment" },
+        { matchKind: "merchant", matchValue: "loan1", type: "loan_in" },
+        { matchKind: "merchant", matchValue: "dps1", type: "tax" },
+      ],
+    });
+    const cat = (d: string) => classify(tx({ description: d }), c).category;
+    expect(cat("rentco")).toBe("transfer");
+    expect(cat("shopx")).toBe("uncategorized");
+    expect(cat("gift")).toBe("transfer");
+    expect(cat("pay")).toBe("income");
+    expect(cat("atm1")).toBe("cash");
+    expect(cat("jar1")).toBe("own");
+    expect(cat("debt1")).toBe("debt");
+    expect(cat("loan1")).toBe("loan");
+    expect(cat("dps1")).toBe("tax");
+  });
+
+  it("any incoming money on the fop account is income", () => {
+    const r = classify(tx({ accountKind: "fop", amount: 1_000_000, mcc: 4829, description: "Payment from client" }), ctx());
+    expect(r.type).toBe("income");
   });
 });

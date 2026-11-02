@@ -3,7 +3,7 @@ import { Interval } from "@nestjs/schedule";
 import { DataSource } from "typeorm";
 import { APP_CONFIG } from "../config.module";
 import type { AppConfig } from "../config";
-import { CURRENCY_CODES } from "./import.service";
+import { CURRENCY_ALPHA } from "../domain/money";
 import { JOB_CLOCK, type JobClock } from "./jobs/job-runner";
 import { MonoClient } from "./mono.client";
 
@@ -39,7 +39,7 @@ export class FxService implements OnApplicationBootstrap {
       const fetchedAt = new Date(this.clock.now());
       const rows: [string, number][] = [];
       for (const r of rates) {
-        const code = CURRENCY_CODES[r.currencyCodeA];
+        const code = CURRENCY_ALPHA[r.currencyCodeA];
         if (r.currencyCodeB !== UAH || r.currencyCodeA === UAH || !code) continue;
         const rate =
           r.rateBuy && r.rateSell ? (r.rateBuy + r.rateSell) / 2 : r.rateCross;

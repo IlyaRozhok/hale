@@ -5,6 +5,7 @@ import { JOB_CLOCK, type JobClock, JobRunner } from "./jobs/job-runner";
 import { MonoClient } from "./mono.client";
 import type { MonoClientInfo, MonoStatementItem } from "./mono.schemas";
 import { ReclassifyService } from "../transactions/reclassify.service";
+import { CURRENCY_ALPHA } from "../domain/money";
 import { planWindows, splitWindow } from "./windows";
 
 export const WINDOW_JOB_KIND = "history.window";
@@ -14,9 +15,6 @@ export const WINDOW_JOB_KIND = "history.window";
  */
 export const SPLIT_THRESHOLD = 500;
 
-export const CURRENCY_CODES: Record<number, string> = {
-  980: "UAH", 840: "USD", 978: "EUR", 826: "GBP", 985: "PLN", 756: "CHF", 203: "CZK",
-};
 const ACCOUNT_KINDS = new Set(["black", "white", "fop"]);
 
 const kyivDate = new Intl.DateTimeFormat("en-CA", {
@@ -32,7 +30,7 @@ export interface WindowPayload {
   to: number;
 }
 
-export const currencyName = (code: number) => CURRENCY_CODES[code] ?? `#${code}`;
+export const currencyName = (code: number) => CURRENCY_ALPHA[code] ?? `#${code}`;
 
 @Injectable()
 export class ImportService implements OnModuleInit {

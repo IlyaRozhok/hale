@@ -6,7 +6,7 @@ const input = (o: Partial<DailyInput> = {}): DailyInput => ({
   cardsMoney: 1_032_500,
   fopMoney: 0,
   binanceMoney: 0,
-  creditAvailable: 3_000_000,
+  creditLimit: 3_000_000,
   taxReserve: 0,
   obligationsDue: 2_229_500,
   goalDue: 0,
@@ -32,6 +32,10 @@ describe("sumDue", () => {
       "2026-11-02",
       "2026-11-20",
     );
+    expect(r).toBe(11);
+  });
+  it("past nextIncomeOn counts upcoming (30 days) and overdue payments", () => {
+    const r = sumDue([pay("2026-10-20", 1), pay("2026-11-15", 10), pay("2026-12-02", 100)], "2026-11-02", "2026-10-30");
     expect(r).toBe(11);
   });
   it("skips paid payments", () => {
@@ -86,18 +90,28 @@ describe("computeDaily bridge mode", () => {
     expect(s.dailyLimit).toBe(30_000);
   });
   it("keeps foodFloor as recommendation with a positive shortfall when even it does not fit", () => {
-    const s = computeDaily(input({ taxReserve: 794_634, creditAvailable: 1_000_000 }));
+    const s = computeDaily(input({ taxReserve: 794_634, creditLimit: 1_000_000 }));
     expect(s.bridge?.recommendedDaily).toBe(45_000);
     expect(s.bridge?.shortfall).toBe(1_801_634);
     expect(s.bridge?.shortfall).toBeGreaterThan(0);
   });
+  it("handles negative own money: shortfall measured against the full limit", () => {
+    // own -500,000 (card debt), obligations 300,000: free -800,000; 18 days at 45,000 = 810,000
+    const s = computeDaily(input({ cardsMoney: -500_000, obligationsDue: 300_000, creditLimit: 1_500_000 }));
+    expect(s.free).toBe(-800_000);
+    expect(s.bridge?.creditNeeded).toBe(1_610_000);
+    expect(s.bridge?.shortfall).toBe(110_000);
+  });
   it("clamps maxDailyWithinCredit at 0", () => {
-    const s = computeDaily(input({ creditAvailable: 0 }));
+    const s = computeDaily(input({ creditLimit: 0 }));
     expect(s.bridge?.maxDailyWithinCredit).toBe(0);
   });
   it("overPlan only when own money is below -creditPlan", () => {
     expect(computeDaily(input({ cardsMoney: -2_000_000, creditPlan: 2_000_000 })).bridge?.overPlan).toBe(false);
     expect(computeDaily(input({ cardsMoney: -2_000_001, creditPlan: 2_000_000 })).bridge?.overPlan).toBe(true);
+    expect(computeDaily(input({ cardsMoney: 0, fopMoney: -2_000_001, creditPlan: 2_000_000 })).bridge?.overPlan).toBe(true);
+    expect(computeDaily(input({ cardsMoney: -1_000_000, binanceMoney: -1_000_001, creditPlan: 2_000_000 })).bridge?.overPlan).toBe(true);
+    expect(computeDaily(input({ cardsMoney: -1_000_000, binanceMoney: 500_000, creditPlan: 2_000_000 })).bridge?.overPlan).toBe(false);
     expect(computeDaily(input({ cardsMoney: -9_000_000, creditPlan: null })).bridge?.overPlan).toBe(false);
   });
 });

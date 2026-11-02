@@ -9,12 +9,15 @@ export type Minor = number;
 export type Rates = Record<string, { rate: number; fetchedAt: string }>;
 
 export const UAH = 980;
-const ALPHA_BY_NUMERIC: Record<number, string> = {
+/** ISO 4217 numeric to alpha code. Single source for the money engine and the importer. */
+export const CURRENCY_ALPHA: Record<number, string> = {
   980: "UAH",
   840: "USD",
   978: "EUR",
   826: "GBP",
   985: "PLN",
+  756: "CHF",
+  203: "CZK",
 };
 const STALE_AFTER_MS = 48 * 60 * 60 * 1000;
 const DAY_MS = 86_400_000;
@@ -34,7 +37,7 @@ export function toUah(
   now: string,
 ): { uah: Minor; stale: boolean } {
   if (currency === UAH) return { uah: amount, stale: false };
-  const alpha = ALPHA_BY_NUMERIC[currency];
+  const alpha = CURRENCY_ALPHA[currency];
   if (!alpha) throw new Error(`Unknown currency code ${currency}`);
   const entry = rates[alpha];
   if (!entry) throw new Error(`No exchange rate for ${alpha}`);

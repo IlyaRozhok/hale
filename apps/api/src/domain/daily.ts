@@ -11,7 +11,8 @@ const NO_INCOME_HORIZON_DAYS = 30;
 /**
  * Unpaid payments that must be covered before the next income: overdue ones
  * (still owed) plus those with today <= due < nextIncomeOn. Without an income
- * date, the next 30 days.
+ * date (null or already past), the next 30 days.
+ * Callers pass only non-tax payments: taxes are covered by taxReserve.
  */
 export function sumDue(
   payments: DuePayment[],
@@ -31,7 +32,11 @@ export interface DailyInput {
   cardsMoney: Minor;
   fopMoney: Minor;
   binanceMoney: Minor;
-  creditAvailable: Minor;
+  /**
+   * The full credit limit (not the unused part): `-free` already contains any
+   * card debt, so the headroom is limit minus the shortfall of own money.
+   */
+  creditLimit: Minor;
   taxReserve: Minor;
   obligationsDue: Minor;
   goalDue: Minor;
@@ -85,8 +90,8 @@ export function computeDaily(i: DailyInput): DailyState {
     bridge = {
       creditNeeded,
       recommendedDaily,
-      maxDailyWithinCredit: Math.max(0, Math.floor((i.creditAvailable + free) / daysLeft)),
-      shortfall: Math.max(0, creditNeeded - i.creditAvailable),
+      maxDailyWithinCredit: Math.max(0, Math.floor((i.creditLimit + free) / daysLeft)),
+      shortfall: Math.max(0, creditNeeded - i.creditLimit),
       overPlan: i.creditPlan !== null && ownTotal < -i.creditPlan,
     };
   } else {
