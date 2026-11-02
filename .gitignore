@@ -6,3 +6,4 @@ private/
 *.tfstate*
 .superpowers/
 .DS_Store
+.terraform/

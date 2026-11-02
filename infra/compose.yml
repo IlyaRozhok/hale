@@ -1,0 +1,58 @@
+# Production stack. Only Caddy publishes ports (80/443); Postgres and the API
+# are reachable on the internal network only.
+# Required in infra/.env (never committed): DOMAIN, POSTGRES_PASSWORD,
+# JWT_SECRET, OWNER_PASSWORD_HASH, API_IMAGE, plus the backup variables.
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tablo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: tablo
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tablo -d tablo"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    # no "ports:" on purpose: 5432 must stay closed to the host and internet
+
+  api:
+    image: ${API_IMAGE:?set in .env}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://tablo:${POSTGRES_PASSWORD}@postgres:5432/tablo
+      JWT_SECRET: ${JWT_SECRET:?set in .env}
+      OWNER_PASSWORD_HASH: ${OWNER_PASSWORD_HASH:?set in .env}
+      PORT: "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

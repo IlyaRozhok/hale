@@ -1,6 +1,7 @@
 packages:
   - "apps/*"
   - "packages/*"
+  - "infra"
 allowBuilds:
   "@embedded-postgres/darwin-arm64": true
   "@embedded-postgres/linux-x64": true
