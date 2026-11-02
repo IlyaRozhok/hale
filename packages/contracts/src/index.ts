@@ -61,6 +61,22 @@ export const scheduledPaymentInput = z
 export const scheduledPaymentPatch = partial(z.object(paymentShape));
 export type ScheduledPaymentInput = z.infer<typeof scheduledPaymentInput>;
 
+// --- recurring payments -----------------------------------------------------
+const recurringShape = {
+  kind: paymentKind,
+  name: z.string().min(1).max(200),
+  amount: money.positive(),
+  currency,
+  day_of_month: day,
+  match_hint: z.string().min(1).max(200).nullable(),
+  active: z.boolean(),
+};
+export const recurringInput = z
+  .object({ ...recurringShape, kind: paymentKind.optional(), match_hint: recurringShape.match_hint.optional(), active: z.boolean().optional() })
+  .strict();
+export const recurringPatch = partial(z.object(recurringShape));
+export type RecurringInput = z.infer<typeof recurringInput>;
+
 // --- loans ------------------------------------------------------------------
 const loanShape = {
   amount: money.positive(),
@@ -113,25 +129,12 @@ const seedInstallment = z
     match_hint: z.string().min(1).optional(),
   })
   .strict();
-/** A payment that repeats every month on `day`; the next `months` occurrences are created. */
-const seedMonthly = z
-  .object({
-    kind: paymentKind,
-    name: z.string().min(1),
-    amount: money.positive(),
-    currency,
-    day,
-    months: z.number().int().min(1).max(12).default(3),
-    match_hint: z.string().min(1).optional(),
-  })
-  .strict();
-
 export const seedFile = z
   .object({
     settings: settingsPatch.optional(),
     expected_incomes: z.array(expectedIncomeInput).default([]),
     installments: z.array(seedInstallment).default([]),
-    monthly_payments: z.array(seedMonthly).default([]),
+    recurring: z.array(recurringInput).default([]),
     payments: z.array(seedPayment).default([]),
     manual_balances: z.array(manualBalanceInput).default([]),
   })

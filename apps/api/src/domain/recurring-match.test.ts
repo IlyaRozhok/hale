@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Payment, matchPayment, monthlyEvents } from "./recurring-match";
+import { type Payment, matchPayment, monthlyEvents, monthlyDueDates } from "./recurring-match";
 
 const pay = (over: Partial<Payment> = {}): Payment => ({
   id: 1,
@@ -48,9 +48,17 @@ describe("matchPayment", () => {
   });
 
   it("only matches the payment kind that fits the type, and only money out", () => {
-    expect(matchPayment(tx({ type: "spend" }), [pay()])).toBeNull();
+    expect(matchPayment(tx({ type: "person_in" }), [pay()])).toBeNull();
     expect(matchPayment(tx({ type: "tax" }), [pay()])).toBeNull();
     expect(matchPayment(tx({ amount: 529_500, amountUah: 529_500 }), [pay()])).toBeNull();
+  });
+
+  it("lets a spend-typed row settle an installment by exact amount or hint, within three days only", () => {
+    const p = pay();
+    expect(matchPayment(tx({ type: "spend" }), [p])).toBe(p);
+    expect(matchPayment(tx({ type: "spend", amount: -1, amountUah: -1 }), [pay({ match_hint: "skay" })])).not.toBeNull();
+    expect(matchPayment(tx({ type: "spend", localDate: "2026-11-25" }), [p])).toBeNull();
+    expect(matchPayment(tx({ type: "spend" }), [pay({ kind: "obligation" })])).toBeNull();
   });
 
   it("picks the nearest due date when two payments fit", () => {
@@ -59,29 +67,49 @@ describe("matchPayment", () => {
     expect(matchPayment(tx(), [a, b])).toBe(b);
   });
 
-  it("closes the month's obligation paid in another currency by label hint", () => {
-    const p = pay({
-      kind: "obligation",
-      amount: 80_000,
-      currency: "USD",
-      due_on: "2026-11-05",
-      match_hint: "Partner",
-    });
-    const t = tx({
-      type: "obligation",
-      amount: -3_600_000,
-      amountUah: -3_600_000,
-      localDate: "2026-11-20",
-      text: "Transfer Partner",
-    });
-    expect(matchPayment(t, [p])).toBe(p);
-    expect(matchPayment({ ...t, localDate: "2026-12-20" }, [p])).toBeNull();
+  const usd = (over: Partial<Payment> = {}) =>
+    pay({ kind: "obligation", amount: 80_000, currency: "USD", due_on: "2026-11-05", ...over });
+  const uahOut = (uah: number, over: Partial<Parameters<typeof matchPayment>[0]> = {}) =>
+    tx({ type: "obligation", amount: -uah, amountUah: -uah, localDate: "2026-11-20", text: "Transfer", ...over });
+
+  it("closes a USD obligation with a UAH debit within 5% at the current rate, same month", () => {
+    const p = usd();
+    const rates = { USD: 40 }; // 80_000 cents -> 3_200_000 kopecks
+    expect(matchPayment(uahOut(3_300_000), [p], rates)).toBe(p);
+    expect(matchPayment(uahOut(3_040_000), [p], rates)).toBe(p);
+    expect(matchPayment(uahOut(3_400_000), [p], rates)).toBeNull();
+    expect(matchPayment(uahOut(3_300_000), [p], {})).toBeNull();
+    expect(matchPayment(uahOut(3_300_000, { type: "spend" }), [p], rates)).toBeNull();
+    expect(matchPayment(uahOut(3_300_000, { localDate: "2026-12-20" }), [p], rates)).toBeNull();
   });
 
-  it("matches a USD payment by its UAH amount when currencies are equal", () => {
-    const p = pay({ kind: "obligation", amount: 80_000, currency: "USD", due_on: "2026-11-05" });
+  it("a hint alone closes only within three days and needs three characters", () => {
+    const p = usd({ match_hint: "partner" });
+    expect(matchPayment(uahOut(1_000, { localDate: "2026-11-07", text: "Partner" }), [p])).toBe(p);
+    expect(matchPayment(uahOut(1_000, { localDate: "2026-11-15", text: "Partner" }), [p])).toBeNull();
+    const short = usd({ match_hint: "pa" });
+    expect(matchPayment(uahOut(1_000, { localDate: "2026-11-07", text: "pa" }), [short])).toBeNull();
+  });
+
+  it("same month needs the amount: an unrelated same-month row does not close an obligation", () => {
+    const rent = pay({ kind: "obligation", amount: 1_700_000, due_on: "2026-11-05" });
+    expect(matchPayment(uahOut(1_700_000, { type: "spend" }), [rent])).toBeNull();
+    expect(matchPayment(uahOut(1_700_000), [rent])).toBe(rent);
+    expect(matchPayment(uahOut(1_700_001), [rent])).toBeNull();
+  });
+
+  it("matches a USD payment by its own-currency amount when currencies are equal", () => {
+    const p = usd();
     const t = tx({ type: "obligation", amount: -80_000, currency: "USD", amountUah: -3_500_000, localDate: "2026-11-05" });
     expect(matchPayment(t, [p])).toBe(p);
+  });
+});
+
+describe("monthlyDueDates", () => {
+  it("gives this and next month, clamping to the month length", () => {
+    expect(monthlyDueDates(31, "2027-01-15")).toEqual(["2027-01-31", "2027-02-28"]);
+    expect(monthlyDueDates(30, "2028-02-01")).toEqual(["2028-02-29", "2028-03-30"]);
+    expect(monthlyDueDates(6, "2026-12-30")).toEqual(["2026-12-06", "2027-01-06"]);
   });
 });
 

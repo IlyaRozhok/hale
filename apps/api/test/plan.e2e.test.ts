@@ -34,7 +34,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await ds.query(
     `TRUNCATE jobs, rules, transactions, accounts, fx_rates, income_events, expected_incomes,
-              scheduled_payments, manual_balances, loans RESTART IDENTITY CASCADE`,
+              scheduled_payments, recurring_payments, manual_balances, loans RESTART IDENTITY CASCADE`,
   );
   await ds.query(`UPDATE settings SET lifestyle_cap=0, food_floor=0, tax_rate_bp=600, esv_quarter=0`);
 });
@@ -158,10 +158,34 @@ describe("payment matching during reclassification", () => {
         })
         .expect(201)
     ).body.id as number;
-    const t = await tx(acc, { amount: -3_500_000, description: "Partner", date: "2026-11-20", mcc: 4829 });
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', now(), 40)`);
+    const t = await tx(acc, { amount: -3_300_000, description: "Partner", date: "2026-11-20", mcc: 4829 });
     await reclassify([t]);
     expect((await row("SELECT type FROM transactions WHERE id=$1", [t])).type).toBe("obligation");
     expect((await row("SELECT transaction_id FROM scheduled_payments WHERE id=$1", [id])).transaction_id).toBe(t);
+  });
+
+  it("a spend-typed store installment row closes the installment and is retyped debt_payment", async () => {
+    const acc = await account("black");
+    const id = (await installment({ match_hint: "skay" }).expect(201)).body.id as number;
+    const t = await tx(acc, { amount: -529_500, description: "Платіж skay.ua", mcc: 4829, date: "2026-11-17" });
+    await reclassify([t]);
+    expect(await row("SELECT type, type_source FROM transactions WHERE id=$1", [t])).toEqual({ type: "debt_payment", type_source: "rule" });
+    expect((await row("SELECT transaction_id FROM scheduled_payments WHERE id=$1", [id])).transaction_id).toBe(t);
+    await reclassify([t]); // classify says spend again; the link keeps it a debt payment
+    expect((await row("SELECT type FROM transactions WHERE id=$1", [t])).type).toBe("debt_payment");
+    expect(await ds.query("SELECT 1 FROM scheduled_payments WHERE paid_at IS NOT NULL")).toHaveLength(1);
+  });
+
+  it("never retypes an owner-labelled row and ignores unrelated spend", async () => {
+    const acc = await account("black");
+    await installment();
+    const owner = await tx(acc, { amount: -529_500, description: "Платіж skay.ua", mcc: 4829 });
+    await ds.query(`UPDATE transactions SET type='spend', type_source='owner' WHERE id=$1`, [owner]);
+    const other = await tx(acc, { amount: -100, description: "Coffee", mcc: 5814 });
+    await reclassify([owner, other]);
+    expect(await ds.query("SELECT 1 FROM scheduled_payments WHERE paid_at IS NOT NULL")).toHaveLength(0);
+    expect((await row("SELECT type, type_source FROM transactions WHERE id=$1", [owner]))).toEqual({ type: "spend", type_source: "owner" });
   });
 
   it("pays a tax payment from the fop account", async () => {
@@ -238,22 +262,30 @@ describe("income events", () => {
     expect((await row("SELECT amount::int AS amount FROM manual_balances WHERE name='Binance'")).amount).toBe(540_000);
   });
 
-  it("an income on the fop account marks that month's fop event received", async () => {
+  it("fop event is received only once incomes reach half the expected amount", async () => {
+    await fopIncome(); // $5,000
+    await app.get(PlanService).generateEvents("2026-11-02");
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', now(), 40)`); // half = 10_000_000 kop
+    const fop = await account("fop", "USD");
+    const status = async () => (await row(`SELECT status, amount_uah::int AS amount_uah FROM income_events WHERE period='2026-11'`));
+    const small = await tx(fop, { amount: 25_000, description: "From client", date: "2026-11-10", amountUah: 1_000_000 });
+    await reclassify([small]);
+    expect((await status()).status).toBe("expected");
+    const big = await tx(fop, { amount: 200_000, description: "From client", date: "2026-11-17", amountUah: 9_000_000 });
+    await reclassify([big]);
+    await reclassify([big]);
+    expect(await status()).toEqual({ status: "received", amount_uah: 10_000_000 });
+    // next month stays untouched
+    expect((await row(`SELECT status FROM income_events WHERE period='2026-12'`)).status).toBe("expected");
+  });
+
+  it("a fop income cannot be judged without a rate", async () => {
     await fopIncome();
-    await usdc();
     await app.get(PlanService).generateEvents("2026-11-02");
     const fop = await account("fop", "USD");
     const t = await tx(fop, { amount: 500_000, description: "From client", date: "2026-11-17", amountUah: 21_000_000 });
     await reclassify([t]);
-    await reclassify([t]);
-    const evs = await ds.query(
-      `SELECT e.period, e.status, e.amount_uah::int AS amount_uah, x.source FROM income_events e
-         JOIN expected_incomes x ON x.id = e.expected_income_id ORDER BY e.id`,
-    );
-    expect(evs.find((e: { source: string; period: string }) => e.source === "fop" && e.period === "2026-11")).toMatchObject({
-      status: "received", amount_uah: 21_000_000,
-    });
-    expect(evs.filter((e: { status: string }) => e.status === "received")).toHaveLength(1);
+    expect((await row(`SELECT status FROM income_events WHERE period='2026-11'`)).status).toBe("expected");
   });
 
   it("matching a cash_in to a USDC event lowers Binance, retypes the row and is idempotent", async () => {
@@ -302,5 +334,43 @@ describe("manual mark-paid", () => {
     const b = await api.post(`/plan/payments/${id}/mark-paid`).expect(201);
     expect(b.body.paid_at).toBe(a.body.paid_at);
     await api.post(`/plan/payments/9999/mark-paid`).expect(404);
+  });
+});
+
+describe("recurring payments", () => {
+  const rent = { name: "Rent", amount: 1_700_000, currency: "UAH", day_of_month: 31 };
+
+  it("has CRUD", async () => {
+    const c = await api.post("/plan/recurring", rent).expect(201);
+    expect(c.body).toMatchObject({ name: "Rent", active: true, match_hint: null, kind: "obligation" });
+    await api.patch(`/plan/recurring/${c.body.id}`, { active: false }).expect(200);
+    expect((await api.get("/plan/recurring")).body[0].active).toBe(false);
+    await api.post("/plan/recurring", { ...rent, day_of_month: 32 }).expect(400);
+    await api.del(`/plan/recurring/${c.body.id}`).expect(200);
+    await api.patch(`/plan/recurring/${c.body.id}`, { active: true }).expect(404);
+  });
+
+  it("creates this and next month's payment each run, once, across months and February", async () => {
+    const id = (await api.post("/plan/recurring", { ...rent, match_hint: "rent" }).expect(201)).body.id as number;
+    const plan = app.get(PlanService);
+    const dues = async () =>
+      (await ds.query(`SELECT due_on::text AS d FROM scheduled_payments WHERE recurring_id=$1 ORDER BY due_on`, [id])).map(
+        (r: { d: string }) => r.d,
+      );
+    expect(await plan.generateRecurring("2027-01-15")).toBe(2);
+    expect(await plan.generateRecurring("2027-01-20")).toBe(0);
+    expect(await dues()).toEqual(["2027-01-31", "2027-02-28"]);
+    await plan.generateRecurring("2027-02-10");
+    await plan.generateRecurring("2027-03-01");
+    await plan.generateRecurring("2028-01-30");
+    await plan.generateRecurring("2028-02-01");
+    expect(await dues()).toEqual(["2027-01-31", "2027-02-28", "2027-03-31", "2027-04-30", "2028-01-31", "2028-02-29", "2028-03-31"]);
+    const p = (await ds.query(`SELECT name, amount::int AS amount, kind, match_hint FROM scheduled_payments LIMIT 1`))[0];
+    expect(p).toEqual({ name: "Rent", amount: 1_700_000, kind: "obligation", match_hint: "rent" });
+  });
+
+  it("skips inactive series", async () => {
+    await api.post("/plan/recurring", { ...rent, active: false }).expect(201);
+    expect(await app.get(PlanService).generateRecurring("2027-01-15")).toBe(0);
   });
 });

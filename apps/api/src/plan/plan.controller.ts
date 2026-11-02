@@ -21,13 +21,15 @@ import {
   manualBalanceInput,
   manualBalancePatch,
   matchTransactionInput,
+  recurringInput,
+  recurringPatch,
   scheduledPaymentInput,
   scheduledPaymentPatch,
   settingsPatch,
 } from "@tablo/contracts";
 import { DataSource, type ObjectLiteral, type Repository } from "typeorm";
 import type { z } from "zod";
-import { ExpectedIncome, Loan, ManualBalance, ScheduledPayment, Settings } from "../db/entities";
+import { ExpectedIncome, Loan, ManualBalance, RecurringPayment, ScheduledPayment, Settings } from "../db/entities";
 import { PlanService } from "./plan.service";
 
 function parse<S extends z.ZodType>(schema: S, body: unknown): z.infer<S> {
@@ -140,6 +142,28 @@ export class PlanController {
   @Post("payments/:id/mark-paid")
   markPaid(@Param("id", ParseIntPipe) id: number) {
     return this.plan.markPaid(id);
+  }
+
+  // --- recurring payments ---------------------------------------------------
+  @Get("recurring")
+  listRecurring(): Promise<RecurringPayment[]> {
+    return this.ds.getRepository(RecurringPayment).find({ order: { id: "ASC" } });
+  }
+
+  @Post("recurring")
+  createRecurring(@Body() body: unknown): Promise<RecurringPayment> {
+    const repo = this.ds.getRepository(RecurringPayment);
+    return repo.save(repo.create(parse(recurringInput, body)));
+  }
+
+  @Patch("recurring/:id")
+  patchRecurring(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<RecurringPayment> {
+    return patchRow(this.ds.getRepository(RecurringPayment), id, parse(recurringPatch, body));
+  }
+
+  @Delete("recurring/:id")
+  deleteRecurring(@Param("id", ParseIntPipe) id: number) {
+    return removeRow(this.ds.getRepository(RecurringPayment), id);
   }
 
   // --- loans ----------------------------------------------------------------

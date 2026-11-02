@@ -3,10 +3,11 @@
  *
  *   DATABASE_URL=postgres://... pnpm seed:private
  *
- * Idempotent: settings are overwritten with the file's values, everything else is inserted only
- * when no row with the same natural key exists (incomes by source, payments by kind + name + due
- * date, balances by name), so running it again changes nothing. Monthly payments are expanded
- * for the next few months only; running the seed again later extends them.
+ * Idempotent: everything is inserted only when no row with the same natural key exists
+ * (incomes by source, payments by kind + name + due
+ * date, recurring series by name, balances by name), so running it again changes nothing.
+ * Settings are written only while the settings row is still at its defaults.
+ * Recurring series become payments through the API's daily job, not here.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -29,8 +30,8 @@ function dateIn(year: number, monthIndex: number, day: number): string {
   return `${y}-${pad(m + 1)}-${pad(Math.min(day, last))}`;
 }
 
-/** Every payment the seed describes, in one flat list with explicit due dates. */
-export function expandPayments(seed: SeedFile, today: string): SeedPayment[] {
+/** Per-payment installment rows and explicit payments, with explicit due dates. */
+export function expandPayments(seed: SeedFile): SeedPayment[] {
   const out: SeedPayment[] = [...seed.payments];
   for (const i of seed.installments) {
     const y = Number(i.last_payment_on.slice(0, 4));
@@ -48,22 +49,6 @@ export function expandPayments(seed: SeedFile, today: string): SeedPayment[] {
       });
     }
   }
-  const ty = Number(today.slice(0, 4));
-  const tm = Number(today.slice(5, 7)) - 1;
-  for (const p of seed.monthly_payments) {
-    // First occurrence is this month if its day has not passed yet, else next month.
-    const start = dateIn(ty, tm, p.day) >= today ? tm : tm + 1;
-    for (let k = 0; k < p.months; k++) {
-      out.push({
-        kind: p.kind,
-        name: p.name,
-        amount: p.amount,
-        currency: p.currency,
-        due_on: dateIn(ty, start + k, p.day),
-        ...(p.match_hint ? { match_hint: p.match_hint } : {}),
-      });
-    }
-  }
   return out;
 }
 
@@ -74,19 +59,24 @@ export function parseSeed(text: string): SeedFile {
 export interface SeedResult {
   incomes: number;
   payments: number;
+  recurring: number;
   balances: number;
 }
 
-export async function applySeed(db: Queryable, seed: SeedFile, today: string): Promise<SeedResult> {
+export async function applySeed(db: Queryable, seed: SeedFile): Promise<SeedResult> {
   const inserted = async (sql: string, params: unknown[]) => ((await db.query(sql, params)) as unknown[]).length;
-  const result: SeedResult = { incomes: 0, payments: 0, balances: 0 };
+  const result: SeedResult = { incomes: 0, payments: 0, recurring: 0, balances: 0 };
 
+  // Settings are the owner's to change in the app: write them only while the row is untouched.
   const s = seed.settings;
-  if (s) {
-    for (const [k, v] of Object.entries(s)) {
-      if (!/^[a-z_]+$/.test(k)) throw new Error(`bad settings key ${k}`);
-      await db.query(`UPDATE settings SET ${k}=$1 WHERE id=1`, [v]);
-    }
+  if (s && Object.keys(s).length > 0) {
+    const cols = Object.keys(s);
+    if (cols.some((k) => !/^[a-z_]+$/.test(k))) throw new Error("bad settings key");
+    await db.query(
+      `UPDATE settings SET ${cols.map((k, i) => `${k}=$${i + 1}`).join(", ")}
+        WHERE id=1 AND lifestyle_cap=0 AND food_floor=0 AND tax_rate_bp=600 AND esv_quarter=0 AND limit_visual='mercury'`,
+      Object.values(s),
+    );
   }
   for (const e of seed.expected_incomes) {
     result.incomes += await inserted(
@@ -95,13 +85,21 @@ export async function applySeed(db: Queryable, seed: SeedFile, today: string): P
       [e.source, e.amount, e.currency, e.window_start_day, e.window_end_day],
     );
   }
-  for (const p of expandPayments(seed, today)) {
+  for (const p of expandPayments(seed)) {
     result.payments += await inserted(
       `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, paid_at, match_hint, overpayment)
        SELECT $1::text,$2::text,$3,$4,$5::date, CASE WHEN $6::boolean THEN $5::date::timestamptz END,$7,$8
         WHERE NOT EXISTS (SELECT 1 FROM scheduled_payments WHERE kind=$1::text AND name=$2::text AND due_on=$5::date)
        RETURNING id`,
       [p.kind, p.name, p.amount, p.currency, p.due_on, p.paid ?? false, p.match_hint ?? null, p.overpayment ?? false],
+    );
+  }
+  for (const r of seed.recurring) {
+    result.recurring += await inserted(
+      `INSERT INTO recurring_payments (kind, name, amount, currency, day_of_month, match_hint, active)
+       SELECT $1::text,$2::text,$3,$4,$5,$6,$7 WHERE NOT EXISTS (SELECT 1 FROM recurring_payments WHERE name=$2::text)
+       RETURNING id`,
+      [r.kind ?? "obligation", r.name, r.amount, r.currency, r.day_of_month, r.match_hint ?? null, r.active ?? true],
     );
   }
   for (const b of seed.manual_balances) {
@@ -129,9 +127,10 @@ export async function main(): Promise<number> {
   const ds = createDataSource(url);
   await ds.initialize();
   try {
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv" }).format(new Date());
-    const r = await applySeed(ds, seed, today);
-    console.log(`seeded: ${r.incomes} incomes, ${r.payments} payments, ${r.balances} balances (new rows only)`);
+    const r = await applySeed(ds, seed);
+    console.log(
+      `seeded: ${r.incomes} incomes, ${r.payments} payments, ${r.recurring} recurring, ${r.balances} balances (new rows only)`,
+    );
   } finally {
     await ds.destroy();
   }

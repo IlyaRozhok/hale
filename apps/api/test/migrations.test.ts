@@ -5,7 +5,7 @@ import { createTestDatabase } from "./db";
 
 const TABLES = [
   "accounts", "transactions", "rules", "expected_incomes", "income_events",
-  "scheduled_payments", "manual_balances", "loans", "settings", "bridge_plans",
+  "scheduled_payments", "recurring_payments", "manual_balances", "loans", "settings", "bridge_plans",
   "daily_snapshots", "fx_rates", "jobs", "devices", "notifications_log",
 ];
 
@@ -42,6 +42,7 @@ describe("migrations", () => {
       "transactions.needs_label",
     ]);
 
+    await ds.undoLastMigration();
     await ds.undoLastMigration();
     await ds.undoLastMigration();
     await ds.undoLastMigration();

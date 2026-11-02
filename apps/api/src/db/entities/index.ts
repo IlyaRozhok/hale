@@ -86,6 +86,19 @@ export class ScheduledPayment {
   @Column({ type: "integer", nullable: true }) transaction_id!: number | null;
   @Column({ type: "text", nullable: true }) match_hint!: string | null;
   @Column({ type: "boolean", default: false }) overpayment!: boolean;
+  @Column({ type: "integer", nullable: true }) recurring_id!: number | null;
+}
+
+@Entity("recurring_payments")
+export class RecurringPayment {
+  @id() id!: number;
+  @Column({ type: "text", default: "obligation" }) kind!: "obligation" | "installment" | "tax";
+  @Column({ type: "text" }) name!: string;
+  @money() amount!: number;
+  @Column({ type: "text" }) currency!: string;
+  @Column({ type: "smallint" }) day_of_month!: number;
+  @Column({ type: "text", nullable: true }) match_hint!: string | null;
+  @Column({ type: "boolean", default: true }) active!: boolean;
 }
 
 @Entity("manual_balances")
@@ -169,7 +182,7 @@ export class NotificationLog {
 }
 
 export const entities = [
-  Account, Transaction, Rule, ExpectedIncome, IncomeEvent, ScheduledPayment,
+  Account, Transaction, Rule, ExpectedIncome, IncomeEvent, ScheduledPayment, RecurringPayment,
   ManualBalance, Loan, Settings, BridgePlan, DailySnapshot, FxRate, Job,
   Device, NotificationLog,
 ];

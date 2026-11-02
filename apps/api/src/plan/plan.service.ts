@@ -9,10 +9,11 @@ import {
 } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { DataSource, type EntityManager } from "typeorm";
-import { type Payment, matchPayment, monthlyEvents } from "../domain/recurring-match";
+import { type Payment, matchPayment, monthlyDueDates, monthlyEvents } from "../domain/recurring-match";
 import type { IncomeEvent, ScheduledPayment } from "../db/entities";
 
 export const BINANCE = "Binance";
+const MATCH_DAYS = 3;
 
 /** Today's date in Kyiv, YYYY-MM-DD. */
 export function kyivToday(now: Date = new Date()): string {
@@ -44,6 +45,7 @@ export class PlanService implements OnApplicationBootstrap {
   async onApplicationBootstrap(): Promise<void> {
     try {
       await this.generateEvents();
+      await this.generateRecurring();
     } catch (e) {
       this.log.warn(`event generation failed: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -52,6 +54,28 @@ export class PlanService implements OnApplicationBootstrap {
   @Cron("0 4 * * *", { timeZone: "Europe/Kyiv" })
   async dailyJob(): Promise<void> {
     await this.generateEvents();
+    await this.generateRecurring();
+  }
+
+  /** Creates this and next month's payment for every active recurring series. Returns new rows. */
+  async generateRecurring(today: string = kyivToday()): Promise<number> {
+    const series: { id: number; kind: string; name: string; amount: number; currency: string; day_of_month: number; match_hint: string | null }[] =
+      await this.ds.query(
+        `SELECT id, kind, name, amount::float8 AS amount, currency, day_of_month, match_hint
+           FROM recurring_payments WHERE active ORDER BY id`,
+      );
+    let created = 0;
+    for (const r of series) {
+      for (const due of monthlyDueDates(r.day_of_month, today)) {
+        const out: unknown[] = await this.ds.query(
+          `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, match_hint, recurring_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (recurring_id, due_on) DO NOTHING RETURNING id`,
+          [r.kind, r.name, r.amount, r.currency, due, r.match_hint, r.id],
+        );
+        created += out.length;
+      }
+    }
+    return created;
   }
 
   /** Creates this and next month's events. Returns how many were new. */
@@ -171,17 +195,28 @@ export class PlanService implements OnApplicationBootstrap {
    * Runs after a row has been given its type. Settles a planned payment, records a new loan or
    * marks the fop income event received. Safe to call again for the same row.
    */
-  async onClassified(txId: number): Promise<void> {
+  async onClassified(txId: number, typeHint?: string): Promise<void> {
+    if (typeHint === "spend") {
+      // Most rows are plain spend: only open a transaction if an installment could be involved.
+      const maybe = await this.ds.query(
+        `SELECT 1 FROM transactions t JOIN scheduled_payments p ON p.kind='installment'
+            AND (p.transaction_id = t.id OR (p.paid_at IS NULL AND p.transaction_id IS NULL
+                 AND abs(p.due_on - t.local_date) <= $2))
+          WHERE t.id=$1 AND t.amount < 0 LIMIT 1`,
+        [txId, MATCH_DAYS],
+      );
+      if (maybe.length === 0) return;
+    }
     await this.ds.transaction(async (m) => {
       const t = (
         await m.query(
-          `SELECT t.id, t.type, t.amount::float8 AS amount, a.currency, t.amount_uah::float8 AS amount_uah,
+          `SELECT t.id, t.type, t.type_source, t.amount::float8 AS amount, a.currency, t.amount_uah::float8 AS amount_uah,
                   t.local_date::text AS local_date, t.occurred_at, a.kind AS account_kind,
                   concat_ws(' ', t.description, t.comment, t.counter_name) AS text
              FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.id=$1`,
           [txId],
         )
-      )[0] as TxRow | undefined;
+      )[0] as (TxRow & { type_source: string | null }) | undefined;
       if (!t?.type) return;
 
       if (t.type === "loan_in") {
@@ -192,32 +227,81 @@ export class PlanService implements OnApplicationBootstrap {
           [t.id, Math.abs(t.amount_uah ?? t.amount), t.local_date],
         );
       } else if (t.type === "income" && t.account_kind === "fop") {
-        await m.query(
-          `UPDATE income_events e SET status='received', received_at=$2, amount_uah=$3, matched_transaction_id=$1
-             FROM expected_incomes x
-            WHERE x.id = e.expected_income_id AND x.source='fop' AND e.period=$4 AND e.status <> 'received'`,
-          [t.id, t.occurred_at, t.amount_uah, t.local_date.slice(0, 7)],
-        );
-      } else if (t.type === "obligation" || t.type === "debt_payment" || t.type === "tax") {
-        if ((await m.query(`SELECT 1 FROM scheduled_payments WHERE transaction_id=$1`, [t.id])).length > 0) return;
+        await this.markFopEvents(m, t);
+      } else if (t.type === "obligation" || t.type === "debt_payment" || t.type === "tax" || t.type === "spend") {
+        const linked = await m.query(`SELECT 1 FROM scheduled_payments WHERE transaction_id=$1`, [t.id]);
+        if (linked.length > 0) {
+          if (t.type === "spend") await this.retypeAsDebt(m, t.id);
+          return;
+        }
         const open: Payment[] = await m.query(
           `SELECT id, kind, name, amount::float8 AS amount, currency, due_on::text AS due_on, paid_at,
                   transaction_id, match_hint
              FROM scheduled_payments WHERE paid_at IS NULL AND transaction_id IS NULL
             ORDER BY due_on, id FOR UPDATE`,
         );
+        if (t.type === "spend" && t.type_source === "owner") return;
         const hit = matchPayment(
           { id: t.id, type: t.type, amount: t.amount, currency: t.currency, amountUah: t.amount_uah, localDate: t.local_date, text: t.text },
           open,
+          await this.rates(m),
         );
         if (hit) {
           await m.query(
             `UPDATE scheduled_payments SET paid_at=$2, transaction_id=$3 WHERE id=$1 AND paid_at IS NULL`,
             [hit.id, t.occurred_at, t.id],
           );
+          if (t.type === "spend") await this.retypeAsDebt(m, t.id);
         }
       }
     });
+  }
+
+  /** A store installment that classify() saw as spend is a debt payment; owner rows stay as they are. */
+  private async retypeAsDebt(m: EntityManager, txId: number): Promise<void> {
+    await m.query(
+      `UPDATE transactions SET type='debt_payment', category='debt', type_source='rule'
+        WHERE id=$1 AND type_source IS DISTINCT FROM 'owner'`,
+      [txId],
+    );
+  }
+
+  /**
+   * Marks the month's fop event received once the incomes on the fop account in that month reach
+   * half the expected amount, compared in hryvnias at the current rate. Without a rate it waits.
+   */
+  private async markFopEvents(m: EntityManager, t: TxRow): Promise<void> {
+    const period = t.local_date.slice(0, 7);
+    const events: { id: number; amount: number; currency: string }[] = await m.query(
+      `SELECT e.id, x.amount::float8 AS amount, x.currency FROM income_events e
+         JOIN expected_incomes x ON x.id = e.expected_income_id
+        WHERE x.source='fop' AND e.period=$1 AND e.status <> 'received' FOR UPDATE OF e`,
+      [period],
+    );
+    if (events.length === 0) return;
+    const rates = await this.rates(m);
+    const sum: number = (
+      await m.query(
+        `SELECT COALESCE(SUM(t.amount_uah),0)::float8 AS s FROM transactions t JOIN accounts a ON a.id = t.account_id
+          WHERE a.kind='fop' AND t.type='income' AND t.amount_uah IS NOT NULL AND to_char(t.local_date,'YYYY-MM')=$1`,
+        [period],
+      )
+    )[0].s;
+    for (const e of events) {
+      const rate = e.currency === "UAH" ? 1 : rates[e.currency];
+      if (!rate || sum < (e.amount * rate) / 2) continue;
+      await m.query(
+        `UPDATE income_events SET status='received', received_at=$2, amount_uah=$3, matched_transaction_id=$4 WHERE id=$1`,
+        [e.id, t.occurred_at, sum, t.id],
+      );
+    }
+  }
+
+  private async rates(m: EntityManager): Promise<Record<string, number>> {
+    const rows: { currency: string; rate: number }[] = await m.query(
+      `SELECT DISTINCT ON (currency) currency, rate::float8 AS rate FROM fx_rates ORDER BY currency, fetched_at DESC`,
+    );
+    return Object.fromEntries(rows.map((r) => [r.currency, r.rate]));
   }
 
   // --- helpers --------------------------------------------------------------
