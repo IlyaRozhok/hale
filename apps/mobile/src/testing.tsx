@@ -61,7 +61,7 @@ export function settingsFixture(over: Partial<SettingsDto> = {}): SettingsDto {
 }
 
 export function taxFixture(over: Partial<ScheduledPaymentDto> = {}): ScheduledPaymentDto {
-  return { id: 1, kind: "tax", name: "Налог за 3 кв.", amount: 1_200_000, currency: "UAH", due_on: "2026-11-20", paid_at: null, ...over };
+  return { id: 1, kind: "tax", name: "Налог за 3 кв.", amount: 1_200_000, currency: "UAH", due_on: "2026-11-20", paid_at: null, tax_quarter: "2026-Q3", is_estimate: false, ...over };
 }
 
 export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock } {

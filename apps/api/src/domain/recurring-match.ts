@@ -1,5 +1,7 @@
 /** Pure matching of bank rows to planned payments and generation of monthly income events. */
 
+import { precedingQuarter, quarterBounds } from "./quarter";
+
 export type PaymentKind = "obligation" | "installment" | "tax";
 
 export interface Payment {
@@ -14,6 +16,8 @@ export interface Payment {
   paid_at: Date | string | null;
   transaction_id: number | null;
   match_hint: string | null;
+  /** "2026-Q3" for a quarterly tax row; null for anything else. */
+  tax_quarter?: string | null;
 }
 
 export interface PayableTx {
@@ -89,6 +93,27 @@ export function matchPayment(
     const ok = dist <= MATCH_TOLERANCE_DAYS ? amountOk || hinted : amountOk;
     if (!ok) continue;
     if (!best || dist < best.dist) best = { p, dist };
+  }
+  return best ? best.p : null;
+}
+
+/**
+ * The tax row this outgoing tax payment belongs to, by exact amount, whatever the date or the paid
+ * mark: an owner's "already paid" row still claims its bank row, so that row does not count against
+ * the next quarter. Only a row not yet linked can be returned; the nearest due date wins, an unpaid
+ * row on a tie. A payment made before the row's quarter ended cannot be for it: the same ESV amount
+ * comes around every quarter, and last quarter's payment must not close this quarter's row.
+ */
+export function matchTaxPayment(tx: PayableTx, payments: readonly Payment[]): Payment | null {
+  if (tx.type !== "tax" || tx.amount >= 0) return null;
+  const today = dayNumber(tx.localDate);
+  let best: { p: Payment; dist: number } | null = null;
+  for (const p of payments) {
+    if (p.kind !== "tax" || p.transaction_id !== null || !exactFit(tx, p)) continue;
+    if (tx.localDate <= quarterBounds(p.tax_quarter ?? precedingQuarter(p.due_on)).end) continue;
+    const dist = Math.abs(dayNumber(p.due_on) - today);
+    const closer = !best || dist < best.dist || (dist === best.dist && best.p.paid_at !== null && p.paid_at === null);
+    if (closer) best = { p, dist };
   }
   return best ? best.p : null;
 }

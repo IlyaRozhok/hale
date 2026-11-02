@@ -5,11 +5,12 @@ import { DataSource, type EntityManager } from "typeorm";
 import { leftForGoalsMonthly } from "../domain/goals";
 import { type DailyInput, type DailyState, computeDaily, sumDue } from "../domain/daily";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
-import { quarterOf } from "../domain/quarter";
+import { quarterLabel, quarterOf } from "../domain/quarter";
 import { runOutDate } from "../domain/run-out";
 import { taxReserve } from "../domain/tax";
 import { counterKeySql } from "../transactions/counter-key";
 import { Clock } from "./clock";
+import { quarterTaxFacts } from "./tax-facts";
 
 const STALE_SYNC_MS = 6 * 3_600_000;
 const AVG_DAYS = 7;
@@ -319,9 +320,13 @@ export class TodayService {
 
     // payments: unpaid ones feed the limit; the window's payments (paid or not, native amounts) define the bridge basis
     const end = next && next >= date ? next : addDays(date, HORIZON_DAYS);
-    const pays: { id: number; name: string; kind: string; amount: number; currency: string; due_on: string; paid: boolean }[] =
+    const pays: {
+      id: number; name: string; kind: string; amount: number; currency: string; due_on: string; paid: boolean;
+      tax_quarter: string | null; is_estimate: boolean;
+    }[] =
       await m.query(
-        `SELECT id, name, kind, amount::float8 AS amount, currency, due_on::text AS due_on, (paid_at IS NOT NULL) AS paid
+        `SELECT id, name, kind, amount::float8 AS amount, currency, due_on::text AS due_on, (paid_at IS NOT NULL) AS paid,
+                tax_quarter, is_estimate
            FROM scheduled_payments WHERE due_on < $1 OR paid_at IS NULL ORDER BY due_on, id`,
         [end],
       );
@@ -343,21 +348,12 @@ export class TodayService {
       .map((p) => ({ id: String(p.id), name: p.name, amount: uah(p.amount, p.currency), dueOn: p.due_on, kind: p.kind }));
 
     // tax reserve
-    const fopIncome = (
-      await m.query(
-        `SELECT COALESCE(SUM(t.amount_uah),0)::float8 AS s FROM transactions t JOIN accounts a ON a.id=t.account_id
-          WHERE a.kind='fop' AND t.type='income' AND t.local_date BETWEEN $1 AND $2`,
-        [q.start, q.end],
-      )
-    )[0].s as number;
-    const paidTax = (
-      await m.query(
-        `SELECT COALESCE(SUM(-t.amount_uah),0)::float8 AS s FROM transactions t
-          WHERE t.type='tax' AND t.amount < 0 AND t.local_date BETWEEN $1 AND $2
-            AND NOT EXISTS (SELECT 1 FROM scheduled_payments p WHERE p.transaction_id = t.id)`,
-        [q.start, q.end],
-      )
-    )[0].s as number;
+    const { fopIncome, paidUnmatched: paidTax } = await quarterTaxFacts(m, q.start, q.end);
+    const thisQuarter = quarterLabel(date);
+    const realRows = await m.query(
+      `SELECT 1 FROM scheduled_payments WHERE kind='tax' AND tax_quarter=$1 AND NOT is_estimate LIMIT 1`,
+      [thisQuarter],
+    );
     const taxInput = {
       fopIncomeQuarter: fopIncome,
       rateBp: settings.tax_rate_bp,
@@ -365,9 +361,15 @@ export class TodayService {
       dayOfQuarter: q.dayOf,
       daysInQuarter: q.daysIn,
       paidAgainstCurrentQuarter: paidTax,
+      currentQuarterHasRows: realRows.length > 0,
     };
     const reserve = taxReserve({ ...taxInput, unpaidScheduled });
     const accrued = taxReserve({ ...taxInput, unpaidScheduled: 0 });
+    // Rows standing in for an accrual (an estimate, or this quarter entered early) are still not cash
+    // needed before the next income, or a bridge plan would jump at the rollover.
+    const deferred = unpaid
+      .filter((p) => p.kind === "tax" && p.due_on >= end && (p.is_estimate || p.tax_quarter === thisQuarter))
+      .reduce((s, p) => s + uah(p.amount, p.currency), 0);
 
     const spentToday = await this.spent(m, date, date);
     const avgDailySpend = Math.max(0, Math.round((await this.spent(m, addDays(date, -AVG_DAYS), addDays(date, -1))) / AVG_DAYS));
@@ -392,7 +394,7 @@ export class TodayService {
         binanceMoney: binance,
         creditLimit: credit,
         taxReserve: reserve,
-        taxAccruedNotDue: Math.min(accrued, reserve),
+        taxAccruedNotDue: Math.min(accrued + deferred, reserve),
         obligationsDue,
         goalDue: 0,
         borrowed,

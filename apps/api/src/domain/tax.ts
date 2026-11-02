@@ -13,13 +13,19 @@ export interface TaxInput {
    * `unpaidScheduled` dropping to zero (otherwise it would be subtracted twice).
    */
   paidAgainstCurrentQuarter: Minor;
-  /** Scheduled (earlier quarters') tax payments not yet paid. */
+  /** Scheduled tax payments not yet paid (estimates included). */
   unpaidScheduled: Minor;
+  /**
+   * The owner has entered real payments for the current quarter. They are counted in
+   * `unpaidScheduled` once they exist, so the quarter does not also accrue.
+   */
+  currentQuarterHasRows: boolean;
 }
 
 /** Estimated tax to hold back from own money. Never negative. */
 export function taxReserve(i: TaxInput): Minor {
   const base = Math.round((i.fopIncomeQuarter * i.rateBp) / 10_000);
   const esv = Math.round((i.esvQuarter * i.dayOfQuarter) / i.daysInQuarter);
-  return Math.max(0, base + esv + i.unpaidScheduled - i.paidAgainstCurrentQuarter);
+  const accrual = i.currentQuarterHasRows ? 0 : base + esv;
+  return Math.max(0, accrual + i.unpaidScheduled - i.paidAgainstCurrentQuarter);
 }

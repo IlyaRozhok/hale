@@ -201,6 +201,40 @@ describe("payment matching during reclassification", () => {
   });
 });
 
+describe("tax quarter on payments", () => {
+  const tax = { kind: "tax", name: "Levy", amount: 1_000, currency: "UAH" };
+  it("takes the form's quarter, else the one before the due date; other kinds have none", async () => {
+    const given = await api.post("/plan/payments", { ...tax, due_on: "2026-11-20", tax_quarter: "2026-Q2" }).expect(201);
+    expect(given.body).toMatchObject({ tax_quarter: "2026-Q2", is_estimate: false });
+    const derived = await api.post("/plan/payments", { ...tax, due_on: "2027-02-20" }).expect(201);
+    expect(derived.body.tax_quarter).toBe("2026-Q4");
+    const rent = await api.post("/plan/payments", { ...tax, kind: "obligation", due_on: "2027-02-20" }).expect(201);
+    expect(rent.body.tax_quarter).toBeNull();
+    await api.post("/plan/payments", { ...tax, due_on: "2027-02-20", tax_quarter: "2026-4" }).expect(400);
+    await api.post("/plan/payments", { ...tax, due_on: "2027-02-20", is_estimate: true }).expect(400);
+  });
+  it("a row moved to a quarter by editing also replaces its estimate", async () => {
+    await ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, tax_quarter, is_estimate)
+       VALUES ('tax','Estimate',5,'UAH','2027-02-20','2026-Q4',true)`,
+    );
+    const id = (await api.post("/plan/payments", { ...tax, due_on: "2026-11-20" }).expect(201)).body.id as number;
+    await api.patch(`/plan/payments/${id}`, { amount: 2_000 }).expect(200);
+    expect(await ds.query(`SELECT 1 FROM scheduled_payments WHERE is_estimate`)).toHaveLength(1);
+    await api.patch(`/plan/payments/${id}`, { tax_quarter: "2026-Q4" }).expect(200);
+    expect(await ds.query(`SELECT 1 FROM scheduled_payments WHERE is_estimate`)).toHaveLength(0);
+  });
+  it("the estimate index allows one estimate per quarter", async () => {
+    const add = () =>
+      ds.query(
+        `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, tax_quarter, is_estimate)
+         VALUES ('tax','E',5,'UAH','2027-02-20','2026-Q4',true)`,
+      );
+    await add();
+    await expect(add()).rejects.toThrow(/scheduled_payments_estimate_uq/);
+  });
+});
+
 describe("loans", () => {
   it("a manual loan creates a loan row flagged as a bad case", async () => {
     const r = await api.post("/plan/loans", { amount: 500_000, received_on: "2026-11-01", note: "manual" }).expect(201);

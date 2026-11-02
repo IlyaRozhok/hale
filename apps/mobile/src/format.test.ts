@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dueLabel, formatMoney, formatOriginal, kyivDate, formatMoneyWithUsd, formatStamp, formatUsd, isIsoDate, parseHryvnias, shiftDate, shortDate } from "./format";
+import { dueLabel, formatMoney, formatOriginal, kyivDate, formatMoneyWithUsd, formatStamp, formatUsd, isIsoDate, parseHryvnias, shiftDate, shortDate, taxQuarterOfDue } from "./format";
 
 describe("formatMoney", () => {
   it("groups thousands with commas and rounds to whole hryvnias", () => {
@@ -80,6 +80,14 @@ describe("formatOriginal", () => {
     expect(formatOriginal(-1000, "USD")).toBe("−$10.00");
     expect(formatOriginal(2550, "EUR")).toBe("€25.50");
     expect(formatOriginal(-100050, "PLN")).toBe("−1,000.50 PLN");
+  });
+});
+
+describe("taxQuarterOfDue", () => {
+  it("is the quarter before the due date's, across the year end", () => {
+    expect(taxQuarterOfDue("2026-11-20")).toBe("2026-Q3");
+    expect(taxQuarterOfDue("2026-05-20")).toBe("2026-Q1");
+    expect(taxQuarterOfDue("2027-02-20")).toBe("2026-Q4");
   });
 });
 

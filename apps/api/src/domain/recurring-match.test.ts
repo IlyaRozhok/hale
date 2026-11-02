@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Payment, matchPayment, monthlyEvents, monthlyDueDates } from "./recurring-match";
+import { type Payment, matchPayment, matchTaxPayment, monthlyEvents, monthlyDueDates } from "./recurring-match";
 
 const pay = (over: Partial<Payment> = {}): Payment => ({
   id: 1,
@@ -102,6 +102,45 @@ describe("matchPayment", () => {
     const p = usd();
     const t = tx({ type: "obligation", amount: -80_000, currency: "USD", amountUah: -3_500_000, localDate: "2026-11-05" });
     expect(matchPayment(t, [p])).toBe(p);
+  });
+});
+
+describe("matchTaxPayment", () => {
+  const row = (over: Partial<Payment> = {}) =>
+    pay({ kind: "tax", amount: 100_000, due_on: "2026-11-20", tax_quarter: "2026-Q3", ...over });
+  const paying = (over: Partial<Parameters<typeof matchPayment>[0]> = {}) =>
+    tx({ type: "tax", amount: -100_000, amountUah: -100_000, localDate: "2026-10-19", ...over });
+
+  it("takes a row with the exact amount whatever the date or the paid mark", () => {
+    const unpaid = row();
+    const paid = row({ paid_at: "2026-11-20" });
+    expect(matchTaxPayment(paying(), [unpaid])).toBe(unpaid);
+    expect(matchTaxPayment(paying(), [paid])).toBe(paid);
+    expect(matchTaxPayment(paying({ localDate: "2027-03-01" }), [paid])).toBe(paid);
+  });
+  it("never takes another amount, an already linked row, a non-tax row or an incoming payment", () => {
+    expect(matchTaxPayment(paying({ amount: -100_001, amountUah: -100_001 }), [row()])).toBeNull();
+    expect(matchTaxPayment(paying(), [row({ transaction_id: 5 })])).toBeNull();
+    expect(matchTaxPayment(paying(), [row({ kind: "obligation" })])).toBeNull();
+    expect(matchTaxPayment(paying({ type: "spend" }), [row()])).toBeNull();
+    expect(matchTaxPayment(paying({ amount: 100_000 }), [row()])).toBeNull();
+  });
+  it("does not let a payment from before the quarter ended close the row", () => {
+    expect(matchTaxPayment(paying({ localDate: "2026-07-15" }), [row()])).toBeNull();
+    expect(matchTaxPayment(paying({ localDate: "2026-09-30" }), [row()])).toBeNull();
+    expect(matchTaxPayment(paying({ localDate: "2026-10-01" }), [row()])).not.toBeNull();
+    // A row with no quarter is judged by the quarter before its due date.
+    expect(matchTaxPayment(paying({ localDate: "2026-09-30" }), [row({ tax_quarter: null })])).toBeNull();
+    expect(matchTaxPayment(paying({ localDate: "2026-10-01" }), [row({ tax_quarter: null })])).not.toBeNull();
+  });
+  it("takes the nearest due date, and an unpaid row on a tie", () => {
+    const q3 = row({ id: 1, paid_at: "2026-11-20" });
+    const q4 = row({ id: 2, due_on: "2027-02-20", tax_quarter: "2026-Q4" });
+    expect(matchTaxPayment(paying({ localDate: "2027-01-20" }), [q3, q4])).toBe(q4);
+    const a = row({ id: 3, paid_at: "2026-11-20" });
+    const b = row({ id: 4 });
+    expect(matchTaxPayment(paying(), [a, b])).toBe(b);
+    expect(matchTaxPayment(paying(), [b, a])).toBe(b);
   });
 });
 

@@ -88,6 +88,8 @@ export class ScheduledPayment {
   @Column({ type: "text", nullable: true }) match_hint!: string | null;
   @Column({ type: "boolean", default: false }) overpayment!: boolean;
   @Column({ type: "integer", nullable: true }) recurring_id!: number | null;
+  @Column({ type: "text", nullable: true }) tax_quarter!: string | null;
+  @Column({ type: "boolean", default: false }) is_estimate!: boolean;
 }
 
 @Entity("recurring_payments")

@@ -70,6 +70,13 @@ export function parseHryvnias(text: string): number | null {
   return Number.isSafeInteger(kopecks) && kopecks > 0 ? kopecks : null;
 }
 
+/** The quarter a tax payment is for, from its due date: the one before the due date's quarter. */
+export function taxQuarterOfDue(due: string): string {
+  const year = Number(due.slice(0, 4));
+  const quarter = Math.floor((Number(due.slice(5, 7)) - 1) / 3) + 1;
+  return quarter === 1 ? `${year - 1}-Q4` : `${year}-Q${quarter - 1}`;
+}
+
 const SYMBOLS: Record<string, string> = { USD: "$", EUR: "€" };
 
 /** An amount in its own account currency, cents shown: "−$10.00" or "−1,000.50 PLN". */

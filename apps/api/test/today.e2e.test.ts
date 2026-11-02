@@ -275,6 +275,157 @@ describe("tax reserve and own money", () => {
     expect(paid.state.free).toBe(1_000_000 + 500_000 - (60_000 - 20_000) - 223_932);
   });
 
+  describe("a prior quarter's tax paid this quarter", () => {
+    const Q3_TAX = 500_000;
+    const paidRow = () =>
+      ds.query(
+        `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, paid_at, tax_quarter)
+         VALUES ('tax','Q3 tax',$1,'UAH','2026-11-20','2026-11-20','2026-Q3') RETURNING id`,
+        [Q3_TAX],
+      );
+    const plan = () => app.get(PlanService);
+
+    it("does not reduce this quarter's reserve once its row claims it (bank row first, then the seeded row)", async () => {
+      await account("black", 1_000_000);
+      const fop = await account("fop", 500_000);
+      await income("usdc", "2026-11-12");
+      await tx(fop, 1_000_000, "income", { date: "2026-10-05" });
+      const t = await tx(fop, -Q3_TAX, "tax", { date: "2026-10-19" });
+      expect((await today()).state.free).toBe(1_500_000); // the accrual of 60,000 wiped out by last quarter's payment
+      await plan().onClassified(t, "tax");
+      const [row] = await paidRow();
+      await plan().linkTaxTransactions();
+      expect((await ds.query(`SELECT transaction_id FROM scheduled_payments WHERE id=$1`, [row.id]))[0].transaction_id).toBe(t);
+      expect((await today()).state.free).toBe(1_500_000 - 60_000);
+    });
+
+    it("links at once when the row is already there, keeping its paid date", async () => {
+      await account("black", 1_000_000);
+      const fop = await account("fop", 500_000);
+      await income("usdc", "2026-11-12");
+      await tx(fop, 1_000_000, "income", { date: "2026-10-05" });
+      const [row] = await paidRow();
+      const t = await tx(fop, -Q3_TAX, "tax", { date: "2026-10-19" });
+      await plan().onClassified(t, "tax");
+      const linked = (await ds.query(`SELECT transaction_id, paid_at::date::text AS d FROM scheduled_payments WHERE id=$1`, [row.id]))[0];
+      expect(linked).toEqual({ transaction_id: t, d: "2026-11-20" });
+      expect((await today()).state.free).toBe(1_500_000 - 60_000);
+    });
+
+    it("still counts a truly unmatched tax payment against this quarter", async () => {
+      await account("black", 1_000_000);
+      const fop = await account("fop", 500_000);
+      await income("usdc", "2026-11-12");
+      await tx(fop, 1_000_000, "income", { date: "2026-10-05" });
+      await paidRow();
+      const t = await tx(fop, -20_000, "tax", { date: "2026-10-19" });
+      await plan().onClassified(t, "tax");
+      expect((await today()).state.free).toBe(1_500_000 - (60_000 - 20_000));
+    });
+  });
+
+  describe("quarter rollover", () => {
+    const ESV = 570_702;
+    const plan = () => app.get(PlanService);
+    const setup = async (esv = 0) => {
+      await ds.query(`UPDATE settings SET esv_quarter=$1`, [esv]);
+      await account("black", 5_000_000);
+      const fop = await account("fop", 0);
+      await income("usdc", "2027-01-25");
+      await tx(fop, 1_000_000, "income", { date: "2026-11-05" }); // 6% = 60,000
+    };
+    const taxRows = () =>
+      ds.query(
+        `SELECT name, amount::int AS amount, due_on::text AS due_on, tax_quarter, is_estimate, paid_at FROM scheduled_payments WHERE kind='tax' ORDER BY id`,
+      );
+
+    it("keeps the reserve from 31 December to 1 January", async () => {
+      await setup();
+      at("2026-12-31T10:00:00Z");
+      const dec = await today();
+      expect(dec.state.free).toBe(5_000_000 - 60_000);
+      at("2027-01-01T10:00:00Z");
+      expect(await plan().ensureTaxEstimate()).toBe(true);
+      expect((await today()).state.free).toBe(dec.state.free);
+      expect(await taxRows()).toEqual([
+        { name: "Налог за 4 кв. 2026 (оценка)", amount: 60_000, due_on: "2027-02-20", tax_quarter: "2026-Q4", is_estimate: true, paid_at: null },
+      ]);
+    });
+
+    it("moves the reserve by one day of ESV at most, and is idempotent", async () => {
+      await setup(ESV);
+      at("2026-12-31T10:00:00Z");
+      const dec = await today();
+      expect(dec.state.free).toBe(5_000_000 - 60_000 - ESV);
+      at("2027-01-01T00:01:00Z");
+      await plan().ensureTaxEstimate();
+      expect(await plan().ensureTaxEstimate()).toBe(false);
+      expect(await taxRows()).toHaveLength(1);
+      expect(dec.state.free - (await today()).state.free).toBe(Math.round(ESV / 90));
+    });
+
+    it("recomputes a limit fixed just after midnight, before the estimate existed", async () => {
+      await setup();
+      at("2027-01-01T00:00:00Z"); // 02:00 in Kyiv: the 15-minute job has already fixed the day
+      const early = await today();
+      expect(early.state.free).toBe(5_000_000);
+      await plan().ensureTaxEstimate();
+      const after = await today();
+      expect(after.state.free).toBe(5_000_000 - 60_000);
+      expect(after.state.dailyLimit).toBeLessThan(early.state.dailyLimit);
+    });
+
+    it("takes off unmatched payments of the ended quarter, and writes nothing when nothing accrued", async () => {
+      await setup();
+      const fop = (await ds.query(`SELECT id FROM accounts WHERE kind='fop'`))[0].id;
+      await tx(fop, -20_000, "tax", { date: "2026-12-01" });
+      at("2027-01-01T10:00:00Z");
+      await plan().ensureTaxEstimate();
+      expect((await taxRows())[0].amount).toBe(40_000);
+
+      await ds.query(`DELETE FROM scheduled_payments`);
+      await ds.query(`DELETE FROM transactions`);
+      expect(await plan().ensureTaxEstimate()).toBe(false);
+      expect(await taxRows()).toHaveLength(0);
+    });
+
+    it("does not count rows entered on 20 December on top of the accrual", async () => {
+      await setup();
+      at("2026-12-20T10:00:00Z");
+      expect((await today()).state.free).toBe(5_000_000 - 60_000);
+      await api.post("/plan/payments", { kind: "tax", name: "Q4 tax", amount: 75_000, currency: "UAH", due_on: "2027-02-20" }).expect(201);
+      expect((await today()).state.free).toBe(5_000_000 - 75_000);
+      expect((await taxRows())[0].tax_quarter).toBe("2026-Q4");
+      at("2027-01-01T10:00:00Z");
+      expect(await plan().ensureTaxEstimate()).toBe(false); // the real row stands
+      expect((await today()).state.free).toBe(5_000_000 - 75_000);
+    });
+
+    it("a real row for an ended quarter replaces its estimate, with no gap", async () => {
+      await setup();
+      at("2027-01-05T10:00:00Z");
+      await plan().ensureTaxEstimate();
+      const id = (await ds.query(`SELECT id FROM scheduled_payments WHERE is_estimate`))[0].id;
+      expect((await today()).state.free).toBe(5_000_000 - 60_000);
+      await api.post("/plan/payments", { kind: "tax", name: "Levy", amount: 11_000, currency: "UAH", due_on: "2027-02-20" }).expect(201);
+      await api.post("/plan/payments", { kind: "tax", name: "Tax", amount: 52_000, currency: "UAH", due_on: "2027-02-20" }).expect(201);
+      expect(await ds.query(`SELECT 1 FROM scheduled_payments WHERE id=$1`, [id])).toHaveLength(0);
+      expect((await today()).state.free).toBe(5_000_000 - 63_000);
+      expect(await plan().ensureTaxEstimate()).toBe(false);
+    });
+
+    it("keeps a bridge plan's credit needed across the rollover", async () => {
+      await setup();
+      await ds.query(`UPDATE accounts SET balance=10000 WHERE kind='black'`);
+      at("2026-12-31T10:00:00Z");
+      const before = (await api.post("/bridge/preview", { dailyAmount: 45_000 }).expect(201)).body.creditNeeded as number;
+      at("2027-01-01T10:00:00Z");
+      await plan().ensureTaxEstimate();
+      const after = (await api.post("/bridge/preview", { dailyAmount: 45_000 }).expect(201)).body.creditNeeded as number;
+      expect(before - after).toBe(45_000); // one day fewer to the income, nothing else
+    });
+  });
+
   it("shows cards, fop, credit and binance converted at the USD rate, and flags a stale rate", async () => {
     await account("black", 4_000_000, { creditLimit: 3_000_000 });
     await account("white", 200_000);

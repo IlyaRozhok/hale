@@ -53,17 +53,25 @@ describe("seed-private", () => {
     expect((await ds.query(`SELECT lifestyle_cap::int AS c FROM settings`))[0].c).toBe(777);
   });
 
-  // The two zones are 26 hours apart, so at any moment at least one has a different date from Kyiv.
-  it.each(["Etc/GMT+12", "Etc/GMT-14"])("starts tracking on the seed date in Kyiv when the session is in %s", async (zone) => {
+  it("starts tracking on the seed date in Kyiv, not the session's", async () => {
     await ds.query(
       `UPDATE settings SET lifestyle_cap=0, food_floor=0, tax_rate_bp=600, esv_quarter=0, limit_visual='mercury', tracking_start='2020-01-01'`,
     );
-    await ds.transaction(async (m) => {
-      await m.query(`SET LOCAL TIME ZONE '${zone}'`);
-      await applySeed(m, parseSeed(SEED));
-    });
-    const r = (await ds.query(`SELECT tracking_start = (now() AT TIME ZONE 'Europe/Kyiv')::date AS kyiv FROM settings`))[0];
-    expect(r.kyiv).toBe(true);
+    await applySeed(ds, parseSeed(SEED), new Date("2026-11-01T22:30:00Z")); // 00:30 on the 2nd in Kyiv
+    expect((await ds.query(`SELECT tracking_start::text AS d FROM settings`))[0].d).toBe("2026-11-02");
   });
+
+  it("names the quarter of its tax rows and replaces that quarter's estimate", async () => {
+    expect((await ds.query(`SELECT tax_quarter FROM scheduled_payments WHERE name='Tax'`))[0].tax_quarter).toBe("2026-Q3");
+    const noQuarter = await ds.query(`SELECT 1 FROM scheduled_payments WHERE kind<>'tax' AND tax_quarter IS NOT NULL`);
+    expect(noQuarter).toHaveLength(0);
+    await ds.query(`DELETE FROM scheduled_payments WHERE name='Tax'`);
+    await ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, tax_quarter, is_estimate)
+       VALUES ('tax','Estimate',1,'UAH','2026-11-20','2026-Q3',true)`,
+    );
+    await applySeed(ds, parseSeed(SEED));
+    const rows = await ds.query(`SELECT name FROM scheduled_payments WHERE kind='tax'`);
+    expect(rows).toEqual([{ name: "Tax" }]);
   });
 });

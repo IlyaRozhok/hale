@@ -10,6 +10,7 @@ const base = {
   daysInQuarter: 92,
   paidAgainstCurrentQuarter: 0,
   unpaidScheduled: 0,
+  currentQuarterHasRows: false,
 };
 
 describe("taxReserve", () => {
@@ -30,6 +31,11 @@ describe("taxReserve", () => {
   });
   it("accrues full ESV on the last day", () => {
     expect(taxReserve({ ...base, esvQuarter: 570_702, dayOfQuarter: 92 })).toBe(570_702);
+  });
+  it("does not accrue a quarter whose real payments are already entered", () => {
+    const input = { ...base, fopIncomeQuarter: 1_000_000, esvQuarter: 570_702, dayOfQuarter: 92 };
+    expect(taxReserve({ ...input, unpaidScheduled: 500_000, currentQuarterHasRows: true })).toBe(500_000);
+    expect(taxReserve({ ...input, unpaidScheduled: 500_000 })).toBe(60_000 + 570_702 + 500_000);
   });
   it("paying a scheduled prior-quarter tax leaves free unchanged", () => {
     const run = (cash: number, unpaidScheduled: number) => {

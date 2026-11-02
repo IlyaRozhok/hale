@@ -9,11 +9,14 @@ import {
 } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { DataSource, type EntityManager } from "typeorm";
-import { type Payment, matchPayment, monthlyDueDates, monthlyEvents } from "../domain/recurring-match";
+import { type Payment, matchPayment, matchTaxPayment, monthlyDueDates, monthlyEvents } from "../domain/recurring-match";
 import { kyivDate } from "../domain/money";
+import { estimateDueOn, precedingQuarter, quarterBounds, quarterOf } from "../domain/quarter";
+import { taxReserve } from "../domain/tax";
 import { Clock } from "../today/clock";
+import { quarterTaxFacts } from "../today/tax-facts";
 import { INTEREST_TEXT, SHORT_LOAN_TEXT } from "./short-loan";
-import type { IncomeEvent, ScheduledPayment } from "../db/entities";
+import { ScheduledPayment, type IncomeEvent } from "../db/entities";
 
 export const BINANCE = "Binance";
 const MATCH_DAYS = 3;
@@ -52,6 +55,8 @@ export class PlanService implements OnApplicationBootstrap {
     try {
       await this.generateEvents();
       await this.generateRecurring();
+      await this.linkTaxTransactions();
+      await this.ensureTaxEstimate();
     } catch (e) {
       this.log.warn(`event generation failed: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -61,6 +66,88 @@ export class PlanService implements OnApplicationBootstrap {
   async dailyJob(): Promise<void> {
     await this.generateEvents();
     await this.generateRecurring();
+    await this.linkTaxTransactions();
+  }
+
+  /** Just after midnight on the first day of a quarter this is what keeps the reserve in place. */
+  @Cron("1 0 * * *", { timeZone: "Europe/Kyiv" })
+  async dailyTaxEstimateJob(): Promise<void> {
+    try {
+      await this.ensureTaxEstimate();
+    } catch (e) {
+      this.log.warn(`tax estimate failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /**
+   * The quarter that just ended, if the owner has entered no tax rows for it, gets one estimated row
+   * with its accrual: the money stays reserved over the rollover. Safe to repeat. Returns true when a
+   * row was created; the day's limit may already have been fixed without it, so it is recomputed.
+   */
+  async ensureTaxEstimate(today: string = kyivDate(this.clock.now())): Promise<boolean> {
+    const label = precedingQuarter(today);
+    const has = await this.ds.query(`SELECT 1 FROM scheduled_payments WHERE kind='tax' AND tax_quarter=$1 LIMIT 1`, [label]);
+    if (has.length > 0) return false;
+    const { start, end } = quarterBounds(label);
+    const days = quarterOf(end).daysIn;
+    const s = (await this.ds.query(`SELECT tax_rate_bp, esv_quarter::float8 AS esv_quarter FROM settings WHERE id=1`))[0] as {
+      tax_rate_bp: number;
+      esv_quarter: number;
+    };
+    const facts = await quarterTaxFacts(this.ds.manager, start, end);
+    const amount = taxReserve({
+      fopIncomeQuarter: facts.fopIncome,
+      rateBp: s.tax_rate_bp,
+      esvQuarter: s.esv_quarter,
+      dayOfQuarter: days,
+      daysInQuarter: days,
+      paidAgainstCurrentQuarter: facts.paidUnmatched,
+      unpaidScheduled: 0,
+      currentQuarterHasRows: false,
+    });
+    if (amount <= 0) return false;
+    const made: unknown[] = await this.ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, tax_quarter, is_estimate)
+       VALUES ('tax',$1,$2,'UAH',$3,$4,true)
+       ON CONFLICT (tax_quarter) WHERE is_estimate DO NOTHING RETURNING id`,
+      [`Налог за ${label.slice(6)} кв. ${label.slice(0, 4)} (оценка)`, amount, estimateDueOn(label), label],
+    );
+    if (made.length === 0) return false;
+    await this.ds.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [today]);
+    return true;
+  }
+
+  /** A new payment. A tax row names its quarter (by default the one before its due date) and replaces that quarter's estimate. */
+  async createPayment(input: Partial<ScheduledPayment> & Pick<ScheduledPayment, "kind" | "due_on">): Promise<ScheduledPayment> {
+    const taxQuarter = input.kind === "tax" && input.tax_quarter === undefined ? precedingQuarter(input.due_on) : input.tax_quarter;
+    return this.ds.transaction(async (m) => {
+      const repo = m.getRepository(ScheduledPayment);
+      const row = await repo.save(repo.create({ ...input, tax_quarter: taxQuarter ?? null }));
+      await this.dropEstimate(m, row);
+      return row;
+    });
+  }
+
+  /** Real figures for a quarter replace the app's estimate for it. */
+  async dropEstimate(m: EntityManager, row: Pick<ScheduledPayment, "kind" | "tax_quarter" | "is_estimate">): Promise<void> {
+    if (row.kind !== "tax" || !row.tax_quarter || row.is_estimate) return;
+    await m.query(`DELETE FROM scheduled_payments WHERE is_estimate AND tax_quarter=$1`, [row.tax_quarter]);
+  }
+
+  /**
+   * Bank rows can arrive before the tax row that claims them (history is imported first, the owner's
+   * rows are seeded later), so unclaimed tax payments are tried again. Newest first: a row goes to its
+   * latest fitting payment. Safe to repeat.
+   */
+  async linkTaxTransactions(): Promise<void> {
+    const rows: { id: number }[] = await this.ds.query(
+      `SELECT t.id FROM transactions t
+        WHERE t.type='tax' AND t.amount < 0
+          AND NOT EXISTS (SELECT 1 FROM scheduled_payments p WHERE p.transaction_id = t.id)
+          AND EXISTS (SELECT 1 FROM scheduled_payments p WHERE p.kind='tax' AND p.transaction_id IS NULL)
+        ORDER BY t.occurred_at DESC, t.id DESC`,
+    );
+    for (const r of rows) await this.onClassified(r.id, "tax");
   }
 
   /** Creates this and next month's payment for every active recurring series. Returns new rows. */
@@ -247,21 +334,19 @@ export class PlanService implements OnApplicationBootstrap {
           if (t.type === "spend") await this.retypeAsDebt(m, t.id);
           return;
         }
+        // Tax rows stay candidates after the owner marked them paid: they can still claim their bank row.
         const open: Payment[] = await m.query(
           `SELECT id, kind, name, amount::float8 AS amount, currency, due_on::text AS due_on, paid_at,
-                  transaction_id, match_hint
-             FROM scheduled_payments WHERE paid_at IS NULL AND transaction_id IS NULL
+                  transaction_id, match_hint, tax_quarter
+             FROM scheduled_payments WHERE transaction_id IS NULL AND (paid_at IS NULL OR kind='tax')
             ORDER BY due_on, id FOR UPDATE`,
         );
         if (t.type === "spend" && t.type_source === "owner") return;
-        const hit = matchPayment(
-          { id: t.id, type: t.type, amount: t.amount, currency: t.currency, amountUah: t.amount_uah, localDate: t.local_date, text: t.text },
-          open,
-          await this.rates(m),
-        );
+        const payable = { id: t.id, type: t.type, amount: t.amount, currency: t.currency, amountUah: t.amount_uah, localDate: t.local_date, text: t.text };
+        const hit = matchTaxPayment(payable, open) ?? matchPayment(payable, open, await this.rates(m));
         if (hit) {
           await m.query(
-            `UPDATE scheduled_payments SET paid_at=$2, transaction_id=$3 WHERE id=$1 AND paid_at IS NULL`,
+            `UPDATE scheduled_payments SET paid_at=COALESCE(paid_at, $2), transaction_id=$3 WHERE id=$1`,
             [hit.id, t.occurred_at, t.id],
           );
           if (t.type === "spend") await this.retypeAsDebt(m, t.id);

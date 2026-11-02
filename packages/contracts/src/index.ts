@@ -54,10 +54,15 @@ const paymentShape = {
   due_on: isoDate,
   match_hint: z.string().min(1).max(200).nullable(),
   overpayment: z.boolean(),
+  /** The quarter a tax payment is for, "2026-Q4". */
+  tax_quarter: z.string().regex(/^\d{4}-Q[1-4]$/).nullable(),
 };
-export const scheduledPaymentInput = z
-  .object({ ...paymentShape, match_hint: paymentShape.match_hint.optional(), overpayment: paymentShape.overpayment.optional() })
-  .strict();
+const paymentOptionals = {
+  match_hint: paymentShape.match_hint.optional(),
+  overpayment: paymentShape.overpayment.optional(),
+  tax_quarter: paymentShape.tax_quarter.optional(),
+};
+export const scheduledPaymentInput = z.object({ ...paymentShape, ...paymentOptionals }).strict();
 export const scheduledPaymentPatch = partial(z.object(paymentShape));
 export type ScheduledPaymentInput = z.infer<typeof scheduledPaymentInput>;
 
@@ -143,10 +148,13 @@ export interface ScheduledPaymentDto {
   currency: string;
   due_on: string;
   paid_at: string | null;
+  tax_quarter: string | null;
+  /** The app's own estimate for an ended quarter; replaced once the owner enters real figures. */
+  is_estimate: boolean;
 }
 
 // --- private/seed.json ------------------------------------------------------
-const seedPayment = z.object({ ...paymentShape, match_hint: paymentShape.match_hint.optional(), overpayment: paymentShape.overpayment.optional(), paid: z.boolean().optional() }).strict();
+const seedPayment = z.object({ ...paymentShape, ...paymentOptionals, paid: z.boolean().optional() }).strict();
 /** One monthly series of equal payments ending on `last_payment_on`, `remaining` payments long. */
 const seedInstallment = z
   .object({

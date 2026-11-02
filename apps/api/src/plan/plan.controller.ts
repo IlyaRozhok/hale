@@ -125,13 +125,16 @@ export class PlanController {
 
   @Post("payments")
   createPayment(@Body() body: unknown): Promise<ScheduledPayment> {
-    const repo = this.ds.getRepository(ScheduledPayment);
-    return repo.save(repo.create(parse(scheduledPaymentInput, body)));
+    return this.plan.createPayment(parse(scheduledPaymentInput, body));
   }
 
   @Patch("payments/:id")
   patchPayment(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<ScheduledPayment> {
-    return patchRow(this.ds.getRepository(ScheduledPayment), id, parse(scheduledPaymentPatch, body));
+    return this.ds.transaction(async (m) => {
+      const row = await patchRow(m.getRepository(ScheduledPayment), id, parse(scheduledPaymentPatch, body));
+      await this.plan.dropEstimate(m, row);
+      return row;
+    });
   }
 
   @Delete("payments/:id")

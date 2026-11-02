@@ -163,7 +163,7 @@ describe("Settings, tax payments", () => {
     await fireEvent.changeText(screen.getByLabelText("Срок оплаты, ГГГГ-ММ-ДД"), "2027-02-20");
     await fireEvent.press(screen.getByRole("button", { name: "Добавить платёж" }));
     await waitFor(() =>
-      expect(api.createPayment).toHaveBeenCalledWith({ kind: "tax", name: "Налог за 4 кв.", amount: 1_500_050, currency: "UAH", due_on: "2027-02-20" }),
+      expect(api.createPayment).toHaveBeenCalledWith({ kind: "tax", name: "Налог за 4 кв.", amount: 1_500_050, currency: "UAH", due_on: "2027-02-20", tax_quarter: "2026-Q4" }),
     );
     await waitFor(() => expect(screen.getByLabelText("Название платежа").props.value).toBe(""));
   });

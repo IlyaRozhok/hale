@@ -2,7 +2,7 @@ import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { tokens } from "@tablo/tokens";
 import { useCreatePayment, useMarkPaid, useTaxPayments } from "../api/queries";
-import { formatMoney, isIsoDate, parseHryvnias, shortDate } from "../format";
+import { formatMoney, isIsoDate, parseHryvnias, shortDate, taxQuarterOfDue } from "../format";
 import { Chip } from "./Chip";
 import { Field } from "./Field";
 import { Glass } from "./Glass";
@@ -27,7 +27,7 @@ export function TaxPayments() {
     }
     setMessage(null);
     create.mutate(
-      { kind: "tax", name: name.trim(), amount: kopecks, currency: "UAH", due_on: due },
+      { kind: "tax", name: name.trim(), amount: kopecks, currency: "UAH", due_on: due, tax_quarter: taxQuarterOfDue(due) },
       {
         onSuccess: () => {
           setName("");
