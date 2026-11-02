@@ -1,6 +1,6 @@
 import { ConflictException, Inject, Injectable, Logger, UnprocessableEntityException } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
-import type { BridgePreviewDto, TodayDto } from "@tablo/contracts";
+import type { BridgePreviewDto, SettingsPreviewDto, TodayDto } from "@tablo/contracts";
 import { DataSource, type EntityManager } from "typeorm";
 import { type DailyInput, type DailyState, computeDaily, sumDue } from "../domain/daily";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
@@ -122,6 +122,39 @@ export class TodayService {
     return { dailyAmount, creditNeeded: b?.creditNeeded ?? 0, shortfall: b?.shortfall ?? 0 };
   }
 
+  /** The day's limit under another lifestyle cap (nothing is saved) and what that leaves for goals each month. */
+  async previewCap(lifestyleCap: number): Promise<SettingsPreviewDto> {
+    const now = this.clock.now();
+    const f = await this.load(kyivDate(now), now);
+    const input = { ...f.input, lifestyleCapMonthly: lifestyleCap > 0 ? lifestyleCap : DEFAULT_LIFESTYLE_CAP };
+    const dailyLimit = this.compute({ ...f, input }, f.plan, 0, f.spentToday).dailyLimit;
+
+    const m = this.ds.manager;
+    const rates = await this.rates(m);
+    const nowIso = now.toISOString();
+    const uah = (amount: number, alpha: string): number => {
+      if (alpha === "UAH") return amount;
+      const code = CODE_BY_ALPHA.get(alpha);
+      return code === undefined || !rates[alpha] ? 0 : toUah(amount, code, rates, nowIso).uah;
+    };
+    const incomes: { amount: number; currency: string }[] = await m.query(
+      `SELECT amount::float8 AS amount, currency FROM expected_incomes`,
+    );
+    // Monthly obligations: active recurring payments. Tax has its own reserve, so it is not counted here.
+    const obligations: { amount: number; currency: string }[] = await m.query(
+      `SELECT amount::float8 AS amount, currency FROM recurring_payments WHERE active AND kind <> 'tax'`,
+    );
+    const sum = (rows: { amount: number; currency: string }[]) => rows.reduce((s, r) => s + uah(r.amount, r.currency), 0);
+    return { dailyLimit, leftForGoalsMonthly: Math.max(0, sum(incomes) - sum(obligations) - lifestyleCap) };
+  }
+
+  private async rates(m: EntityManager): Promise<Rates> {
+    const rows: { currency: string; rate: number; fetched_at: Date }[] = await m.query(
+      `SELECT DISTINCT ON (currency) currency, rate::float8 AS rate, fetched_at FROM fx_rates ORDER BY currency, fetched_at DESC`,
+    );
+    return Object.fromEntries(rows.map((r) => [r.currency, { rate: r.rate, fetchedAt: r.fetched_at.toISOString() }]));
+  }
+
   async chooseBridge(dailyAmount: number): Promise<TodayDto> {
     const now = this.clock.now();
     const f = await this.load(kyivDate(now), now);
@@ -201,12 +234,7 @@ export class TodayService {
       limit_visual: "mercury" | "ring"; last_sync_at: Date | null; tracking_start: string;
     };
 
-    const rateRows: { currency: string; rate: number; fetched_at: Date }[] = await m.query(
-      `SELECT DISTINCT ON (currency) currency, rate::float8 AS rate, fetched_at FROM fx_rates ORDER BY currency, fetched_at DESC`,
-    );
-    const rates: Rates = Object.fromEntries(
-      rateRows.map((r) => [r.currency, { rate: r.rate, fetchedAt: r.fetched_at.toISOString() }]),
-    );
+    const rates = await this.rates(m);
     let stale = false;
     /** Converts to hryvnias; a missing rate counts as 0 and marks the rate stale rather than failing the screen. */
     const uah = (amount: number, alpha: string): number => {

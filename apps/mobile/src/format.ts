@@ -61,3 +61,34 @@ export function formatStamp(iso: string, now: Date = new Date()): string {
 export function kyivDate(now: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 }
+
+/** Typed hryvnias ("1 500,50", "12.5") as kopecks; null for empty, zero, negative or malformed text. */
+export function parseHryvnias(text: string): number | null {
+  const m = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(text.replace(/\s/g, ""));
+  if (!m) return null;
+  const kopecks = Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0"));
+  return Number.isSafeInteger(kopecks) && kopecks > 0 ? kopecks : null;
+}
+
+const SYMBOLS: Record<string, string> = { USD: "$", EUR: "€" };
+
+/** An amount in its own account currency, cents shown: "−$10.00" or "−1,000.50 PLN". */
+export function formatOriginal(minor: number, currency: string): string {
+  const abs = Math.abs(minor);
+  const text = `${group(Math.floor(abs / 100))}.${String(abs % 100).padStart(2, "0")}`;
+  const sign = minor < 0 ? "−" : "";
+  const symbol = SYMBOLS[currency];
+  return symbol ? `${sign}${symbol}${text}` : `${sign}${text} ${currency}`;
+}
+
+/** "2026-11-02" as "02.11". */
+export function shortDate(iso: string): string {
+  return `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
+}
+
+/** A real calendar date typed as YYYY-MM-DD. */
+export function isIsoDate(text: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const d = new Date(`${text}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().startsWith(text);
+}

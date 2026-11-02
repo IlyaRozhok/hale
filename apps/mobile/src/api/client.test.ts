@@ -60,4 +60,40 @@ describe("api client", () => {
     await expect(bad.api.today()).rejects.toMatchObject({ status: 500 });
     await expect(bad.api.today()).rejects.toBeInstanceOf(ApiError);
   });
+
+  it("builds the transactions query and sends edits with PATCH", async () => {
+    const fetchImpl = vi.fn(async () => json({ items: [], nextCursor: null }));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await api.transactions({ cursor: "a b", needsLabel: true });
+    await api.transactions({});
+    await api.editTransaction(7, { category: "cafe", applyToSimilar: true });
+    const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
+    expect(calls[0]![0]).toBe("https://api.example.test/transactions?cursor=a%20b&needsLabel=true");
+    expect(calls[1]![0]).toBe("https://api.example.test/transactions");
+    expect(calls[2]![0]).toBe("https://api.example.test/transactions/7");
+    expect(calls[2]![1].method).toBe("PATCH");
+    expect(calls[2]![1].body).toBe(JSON.stringify({ category: "cafe", applyToSimilar: true }));
+  });
+
+  it("covers labels, settings, payments, loans and the push token", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await api.labelRecipient("0123456789abcdef", "help");
+    await api.patchSettings({ limit_visual: "ring" });
+    await api.previewSettings(10_000_000);
+    await api.markPaid(3);
+    await api.createLoan({ amount: 500000, received_on: "2026-11-02", note: "x" });
+    await api.registerPushToken("ExponentPushToken[abc]");
+    const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([u, i]) => `${i.method} ${u.replace("https://api.example.test", "")}`)).toEqual([
+      "POST /recipients/label",
+      "PATCH /settings",
+      "POST /settings/preview",
+      "POST /plan/payments/3/mark-paid",
+      "POST /plan/loans",
+      "POST /devices/push-token",
+    ]);
+    expect(calls[2]![1].body).toBe(JSON.stringify({ lifestyleCap: 10_000_000 }));
+    expect(calls[5]![1].body).toBe(JSON.stringify({ token: "ExponentPushToken[abc]" }));
+  });
 });

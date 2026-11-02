@@ -512,3 +512,27 @@ describe("questions, upcoming and run-out", () => {
     expect(r.runOutOn).toBe("2027-01-31");
   });
 });
+
+describe("settings preview", () => {
+  it("computes the daily limit and what is left for goals under a cap, saving nothing", async () => {
+    await account("black", 30_000_000);
+    await income("fop", "2026-11-12"); // 10 days, ₴5,000 expected
+    await income("usdc", "2026-11-20"); // $5,000 expected
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-02T08:00:00Z', 40)`);
+    await ds.query(
+      `INSERT INTO recurring_payments (kind, name, amount, currency, day_of_month) VALUES ('obligation','Rent',2000000,'UAH',6),('tax','Tax',999999,'UAH',20)`,
+    );
+    const before = (await api.get("/settings").expect(200)).body;
+
+    // expected 500,000 + 500,000 * 40 = 20,500,000; obligations 2,000,000 (tax excluded)
+    const wide = await api.post("/settings/preview", { lifestyleCap: 3_000_000 }).expect(201);
+    expect(wide.body).toEqual({ dailyLimit: 100_000, leftForGoalsMonthly: 15_500_000 });
+    const roomy = await api.post("/settings/preview", { lifestyleCap: 100_000_000 }).expect(201);
+    expect(roomy.body.leftForGoalsMonthly).toBe(0); // floored, never negative
+    expect(roomy.body.dailyLimit).toBeGreaterThan(wide.body.dailyLimit);
+
+    expect((await api.get("/settings").expect(200)).body).toEqual(before);
+    await api.post("/settings/preview", { lifestyleCap: -1 }).expect(400);
+    await api.post("/settings/preview", {}).expect(400);
+  });
+});

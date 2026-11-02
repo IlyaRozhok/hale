@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Inject, Post } from "@nestjs/common";
-import { bridgeInput, type BridgePreviewDto, type TodayDto } from "@tablo/contracts";
+import { bridgeInput, settingsPreviewInput, type BridgePreviewDto, type SettingsPreviewDto, type TodayDto } from "@tablo/contracts";
 import { TodayService } from "./today.service";
 
 function parseBridge(body: unknown): number {
@@ -8,6 +8,14 @@ function parseBridge(body: unknown): number {
     throw new BadRequestException(r.error.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; "));
   }
   return r.data.dailyAmount;
+}
+
+function parseCap(body: unknown): number {
+  const r = settingsPreviewInput.safeParse(body);
+  if (!r.success) {
+    throw new BadRequestException(r.error.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; "));
+  }
+  return r.data.lifestyleCap;
 }
 
 @Controller()
@@ -27,5 +35,10 @@ export class TodayController {
   @Post("bridge/preview")
   preview(@Body() body: unknown): Promise<BridgePreviewDto> {
     return this.today.previewBridge(parseBridge(body));
+  }
+
+  @Post("settings/preview")
+  previewCap(@Body() body: unknown): Promise<SettingsPreviewDto> {
+    return this.today.previewCap(parseCap(body));
   }
 }

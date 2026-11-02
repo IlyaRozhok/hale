@@ -107,12 +107,17 @@ describe("Today, questions", () => {
     await waitFor(() => expect(screen.queryByText("Когда ожидается следующий доход?")).toBeNull());
   });
 
-  it("a recipient question opens the Activity tab", async () => {
+  it("a recipient question opens the label sheet for that recipient, and the card goes away once answered", async () => {
     const questions = [{ id: "recipient_label:0123456789abcdef", kind: "recipient_label" as const, text: "Кто это: Иван?" }];
     const onOpenActivity = jest.fn();
-    await renderWith(<Today onOpenActivity={onOpenActivity} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions })) });
+    await renderWith(<Today onOpenActivity={onOpenActivity} />, api);
     await fireEvent.press(await screen.findByText("Кто это: Иван?"));
-    expect(onOpenActivity).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Кто это?")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Разово" }));
+    await waitFor(() => expect(api.labelRecipient).toHaveBeenCalledWith("0123456789abcdef", "one_off"));
+    await waitFor(() => expect(screen.queryByText("Кто это: Иван?")).toBeNull());
+    expect(onOpenActivity).not.toHaveBeenCalled();
   });
 
   it("brings the card back if the call fails", async () => {

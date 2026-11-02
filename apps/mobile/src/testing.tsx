@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { render } from "@testing-library/react-native";
-import type { TodayDto } from "@tablo/contracts";
+import type { ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@tablo/contracts";
 import { ApiProvider } from "./api/context";
 import type { Api } from "./api/client";
 
@@ -34,6 +34,36 @@ export function todayFixture(over: Partial<TodayDto> = {}): TodayDto {
   };
 }
 
+/** Anonymised card purchase in hryvnias. */
+export function txFixture(over: Partial<TransactionDto> = {}): TransactionDto {
+  return {
+    id: 1,
+    occurredAt: "2026-11-02T08:30:00.000Z",
+    localDate: "2026-11-02",
+    description: "Кофейня",
+    amount: -8500,
+    amountUah: -8500,
+    fxRate: null,
+    currency: "UAH",
+    type: "spend",
+    category: "cafe",
+    hold: false,
+    needsLabel: false,
+    counterKey: "0123456789abcdef",
+    counterName: null,
+    accountKind: "black",
+    ...over,
+  };
+}
+
+export function settingsFixture(over: Partial<SettingsDto> = {}): SettingsDto {
+  return { lifestyle_cap: 10_000_000, food_floor: 45_000, tax_rate_bp: 600, esv_quarter: 0, limit_visual: "mercury", ...over };
+}
+
+export function taxFixture(over: Partial<ScheduledPaymentDto> = {}): ScheduledPaymentDto {
+  return { id: 1, kind: "tax", name: "Налог за 3 кв.", amount: 1_200_000, currency: "UAH", due_on: "2026-11-20", paid_at: null, ...over };
+}
+
 export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock } {
   return {
     login: jest.fn(async () => "token"),
@@ -42,6 +72,17 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     chooseBridge: jest.fn(async () => todayFixture()),
     confirmIncome: jest.fn(async () => undefined),
     setIncomeDate: jest.fn(async () => undefined),
+    transactions: jest.fn(async () => ({ items: [txFixture()], nextCursor: null })),
+    editTransaction: jest.fn(async () => ({ transaction: txFixture(), updated: 1 })),
+    labelRecipient: jest.fn(async () => ({ updated: 1 })),
+    settings: jest.fn(async () => settingsFixture()),
+    patchSettings: jest.fn(async () => settingsFixture()),
+    previewSettings: jest.fn(async () => ({ dailyLimit: 90000, leftForGoalsMonthly: 1500000 })),
+    payments: jest.fn(async () => []),
+    createPayment: jest.fn(async () => taxFixture()),
+    markPaid: jest.fn(async () => undefined),
+    createLoan: jest.fn(async () => undefined),
+    registerPushToken: jest.fn(async () => undefined),
     ...over,
   } as never;
 }

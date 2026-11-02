@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dueLabel, formatMoney, kyivDate, formatMoneyWithUsd, formatStamp, formatUsd, shiftDate } from "./format";
+import { dueLabel, formatMoney, formatOriginal, kyivDate, formatMoneyWithUsd, formatStamp, formatUsd, isIsoDate, parseHryvnias, shiftDate, shortDate } from "./format";
 
 describe("formatMoney", () => {
   it("groups thousands with commas and rounds to whole hryvnias", () => {
@@ -59,5 +59,41 @@ describe("dates", () => {
     const now = new Date(2026, 10, 2, 18, 0);
     expect(formatStamp(new Date(2026, 10, 2, 9, 5).toISOString(), now)).toBe("сегодня 09:05");
     expect(formatStamp(new Date(2026, 10, 1, 23, 40).toISOString(), now)).toBe("01.11 23:40");
+  });
+});
+
+describe("parseHryvnias", () => {
+  it("reads typed amounts as kopecks", () => {
+    expect(parseHryvnias("1500")).toBe(150000);
+    expect(parseHryvnias("1 500,50")).toBe(150050);
+    expect(parseHryvnias(" 12.5 ")).toBe(1250);
+    expect(parseHryvnias("0,07")).toBe(7);
+  });
+
+  it("rejects empty, zero, negative and malformed input", () => {
+    for (const bad of ["", "0", "0,00", "-5", "abc", "1,234", "1.2.3", "12,5x"]) expect(parseHryvnias(bad)).toBeNull();
+  });
+});
+
+describe("formatOriginal", () => {
+  it("shows the account currency with cents, a real minus, and symbols for the usual ones", () => {
+    expect(formatOriginal(-1000, "USD")).toBe("−$10.00");
+    expect(formatOriginal(2550, "EUR")).toBe("€25.50");
+    expect(formatOriginal(-100050, "PLN")).toBe("−1,000.50 PLN");
+  });
+});
+
+describe("shortDate", () => {
+  it("prints DD.MM", () => {
+    expect(shortDate("2026-11-02")).toBe("02.11");
+  });
+});
+
+describe("isIsoDate", () => {
+  it("accepts real dates only", () => {
+    expect(isIsoDate("2026-11-02")).toBe(true);
+    expect(isIsoDate("2026-02-30")).toBe(false);
+    expect(isIsoDate("02.11.2026")).toBe(false);
+    expect(isIsoDate("")).toBe(false);
   });
 });

@@ -1,4 +1,18 @@
-import type { BridgePreviewDto, TodayDto } from "@tablo/contracts";
+import type {
+  BridgePreviewDto,
+  LoanInput,
+  RecipientLabelName,
+  RecipientLabelResultDto,
+  ScheduledPaymentDto,
+  ScheduledPaymentInput,
+  SettingsDto,
+  SettingsPatch,
+  SettingsPreviewDto,
+  TodayDto,
+  TransactionEditDto,
+  TransactionPageDto,
+  TransactionPatch,
+} from "@tablo/contracts";
 
 export class ApiError extends Error {
   constructor(
@@ -33,6 +47,17 @@ export interface Api {
   chooseBridge(dailyAmount: number): Promise<TodayDto>;
   confirmIncome(eventId: number): Promise<void>;
   setIncomeDate(eventId: number, date: string): Promise<void>;
+  transactions(query: { cursor?: string; needsLabel?: boolean }): Promise<TransactionPageDto>;
+  editTransaction(id: number, patch: Pick<TransactionPatch, "type" | "category" | "applyToSimilar">): Promise<TransactionEditDto>;
+  labelRecipient(counterKey: string, label: RecipientLabelName): Promise<RecipientLabelResultDto>;
+  settings(): Promise<SettingsDto>;
+  patchSettings(patch: SettingsPatch): Promise<SettingsDto>;
+  previewSettings(lifestyleCap: number): Promise<SettingsPreviewDto>;
+  payments(): Promise<ScheduledPaymentDto[]>;
+  createPayment(input: ScheduledPaymentInput): Promise<ScheduledPaymentDto>;
+  markPaid(id: number): Promise<void>;
+  createLoan(input: LoanInput): Promise<void>;
+  registerPushToken(token: string): Promise<void>;
 }
 
 export interface ApiOptions {
@@ -47,7 +72,7 @@ export interface ApiOptions {
 export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch }: ApiOptions): Api {
   const root = baseUrl.replace(/\/+$/, "");
 
-  async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  async function request<T>(method: "GET" | "POST" | "PATCH", path: string, body?: unknown): Promise<T> {
     const token = await getToken();
     const headers: Record<string, string> = { accept: "application/json" };
     if (token) headers.authorization = `Bearer ${token}`;
@@ -74,5 +99,19 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     chooseBridge: (dailyAmount) => request("POST", "/bridge", { dailyAmount }),
     confirmIncome: async (eventId) => void (await request("POST", `/plan/incomes/${eventId}/confirm`)),
     setIncomeDate: async (eventId, date) => void (await request("POST", `/plan/incomes/${eventId}/date`, { date })),
+    transactions: ({ cursor, needsLabel }) => {
+      const q = [cursor !== undefined && `cursor=${encodeURIComponent(cursor)}`, needsLabel !== undefined && `needsLabel=${needsLabel}`].filter(Boolean);
+      return request("GET", `/transactions${q.length ? `?${q.join("&")}` : ""}`);
+    },
+    editTransaction: (id, patch) => request("PATCH", `/transactions/${id}`, patch),
+    labelRecipient: (counterKey, label) => request("POST", "/recipients/label", { counterKey, label }),
+    settings: () => request("GET", "/settings"),
+    patchSettings: (patch) => request("PATCH", "/settings", patch),
+    previewSettings: (lifestyleCap) => request("POST", "/settings/preview", { lifestyleCap }),
+    payments: () => request("GET", "/plan/payments"),
+    createPayment: (input) => request("POST", "/plan/payments", input),
+    markPaid: async (id) => void (await request("POST", `/plan/payments/${id}/mark-paid`)),
+    createLoan: async (input) => void (await request("POST", "/plan/loans", input)),
+    registerPushToken: async (token) => void (await request("POST", "/devices/push-token", { token })),
   };
 }

@@ -12,6 +12,7 @@ import { BridgePlan } from "../components/BridgePlan";
 import { Glass } from "../components/Glass";
 import { LAYOUT } from "../components/layout";
 import { QuestionCard } from "../components/QuestionCard";
+import { RecipientLabelSheet } from "../components/RecipientLabelSheet";
 import { StaleBanner } from "../components/StaleBanner";
 import { TodaySkeleton } from "../components/TodaySkeleton";
 import { Upcoming } from "../components/Upcoming";
@@ -45,6 +46,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const setIncomeDate = useSetIncomeDate();
   const chooseBridge = useChooseBridge();
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
+  const [labeling, setLabeling] = useState<{ id: string; counterKey: string; text: string } | null>(null);
 
   const hide = (id: string, on: boolean) =>
     setAnswered((prev) => {
@@ -126,6 +128,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
             question={q}
             today={data.date}
             onOpenActivity={onOpenActivity}
+            onLabelRecipient={(counterKey) => setLabeling({ id: q.id, counterKey, text: q.text })}
             onConfirmUsdc={(eventId) => answer(q.id, () => confirmIncome.mutateAsync(eventId))}
             onSetDate={(eventId, date) => answer(q.id, () => setIncomeDate.mutateAsync({ eventId, date }))}
           />
@@ -134,6 +137,14 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
         <AccountsList accounts={data.accounts} usdRate={data.usdRate} />
         <Upcoming items={data.upcoming} today={data.date} usdRate={data.usdRate} />
       </ScrollView>
+      {labeling && (
+        <RecipientLabelSheet
+          counterKey={labeling.counterKey}
+          name={labeling.text}
+          onClose={() => setLabeling(null)}
+          onLabeled={() => hide(labeling.id, true)}
+        />
+      )}
     </View>
   );
 }

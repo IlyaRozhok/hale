@@ -115,6 +115,34 @@ export const settingsPatch = partial(
 );
 export type SettingsPatch = z.infer<typeof settingsPatch>;
 
+export const settingsPreviewInput = z.object({ lifestyleCap: money.nonnegative() }).strict();
+export type SettingsPreviewInput = z.infer<typeof settingsPreviewInput>;
+
+/** What a lifestyle cap would mean, computed by the server. */
+export interface SettingsPreviewDto {
+  dailyLimit: number;
+  /** Expected monthly income minus monthly obligations minus the cap, never below 0. */
+  leftForGoalsMonthly: number;
+}
+
+export interface SettingsDto {
+  lifestyle_cap: number;
+  food_floor: number;
+  tax_rate_bp: number;
+  esv_quarter: number;
+  limit_visual: "mercury" | "ring";
+}
+
+export interface ScheduledPaymentDto {
+  id: number;
+  kind: "obligation" | "installment" | "tax";
+  name: string;
+  amount: number;
+  currency: string;
+  due_on: string;
+  paid_at: string | null;
+}
+
 // --- private/seed.json ------------------------------------------------------
 const seedPayment = z.object({ ...paymentShape, match_hint: paymentShape.match_hint.optional(), overpayment: paymentShape.overpayment.optional(), paid: z.boolean().optional() }).strict();
 /** One monthly series of equal payments ending on `last_payment_on`, `remaining` payments long. */

@@ -26,9 +26,10 @@ type Props = {
   onConfirmUsdc: (eventId: number) => void;
   onSetDate: (eventId: number, date: string) => void;
   onOpenActivity: () => void;
+  onLabelRecipient: (counterKey: string) => void;
 };
 
-export function QuestionCard({ question, today, onConfirmUsdc, onSetDate, onOpenActivity }: Props) {
+export function QuestionCard({ question, today, onConfirmUsdc, onSetDate, onOpenActivity, onLabelRecipient }: Props) {
   const eventId = eventIdOf(question.id);
   const text = <Text style={styles.text}>{question.text}</Text>;
 
@@ -52,8 +53,17 @@ export function QuestionCard({ question, today, onConfirmUsdc, onSetDate, onOpen
       </Glass>
     );
   }
-  // Recipient questions are answered in the Activity tab (Task 16); an income date with no
-  // event to attach to can only be set there too.
+  if (question.kind === "recipient_label") {
+    const counterKey = question.id.split(":")[1];
+    if (counterKey) {
+      return (
+        <Pressable accessibilityRole="button" onPress={() => onLabelRecipient(counterKey)} style={styles.whole}>
+          <Glass>{text}</Glass>
+        </Pressable>
+      );
+    }
+  }
+  // An income date with no event to attach to can only be set in the Activity tab.
   return (
     <Pressable accessibilityRole="button" onPress={onOpenActivity} style={styles.whole}>
       <Glass>{text}</Glass>

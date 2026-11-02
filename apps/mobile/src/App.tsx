@@ -13,7 +13,11 @@ import { ApiProvider } from "./api/context";
 import { createStorePersister, shouldPersist } from "./api/persist";
 import { CACHE_KEY, TOKEN_KEY, keychain } from "./api/secureStore";
 import { Login } from "./screens/Login";
-import { Stub } from "./screens/Stub";
+import { Activity } from "./screens/Activity";
+import { Settings } from "./screens/Settings";
+import { createPushDeps } from "./pushNative";
+import { registerPush } from "./push";
+import { useApi } from "./api/context";
 import { Today } from "./screens/Today";
 
 const { color, type } = tokens;
@@ -30,10 +34,14 @@ const Tabs = createBottomTabNavigator();
 function TodayTab({ navigation }: { navigation: NavigationProp<ParamListBase> }) {
   return <Today onOpenActivity={() => navigation.navigate("Activity")} />;
 }
-const ActivityTab = () => <Stub title="Операции" />;
-const SettingsTab = () => <Stub title="Настройки" />;
 
 function Main() {
+  const api = useApi();
+  // Ask for notifications once after login. A refusal or a missing token changes nothing.
+  useEffect(() => {
+    void registerPush(createPushDeps(api, keychain));
+  }, [api]);
+
   return (
     <NavigationContainer theme={theme}>
       <Tabs.Navigator
@@ -47,8 +55,8 @@ function Main() {
         }}
       >
         <Tabs.Screen name="Today" component={TodayTab} options={{ title: "Сегодня" }} />
-        <Tabs.Screen name="Activity" component={ActivityTab} options={{ title: "Операции" }} />
-        <Tabs.Screen name="Settings" component={SettingsTab} options={{ title: "Настройки" }} />
+        <Tabs.Screen name="Activity" component={Activity} options={{ title: "Операции" }} />
+        <Tabs.Screen name="Settings" component={Settings} options={{ title: "Настройки" }} />
       </Tabs.Navigator>
     </NavigationContainer>
   );
