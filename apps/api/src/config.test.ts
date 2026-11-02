@@ -31,4 +31,10 @@ describe("loadConfig", () => {
   it("throws when OWNER_PASSWORD_HASH is missing", () => {
     expect(() => loadConfig(without("OWNER_PASSWORD_HASH"))).toThrow(/OWNER_PASSWORD_HASH/);
   });
+
+  it("treats MONOBANK_TOKEN as optional", () => {
+    expect(loadConfig(valid).MONOBANK_TOKEN).toBeUndefined();
+    expect(loadConfig({ ...valid, MONOBANK_TOKEN: "" }).MONOBANK_TOKEN).toBeUndefined();
+    expect(loadConfig({ ...valid, MONOBANK_TOKEN: "tok" }).MONOBANK_TOKEN).toBe("tok");
+  });
 });

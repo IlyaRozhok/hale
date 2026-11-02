@@ -29,6 +29,7 @@ services:
       DATABASE_URL: postgres://tablo:${POSTGRES_PASSWORD}@postgres:5432/tablo
       JWT_SECRET: ${JWT_SECRET:?set in .env}
       OWNER_PASSWORD_HASH: ${OWNER_PASSWORD_HASH:?set in .env}
+      MONOBANK_TOKEN: ${MONOBANK_TOKEN:-}
       PORT: "3000"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
