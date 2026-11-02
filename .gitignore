@@ -8,3 +8,4 @@ private/
 .DS_Store
 .terraform/
 .idea/
+coverage/
