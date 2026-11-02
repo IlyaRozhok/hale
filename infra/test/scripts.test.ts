@@ -51,6 +51,21 @@ const migration = readFileSync(
 );
 const migrationTables = [...migration.matchAll(/CREATE TABLE (\w+)/g)].map((m) => m[1]!);
 
+describe("tablo.cron", () => {
+  const cron = readFileSync(join(infra, "tablo.cron"), "utf8");
+  it("runs pg_dump and psql inside the postgres container, where host `postgres` resolves", () => {
+    expect(cron).toMatch(/^PG_DUMP=docker compose -f \S+ exec -T postgres pg_dump$/m);
+    expect(cron).toMatch(/^PSQL=docker compose -f \S+ exec -T postgres psql$/m);
+  });
+  it("keeps Postgres unpublished in compose", () => {
+    const compose = readFileSync(join(infra, "compose.yml"), "utf8");
+    const start = compose.indexOf("\n  postgres:");
+    const pg = compose.slice(start, compose.indexOf("\n  api:"));
+    expect(start).toBeGreaterThan(0);
+    expect(pg).not.toMatch(/^\s+ports:/m);
+  });
+});
+
 describe.skipIf(!pgBin)("backup.sh / restore-check.sh", () => {
   let dir: string;
   let port: number;

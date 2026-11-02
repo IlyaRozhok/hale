@@ -121,7 +121,7 @@ export type SettingsPreviewInput = z.infer<typeof settingsPreviewInput>;
 /** What a lifestyle cap would mean, computed by the server. */
 export interface SettingsPreviewDto {
   dailyLimit: number;
-  /** Expected monthly income minus monthly obligations minus the cap, never below 0. */
+  /** Expected monthly income, minus tax on the FOP part, minus a third of the quarterly ESV, minus recurring payments and this month's installments, minus the cap; never below 0. */
   leftForGoalsMonthly: number;
   /** True when a foreign amount had no usable rate: the figure may be inaccurate. */
   rateStale: boolean;
