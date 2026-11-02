@@ -120,6 +120,16 @@ describe("Activity recipient label", () => {
     await waitFor(() => expect(screen.queryByText("Кто это?")).toBeNull());
   });
 
+  it("still lets the type be changed from the label sheet", async () => {
+    const api = fakeApi({ transactions: page([person]) });
+    await renderWith(<Activity />, api);
+    await fireEvent.press(await screen.findByText("Иван"));
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить тип" }));
+    expect(await screen.findByLabelText("Применить к похожим")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Обязательный платёж" }));
+    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(5, { type: "obligation", applyToSimilar: true }));
+  });
+
   it("marks rows that need an answer", async () => {
     await renderWith(<Activity />, fakeApi({ transactions: page([person]) }));
     expect(await screen.findByText("Ждёт ответа")).toBeTruthy();

@@ -7,6 +7,7 @@ export const TODAY_KEY = ["today"] as const;
 export const TRANSACTIONS_KEY = ["transactions"] as const;
 export const SETTINGS_KEY = ["settings"] as const;
 export const PAYMENTS_KEY = ["payments"] as const;
+export const CAP_PREVIEW_KEY = ["cap-preview"] as const;
 /** Debounce between the last slider move and the preview request. */
 export const PREVIEW_DELAY_MS = 300;
 
@@ -135,7 +136,7 @@ export function useCapPreview(cap: number | null) {
     return () => clearTimeout(t);
   }, [cap, settled]);
   const query = useQuery({
-    queryKey: ["cap-preview", settled],
+    queryKey: [...CAP_PREVIEW_KEY, settled],
     queryFn: () => api.previewSettings(settled!),
     enabled: settled !== null,
     placeholderData: (previous) => previous,
@@ -153,7 +154,7 @@ export function useCreatePayment() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (input: ScheduledPaymentInput) => api.createPayment(input),
-    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: PAYMENTS_KEY }), client.invalidateQueries({ queryKey: TODAY_KEY })]),
+    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: PAYMENTS_KEY }), client.invalidateQueries({ queryKey: TODAY_KEY }), client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY })]),
   });
 }
 
@@ -162,7 +163,7 @@ export function useMarkPaid() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => api.markPaid(id),
-    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: PAYMENTS_KEY }), client.invalidateQueries({ queryKey: TODAY_KEY })]),
+    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: PAYMENTS_KEY }), client.invalidateQueries({ queryKey: TODAY_KEY }), client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY })]),
   });
 }
 
@@ -171,6 +172,6 @@ export function useCreateLoan() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (input: LoanInput) => api.createLoan(input),
-    onSuccess: () => client.invalidateQueries({ queryKey: TODAY_KEY }),
+    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: TODAY_KEY }), client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY })]),
   });
 }

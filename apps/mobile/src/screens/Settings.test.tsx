@@ -30,7 +30,7 @@ describe("Settings, lifestyle cap", () => {
   it("previews the consequence from the server 300 ms after the slider stops", async () => {
     const api = fakeApi({
       previewSettings: jest.fn(async (cap: number) =>
-        cap === 15_000_000 ? { dailyLimit: 90000, leftForGoalsMonthly: 1500000 } : { dailyLimit: 50000, leftForGoalsMonthly: 0 },
+        cap === 15_000_000 ? { dailyLimit: 90000, leftForGoalsMonthly: 1500000, rateStale: false } : { dailyLimit: 50000, leftForGoalsMonthly: 0, rateStale: false },
       ),
     });
     await renderWith(<Settings />, api);
@@ -68,6 +68,26 @@ describe("Settings, lifestyle cap", () => {
     await fireEvent(slider, "slidingComplete", 150000);
     expect(await screen.findByText("Не удалось сохранить. Значение возвращено.")).toBeTruthy();
     expect(screen.getByLabelText("Потолок трат в месяц").props.value).toBe(100000);
+  });
+});
+
+describe("Settings, preview accuracy", () => {
+  it("warns that the figure may be inaccurate when a rate is missing", async () => {
+    const previewSettings = jest.fn(async () => ({ dailyLimit: 90000, leftForGoalsMonthly: 0, rateStale: true }));
+    await renderWith(<Settings />, fakeApi({ previewSettings }));
+    expect(await screen.findByText(/цифра может быть неточной/)).toBeTruthy();
+  });
+
+  it("recalculates the preview after a loan or a tax payment is saved", async () => {
+    const api = fakeApi({ payments: jest.fn(async () => [taxFixture({ id: 2 })]) });
+    await renderWith(<Settings />, api);
+    await waitFor(() => expect(api.previewSettings).toHaveBeenCalledTimes(1));
+    await fireEvent.changeText(await screen.findByLabelText("Сумма займа"), "100");
+    await fireEvent.changeText(screen.getByLabelText("Дата займа, ГГГГ-ММ-ДД"), "2026-11-02");
+    await fireEvent.press(screen.getByRole("button", { name: "Добавить займ" }));
+    await waitFor(() => expect(api.previewSettings).toHaveBeenCalledTimes(2));
+    await fireEvent.press(await screen.findByRole("button", { name: "Отметить оплаченным" }));
+    await waitFor(() => expect(api.previewSettings).toHaveBeenCalledTimes(3));
   });
 });
 

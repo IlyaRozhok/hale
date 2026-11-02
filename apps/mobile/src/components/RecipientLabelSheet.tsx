@@ -8,10 +8,10 @@ import { Sheet } from "./Sheet";
 
 const { color, space, type } = tokens;
 
-type Props = { counterKey: string; name?: string; onClose: () => void; onLabeled?: () => void };
+type Props = { counterKey: string; name?: string; onClose: () => void; onLabeled?: () => void; onEditType?: () => void };
 
 /** "Кто это?": one tap labels the recipient everywhere. */
-export function RecipientLabelSheet({ counterKey, name, onClose, onLabeled }: Props) {
+export function RecipientLabelSheet({ counterKey, name, onClose, onLabeled, onEditType }: Props) {
   const label = useLabelRecipient();
   const [failed, setFailed] = useState(false);
   return (
@@ -39,6 +39,11 @@ export function RecipientLabelSheet({ counterKey, name, onClose, onLabeled }: Pr
           />
         ))}
       </View>
+      {onEditType && (
+        <View style={styles.chips}>
+          <Chip label="Изменить тип" disabled={label.isPending} onPress={onEditType} />
+        </View>
+      )}
     </Sheet>
   );
 }

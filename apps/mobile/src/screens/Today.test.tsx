@@ -114,6 +114,8 @@ describe("Today, questions", () => {
     await renderWith(<Today onOpenActivity={onOpenActivity} />, api);
     await fireEvent.press(await screen.findByText("Кто это: Иван?"));
     expect(await screen.findByText("Кто это?")).toBeTruthy();
+    expect(screen.getAllByText("Кто это: Иван?")).toHaveLength(1); // the question is not repeated in the sheet
+    expect(screen.getByText("Иван")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Разово" }));
     await waitFor(() => expect(api.labelRecipient).toHaveBeenCalledWith("0123456789abcdef", "one_off"));
     await waitFor(() => expect(screen.queryByText("Кто это: Иван?")).toBeNull());

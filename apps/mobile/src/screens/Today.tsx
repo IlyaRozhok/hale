@@ -46,7 +46,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const setIncomeDate = useSetIncomeDate();
   const chooseBridge = useChooseBridge();
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
-  const [labeling, setLabeling] = useState<{ id: string; counterKey: string; text: string } | null>(null);
+  const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
 
   const hide = (id: string, on: boolean) =>
     setAnswered((prev) => {
@@ -128,7 +128,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
             question={q}
             today={data.date}
             onOpenActivity={onOpenActivity}
-            onLabelRecipient={(counterKey) => setLabeling({ id: q.id, counterKey, text: q.text })}
+            onLabelRecipient={(counterKey) => setLabeling({ id: q.id, counterKey, name: q.text.replace(/^Кто это:\s*/, "").replace(/\?$/, "") })}
             onConfirmUsdc={(eventId) => answer(q.id, () => confirmIncome.mutateAsync(eventId))}
             onSetDate={(eventId, date) => answer(q.id, () => setIncomeDate.mutateAsync({ eventId, date }))}
           />
@@ -140,7 +140,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
       {labeling && (
         <RecipientLabelSheet
           counterKey={labeling.counterKey}
-          name={labeling.text}
+          name={labeling.name}
           onClose={() => setLabeling(null)}
           onLabeled={() => hide(labeling.id, true)}
         />

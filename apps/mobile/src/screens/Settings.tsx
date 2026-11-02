@@ -88,6 +88,7 @@ export function Settings() {
                   <Text style={styles.muted}>Останется на цели в месяц</Text>
                   <Text style={styles.value}>{formatMoney(preview.data.leftForGoalsMonthly)}</Text>
                 </View>
+                {preview.data.rateStale && <Text style={styles.muted}>Курс валюты неизвестен или устарел: цифра может быть неточной.</Text>}
               </View>
             ) : preview.failed ? (
               <Text style={styles.muted}>Не удалось пересчитать.</Text>

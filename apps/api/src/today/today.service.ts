@@ -2,6 +2,7 @@ import { ConflictException, Inject, Injectable, Logger, UnprocessableEntityExcep
 import { Cron } from "@nestjs/schedule";
 import type { BridgePreviewDto, SettingsPreviewDto, TodayDto } from "@tablo/contracts";
 import { DataSource, type EntityManager } from "typeorm";
+import { leftForGoalsMonthly } from "../domain/goals";
 import { type DailyInput, type DailyState, computeDaily, sumDue } from "../domain/daily";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
 import { quarterOf } from "../domain/quarter";
@@ -132,20 +133,53 @@ export class TodayService {
     const m = this.ds.manager;
     const rates = await this.rates(m);
     const nowIso = now.toISOString();
+    let rateStale = false;
+    /** A foreign amount with no rate counts as 0 but marks the figure as possibly inaccurate. */
     const uah = (amount: number, alpha: string): number => {
       if (alpha === "UAH") return amount;
       const code = CODE_BY_ALPHA.get(alpha);
-      return code === undefined || !rates[alpha] ? 0 : toUah(amount, code, rates, nowIso).uah;
+      if (code === undefined || !rates[alpha]) {
+        rateStale = true;
+        return 0;
+      }
+      const r = toUah(amount, code, rates, nowIso);
+      rateStale ||= r.stale;
+      return r.uah;
     };
-    const incomes: { amount: number; currency: string }[] = await m.query(
-      `SELECT amount::float8 AS amount, currency FROM expected_incomes`,
+    type Row = { amount: number; currency: string };
+    const sum = (rows: Row[]) => rows.reduce((t, r) => t + uah(r.amount, r.currency), 0);
+    const month = kyivDate(now).slice(0, 7);
+
+    // This month's expected income: each source's event (received or pending), else its template.
+    const incomes: (Row & { source: string })[] = await m.query(
+      `SELECT x.source, x.amount::float8 AS amount, x.currency FROM expected_incomes x
+        WHERE EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id AND e.period = $1)
+           OR NOT EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id)`,
+      [month],
     );
-    // Monthly obligations: active recurring payments. Tax has its own reserve, so it is not counted here.
-    const obligations: { amount: number; currency: string }[] = await m.query(
-      `SELECT amount::float8 AS amount, currency FROM recurring_payments WHERE active AND kind <> 'tax'`,
+    const settings = (await m.query(`SELECT tax_rate_bp, esv_quarter::float8 AS esv_quarter FROM settings WHERE id=1`))[0] as {
+      tax_rate_bp: number;
+      esv_quarter: number;
+    };
+    const recurring: Row[] = await m.query(`SELECT amount::float8 AS amount, currency FROM recurring_payments WHERE active AND kind <> 'tax'`);
+    const installments: Row[] = await m.query(
+      `SELECT amount::float8 AS amount, currency FROM scheduled_payments
+        WHERE kind='installment' AND to_char(due_on, 'YYYY-MM') = $1`,
+      [month],
     );
-    const sum = (rows: { amount: number; currency: string }[]) => rows.reduce((s, r) => s + uah(r.amount, r.currency), 0);
-    return { dailyLimit, leftForGoalsMonthly: Math.max(0, sum(incomes) - sum(obligations) - lifestyleCap) };
+    return {
+      dailyLimit,
+      leftForGoalsMonthly: leftForGoalsMonthly({
+        income: sum(incomes),
+        fopIncome: sum(incomes.filter((i) => i.source === "fop")),
+        taxRateBp: settings.tax_rate_bp,
+        esvQuarter: settings.esv_quarter,
+        recurring: sum(recurring),
+        installments: sum(installments),
+        lifestyleCap,
+      }),
+      rateStale,
+    };
   }
 
   private async rates(m: EntityManager): Promise<Rates> {

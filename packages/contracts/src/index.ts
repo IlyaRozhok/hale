@@ -123,6 +123,8 @@ export interface SettingsPreviewDto {
   dailyLimit: number;
   /** Expected monthly income minus monthly obligations minus the cap, never below 0. */
   leftForGoalsMonthly: number;
+  /** True when a foreign amount had no usable rate: the figure may be inaccurate. */
+  rateStale: boolean;
 }
 
 export interface SettingsDto {

@@ -514,25 +514,67 @@ describe("questions, upcoming and run-out", () => {
 });
 
 describe("settings preview", () => {
-  it("computes the daily limit and what is left for goals under a cap, saving nothing", async () => {
+  const recurring = (kind: string, amount: number) =>
+    ds.query(`INSERT INTO recurring_payments (kind, name, amount, currency, day_of_month) VALUES ($1,'x',$2,'UAH',6)`, [kind, amount]);
+  const preview = async (cap: number) => (await api.post("/settings/preview", { lifestyleCap: cap }).expect(201)).body;
+
+  async function seed() {
     await account("black", 30_000_000);
     await income("fop", "2026-11-12"); // 10 days, ₴5,000 expected
     await income("usdc", "2026-11-20"); // $5,000 expected
     await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-02T08:00:00Z', 40)`);
-    await ds.query(
-      `INSERT INTO recurring_payments (kind, name, amount, currency, day_of_month) VALUES ('obligation','Rent',2000000,'UAH',6),('tax','Tax',999999,'UAH',20)`,
-    );
+    await recurring("obligation", 2_000_000);
+    await recurring("tax", 999_999); // recurring tax is not an obligation here: tax comes from the rate
+  }
+
+  it("computes the daily limit and what is left for goals under a cap, saving nothing", async () => {
+    await seed();
     const before = (await api.get("/settings").expect(200)).body;
 
-    // expected 500,000 + 500,000 * 40 = 20,500,000; obligations 2,000,000 (tax excluded)
-    const wide = await api.post("/settings/preview", { lifestyleCap: 3_000_000 }).expect(201);
-    expect(wide.body).toEqual({ dailyLimit: 100_000, leftForGoalsMonthly: 15_500_000 });
-    const roomy = await api.post("/settings/preview", { lifestyleCap: 100_000_000 }).expect(201);
-    expect(roomy.body.leftForGoalsMonthly).toBe(0); // floored, never negative
-    expect(roomy.body.dailyLimit).toBeGreaterThan(wide.body.dailyLimit);
+    // income 500,000 + 500,000 * 40 = 20,500,000; tax 6% of FOP 500,000 = 30,000; recurring 2,000,000; cap 3,000,000
+    const wide = await preview(3_000_000);
+    expect(wide).toEqual({ dailyLimit: 100_000, leftForGoalsMonthly: 15_470_000, rateStale: false });
+    const roomy = await preview(100_000_000);
+    expect(roomy.leftForGoalsMonthly).toBe(0); // floored, never negative
+    expect(roomy.dailyLimit).toBeGreaterThan(wide.dailyLimit);
 
     expect((await api.get("/settings").expect(200)).body).toEqual(before);
     await api.post("/settings/preview", { lifestyleCap: -1 }).expect(400);
     await api.post("/settings/preview", {}).expect(400);
+  });
+
+  it("subtracts installments due this month, paid or not, and ignores other months", async () => {
+    await seed();
+    await payment("Phone", 1_000_000, "2026-11-18", "installment");
+    await payment("Laptop", 400_000, "2026-11-05", "installment");
+    await ds.query(`UPDATE scheduled_payments SET paid_at=now() WHERE name='Laptop'`);
+    await payment("Later", 700_000, "2026-12-05", "installment");
+    await payment("Rent", 700_000, "2026-11-05", "obligation");
+    expect((await preview(3_000_000)).leftForGoalsMonthly).toBe(15_470_000 - 1_400_000);
+  });
+
+  it("subtracts tax on FOP income and a third of the quarterly ESV", async () => {
+    await seed();
+    await ds.query(`UPDATE settings SET tax_rate_bp=1000, esv_quarter=300000`);
+    // tax 10% of 500,000 = 50,000; ESV 100,000
+    expect((await preview(3_000_000)).leftForGoalsMonthly).toBe(20_500_000 - 50_000 - 100_000 - 2_000_000 - 3_000_000);
+  });
+
+  it("uses a template for a source with no event yet, and skips a source whose events are all in other months", async () => {
+    await account("black", 30_000_000);
+    await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop', 1000000, 'UAH', 15, 25)`);
+    await ds.query(`UPDATE settings SET tax_rate_bp=0`);
+    const low = await preview(100_000);
+    expect(low.leftForGoalsMonthly).toBe(900_000); // template counted: 1,000,000 - cap 100,000
+    await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES (1, '2026-10', '2026-10-20', 'received')`);
+    expect((await preview(100_000)).leftForGoalsMonthly).toBe(0); // only October has an event: no income this month
+  });
+
+  it("flags the figure when a foreign amount has no rate instead of silently using 0", async () => {
+    await account("black", 30_000_000);
+    await income("usdc", "2026-11-20");
+    const r = await preview(100_000);
+    expect(r.rateStale).toBe(true);
+    expect(r.leftForGoalsMonthly).toBe(0);
   });
 });

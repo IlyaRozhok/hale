@@ -17,6 +17,12 @@ export function Activity() {
   const insets = useSafeAreaInsets();
   const [onlyAsk, setOnlyAsk] = useState(false);
   const [open, setOpen] = useState<TransactionDto | null>(null);
+  // A row waiting for an answer opens the label sheet; "Изменить тип" there switches to the full editor.
+  const [forceEdit, setForceEdit] = useState(false);
+  const close = () => {
+    setOpen(null);
+    setForceEdit(false);
+  };
   const list = useTransactions(onlyAsk);
   const items = list.data?.pages.flatMap((p) => p.items) ?? [];
 
@@ -53,10 +59,15 @@ export function Activity() {
           ListFooterComponent={list.isFetchingNextPage ? <ActivityIndicator color={color.fg.muted} style={styles.footer} /> : undefined}
         />
       )}
-      {open && open.needsLabel && (
-        <RecipientLabelSheet counterKey={open.counterKey} name={open.counterName ?? open.description} onClose={() => setOpen(null)} />
+      {open && open.needsLabel && !forceEdit && (
+        <RecipientLabelSheet
+          counterKey={open.counterKey}
+          name={open.counterName ?? open.description}
+          onClose={close}
+          onEditType={() => setForceEdit(true)}
+        />
       )}
-      {open && !open.needsLabel && <TxEditSheet tx={open} onClose={() => setOpen(null)} />}
+      {open && (!open.needsLabel || forceEdit) && <TxEditSheet tx={open} onClose={close} />}
     </View>
   );
 }
