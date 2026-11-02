@@ -10,6 +10,8 @@ import {
 import { Cron } from "@nestjs/schedule";
 import { DataSource, type EntityManager } from "typeorm";
 import { type Payment, matchPayment, monthlyDueDates, monthlyEvents } from "../domain/recurring-match";
+import { kyivDate } from "../domain/money";
+import { Clock } from "../today/clock";
 import type { IncomeEvent, ScheduledPayment } from "../db/entities";
 
 export const BINANCE = "Binance";
@@ -39,7 +41,10 @@ interface TxRow {
 export class PlanService implements OnApplicationBootstrap {
   private readonly log = new Logger(PlanService.name);
 
-  constructor(@Inject(DataSource) private readonly ds: DataSource) {}
+  constructor(
+    @Inject(DataSource) private readonly ds: DataSource,
+    @Inject(Clock) private readonly clock: Clock,
+  ) {}
 
   /** Catch up after downtime; the unique key makes this safe to repeat. */
   async onApplicationBootstrap(): Promise<void> {
@@ -110,6 +115,8 @@ export class PlanService implements OnApplicationBootstrap {
     const found = await this.ds.query(`SELECT 1 FROM income_events WHERE id=$1`, [id]);
     if (found.length === 0) throw new NotFoundException("income event not found");
     await this.ds.query(`UPDATE income_events SET expected_on=$2 WHERE id=$1`, [id, date]);
+    // A new date is used at once (design §5.2): today's fixed limit is recomputed on the next request.
+    await this.ds.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [kyivDate(this.clock.now())]);
     return this.eventView(this.ds.manager, id);
   }
 

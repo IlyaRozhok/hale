@@ -38,6 +38,11 @@ export interface DailyInput {
    */
   creditLimit: Minor;
   taxReserve: Minor;
+  /**
+   * The part of taxReserve accrued for the current quarter and not due before the next income.
+   * It stays in `free` (it lowers the normal limit) but is not cash needed to bridge to the income.
+   */
+  taxAccruedNotDue: Minor;
   obligationsDue: Minor;
   goalDue: Minor;
   borrowed: Minor;
@@ -86,11 +91,11 @@ export function computeDaily(i: DailyInput): DailyState {
     mode = "bridge";
     const recommendedDaily = i.foodFloor;
     dailyLimit = i.bridgeDaily ?? recommendedDaily;
-    const creditNeeded = -free + dailyLimit * daysLeft;
+    const creditNeeded = Math.max(0, -(free + i.taxAccruedNotDue) + dailyLimit * daysLeft);
     bridge = {
       creditNeeded,
       recommendedDaily,
-      maxDailyWithinCredit: Math.max(0, Math.floor((i.creditLimit + free) / daysLeft)),
+      maxDailyWithinCredit: Math.max(0, Math.floor((i.creditLimit + free + i.taxAccruedNotDue) / daysLeft)),
       shortfall: Math.max(0, creditNeeded - i.creditLimit),
       overPlan: i.creditPlan !== null && ownTotal < -i.creditPlan,
     };

@@ -3,7 +3,8 @@ import { Cron } from "@nestjs/schedule";
 import type { BridgePreviewDto, TodayDto } from "@tablo/contracts";
 import { DataSource, type EntityManager } from "typeorm";
 import { type DailyInput, type DailyState, computeDaily, sumDue } from "../domain/daily";
-import { CURRENCY_ALPHA, type Rates, addDays, daysBetween, kyivDate, toUah } from "../domain/money";
+import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
+import { quarterOf } from "../domain/quarter";
 import { runOutDate } from "../domain/run-out";
 import { taxReserve } from "../domain/tax";
 import { Clock } from "./clock";
@@ -13,6 +14,8 @@ const AVG_DAYS = 7;
 const HORIZON_DAYS = 30;
 /** Design §5.2 default: ₴100,000 a month, used until the owner sets one. */
 const DEFAULT_LIFESTYLE_CAP = 10_000_000;
+/** Design §5.3: about ₴450 a day, used while the owner has not set a food floor (0 would mean a ₴0 bridge limit). */
+const DEFAULT_FOOD_FLOOR = 45_000;
 const MAX_RECIPIENT_QUESTIONS = 3;
 
 const CODE_BY_ALPHA = new Map(Object.entries(CURRENCY_ALPHA).map(([code, alpha]) => [alpha, Number(code)]));
@@ -33,6 +36,8 @@ interface Facts {
   usdRate: number;
   rateStale: boolean;
   slots: { own: number; fop: number; binance: number };
+  upcoming: TodayDto["upcoming"];
+  loans: { id: number; amount: number; received_on: string }[];
   basis: string;
   plan: Plan | null;
   syncedAt: Date | null;
@@ -42,15 +47,12 @@ interface Facts {
 
 const fmt = (kopecks: number) => `₴${Math.round(kopecks / 100).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")}`;
 
-function quarterOf(date: string): { start: string; end: string; daysIn: number; dayOf: number } {
-  const y = Number(date.slice(0, 4));
-  const m = Number(date.slice(5, 7));
-  const qm = Math.floor((m - 1) / 3) * 3 + 1;
-  const start = `${y}-${String(qm).padStart(2, "0")}-01`;
-  const ny = qm + 3 > 12 ? y + 1 : y;
-  const nm = ((qm + 2) % 12) + 1;
-  const next = `${ny}-${String(nm).padStart(2, "0")}-01`;
-  return { start, end: addDays(next, -1), daysIn: daysBetween(start, next), dayOf: daysBetween(start, date) + 1 };
+const fmtDay = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
+
+/** Calm tail for a bad case: when the money runs out at the current pace, if that is known. */
+function runOutText(runOutOn: string | null, today: string): string {
+  if (runOutOn === null) return "";
+  return runOutOn <= today ? " Свободных денег уже нет." : ` При текущем темпе деньги закончатся ${fmtDay(runOutOn)}.`;
 }
 
 /** Assembles the main screen from the database and the pure money engine; computes nothing itself. */
@@ -81,6 +83,8 @@ export class TodayService {
     let state = this.compute(f, plan);
     if (plan && state.mode === "normal") {
       await this.ds.query(`UPDATE bridge_plans SET closed_on=$1 WHERE id=$2 AND closed_on IS NULL`, [f.date, plan.id]);
+      // The bridge limit no longer applies: the day gets a fresh normal limit.
+      await this.ds.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [f.date]);
       plan = null;
     } else if (plan && state.mode === "bridge" && plan.basis !== f.basis) {
       // Payments or the income date changed: the plan is recomputed once, then fixed again.
@@ -99,7 +103,7 @@ export class TodayService {
       leftToday,
       level: limit > 0 ? Math.min(1, Math.max(0, leftToday / limit)) : 0,
     };
-    return this.dto(f, state);
+    return this.dto(f, state, plan);
   }
 
   async previewBridge(dailyAmount: number): Promise<BridgePreviewDto> {
@@ -154,22 +158,20 @@ export class TodayService {
     });
   }
 
-  /** Writes the day's row once (concurrent first requests share it) and returns its limit. */
+  /**
+   * Writes the day's row once (concurrent first requests share it) and returns its limit. An existing
+   * row is never rewritten here: only choosing a bridge plan, closing one, or setting an income date
+   * replaces it (design §5.2).
+   */
   private async snapshot(date: string, morning: DailyState): Promise<number> {
     return this.ds.transaction(async (m) => {
       await m.query(
         `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3) ON CONFLICT (local_date) DO NOTHING`,
         [date, morning.dailyLimit, morning.mode],
       );
-      const row = (
-        await m.query(`SELECT daily_limit::float8 AS daily_limit, mode FROM daily_snapshots WHERE local_date=$1`, [date])
-      )[0] as { daily_limit: number; mode: string };
-      if (row.mode !== morning.mode) {
-        await m.query(`UPDATE daily_snapshots SET daily_limit=$2, mode=$3 WHERE local_date=$1`, [
-          date, morning.dailyLimit, morning.mode,
-        ]);
-        return morning.dailyLimit;
-      }
+      const row = (await m.query(`SELECT daily_limit::float8 AS daily_limit FROM daily_snapshots WHERE local_date=$1`, [date]))[0] as {
+        daily_limit: number;
+      };
       return row.daily_limit;
     });
   }
@@ -234,23 +236,38 @@ export class TodayService {
     const lastIncome = (
       await m.query(`SELECT ((max(received_at) AT TIME ZONE 'Europe/Kyiv')::date)::text AS d FROM income_events WHERE status = 'received'`)
     )[0].d as string | null;
-    const loans: { amount: number }[] = await m.query(
-      `SELECT amount::float8 AS amount FROM loans WHERE repaid_at IS NULL AND ($1::date IS NULL OR received_on >= $1::date)`,
+    // Loans since the last received income: they are what was borrowed in this cycle.
+    const loans: { id: number; amount: number; received_on: string }[] = await m.query(
+      `SELECT id, amount::float8 AS amount, received_on::text AS received_on FROM loans
+        WHERE repaid_at IS NULL AND ($1::date IS NULL OR received_on >= $1::date) ORDER BY received_on, id`,
       [lastIncome],
     );
     const borrowed = loans.reduce((s, l) => s + l.amount, 0);
 
-    // payments
-    const pays: { kind: string; amount: number; currency: string; due_on: string; paid: boolean }[] = await m.query(
-      `SELECT kind, amount::float8 AS amount, currency, due_on::text AS due_on, (paid_at IS NOT NULL) AS paid
-         FROM scheduled_payments WHERE paid_at IS NULL`,
-    );
+    // payments: unpaid ones feed the limit; the window's payments (paid or not, native amounts) define the bridge basis
+    const end = next && next >= date ? next : addDays(date, HORIZON_DAYS);
+    const pays: { id: number; name: string; kind: string; amount: number; currency: string; due_on: string; paid: boolean }[] =
+      await m.query(
+        `SELECT id, name, kind, amount::float8 AS amount, currency, due_on::text AS due_on, (paid_at IS NOT NULL) AS paid
+           FROM scheduled_payments WHERE due_on < $1 OR paid_at IS NULL ORDER BY due_on, id`,
+        [end],
+      );
+    const unpaid = pays.filter((p) => !p.paid);
     const obligationsDue = sumDue(
-      pays.filter((p) => p.kind !== "tax").map((p) => ({ dueOn: p.due_on, amount: uah(p.amount, p.currency), paid: p.paid })),
+      unpaid.filter((p) => p.kind !== "tax").map((p) => ({ dueOn: p.due_on, amount: uah(p.amount, p.currency), paid: false })),
       date,
       next,
     );
-    const unpaidScheduled = pays.filter((p) => p.kind === "tax").reduce((s, p) => s + uah(p.amount, p.currency), 0);
+    const unpaidScheduled = unpaid.filter((p) => p.kind === "tax").reduce((s, p) => s + uah(p.amount, p.currency), 0);
+    const basis =
+      pays
+        .filter((p) => p.due_on < end)
+        .map((p) => `${p.due_on}:${p.amount}:${p.currency}`)
+        .sort()
+        .join(",") + `|${next ?? ""}`;
+    const upcoming = unpaid
+      .filter((p) => p.due_on < end)
+      .map((p) => ({ id: String(p.id), name: p.name, amount: uah(p.amount, p.currency), dueOn: p.due_on, kind: p.kind }));
 
     // tax reserve
     const fopIncome = (
@@ -268,15 +285,16 @@ export class TodayService {
         [q.start, q.end],
       )
     )[0].s as number;
-    const reserve = taxReserve({
+    const taxInput = {
       fopIncomeQuarter: fopIncome,
       rateBp: settings.tax_rate_bp,
       esvQuarter: settings.esv_quarter,
       dayOfQuarter: q.dayOf,
       daysInQuarter: q.daysIn,
       paidAgainstCurrentQuarter: paidTax,
-      unpaidScheduled,
-    });
+    };
+    const reserve = taxReserve({ ...taxInput, unpaidScheduled });
+    const accrued = taxReserve({ ...taxInput, unpaidScheduled: 0 });
 
     const spentToday = await this.spent(m, date, date);
     const avgDailySpend = Math.max(0, Math.round((await this.spent(m, addDays(date, -AVG_DAYS), addDays(date, -1))) / AVG_DAYS));
@@ -301,12 +319,13 @@ export class TodayService {
         binanceMoney: binance,
         creditLimit: credit,
         taxReserve: reserve,
+        taxAccruedNotDue: Math.min(accrued, reserve),
         obligationsDue,
         goalDue: 0,
         borrowed,
         nextIncomeOn: next,
         lifestyleCapMonthly: settings.lifestyle_cap > 0 ? settings.lifestyle_cap : DEFAULT_LIFESTYLE_CAP,
-        foodFloor: settings.food_floor,
+        foodFloor: settings.food_floor > 0 ? settings.food_floor : DEFAULT_FOOD_FLOOR,
       },
       spentToday,
       avgDailySpend,
@@ -314,7 +333,9 @@ export class TodayService {
       usdRate: usd?.rate ?? 0,
       rateStale: stale || usdStale,
       slots: { own: cards + fop + binance, fop, binance },
-      basis: `${obligationsDue}|${unpaidScheduled}|${next ?? ""}`,
+      loans,
+      basis,
+      upcoming,
       plan: planRow
         ? { id: planRow.id, dailyAmount: planRow.daily_amount, creditPlan: planRow.credit_plan, basis: planRow.basis }
         : null,
@@ -335,24 +356,8 @@ export class TodayService {
   }
 
   // --- the response -------------------------------------------------------------
-  private async dto(f: Facts, state: DailyState): Promise<TodayDto> {
+  private async dto(f: Facts, state: DailyState, plan: Plan | null): Promise<TodayDto> {
     const m = this.ds.manager;
-    const horizon = f.input.nextIncomeOn && f.input.nextIncomeOn >= f.date ? f.input.nextIncomeOn : addDays(f.date, HORIZON_DAYS);
-
-    const upRows: { id: number; name: string; amount: number; currency: string; due_on: string; kind: string }[] = await m.query(
-      `SELECT id, name, amount::float8 AS amount, currency, due_on::text AS due_on, kind FROM scheduled_payments
-        WHERE paid_at IS NULL AND due_on < $1 ORDER BY due_on, id`,
-      [horizon],
-    );
-    const rates = await this.rateMap();
-    const upcoming = upRows.map((p) => ({
-      id: String(p.id),
-      name: p.name,
-      amount: p.currency === "UAH" ? p.amount : Math.round(p.amount * (rates[p.currency] ?? 0)),
-      dueOn: p.due_on,
-      kind: p.kind,
-    }));
-
     const questions: TodayDto["questions"] = [];
     const usdc: { id: number }[] = await m.query(
       `SELECT e.id FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id
@@ -386,14 +391,19 @@ export class TodayService {
     }
 
     const badCases: TodayDto["badCases"] = [];
-    const loans: { id: number; amount: number; received_on: string }[] = await m.query(
-      `SELECT id, amount::float8 AS amount, received_on::text AS received_on FROM loans WHERE repaid_at IS NULL ORDER BY received_on, id`,
-    );
-    for (const l of loans) {
-      badCases.push({ id: `loan:${l.id}`, text: `Займ ${fmt(l.amount)} от ${l.received_on} ещё не погашен.` });
+    const runOutOn = runOutDate({ free: state.free, avgDailySpend: f.avgDailySpend, today: f.date });
+    for (const l of f.loans) {
+      badCases.push({
+        id: `loan:${l.id}`,
+        text: `Взят займ ${fmt(l.amount)} (${fmtDay(l.received_on)}): столько не хватало.${runOutText(runOutOn, f.date)}`,
+      });
     }
-    if (state.bridge?.overPlan) {
-      badCases.push({ id: "bridge_over_plan", text: "Минус вышел за план моста. Деньги на планируемый срок не хватят." });
+    if (state.bridge?.overPlan && plan) {
+      const over = -(f.input.cardsMoney + f.input.fopMoney + f.input.binanceMoney) - plan.creditPlan;
+      badCases.push({
+        id: "bridge_over_plan",
+        text: `Минус вышел за план моста на ${fmt(over)}.${runOutText(runOutOn, f.date)}`,
+      });
     }
 
     return {
@@ -402,20 +412,13 @@ export class TodayService {
       usdRate: f.usdRate,
       rateStale: f.rateStale,
       accounts: { own: f.slots.own, credit: f.credit, fop: f.slots.fop, binance: f.slots.binance },
-      upcoming,
+      upcoming: f.upcoming,
       questions,
       badCases,
-      runOutOn: runOutDate({ free: state.free, avgDailySpend: f.avgDailySpend, today: f.date }),
+      runOutOn,
       syncedAt: f.syncedAt ? f.syncedAt.toISOString() : null,
       syncStale: !f.syncedAt || f.now.getTime() - f.syncedAt.getTime() > STALE_SYNC_MS,
       limitVisual: f.limitVisual,
     };
-  }
-
-  private async rateMap(): Promise<Record<string, number>> {
-    const rows: { currency: string; rate: number }[] = await this.ds.query(
-      `SELECT DISTINCT ON (currency) currency, rate::float8 AS rate FROM fx_rates ORDER BY currency, fetched_at DESC`,
-    );
-    return Object.fromEntries(rows.map((r) => [r.currency, r.rate]));
   }
 }

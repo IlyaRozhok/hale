@@ -36,7 +36,7 @@ describe("taxReserve", () => {
       const reserve = taxReserve({ ...base, fopIncomeQuarter: 1_000_000, unpaidScheduled });
       return computeDaily({
         today: "2026-11-21", cardsMoney: cash, fopMoney: 0, binanceMoney: 0, creditLimit: 0,
-        taxReserve: reserve, obligationsDue: 0, goalDue: 0, borrowed: 0, nextIncomeOn: "2026-12-05",
+        taxReserve: reserve, taxAccruedNotDue: 0, obligationsDue: 0, goalDue: 0, borrowed: 0, nextIncomeOn: "2026-12-05",
         spentToday: 0, lifestyleCapMonthly: 10_000_000, foodFloor: 45_000, bridgeDaily: null, creditPlan: null,
       }).free;
     };

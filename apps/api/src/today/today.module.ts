@@ -6,6 +6,6 @@ import { TodayService } from "./today.service";
 @Module({
   controllers: [TodayController],
   providers: [Clock, TodayService],
-  exports: [TodayService],
+  exports: [TodayService, Clock],
 })
 export class TodayModule {}

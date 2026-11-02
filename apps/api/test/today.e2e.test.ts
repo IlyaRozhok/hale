@@ -189,7 +189,10 @@ describe("borrowed", () => {
     await income("usdc", "2026-11-12");
     await ds.query(`INSERT INTO loans (amount, received_on) VALUES (200000, '2026-10-05')`);
     await ds.query(`INSERT INTO loans (amount, received_on) VALUES (100000, '2026-10-25')`);
-    expect((await today()).state.free).toBe(1_000_000 - 100_000);
+    const r = await today();
+    expect(r.state.free).toBe(1_000_000 - 100_000);
+    expect(r.badCases).toHaveLength(1);
+    expect(r.badCases[0].text).toContain("₴1 000");
   });
 
   it("lists only unrepaid loans as bad cases", async () => {
@@ -284,10 +287,13 @@ describe("bridge mode", () => {
   it("flags going past the plan as a bad case", async () => {
     const card = await setup();
     await api.post("/bridge", { dailyAmount: 100_000 }).expect(201);
+    await tx(card, -10_000, "spend", { date: "2026-11-01" });
     await setBalance(card, 3_000_000 - 2_997_000 - 5_000);
     const r = await today();
     expect(r.state.bridge.overPlan).toBe(true);
-    expect(r.badCases.map((b: { id: string }) => b.id)).toContain("bridge_over_plan");
+    const bad = r.badCases.find((b: { id: string }) => b.id === "bridge_over_plan");
+    expect(bad.text).toContain("Минус вышел за план моста на ₴");
+    expect(bad.text).toMatch(/закончатся|уже нет/);
   });
 
   it("closes the plan once free is no longer negative", async () => {
@@ -308,6 +314,68 @@ describe("bridge mode", () => {
     expect(await plans()).toHaveLength(0);
     await ds.query(`UPDATE accounts SET balance=50000000`);
     await api.post("/bridge", { dailyAmount: 100_000 }).expect(409);
+  });
+
+  it("keeps the owner's choice when today's own spending caused bridge mode", async () => {
+    const card = await account("black", 4_000_000, { creditLimit: 3_000_000 });
+    await income("fop", "2026-11-12");
+    expect((await today()).state).toMatchObject({ mode: "normal", dailyLimit: 100_000 });
+    await tx(card, -1_100_000, "spend");
+    await setBalance(card, 2_900_000);
+    const crossed = await today();
+    expect(crossed.state.mode).toBe("bridge");
+    expect(crossed.state.dailyLimit).toBe(100_000); // fixed for the day until a plan is chosen
+    const chosen = await api.post("/bridge", { dailyAmount: 45_000 }).expect(201);
+    expect(chosen.body.state.dailyLimit).toBe(45_000);
+    expect((await today()).state.dailyLimit).toBe(45_000);
+  });
+
+  it("does not rewrite the day's limit when a payment appears mid-day, but does when the income date is set", async () => {
+    await account("black", 1_000_000);
+    const eventId = await income("fop", "2026-11-12");
+    expect((await today()).state.dailyLimit).toBe(100_000);
+    await payment("Phone", 200_000, "2026-11-05");
+    const after = await today();
+    expect(after.state.dailyLimit).toBe(100_000);
+    expect(after.state.free).toBe(800_000);
+    await api.post(`/plan/incomes/${eventId}/date`, { date: "2026-11-07" }).expect(201);
+    const moved = await today();
+    expect(moved.state.daysLeft).toBe(5);
+    expect(moved.state.dailyLimit).toBe(160_000);
+  });
+
+  it("leaves credit_plan alone on a rate change or on paying a payment, but not on a new payment", async () => {
+    await setup();
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-02T08:00:00Z', 40)`);
+    await ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Abroad',1000,'USD','2026-11-10')`);
+    await api.post("/bridge", { dailyAmount: 45_000 }).expect(201);
+    const plan0 = (await plans())[0].credit_plan;
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-02T09:00:00Z', 41)`);
+    await today();
+    expect((await plans())[0].credit_plan).toBe(plan0);
+    const paidId = (await ds.query(`SELECT id FROM scheduled_payments WHERE name='Abroad'`))[0].id;
+    await api.post(`/plan/payments/${paidId}/mark-paid`).expect(201);
+    await today();
+    expect((await plans())[0].credit_plan).toBe(plan0);
+    await payment("Phone", 100_000, "2026-11-10");
+    await today();
+    expect((await plans())[0].credit_plan).not.toBe(plan0);
+  });
+
+  it("falls back to 45,000 a day when no food floor is set", async () => {
+    await setup();
+    await ds.query(`UPDATE settings SET food_floor=0`);
+    const r = await today();
+    expect(r.state.bridge.recommendedDaily).toBe(45_000);
+    expect(r.state.dailyLimit).toBe(45_000);
+  });
+
+  it("leaves accrued quarter tax out of the credit needed (design example)", async () => {
+    await setup();
+    await ds.query(`UPDATE settings SET esv_quarter=570702`);
+    await payment("Q3 levy and ESV", 794_634, "2026-11-20", "tax");
+    const p = await api.post("/bridge/preview", { dailyAmount: 45_000 }).expect(201);
+    expect(p.body).toEqual({ dailyAmount: 45_000, creditNeeded: 2_801_634, shortfall: 0 });
   });
 
   it("previews without saving anything", async () => {
@@ -354,6 +422,16 @@ describe("questions, upcoming and run-out", () => {
     expect((await today()).questions.map((q: { kind: string }) => q.kind)).not.toContain("usdc_arrived");
     await ds.query(`DELETE FROM income_events`);
     expect((await today()).questions.map((q: { kind: string }) => q.kind)).toContain("income_date");
+  });
+
+  it("converts upcoming foreign payments with the engine and flags a stale rate", async () => {
+    await account("black", 1_000_000);
+    await income("fop", "2026-11-12");
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-10-20T08:00:00Z', 40)`);
+    await ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Abroad',1000,'USD','2026-11-10')`);
+    const r = await today();
+    expect(r.upcoming).toMatchObject([{ name: "Abroad", amount: 40_000 }]);
+    expect(r.rateStale).toBe(true);
   });
 
   it("lists upcoming payments and the date the money runs out", async () => {

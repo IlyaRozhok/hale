@@ -8,6 +8,7 @@ const input = (o: Partial<DailyInput> = {}): DailyInput => ({
   binanceMoney: 0,
   creditLimit: 3_000_000,
   taxReserve: 0,
+  taxAccruedNotDue: 0,
   obligationsDue: 2_229_500,
   goalDue: 0,
   borrowed: 0,
@@ -176,5 +177,23 @@ describe("computeDaily income date", () => {
   it("counts days across the 2026-10-25 DST change", () => {
     const s = computeDaily(input({ today: "2026-10-24", nextIncomeOn: "2026-10-27" }));
     expect(s.daysLeft).toBe(3);
+  });
+});
+
+describe("computeDaily bridge with accrued tax not yet due", () => {
+  it("keeps accrued tax in free but leaves it out of the credit needed", () => {
+    // free = 1,032,500 - 2,229,500 - 794,634 - 204,708 = -2,196,342; the 204,708 accrual is not cash due before the income
+    const r = computeDaily(input({ taxReserve: 794_634 + 204_708, taxAccruedNotDue: 204_708, bridgeDaily: 45_000 }));
+    expect(r.mode).toBe("bridge");
+    expect(r.free).toBe(-2_196_342);
+    expect(r.bridge!.creditNeeded).toBe(1_991_634 + 45_000 * 18);
+    expect(r.bridge!.shortfall).toBe(0);
+    expect(r.bridge!.maxDailyWithinCredit).toBe(Math.floor((3_000_000 - 1_991_634) / 18));
+  });
+
+  it("never lets the credit needed go below zero", () => {
+    const r = computeDaily(input({ obligationsDue: 1_000_000, taxReserve: 100_000, taxAccruedNotDue: 100_000, foodFloor: 0 }));
+    expect(r.free).toBe(-67_500);
+    expect(r.bridge!.creditNeeded).toBe(0);
   });
 });
