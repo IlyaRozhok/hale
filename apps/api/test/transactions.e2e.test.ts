@@ -78,7 +78,7 @@ async function tx(accountId: number, o: TxOver = {}): Promise<number> {
   )[0].id;
 }
 const row = async (sql: string, args: unknown[] = []) => (await ds.query(sql, args))[0];
-const IBAN = "UA213223130000026007233566001";
+const IBAN = "UA000000000000000000000000001";
 
 describe("GET /transactions", () => {
   it("requires auth and validates the query", async () => {

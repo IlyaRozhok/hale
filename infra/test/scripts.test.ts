@@ -43,13 +43,12 @@ function freePort(): Promise<number> {
   });
 }
 
-// The tables created by apps/api migration 0001, read from source so the
+// The tables created by every apps/api migration, read from source so the
 // restore-check table list cannot silently drift from the schema.
-const migration = readFileSync(
-  resolve(infra, "../apps/api/src/db/migrations/0001-init.ts"),
-  "utf8",
+const migrationsDir = resolve(infra, "../apps/api/src/db/migrations");
+const migrationTables = readdirSync(migrationsDir).flatMap((f) =>
+  [...readFileSync(join(migrationsDir, f), "utf8").matchAll(/CREATE TABLE (\w+)/g)].map((m) => m[1]!),
 );
-const migrationTables = [...migration.matchAll(/CREATE TABLE (\w+)/g)].map((m) => m[1]!);
 
 describe("tablo.cron", () => {
   const cron = readFileSync(join(infra, "tablo.cron"), "utf8");
@@ -63,6 +62,43 @@ describe("tablo.cron", () => {
     const pg = compose.slice(start, compose.indexOf("\n  api:"));
     expect(start).toBeGreaterThan(0);
     expect(pg).not.toMatch(/^\s+ports:/m);
+  });
+});
+
+describe("restore-check table list", () => {
+  it("keeps restore-check's table list in sync with the migrations", () => {
+    const script = readFileSync(join(infra, "restore-check.sh"), "utf8");
+    const listed = /DEFAULT_TABLES="([^"]+)"/.exec(script)![1]!.split(" ");
+    expect([...listed].sort()).toEqual([...migrationTables].sort());
+  });
+});
+
+describe("db-tunnel.sh", () => {
+  let dir: string;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "tablo-tunnel-"));
+  });
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const tunnel = (ip: string) => {
+    const log = join(dir, "tunnel.log");
+    const fake = join(dir, "fake-tunnel-ssh.sh");
+    writeFileSync(fake, `case "$*" in *"docker inspect"*) echo "$FAKE_IP";; *) echo "$*" > ${log};; esac\n`);
+    const env = { PATH: process.env.PATH ?? "", DEPLOY_HOST: "203.0.113.1", SSH_CMD: `bash ${fake}`, FAKE_IP: ip };
+    return { r: spawnSync("bash", [join(infra, "db-tunnel.sh")], { env, encoding: "utf8" }), log };
+  };
+
+  it("forwards loopback to the container IP", () => {
+    const { r, log } = tunnel("172.18.0.2");
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(log, "utf8")).toContain("-N -L 127.0.0.1:15432:172.18.0.2:5432 root@203.0.113.1");
+  });
+
+  it.each(["", "172.18.0.2172.19.0.3", "172.18.0.2172", "172.18.0", "not-an-ip"])("refuses the lookup result %j", (ip) => {
+    const { r } = tunnel(ip);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("could not find the postgres container IP");
   });
 });
 
@@ -125,12 +161,6 @@ describe.skipIf(!pgBin)("backup.sh / restore-check.sh", () => {
       /* already stopped */
     }
     rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("keeps restore-check's table list in sync with the migration", () => {
-    const script = readFileSync(join(infra, "restore-check.sh"), "utf8");
-    const listed = /DEFAULT_TABLES="([^"]+)"/.exec(script)![1]!.split(" ");
-    expect([...listed].sort()).toEqual([...migrationTables].sort());
   });
 
   it("backup then restore-check succeeds", () => {
@@ -276,19 +306,6 @@ describe.skipIf(!pgBin)("backup.sh / restore-check.sh", () => {
     const ok = run("deploy.sh", env({ CURL: "true" }));
     expect(ok.status, ok.stderr).toBe(0);
     expect(ok.stdout).toContain("deploy ok");
-  });
-
-  it("db-tunnel.sh forwards loopback to the container IP and refuses a bad lookup", () => {
-    const log = join(dir, "tunnel.log");
-    const fake = join(dir, "fake-tunnel-ssh.sh");
-    writeFileSync(fake, `case "$*" in *"docker inspect"*) echo "$FAKE_IP";; *) echo "$*" > ${log};; esac\n`);
-    const env = (ip: string) => ({ PATH: process.env.PATH ?? "", DEPLOY_HOST: "203.0.113.1", SSH_CMD: `bash ${fake}`, FAKE_IP: ip });
-    const ok = run("db-tunnel.sh", env("172.18.0.2"));
-    expect(ok.status, ok.stderr).toBe(0);
-    expect(readFileSync(log, "utf8")).toContain("-N -L 127.0.0.1:15432:172.18.0.2:5432 root@203.0.113.1");
-    const bad = run("db-tunnel.sh", env(""));
-    expect(bad.status).not.toBe(0);
-    expect(bad.stderr).toContain("could not find the postgres container IP");
   });
 
   it("shallow mode accepts a fresh age-shaped backup and rejects a stale or plain one", () => {

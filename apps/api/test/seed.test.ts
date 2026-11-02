@@ -53,11 +53,17 @@ describe("seed-private", () => {
     expect((await ds.query(`SELECT lifestyle_cap::int AS c FROM settings`))[0].c).toBe(777);
   });
 
-  it("starts tracking on the seed date", async () => {
+  // The two zones are 26 hours apart, so at any moment at least one has a different date from Kyiv.
+  it.each(["Etc/GMT+12", "Etc/GMT-14"])("starts tracking on the seed date in Kyiv when the session is in %s", async (zone) => {
     await ds.query(
       `UPDATE settings SET lifestyle_cap=0, food_floor=0, tax_rate_bp=600, esv_quarter=0, limit_visual='mercury', tracking_start='2020-01-01'`,
     );
-    await applySeed(ds, parseSeed(SEED));
-    expect((await ds.query(`SELECT tracking_start = CURRENT_DATE AS today FROM settings`))[0].today).toBe(true);
+    await ds.transaction(async (m) => {
+      await m.query(`SET LOCAL TIME ZONE '${zone}'`);
+      await applySeed(m, parseSeed(SEED));
+    });
+    const r = (await ds.query(`SELECT tracking_start = (now() AT TIME ZONE 'Europe/Kyiv')::date AS kyiv FROM settings`))[0];
+    expect(r.kyiv).toBe(true);
+  });
   });
 });

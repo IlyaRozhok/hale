@@ -73,8 +73,8 @@ export async function applySeed(db: Queryable, seed: SeedFile): Promise<SeedResu
     const cols = Object.keys(s);
     if (cols.some((k) => !/^[a-z_]+$/.test(k))) throw new Error("bad settings key");
     await db.query(
-      // The seed date is when tracking starts: loans imported from earlier history never alert or count.
-      `UPDATE settings SET ${cols.map((k, i) => `${k}=$${i + 1}`).join(", ")}, tracking_start=CURRENT_DATE
+      // The seed date in Kyiv is when tracking starts: loans imported from earlier history never alert or count.
+      `UPDATE settings SET ${cols.map((k, i) => `${k}=$${i + 1}`).join(", ")}, tracking_start=(now() AT TIME ZONE 'Europe/Kyiv')::date
         WHERE id=1 AND lifestyle_cap=0 AND food_floor=0 AND tax_rate_bp=600 AND esv_quarter=0 AND limit_visual='mercury'`,
       Object.values(s),
     );

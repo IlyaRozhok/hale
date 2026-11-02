@@ -20,9 +20,11 @@ REMOTE_DIR=${REMOTE_DIR:-/opt/tablo}
 ip=$($SSH_CMD ${SSH_OPTS:-} "$SSH_USER@$DEPLOY_HOST" \
   "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \$(cd '$REMOTE_DIR/infra' && docker compose ps -q postgres)")
 ip=$(printf '%s' "$ip" | tr -d '[:space:]')
-case "$ip" in
-  *[!0-9.]* | "") echo "db-tunnel: could not find the postgres container IP (got '$ip'); is the stack up?" >&2; exit 1 ;;
-esac
+# Exactly one IPv4 address: a container on several networks prints them glued together.
+if ! [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+  echo "db-tunnel: could not find the postgres container IP (got '$ip'); is the stack up, on one network?" >&2
+  exit 1
+fi
 echo "tunnel: 127.0.0.1:$LOCAL_PORT -> $ip:5432 via $DEPLOY_HOST (Ctrl-C to close)" >&2
 # shellcheck disable=SC2086
 exec $SSH_CMD ${SSH_OPTS:-} -N -L "127.0.0.1:$LOCAL_PORT:$ip:5432" "$SSH_USER@$DEPLOY_HOST"
