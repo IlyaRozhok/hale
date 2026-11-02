@@ -278,6 +278,19 @@ describe.skipIf(!pgBin)("backup.sh / restore-check.sh", () => {
     expect(ok.stdout).toContain("deploy ok");
   });
 
+  it("db-tunnel.sh forwards loopback to the container IP and refuses a bad lookup", () => {
+    const log = join(dir, "tunnel.log");
+    const fake = join(dir, "fake-tunnel-ssh.sh");
+    writeFileSync(fake, `case "$*" in *"docker inspect"*) echo "$FAKE_IP";; *) echo "$*" > ${log};; esac\n`);
+    const env = (ip: string) => ({ PATH: process.env.PATH ?? "", DEPLOY_HOST: "203.0.113.1", SSH_CMD: `bash ${fake}`, FAKE_IP: ip });
+    const ok = run("db-tunnel.sh", env("172.18.0.2"));
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(readFileSync(log, "utf8")).toContain("-N -L 127.0.0.1:15432:172.18.0.2:5432 root@203.0.113.1");
+    const bad = run("db-tunnel.sh", env(""));
+    expect(bad.status).not.toBe(0);
+    expect(bad.stderr).toContain("could not find the postgres container IP");
+  });
+
   it("shallow mode accepts a fresh age-shaped backup and rejects a stale or plain one", () => {
     const backups = mkdtempSync(join(dir, "shallow-"));
     const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");

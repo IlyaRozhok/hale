@@ -88,7 +88,10 @@ https://api.monobank.ua/ (log in with the monobank app).
   itself cannot resolve it and Postgres publishes no port, so never call the
   host's own `pg_dump`/`psql` with this URL. A manual run on the server (do not
   `source` the .env file: the argon2 hash would be expanded):
-  `PG_DUMP='docker compose exec -T postgres pg_dump' PSQL='docker compose exec -T postgres psql' ENV_FILE=/opt/tablo/infra/.env ./cron-run.sh backup ./backup.sh`.
+  `cd /opt/tablo/infra && PG_DUMP='docker compose exec -T postgres pg_dump' PSQL='docker compose exec -T postgres psql' ENV_FILE=/opt/tablo/infra/.env ./cron-run.sh backup ./backup.sh`.
+- Running repo scripts against production data (`pnpm seed:private`, `pnpm golden:import`):
+  from your machine, `DEPLOY_HOST=<ip> infra/db-tunnel.sh` (keeps running) opens
+  `127.0.0.1:15432` to the postgres container over SSH; Postgres stays unpublished.
 
 - `backup.sh` (cron 03:15 UTC): `pg_dump | gzip | age -r <public key>` to Hetzner
   Object Storage via `rclone`, plus a `.manifest` with the transaction count.
