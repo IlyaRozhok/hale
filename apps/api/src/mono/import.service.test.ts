@@ -326,6 +326,30 @@ describe("classification after upsert", () => {
     expect([tx.type, tx.category, tx.type_source]).toEqual(["spend", "cafe", "auto"]);
   });
 
+  it("stores iban and jar title from client-info and queues a full reclassify after the last window", async () => {
+    const info = {
+      ...clientInfo,
+      accounts: [{ ...clientInfo.accounts[0]!, iban: "UA00IBAN" }, clientInfo.accounts[1]!],
+    };
+    const client = {
+      clientInfo: vi.fn(async () => info),
+      statement: vi.fn(async () => []),
+    } as unknown as MonoClient;
+    const runner = new JobRunner(ds, clock);
+    const service = new ImportService(ds, client, runner, clock, reclassifier());
+    service.onModuleInit();
+    await service.enqueueHistory(daysAgo(10));
+    const rows = await ds.query(`SELECT external_id, iban, title FROM accounts ORDER BY external_id`);
+    expect(rows).toEqual([
+      { external_id: "acc-uah", iban: "UA00IBAN", title: null },
+      { external_id: "acc-usd", iban: null, title: null },
+      { external_id: "jar-1", iban: null, title: "Trip" },
+    ]);
+    await drain(runner);
+    const kinds = await ds.query(`SELECT kind FROM jobs WHERE kind='reclassify'`);
+    expect(kinds).toHaveLength(1);
+  });
+
   it("types a single upserted item (webhook, reconcile)", async () => {
     const { service } = setup(async () => []);
     await service.syncAccounts();

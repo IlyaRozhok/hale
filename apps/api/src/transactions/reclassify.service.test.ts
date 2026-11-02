@@ -111,6 +111,57 @@ describe("reclassify", () => {
     expect((await get(lone)).type).toBe("person_transfer");
   });
 
+  it.each([
+    ["outgoing leg first", true],
+    ["incoming leg first", false],
+  ])("a transfer imported one leg at a time ends as own_transfer (%s)", async (_n, outFirst) => {
+    const at = new Date(NOW - 7_200_000);
+    const mk = (acc: number, amount: number) =>
+      insertTx(acc, { amount, mcc: 4829, description: "Переказ на картку", at });
+    const svc = service();
+    const first = outFirst ? await mk(black, -250000) : await mk(white, 250000);
+    await svc.reclassifyIds([first]);
+    expect((await get(first)).type).toBe(outFirst ? "person_transfer" : "person_in");
+    const second = outFirst ? await mk(white, 250000) : await mk(black, -250000);
+    await svc.reclassifyIds([second]);
+    expect((await get(first)).type).toBe("own_transfer");
+    expect((await get(second)).type).toBe("own_transfer");
+  });
+
+  it("loads own ibans and jar titles from accounts (production context)", async () => {
+    await ds.query(`UPDATE accounts SET iban='UA00OWNIBAN' WHERE id=$1`, [white]);
+    const jar = (await ds.query(
+      `INSERT INTO accounts (external_id, kind, currency, balance, title) VALUES ('j','jar','UAH',0,'Trip') RETURNING id`,
+    ))[0].id as number;
+    expect(jar).toBeGreaterThan(0);
+    const toIban = await insertTx(black, { amount: -1000, mcc: 4829, description: "Переказ" });
+    await ds.query(`UPDATE transactions SET counter_iban='UA00OWNIBAN' WHERE id=$1`, [toIban]);
+    const toJar = await insertTx(black, { amount: -2000, mcc: 4829, description: "Поповнення «Trip»" });
+    const stranger = await insertTx(black, { amount: -3000, mcc: 4829, description: "Поповнення «Other»" });
+    const svc = new ReclassifyService(ds, new JobRunner(ds, clock), { ownNames: [], ownIbans: [], ownJars: [] });
+    await svc.reclassifyPending();
+    expect((await get(toIban)).type).toBe("own_transfer");
+    expect((await get(toJar)).type).toBe("own_transfer");
+    expect((await get(stranger)).type).toBe("person_transfer");
+  });
+
+  it("persists needs_label", async () => {
+    const person = await insertTx(black, { amount: -1000, mcc: 4829, description: "Тест Тестовий" });
+    const cafe = await insertTx(black, { mcc: 5812 });
+    await service().reclassifyPending();
+    const flags = async (id: number) =>
+      (await ds.query(`SELECT needs_label FROM transactions WHERE id=$1`, [id]))[0].needs_label;
+    expect(await flags(person)).toBe(true);
+    expect(await flags(cafe)).toBe(false);
+  });
+
+  it("does not select owner rows even when their type is null", async () => {
+    const id = await insertTx(black, { type: null, type_source: "owner", mcc: 5812 });
+    await service().reclassifyPending();
+    await service().reclassifyIds([id]);
+    expect(await get(id)).toEqual({ type: null, category: null, type_source: "owner" });
+  });
+
   it("uses the account kind: fop income is income, and does not require a label", async () => {
     const id = await insertTx(fop, { amount: 900000, mcc: 4829, description: "Оплата послуг" });
     await service().reclassifyPending();

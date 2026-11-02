@@ -120,6 +120,18 @@ describe("purchases and refunds", () => {
     });
   });
 
+  it("a bank refund text is a refund whatever the mcc, and is flagged when uncategorised", () => {
+    const r = classify(tx({ description: "Повернення платежу skay.ua", amount: 90000, mcc: 4829 }), ctx());
+    expect(r).toMatchObject({ type: "spend", needsLabel: true });
+    expect(classify(tx({ description: "Скасування. Uklon", amount: 9000, mcc: 4829 }), ctx())).toMatchObject({
+      type: "spend",
+      category: "transport",
+    });
+    expect(classify(tx({ description: "Скасування. Переказ на карту", amount: 9000, mcc: 4829 }), ctx()).type).toBe(
+      "person_in",
+    );
+  });
+
   it("a store payment through the bank's installment service is a purchase", () => {
     expect(classify(tx({ description: "Платіж Shop - monomarket", mcc: 4829 }), ctx())).toMatchObject({
       type: "spend",

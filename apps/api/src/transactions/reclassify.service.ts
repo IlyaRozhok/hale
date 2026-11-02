@@ -64,7 +64,7 @@ export class ReclassifyService implements OnModuleInit {
   /** Every row that is allowed to change. Returns how many rows were examined. */
   async reclassifyPending(): Promise<number> {
     const ids: { id: number }[] = await this.ds.query(
-      `SELECT id FROM transactions WHERE type IS NULL OR type_source IS DISTINCT FROM 'owner' ORDER BY id`,
+      `SELECT id FROM transactions WHERE type_source IS DISTINCT FROM 'owner' ORDER BY id`,
     );
     return this.reclassifyIds(ids.map((r) => r.id));
   }
@@ -73,8 +73,9 @@ export class ReclassifyService implements OnModuleInit {
   async reclassifyIds(ids: readonly number[]): Promise<number> {
     if (ids.length === 0) return 0;
     const ctx = await this.loadContext();
+    const all = await this.withOppositeLegs(ids);
     let n = 0;
-    for (let i = 0; i < ids.length; i += CHUNK) {
+    for (let i = 0; i < all.length; i += CHUNK) {
       const rows: Row[] = await this.ds.query(
         `SELECT t.id, a.kind AS account_kind, t.description, t.comment, t.mcc, t.amount::float8 AS amount,
                 t.counter_iban, t.counter_name,
@@ -84,8 +85,8 @@ export class ReclassifyService implements OnModuleInit {
                      AND abs(extract(epoch FROM (o.occurred_at - t.occurred_at))) <= $2
                 ) AS paired
            FROM transactions t JOIN accounts a ON a.id = t.account_id
-          WHERE t.id = ANY($1) AND (t.type IS NULL OR t.type_source IS DISTINCT FROM 'owner')`,
-        [ids.slice(i, i + CHUNK), PAIR_WINDOW_S],
+          WHERE t.id = ANY($1) AND t.type_source IS DISTINCT FROM 'owner'`,
+        [all.slice(i, i + CHUNK), PAIR_WINDOW_S],
       );
       for (const r of rows) {
         const out = classify(
@@ -102,9 +103,9 @@ export class ReclassifyService implements OnModuleInit {
           ctx,
         );
         await this.ds.query(
-          `UPDATE transactions SET type=$2, category=$3, type_source=$4
-            WHERE id=$1 AND (type IS NULL OR type_source IS DISTINCT FROM 'owner')`,
-          [r.id, out.type, out.category, out.source === "owner" ? "rule" : out.source],
+          `UPDATE transactions SET type=$2, category=$3, type_source=$4, needs_label=$5
+            WHERE id=$1 AND type_source IS DISTINCT FROM 'owner'`,
+          [r.id, out.type, out.category, out.source === "owner" ? "rule" : out.source, out.needsLabel],
         );
         n++;
       }
@@ -112,13 +113,35 @@ export class ReclassifyService implements OnModuleInit {
     return n;
   }
 
+  /**
+   * A transfer between own accounts is two rows. Whichever arrives second makes the first one
+   * recognisable, so the opposite legs of the given rows are reclassified with them.
+   */
+  private async withOppositeLegs(ids: readonly number[]): Promise<number[]> {
+    const out = new Set(ids);
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const rows: { id: number }[] = await this.ds.query(
+        `SELECT DISTINCT o.id FROM transactions t JOIN transactions o
+           ON o.account_id <> t.account_id AND o.amount = -t.amount
+          AND abs(extract(epoch FROM (o.occurred_at - t.occurred_at))) <= $2
+          WHERE t.id = ANY($1)`,
+        [ids.slice(i, i + CHUNK), PAIR_WINDOW_S],
+      );
+      for (const r of rows) out.add(r.id);
+    }
+    return [...out];
+  }
+
   private async loadContext(): Promise<ClassifyContext> {
     const rules: { match_kind: ClassifyRule["matchKind"]; match_value: string; type: string; category: string | null }[] =
       await this.ds.query(`SELECT match_kind, match_value, type, category FROM rules ORDER BY id`);
+    const accounts: { kind: string; iban: string | null; title: string | null }[] = await this.ds.query(
+      `SELECT kind, iban, title FROM accounts WHERE iban IS NOT NULL OR title IS NOT NULL`,
+    );
     return {
-      ownIbans: new Set(this.own.ownIbans),
+      ownIbans: new Set([...this.own.ownIbans, ...accounts.flatMap((a) => (a.iban ? [a.iban] : []))]),
       ownNames: this.own.ownNames,
-      ownJars: this.own.ownJars,
+      ownJars: [...this.own.ownJars, ...accounts.flatMap((a) => (a.kind === "jar" && a.title ? [a.title] : []))],
       rules: rules.map((r) => ({
         matchKind: r.match_kind,
         matchValue: r.match_value,

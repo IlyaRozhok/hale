@@ -82,6 +82,7 @@ const ATM = /^(банкомат|видача готівки|видача гот�
 const CASH_DEPOSIT = /^(термінал|city\s*\d)/i;
 const CASHBACK = /^виведення кешбеку/i;
 const REFUND = /^(скасування|повернення платежу)/i;
+const REFUND_OF_TRANSFER = /переказ/i;
 const FROM_PREFIX = /^від:/i;
 
 function ruleMatches(rule: ClassifyRule, tx: ClassifyInput): boolean {
@@ -174,6 +175,13 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
   if (tx.accountKind === "fop") {
     if (incoming) return done("income");
     if (mcc === null || TRANSFER_MCCS.has(mcc)) return done("person_transfer", "auto", "transfer", true);
+  }
+
+  // A bank refund text is a refund whatever its MCC (transfer MCC 4829 included); a refund of a
+  // transfer is not, and stays with the people rules below.
+  if (incoming && REFUND.test(d) && !REFUND_OF_TRANSFER.test(d)) {
+    const category = categoryByMerchant(d) ?? categoryByMcc(mcc);
+    return done("spend", "auto", category, category === "uncategorized");
   }
 
   // 3. MCC and chains

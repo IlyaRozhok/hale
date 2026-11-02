@@ -74,6 +74,8 @@ export class ImportService implements OnModuleInit {
         currency: currencyName(a.currencyCode),
         balance: a.balance,
         creditLimit: a.creditLimit,
+        iban: a.iban ?? null,
+        title: null as string | null,
       })),
       ...data.jars.map((j) => ({
         id: j.id,
@@ -81,16 +83,19 @@ export class ImportService implements OnModuleInit {
         currency: currencyName(j.currencyCode),
         balance: j.balance,
         creditLimit: 0,
+        iban: null,
+        title: j.title,
       })),
     ];
     for (const a of accounts) {
       await this.ds.query(
-        `INSERT INTO accounts (external_id, kind, currency, balance, credit_limit, balance_at)
-         VALUES ($1,$2,$3,$4,$5,$6)
+        `INSERT INTO accounts (external_id, kind, currency, balance, credit_limit, balance_at, iban, title)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
          ON CONFLICT (external_id) DO UPDATE
            SET kind=EXCLUDED.kind, currency=EXCLUDED.currency, balance=EXCLUDED.balance,
-               credit_limit=EXCLUDED.credit_limit, balance_at=EXCLUDED.balance_at`,
-        [a.id, a.kind, a.currency, a.balance, a.creditLimit, balanceAt],
+               credit_limit=EXCLUDED.credit_limit, balance_at=EXCLUDED.balance_at,
+               iban=COALESCE(EXCLUDED.iban, accounts.iban), title=COALESCE(EXCLUDED.title, accounts.title)`,
+        [a.id, a.kind, a.currency, a.balance, a.creditLimit, balanceAt, a.iban, a.title],
       );
     }
     return accounts.map((a) => a.id);
@@ -121,6 +126,17 @@ export class ImportService implements OnModuleInit {
     const ids: number[] = [];
     for (const item of items) ids.push((await this.upsertRow(account.id, item)).id);
     await this.reclassifier?.reclassifyIds(ids);
+    await this.reclassifyAfterLastWindow(job.id);
+  }
+
+  /** Once no other history window is waiting or running, queue a whole-history reclassify. */
+  private async reclassifyAfterLastWindow(thisJobId: number): Promise<void> {
+    if (!this.reclassifier) return;
+    const rows: { n: number }[] = await this.ds.query(
+      `SELECT count(*)::int AS n FROM jobs WHERE kind=$1 AND id<>$2 AND status IN ('pending','running')`,
+      [WINDOW_JOB_KIND, thisJobId],
+    );
+    if (rows[0]?.n === 0) await this.reclassifier.enqueue(new Date(this.clock.now()));
   }
 
   /** Upserts one item and classifies it (type and category are never taken from the bank). */

@@ -33,7 +33,16 @@ describe("migrations", () => {
     expect(settings[0].limit_visual).toBe("mercury");
 
     expect(settings[0]).toHaveProperty("last_sync_at", null);
+    const cols = await ds.query(
+      "SELECT table_name, column_name, is_nullable FROM information_schema.columns WHERE column_name IN ('iban','title','needs_label') ORDER BY 1,2",
+    );
+    expect(cols.map((c: { table_name: string; column_name: string }) => `${c.table_name}.${c.column_name}`)).toEqual([
+      "accounts.iban",
+      "accounts.title",
+      "transactions.needs_label",
+    ]);
 
+    await ds.undoLastMigration();
     await ds.undoLastMigration();
     await ds.undoLastMigration();
     await ds.undoLastMigration();

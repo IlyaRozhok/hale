@@ -31,6 +31,7 @@ services:
       OWNER_PASSWORD_HASH: ${OWNER_PASSWORD_HASH:?set in .env}
       MONOBANK_TOKEN: ${MONOBANK_TOKEN:-}
       MONO_WEBHOOK_SECRET: ${MONO_WEBHOOK_SECRET:-}
+      OWNER_NAMES: ${OWNER_NAMES:-}
       PUBLIC_URL: https://${DOMAIN}
       PORT: "3000"
     healthcheck:
