@@ -700,6 +700,90 @@ describe("questions, upcoming and run-out", () => {
     expect((await today()).questions.map((q: { kind: string }) => q.kind)).toContain("income_date");
   });
 
+  describe("is this credit from Binance", () => {
+    const RATE = 40;
+    const received = async () => {
+      await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-16T09:00:00Z', $1)`, [RATE]);
+      const ev = await income("usdc", "2026-11-25");
+      await api.post(`/plan/incomes/${ev}/confirm`).expect(201); // 500,000 cents on Binance
+      return ev;
+    };
+    const matchQs = (r: { questions: { id: string; kind: string; text: string }[] }) => r.questions.filter((q) => q.kind === "usdc_match");
+
+    beforeEach(() => at("2026-11-16T10:00:00Z"));
+
+    it("after a match free falls by exactly the amount that was counted twice", async () => {
+      const card = await account("black", 1_000_000);
+      const ev = await received();
+      await setBalance(card, 1_000_000 + 12_000_000); // ₴120,000 lands on the card
+      const t = await tx(card, 12_000_000, "person_in", { date: "2026-11-16" });
+
+      const before = await today();
+      expect(matchQs(before)).toEqual([
+        { id: `usdc_match:${ev}:${t}`, kind: "usdc_match", text: "Пришло ₴120 000 (16.11). Это вывод с Binance?" },
+      ]);
+      expect(before.accounts.binance).toBe(500_000 * RATE);
+
+      await api.post(`/plan/incomes/${ev}/match-transaction`, { transactionId: t }).expect(201);
+      const after = await today();
+      expect(before.state.free - after.state.free).toBe(12_000_000);
+      expect(after.accounts.binance).toBe(500_000 * RATE - 12_000_000);
+      expect(matchQs(after)).toEqual([]);
+      expect((await api.get("/transactions").expect(200)).body.items[0]).toMatchObject({ id: t, type: "own_transfer" });
+    });
+
+    it("answering no leaves free alone and does not ask again", async () => {
+      const card = await account("black", 1_000_000);
+      await received();
+      const t = await tx(card, 100_000, "cash_in", { date: "2026-11-16" });
+      const before = await today();
+      expect(matchQs(before)).toHaveLength(1);
+      await api.post(`/plan/transactions/${t}/not-usdc`).expect(201);
+      const after = await today();
+      expect(matchQs(after)).toEqual([]);
+      expect(after.state.free).toBe(before.state.free);
+    });
+
+    it("asks about three at most, the oldest first, then the next", async () => {
+      const card = await account("black", 1_000_000);
+      await received();
+      const ids: number[] = [];
+      for (const d of ["10", "11", "12", "13"]) ids.push(await tx(card, 200_000, "person_in", { date: `2026-11-${d}` }));
+      const shown = matchQs(await today()).map((q) => Number(q.id.split(":")[2]));
+      expect(shown).toEqual(ids.slice(0, 3));
+      await api.post(`/plan/transactions/${ids[0]}/not-usdc`).expect(201);
+      expect(matchQs(await today()).map((q) => Number(q.id.split(":")[2]))).toEqual(ids.slice(1));
+    });
+
+    it("stays silent below ₴1,000, with nothing on Binance, without a received event, or for history", async () => {
+      const card = await account("black", 1_000_000);
+      await tx(card, 500_000, "person_in", { date: "2026-11-16" });
+      await ds.query(`INSERT INTO manual_balances (name, amount, currency) VALUES ('Binance', 100, 'USD')`);
+      await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-16T09:00:00Z', $1)`, [RATE]);
+      expect(matchQs(await today())).toEqual([]); // no USDC received yet
+
+      await ds.query(`DELETE FROM transactions`);
+      await ds.query(`DELETE FROM fx_rates`);
+      await ds.query(`DELETE FROM manual_balances`);
+      await received();
+      await tx(card, 99_999, "person_in", { date: "2026-11-16" });
+      await tx(card, 500_000, "person_in", { date: "2026-10-31" }); // before the income's month
+      expect(matchQs(await today())).toEqual([]);
+
+      const t = await tx(card, 100_000, "person_in", { date: "2026-11-16" });
+      expect(matchQs(await today())).toHaveLength(1);
+      await ds.query(`UPDATE settings SET tracking_start='2026-11-17'`);
+      expect(matchQs(await today())).toEqual([]); // before tracking began
+      await ds.query(`UPDATE settings SET tracking_start='2026-01-01'`);
+      await ds.query(`UPDATE manual_balances SET amount=0 WHERE name='Binance'`);
+      expect(matchQs(await today())).toEqual([]);
+      await ds.query(`UPDATE manual_balances SET amount=100 WHERE name='Binance'`);
+      await ds.query(`DELETE FROM fx_rates`);
+      expect(matchQs(await today())).toEqual([]); // no rate, nothing could be lowered
+      expect(t).toBeGreaterThan(0);
+    });
+  });
+
   it("converts upcoming foreign payments with the engine and flags a stale rate", async () => {
     await account("black", 1_000_000);
     await income("fop", "2026-11-12");

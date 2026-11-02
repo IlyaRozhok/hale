@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Settings } from "./Settings";
 import { Today } from "./Today";
-import { fakeApi, makeClient, renderWith, settingsFixture, taxFixture, todayFixture } from "../testing";
+import { balanceFixture, fakeApi, makeClient, renderWith, settingsFixture, taxFixture, todayFixture } from "../testing";
 import { NetworkError } from "../api/client";
 import { TODAY_KEY } from "../api/queries";
 
@@ -125,6 +125,69 @@ describe("Settings, limit visual", () => {
     expect(await screen.findByText("Не удалось сохранить. Значение возвращено.")).toBeTruthy();
     expect(visualOf()).toBe("mercury:0.72");
     expect(screen.getByRole("radio", { name: "Ртуть" }).props.accessibilityState.selected).toBe(true);
+  });
+});
+
+describe("Settings, Binance balance", () => {
+  const withBalance = () => ({ manualBalances: jest.fn(async () => [balanceFixture({ id: 1, name: "Other", amount: 1 }), balanceFixture()]) });
+  const type = async (text: string) => {
+    await fireEvent.changeText(await screen.findByLabelText("Новый баланс Binance, $"), text);
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить баланс" }));
+  };
+
+  it("shows the balance in dollars with hryvnias alongside", async () => {
+    const client = makeClient();
+    client.setQueryData(TODAY_KEY, todayFixture());
+    await renderWith(<Settings />, fakeApi(withBalance()), client);
+    expect(await screen.findByText("$2,700.00, ₴111,375")).toBeTruthy();
+  });
+
+  it("saves a new value, zero included, and refreshes the balance and Today", async () => {
+    const api = fakeApi(withBalance());
+    const client = makeClient();
+    client.setQueryData(TODAY_KEY, todayFixture());
+    await renderWith(<Settings />, api, client);
+    await screen.findByText(/\$2,700\.00/);
+    await type("2 500,50");
+    await waitFor(() => expect(api.patchManualBalance).toHaveBeenCalledWith(7, 250_050));
+    expect(await screen.findByText("Баланс сохранён.")).toBeTruthy();
+    expect(api.manualBalances).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(client.getQueryState(TODAY_KEY)?.isInvalidated).toBe(true));
+    await type("0");
+    await waitFor(() => expect(api.patchManualBalance).toHaveBeenLastCalledWith(7, 0));
+  });
+
+  it("creates the row the first time", async () => {
+    const api = fakeApi();
+    await renderWith(<Settings />, api);
+    expect(await screen.findByText("Баланс не задан")).toBeTruthy();
+    await type("100");
+    await waitFor(() => expect(api.createManualBalance).toHaveBeenCalledWith({ name: "Binance", amount: 10_000, currency: "USD" }));
+    expect(api.patchManualBalance).not.toHaveBeenCalled();
+  });
+
+  it("refuses a bad amount before sending, and reports a failed save or load", async () => {
+    const api = fakeApi({
+      ...withBalance(),
+      patchManualBalance: jest.fn(async () => {
+        throw new NetworkError();
+      }),
+    });
+    await renderWith(<Settings />, api);
+    await screen.findByText(/\$2,700\.00/);
+    await type("abc");
+    expect(await screen.findByText("Проверьте сумму.")).toBeTruthy();
+    expect(api.patchManualBalance).not.toHaveBeenCalled();
+    await type("5");
+    expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
+  });
+
+  it("says so when the balance cannot be loaded", async () => {
+    const manualBalances = jest.fn(async () => {
+      throw new NetworkError();
+    });
+    await renderWith(<Settings />, fakeApi({ manualBalances }));
+    expect(await screen.findByText("Не получилось загрузить баланс.")).toBeTruthy();
   });
 });
 

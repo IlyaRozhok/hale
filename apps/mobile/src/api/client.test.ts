@@ -31,6 +31,24 @@ describe("api client", () => {
     expect(init.body).toBe(JSON.stringify({ dailyAmount: 45000 }));
   });
 
+  it("sends the USDC answers and the manual balance calls to their routes", async () => {
+    const fetchImpl = vi.fn(async () => json({}));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await api.matchUsdc(12, 34);
+    await api.dismissUsdcMatch(34);
+    await api.manualBalances();
+    await api.patchManualBalance(7, 0);
+    await api.createManualBalance({ name: "Binance", amount: 1, currency: "USD" });
+    const calls = (fetchImpl.mock.calls as unknown as [string, RequestInit][]).map(([url, init]) => [init.method, url.replace("https://api.example.test", ""), init.body]);
+    expect(calls).toEqual([
+      ["POST", "/plan/incomes/12/match-transaction", JSON.stringify({ transactionId: 34 })],
+      ["POST", "/plan/transactions/34/not-usdc", undefined],
+      ["GET", "/plan/manual-balances", undefined],
+      ["PATCH", "/plan/manual-balances/7", JSON.stringify({ amount: 0 })],
+      ["POST", "/plan/manual-balances", JSON.stringify({ name: "Binance", amount: 1, currency: "USD" })],
+    ]);
+  });
+
   it("login sends no token and returns the token string", async () => {
     const fetchImpl = vi.fn(async () => json({ token: "abc" }));
     const { api } = setup(fetchImpl as unknown as typeof fetch, null);

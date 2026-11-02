@@ -108,6 +108,15 @@ export const manualBalanceInput = z
 export const manualBalancePatch = partial(z.object(balanceShape));
 export type ManualBalanceInput = z.infer<typeof manualBalanceInput>;
 
+export interface ManualBalanceDto {
+  id: number;
+  name: string;
+  /** Minor units of `currency`. */
+  amount: number;
+  currency: string;
+  counts_as_own: boolean;
+}
+
 // --- settings ---------------------------------------------------------------
 export const settingsPatch = partial(
   z.object({
@@ -214,7 +223,7 @@ export interface TodayDto {
   rateStale: boolean;
   accounts: { own: number; credit: number; fop: number; binance: number };
   upcoming: { id: string; name: string; amount: number; dueOn: string; kind: string }[];
-  questions: { id: string; kind: "usdc_arrived" | "income_date" | "recipient_label"; text: string }[];
+  questions: { id: string; kind: "usdc_arrived" | "usdc_match" | "income_date" | "recipient_label"; text: string }[];
   badCases: { id: string; text: string }[];
   runOutOn: string | null;
   /** Last successful contact with the bank (webhook item, reconcile or balance refresh), null if there was none yet. */

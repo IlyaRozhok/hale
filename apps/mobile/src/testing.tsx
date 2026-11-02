@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { render } from "@testing-library/react-native";
-import type { ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@tablo/contracts";
+import type { ManualBalanceDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@tablo/contracts";
 import { ApiProvider } from "./api/context";
 import type { Api } from "./api/client";
 
@@ -64,6 +64,10 @@ export function taxFixture(over: Partial<ScheduledPaymentDto> = {}): ScheduledPa
   return { id: 1, kind: "tax", name: "Налог за 3 кв.", amount: 1_200_000, currency: "UAH", due_on: "2026-11-20", paid_at: null, tax_quarter: "2026-Q3", is_estimate: false, ...over };
 }
 
+export function balanceFixture(over: Partial<ManualBalanceDto> = {}): ManualBalanceDto {
+  return { id: 7, name: "Binance", amount: 270_000, currency: "USD", counts_as_own: true, ...over };
+}
+
 export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock } {
   return {
     login: jest.fn(async () => "token"),
@@ -72,6 +76,11 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     chooseBridge: jest.fn(async () => todayFixture()),
     confirmIncome: jest.fn(async () => undefined),
     setIncomeDate: jest.fn(async () => undefined),
+    matchUsdc: jest.fn(async () => undefined),
+    dismissUsdcMatch: jest.fn(async () => undefined),
+    manualBalances: jest.fn(async () => []),
+    createManualBalance: jest.fn(async () => balanceFixture()),
+    patchManualBalance: jest.fn(async () => balanceFixture()),
     transactions: jest.fn(async () => ({ items: [txFixture()], nextCursor: null })),
     editTransaction: jest.fn(async () => ({ transaction: txFixture(), updated: 1 })),
     labelRecipient: jest.fn(async () => ({ updated: 1 })),

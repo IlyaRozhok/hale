@@ -8,6 +8,7 @@ export const TRANSACTIONS_KEY = ["transactions"] as const;
 export const SETTINGS_KEY = ["settings"] as const;
 export const PAYMENTS_KEY = ["payments"] as const;
 export const CAP_PREVIEW_KEY = ["cap-preview"] as const;
+export const MANUAL_BALANCES_KEY = ["manual-balances"] as const;
 /** Debounce between the last slider move and the preview request. */
 export const PREVIEW_DELAY_MS = 300;
 
@@ -48,7 +49,52 @@ export function useConfirmIncome() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (eventId: number) => api.confirmIncome(eventId),
+    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: TODAY_KEY }), client.invalidateQueries({ queryKey: MANUAL_BALANCES_KEY })]),
+  });
+}
+
+/** "Yes, this credit came from Binance": the balance drops and the row becomes an own transfer. */
+export function useMatchUsdc() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ eventId, transactionId }: { eventId: number; transactionId: number }) => api.matchUsdc(eventId, transactionId),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: TODAY_KEY }),
+        client.invalidateQueries({ queryKey: TRANSACTIONS_KEY }),
+        client.invalidateQueries({ queryKey: MANUAL_BALANCES_KEY }),
+      ]),
+  });
+}
+
+export function useDismissUsdcMatch() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (transactionId: number) => api.dismissUsdcMatch(transactionId),
     onSuccess: () => client.invalidateQueries({ queryKey: TODAY_KEY }),
+  });
+}
+
+export function useManualBalances() {
+  const api = useApi();
+  return useQuery({ queryKey: MANUAL_BALANCES_KEY, queryFn: () => api.manualBalances() });
+}
+
+/** Corrects the Binance balance, creating the row the first time. */
+export function useSaveBinanceBalance() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, amount }: { id: number | null; amount: number }) =>
+      id === null ? api.createManualBalance({ name: "Binance", amount, currency: "USD" }) : api.patchManualBalance(id, amount),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: MANUAL_BALANCES_KEY }),
+        client.invalidateQueries({ queryKey: TODAY_KEY }),
+        client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY }),
+      ]),
   });
 }
 

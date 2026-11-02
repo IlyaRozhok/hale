@@ -8,6 +8,8 @@ import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/
 import { quarterLabel, quarterOf } from "../domain/quarter";
 import { runOutDate } from "../domain/run-out";
 import { taxReserve } from "../domain/tax";
+import { usdcMatchRows } from "../domain/usdc-match";
+import { BINANCE } from "../plan/plan.service";
 import { counterKeySql } from "../transactions/counter-key";
 import { Clock } from "./clock";
 import { quarterTaxFacts } from "./tax-facts";
@@ -51,6 +53,7 @@ interface Facts {
   loans: Loan[];
   basis: string;
   plan: Plan | null;
+  trackingStart: string;
   syncedAt: Date | null;
   limitVisual: "mercury" | "ring";
   now: Date;
@@ -414,6 +417,7 @@ export class TodayService {
       plan: planRow
         ? { id: planRow.id, dailyAmount: planRow.daily_amount, creditPlan: planRow.credit_plan, basis: planRow.basis }
         : null,
+      trackingStart: settings.tracking_start,
       syncedAt: settings.last_contact,
       limitVisual: settings.limit_visual,
     };
@@ -430,6 +434,41 @@ export class TodayService {
     return r[0].s;
   }
 
+  /** Money withdrawn from Binance lands as an ordinary credit and counts twice until the owner says what it is. */
+  private async usdcMatchQuestions(m: EntityManager, f: Facts): Promise<TodayDto["questions"]> {
+    if (f.usdRate <= 0) return []; // the balance cannot be lowered without a rate
+    const event = (
+      await m.query(
+        `SELECT e.id, e.period FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id
+          WHERE x.source='usdc' AND e.status='received' ORDER BY e.received_at DESC NULLS LAST, e.id DESC LIMIT 1`,
+      )
+    )[0] as { id: number; period: string } | undefined;
+    if (!event) return [];
+    const balance = (await m.query(`SELECT amount::float8 AS amount FROM manual_balances WHERE name=$1`, [BINANCE]))[0] as
+      | { amount: number }
+      | undefined;
+    const rows: { id: number; type: string | null; account_kind: string; amount_uah: number | null; local_date: string; usdc_checked: boolean }[] =
+      await m.query(
+        `SELECT t.id, t.type, a.kind AS account_kind, t.amount_uah::float8 AS amount_uah, t.local_date::text AS local_date, t.usdc_checked
+           FROM transactions t JOIN accounts a ON a.id = t.account_id
+          WHERE t.amount > 0 AND NOT t.usdc_checked AND t.type IN ('person_in','cash_in') AND t.local_date >= GREATEST($1::date, $2::date)
+          ORDER BY t.occurred_at, t.id`,
+        [`${event.period}-01`, f.trackingStart],
+      );
+    return usdcMatchRows({
+      rows: rows.map((r) => ({
+        id: r.id, type: r.type, accountKind: r.account_kind, amountUah: r.amount_uah, localDate: r.local_date, usdcChecked: r.usdc_checked,
+      })),
+      binanceBalance: balance?.amount ?? 0,
+      receivedPeriod: event.period,
+      trackingStart: f.trackingStart,
+    }).map((r) => ({
+      id: `usdc_match:${event.id}:${r.id}`,
+      kind: "usdc_match" as const,
+      text: `Пришло ${fmt(r.amountUah!)} (${fmtDay(r.localDate)}). Это вывод с Binance?`,
+    }));
+  }
+
   // --- the response -------------------------------------------------------------
   private async dto(f: Facts, state: DailyState, plan: Plan | null): Promise<TodayDto> {
     const m = this.ds.manager;
@@ -441,6 +480,7 @@ export class TodayService {
       [f.date.slice(0, 7), Number(f.date.slice(8, 10))],
     );
     for (const e of usdc) questions.push({ id: `usdc_arrived:${e.id}`, kind: "usdc_arrived", text: "Пришло на Binance?" });
+    for (const q of await this.usdcMatchQuestions(m, f)) questions.push(q);
     if (state.needsIncomeDate) {
       const ev = (await m.query(`SELECT id FROM income_events WHERE status <> 'received' ORDER BY expected_on, id LIMIT 1`))[0] as
         | { id: number }

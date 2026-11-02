@@ -75,6 +75,7 @@ describe("Today, normal mode", () => {
   it("makes every button at least the minimum touch size", async () => {
     const questions = [
       { id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" },
+      { id: "usdc_match:12:34", kind: "usdc_match" as const, text: "Это вывод с Binance?" },
       { id: "income_date:5", kind: "income_date" as const, text: "Когда ожидается следующий доход?" },
       { id: "recipient_label:0123456789abcdef", kind: "recipient_label" as const, text: "Кто это: Иван?" },
     ];
@@ -105,6 +106,46 @@ describe("Today, questions", () => {
     await fireEvent.press(await screen.findByText("Через неделю"));
     await waitFor(() => expect(api.setIncomeDate).toHaveBeenCalledWith(5, "2026-11-09"));
     await waitFor(() => expect(screen.queryByText("Когда ожидается следующий доход?")).toBeNull());
+  });
+
+  const USDC_MATCH = { id: "usdc_match:12:34", kind: "usdc_match" as const, text: "Пришло ₴120 000 (05.11). Это вывод с Binance?" };
+
+  it("a credit from Binance is matched with one tap against the event and the row, and the card goes away", async () => {
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions: [USDC_MATCH] })) });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Да, вывод с Binance" }));
+    await waitFor(() => expect(api.matchUsdc).toHaveBeenCalledWith(12, 34));
+    expect(api.dismissUsdcMatch).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText(USDC_MATCH.text)).toBeNull());
+  });
+
+  it("answering no marks the row, not the balance", async () => {
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions: [USDC_MATCH] })) });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Нет" }));
+    await waitFor(() => expect(api.dismissUsdcMatch).toHaveBeenCalledWith(34));
+    expect(api.matchUsdc).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText(USDC_MATCH.text)).toBeNull());
+  });
+
+  it("refreshes Today after a match and brings the card back if the match fails", async () => {
+    const today = jest.fn(async () => todayFixture({ questions: [USDC_MATCH] }));
+    const ok = fakeApi({ today });
+    const first = await renderWith(<Today onOpenActivity={noop} />, ok);
+    await fireEvent.press(await screen.findByRole("button", { name: "Да, вывод с Binance" }));
+    await waitFor(() => expect(today).toHaveBeenCalledTimes(2));
+    await first.unmount();
+
+    const failing = fakeApi({
+      today: jest.fn(async () => todayFixture({ questions: [USDC_MATCH] })),
+      matchUsdc: jest.fn(async () => {
+        throw new NetworkError();
+      }),
+    });
+    await renderWith(<Today onOpenActivity={noop} />, failing);
+    await fireEvent.press(await screen.findByRole("button", { name: "Да, вывод с Binance" }));
+    await waitFor(() => expect(failing.matchUsdc).toHaveBeenCalled());
+    expect(await screen.findByText(USDC_MATCH.text)).toBeTruthy();
   });
 
   it("with no income event there is no route to Activity: a hint about the settings instead", async () => {

@@ -343,9 +343,40 @@ describe("income events", () => {
     expect((await row("SELECT type FROM transactions WHERE id=$1", [t])).type).toBe("own_transfer");
     expect(await ds.query("SELECT 1 FROM transactions WHERE type='income'")).toHaveLength(0);
 
-    const other = await tx(card, { amount: 100_000, description: "Термінал City24", mcc: 4829 });
-    await api.post(`/plan/incomes/${ev}/match-transaction`, { transactionId: other }).expect(409);
+    // Withdrawing in parts: each row lowers the balance by its own amount, once.
+    const part = await tx(card, { amount: 400_000, description: "Термінал City24", mcc: 4829 });
+    await reclassify([part]);
+    await api.post(`/plan/incomes/${ev}/match-transaction`, { transactionId: part }).expect(201);
+    await api.post(`/plan/incomes/${ev}/match-transaction`, { transactionId: part }).expect(201);
+    expect((await row("SELECT amount::int AS amount FROM manual_balances WHERE name='Binance'")).amount).toBe(160_000);
+    expect((await row("SELECT type, usdc_checked FROM transactions WHERE id=$1", [part]))).toEqual({ type: "own_transfer", usdc_checked: true });
+    expect((await row("SELECT matched_transaction_id AS m FROM income_events WHERE id=$1", [ev])).m).toBe(t);
+
     await api.post(`/plan/incomes/${ev}/match-transaction`, { transactionId: 99999 }).expect(404);
+    // A row matched to one event cannot be used again for another.
+    const nextEvent = (await api.get("/plan/incomes")).body[1].id as number;
+    await api.post(`/plan/incomes/${nextEvent}/match-transaction`, { transactionId: t }).expect(409);
+  });
+
+  it("never takes the Binance balance below zero", async () => {
+    await usdc();
+    await app.get(PlanService).generateEvents("2026-11-02");
+    const ev = (await api.get("/plan/incomes")).body[0].id as number;
+    await api.post(`/plan/incomes/${ev}/confirm`).expect(201);
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', now(), 40)`);
+    const t = await tx(await account("black"), { amount: 99_000_000, description: "Термінал City24", mcc: 4829 });
+    await reclassify([t]);
+    await api.post(`/plan/incomes/${ev}/match-transaction`, { transactionId: t }).expect(201);
+    expect((await row("SELECT amount::int AS amount FROM manual_balances WHERE name='Binance'")).amount).toBe(0);
+  });
+
+  it("marks a row as not from Binance, and answers 404 for an unknown row", async () => {
+    const t = await tx(await account("black"), { amount: 100_000, description: "x" });
+    await api.post(`/plan/transactions/${t}/not-usdc`).expect(201);
+    await api.post(`/plan/transactions/${t}/not-usdc`).expect(201);
+    expect((await row("SELECT usdc_checked FROM transactions WHERE id=$1", [t])).usdc_checked).toBe(true);
+    await api.post("/plan/transactions/99999/not-usdc").expect(404);
+    await request(http()).post(`/plan/transactions/${t}/not-usdc`).expect(401);
   });
 
   it("refuses to match an outgoing transaction", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dueLabel, formatMoney, formatOriginal, kyivDate, formatMoneyWithUsd, formatStamp, formatUsd, isIsoDate, parseHryvnias, shiftDate, shortDate, taxQuarterOfDue } from "./format";
+import { dueLabel, formatMoney, formatOriginal, kyivDate, formatMoneyWithUsd, formatStamp, formatUsd, isIsoDate, parseBalance, parseHryvnias, shiftDate, shortDate, taxQuarterOfDue } from "./format";
 
 describe("formatMoney", () => {
   it("groups thousands with commas and rounds to whole hryvnias", () => {
@@ -72,6 +72,16 @@ describe("parseHryvnias", () => {
 
   it("rejects empty, zero, negative and malformed input", () => {
     for (const bad of ["", "0", "0,00", "-5", "abc", "1,234", "1.2.3", "12,5x"]) expect(parseHryvnias(bad)).toBeNull();
+  });
+});
+
+describe("parseBalance", () => {
+  it("takes zero and cents, refuses the rest", () => {
+    expect(parseBalance("0")).toBe(0);
+    expect(parseBalance("2 700,50")).toBe(270_050);
+    expect(parseBalance("")).toBeNull();
+    expect(parseBalance("-5")).toBeNull();
+    expect(parseBalance("99999999999999999")).toBeNull();
   });
 });
 

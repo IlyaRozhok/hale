@@ -62,12 +62,18 @@ export function kyivDate(now: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 }
 
-/** Typed hryvnias ("1 500,50", "12.5") as kopecks; null for empty, zero, negative or malformed text. */
-export function parseHryvnias(text: string): number | null {
+/** A typed balance ("1 500,50", "12.5", "0") as minor units; null for empty, negative or malformed text. */
+export function parseBalance(text: string): number | null {
   const m = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(text.replace(/\s/g, ""));
   if (!m) return null;
-  const kopecks = Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0"));
-  return Number.isSafeInteger(kopecks) && kopecks > 0 ? kopecks : null;
+  const minor = Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0"));
+  return Number.isSafeInteger(minor) ? minor : null;
+}
+
+/** Typed hryvnias ("1 500,50", "12.5") as kopecks; null for empty, zero, negative or malformed text. */
+export function parseHryvnias(text: string): number | null {
+  const kopecks = parseBalance(text);
+  return kopecks !== null && kopecks > 0 ? kopecks : null;
 }
 
 /** The quarter a tax payment is for, from its due date: the one before the due date's quarter. */

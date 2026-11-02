@@ -251,7 +251,8 @@ export class PlanService implements OnApplicationBootstrap {
   /**
    * A card credit or cash deposit that is the USDC arriving by another way: lowers the Binance
    * balance by its hryvnia amount at the current USD rate and retypes the row as an own transfer.
-   * An event not yet confirmed is confirmed by this match (the money was never on Binance in the
+   * One event can take several rows: withdrawing in parts just lowers the balance each time, and each
+   * row counts once. An event not yet confirmed is confirmed by this match (the money was never on Binance in the
    * app's books, so the balance is left alone).
    */
   async matchTransaction(eventId: number, transactionId: number): Promise<IncomeEvent> {
@@ -260,16 +261,16 @@ export class PlanService implements OnApplicationBootstrap {
       if (ev.source !== "usdc") throw new UnprocessableEntityException("only USDC events can be matched");
       const tx = (
         await m.query(
-          `SELECT t.id, t.type, t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah, a.kind AS account_kind
+          `SELECT t.id, t.type, t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah, t.usdc_checked, a.kind AS account_kind
              FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.id=$1 FOR UPDATE OF t`,
           [transactionId],
         )
-      )[0] as { id: number; type: string | null; amount: number; amount_uah: number | null; account_kind: string } | undefined;
+      )[0] as { id: number; type: string | null; amount: number; amount_uah: number | null; usdc_checked: boolean; account_kind: string } | undefined;
       if (!tx) throw new NotFoundException("transaction not found");
       if (ev.matched_transaction_id === tx.id) return this.eventView(m, eventId);
-      if (ev.matched_transaction_id !== null) throw new ConflictException("event is already matched to another transaction");
       const taken = await m.query(`SELECT 1 FROM income_events WHERE matched_transaction_id=$1`, [tx.id]);
       if (taken.length > 0) throw new ConflictException("transaction is already matched to another event");
+      if (tx.usdc_checked && tx.type === "own_transfer") return this.eventView(m, eventId); // already taken off the balance
       const creditOnCard = tx.amount > 0 && (tx.account_kind === "black" || tx.account_kind === "white");
       if (!(tx.amount > 0 && (tx.type === "cash_in" || creditOnCard))) {
         throw new UnprocessableEntityException("only a cash deposit or a card credit can be matched");
@@ -287,13 +288,20 @@ export class PlanService implements OnApplicationBootstrap {
       } else {
         await this.markReceived(m, ev, tx.amount_uah);
       }
-      await m.query(`UPDATE income_events SET matched_transaction_id=$2 WHERE id=$1`, [eventId, tx.id]);
+      await m.query(`UPDATE income_events SET matched_transaction_id=COALESCE(matched_transaction_id, $2) WHERE id=$1`, [eventId, tx.id]);
       await m.query(
-        `UPDATE transactions SET type='own_transfer', category='own', type_source='owner', needs_label=false WHERE id=$1`,
+        `UPDATE transactions SET type='own_transfer', category='own', type_source='owner', needs_label=false, usdc_checked=true WHERE id=$1`,
         [tx.id],
       );
       return this.eventView(m, eventId);
     });
+  }
+
+  /** The owner says this incoming row is not a Binance withdrawal: it is not asked about again. */
+  async dismissUsdcMatch(transactionId: number): Promise<{ usdc_checked: true }> {
+    const r: [unknown[], number] = await this.ds.query(`UPDATE transactions SET usdc_checked=true WHERE id=$1`, [transactionId]);
+    if (r[1] === 0) throw new NotFoundException("transaction not found");
+    return { usdc_checked: true };
   }
 
   /** Manual path: the owner says it was paid. Idempotent. */

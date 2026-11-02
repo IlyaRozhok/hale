@@ -114,6 +114,11 @@ export class PlanController {
     return this.plan.matchTransaction(id, parse(matchTransactionInput, body).transactionId);
   }
 
+  @Post("transactions/:id/not-usdc")
+  dismissUsdcMatch(@Param("id", ParseIntPipe) id: number) {
+    return this.plan.dismissUsdcMatch(id);
+  }
+
   // --- payments -------------------------------------------------------------
   @Get("payments")
   listPayments(@Query("unpaid") unpaid?: string): Promise<ScheduledPayment[]> {

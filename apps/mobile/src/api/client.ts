@@ -1,6 +1,8 @@
 import type {
   BridgePreviewDto,
   LoanInput,
+  ManualBalanceDto,
+  ManualBalanceInput,
   RecipientLabelName,
   RecipientLabelResultDto,
   ScheduledPaymentDto,
@@ -47,6 +49,11 @@ export interface Api {
   chooseBridge(dailyAmount: number): Promise<TodayDto>;
   confirmIncome(eventId: number): Promise<void>;
   setIncomeDate(eventId: number, date: string): Promise<void>;
+  matchUsdc(eventId: number, transactionId: number): Promise<void>;
+  dismissUsdcMatch(transactionId: number): Promise<void>;
+  manualBalances(): Promise<ManualBalanceDto[]>;
+  createManualBalance(input: ManualBalanceInput): Promise<ManualBalanceDto>;
+  patchManualBalance(id: number, amount: number): Promise<ManualBalanceDto>;
   transactions(query: { cursor?: string; needsLabel?: boolean }): Promise<TransactionPageDto>;
   editTransaction(id: number, patch: Pick<TransactionPatch, "type" | "category" | "applyToSimilar">): Promise<TransactionEditDto>;
   labelRecipient(counterKey: string, label: RecipientLabelName): Promise<RecipientLabelResultDto>;
@@ -99,6 +106,11 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     chooseBridge: (dailyAmount) => request("POST", "/bridge", { dailyAmount }),
     confirmIncome: async (eventId) => void (await request("POST", `/plan/incomes/${eventId}/confirm`)),
     setIncomeDate: async (eventId, date) => void (await request("POST", `/plan/incomes/${eventId}/date`, { date })),
+    matchUsdc: async (eventId, transactionId) => void (await request("POST", `/plan/incomes/${eventId}/match-transaction`, { transactionId })),
+    dismissUsdcMatch: async (transactionId) => void (await request("POST", `/plan/transactions/${transactionId}/not-usdc`)),
+    manualBalances: () => request("GET", "/plan/manual-balances"),
+    createManualBalance: (input) => request("POST", "/plan/manual-balances", input),
+    patchManualBalance: (id, amount) => request("PATCH", `/plan/manual-balances/${id}`, { amount }),
     transactions: ({ cursor, needsLabel }) => {
       const q = [cursor !== undefined && `cursor=${encodeURIComponent(cursor)}`, needsLabel !== undefined && `needsLabel=${needsLabel}`].filter(Boolean);
       return request("GET", `/transactions${q.length ? `?${q.join("&")}` : ""}`);

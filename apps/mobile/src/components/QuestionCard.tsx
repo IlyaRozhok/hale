@@ -26,12 +26,14 @@ type Props = {
   question: Question;
   today: string;
   onConfirmUsdc: (eventId: number) => void;
+  onMatchUsdc: (eventId: number, transactionId: number) => void;
+  onDismissUsdc: (transactionId: number) => void;
   onSetDate: (eventId: number, date: string) => void;
   onOpenActivity: () => void;
   onLabelRecipient: (counterKey: string) => void;
 };
 
-export function QuestionCard({ question, today, onConfirmUsdc, onSetDate, onOpenActivity, onLabelRecipient }: Props) {
+export function QuestionCard({ question, today, onConfirmUsdc, onMatchUsdc, onDismissUsdc, onSetDate, onOpenActivity, onLabelRecipient }: Props) {
   const eventId = eventIdOf(question.id);
   const text = <Text style={styles.text}>{question.text}</Text>;
 
@@ -42,6 +44,20 @@ export function QuestionCard({ question, today, onConfirmUsdc, onSetDate, onOpen
         <Choice label="Да, пришло" onPress={() => onConfirmUsdc(eventId)} />
       </Glass>
     );
+  }
+  if (question.kind === "usdc_match") {
+    const transactionId = Number(question.id.split(":")[2]);
+    if (eventId !== null && Number.isInteger(transactionId) && transactionId > 0) {
+      return (
+        <Glass style={styles.stack}>
+          {text}
+          <View style={styles.choices}>
+            <Choice label="Да, вывод с Binance" onPress={() => onMatchUsdc(eventId, transactionId)} />
+            <Choice label="Нет" onPress={() => onDismissUsdc(transactionId)} />
+          </View>
+        </Glass>
+      );
+    }
   }
   if (question.kind === "income_date" && eventId !== null) {
     return (

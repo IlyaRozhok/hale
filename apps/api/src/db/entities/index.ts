@@ -39,6 +39,7 @@ export class Transaction {
   @Column({ type: "text", nullable: true }) category!: string | null;
   @Column({ type: "text", nullable: true }) type_source!: "rule" | "owner" | "auto" | null;
   @Column({ type: "boolean", default: false }) needs_label!: boolean;
+  @Column({ type: "boolean", default: false }) usdc_checked!: boolean;
   @Column({ type: "jsonb" }) raw!: unknown;
 }
 

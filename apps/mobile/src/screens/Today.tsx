@@ -5,7 +5,7 @@ import { tokens } from "@tablo/tokens";
 import type { TodayDto } from "@tablo/contracts";
 import { LimitVisual } from "../metal";
 import { formatMoney, formatStamp, formatUsd, kyivDate } from "../format";
-import { useChooseBridge, useConfirmIncome, useSetIncomeDate, useToday } from "../api/queries";
+import { useChooseBridge, useConfirmIncome, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
 import { AccountsList } from "../components/AccountsList";
 import { BadCaseCard } from "../components/BadCaseCard";
 import { BridgePlan } from "../components/BridgePlan";
@@ -44,6 +44,8 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const today = useToday();
   const confirmIncome = useConfirmIncome();
   const setIncomeDate = useSetIncomeDate();
+  const matchUsdc = useMatchUsdc();
+  const dismissUsdc = useDismissUsdcMatch();
   const chooseBridge = useChooseBridge();
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
@@ -130,6 +132,8 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
             onOpenActivity={onOpenActivity}
             onLabelRecipient={(counterKey) => setLabeling({ id: q.id, counterKey, name: q.text.replace(/^Кто это:\s*/, "").replace(/\?$/, "") })}
             onConfirmUsdc={(eventId) => answer(q.id, () => confirmIncome.mutateAsync(eventId))}
+            onMatchUsdc={(eventId, transactionId) => answer(q.id, () => matchUsdc.mutateAsync({ eventId, transactionId }))}
+            onDismissUsdc={(transactionId) => answer(q.id, () => dismissUsdc.mutateAsync(transactionId))}
             onSetDate={(eventId, date) => answer(q.id, () => setIncomeDate.mutateAsync({ eventId, date }))}
           />
         ))}

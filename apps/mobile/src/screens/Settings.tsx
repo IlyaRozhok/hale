@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@tablo/tokens";
 import { formatMoney } from "../format";
 import { useCapPreview, useSaveSettings, useSettings } from "../api/queries";
+import { BinanceBalance } from "../components/BinanceBalance";
 import { Chip } from "../components/Chip";
 import { Glass } from "../components/Glass";
 import { ManualLoan } from "../components/ManualLoan";
@@ -97,6 +98,7 @@ export function Settings() {
         </>
       )}
 
+      <BinanceBalance />
       <TaxPayments />
       <ManualLoan />
     </ScrollView>

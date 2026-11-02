@@ -12,6 +12,7 @@ import { RuleDirection1794182400000 } from "./migrations/0008-rule-direction";
 import { LoanTracking1794268800000 } from "./migrations/0009-loan-tracking";
 import { SettingsLastContact1794355200000 } from "./migrations/0010-settings-last-contact";
 import { TaxQuarter1794441600000 } from "./migrations/0011-tax-quarter";
+import { TransactionsUsdcChecked1794528000000 } from "./migrations/0012-transactions-usdc-checked";
 
 export const migrations = [
   Init1793577600000,
@@ -25,6 +26,7 @@ export const migrations = [
   LoanTracking1794268800000,
   SettingsLastContact1794355200000,
   TaxQuarter1794441600000,
+  TransactionsUsdcChecked1794528000000,
 ];
 
 export function createDataSource(url: string): DataSource {
