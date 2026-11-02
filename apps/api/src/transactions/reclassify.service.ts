@@ -14,7 +14,7 @@ export const RECLASSIFY_JOB_KIND = "reclassify";
 export const OWN_IDENTITY = Symbol("OWN_IDENTITY");
 const CHUNK = 500;
 /** Types the planned-data matcher cares about; other rows skip its per-row transaction. */
-const PLAN_TYPES: ReadonlySet<TxType> = new Set<TxType>(["obligation", "debt_payment", "tax", "loan_in", "income", "spend"]);
+export const PLAN_TYPES: ReadonlySet<TxType> = new Set<TxType>(["obligation", "debt_payment", "tax", "loan_in", "income", "spend"]);
 const PAIR_WINDOW_S = 600;
 
 /** What the bank statements cannot tell us about who "me" is. */

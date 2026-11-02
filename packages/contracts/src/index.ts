@@ -188,3 +188,83 @@ export interface BridgePreviewDto {
   creditNeeded: number;
   shortfall: number;
 }
+
+// --- transactions -----------------------------------------------------------
+export const txType = z.enum([
+  "income",
+  "spend",
+  "obligation",
+  "tax",
+  "debt_payment",
+  "loan_in",
+  "own_transfer",
+  "person_transfer",
+  "person_in",
+  "cash_in",
+  "cash_out",
+  "goal_contribution",
+]);
+export type TxTypeDto = z.infer<typeof txType>;
+
+export const transactionsQuery = z
+  .object({
+    cursor: z.string().min(1).max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+    type: txType.optional(),
+    needsLabel: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
+  })
+  .strict();
+export type TransactionsQuery = z.infer<typeof transactionsQuery>;
+
+export const transactionPatch = z
+  .object({
+    type: txType.optional(),
+    category: z.string().trim().min(1).max(64).optional(),
+    applyToSimilar: z.boolean().default(false),
+  })
+  .strict()
+  .refine((v) => v.type !== undefined || v.category !== undefined, "type or category is required");
+export type TransactionPatch = z.infer<typeof transactionPatch>;
+
+export const recipientLabelName = z.enum(["obligation", "debt_repayment", "shared_budget", "help", "one_off"]);
+export type RecipientLabelName = z.infer<typeof recipientLabelName>;
+export const recipientLabelInput = z
+  .object({ counterKey: z.string().regex(/^[0-9a-f]{16}$/), label: recipientLabelName })
+  .strict();
+export type RecipientLabelInput = z.infer<typeof recipientLabelInput>;
+
+export interface TransactionDto {
+  id: number;
+  occurredAt: string;
+  localDate: string;
+  description: string;
+  /** Signed minor units in the account currency. */
+  amount: number;
+  /** Signed kopecks at the rate of the operation date; null when no rate was known. */
+  amountUah: number | null;
+  fxRate: number | null;
+  currency: string;
+  type: TxTypeDto | null;
+  category: string | null;
+  hold: boolean;
+  needsLabel: boolean;
+  /** Stable opaque id of the counterparty; the IBAN itself is never returned. */
+  counterKey: string;
+  counterName: string | null;
+  accountKind: string;
+}
+
+export interface TransactionPageDto {
+  items: TransactionDto[];
+  nextCursor: string | null;
+}
+
+export interface TransactionEditDto {
+  transaction: TransactionDto;
+  /** Rows changed by this edit, the edited one included. */
+  updated: number;
+}
+
+export interface RecipientLabelResultDto {
+  updated: number;
+}

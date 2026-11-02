@@ -106,7 +106,7 @@ function mentionsOwnName(text: string, ownNames: readonly string[]): boolean {
   });
 }
 
-const typeCategory = (type: TxType): Category => {
+export const typeCategory = (type: TxType): Category => {
   switch (type) {
     case "tax": return "tax";
     case "debt_payment": return "debt";

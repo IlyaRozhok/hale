@@ -7,6 +7,7 @@ import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/
 import { quarterOf } from "../domain/quarter";
 import { runOutDate } from "../domain/run-out";
 import { taxReserve } from "../domain/tax";
+import { counterKeySql } from "../transactions/counter-key";
 import { Clock } from "./clock";
 
 const STALE_SYNC_MS = 6 * 3_600_000;
@@ -376,18 +377,18 @@ export class TodayService {
         text: "Когда ожидается следующий доход?",
       });
     }
-    const people: { key: string; id: number }[] = await m.query(
-      `SELECT key, id FROM (
-         SELECT DISTINCT ON (key) key, id, occurred_at FROM (
-           SELECT COALESCE(NULLIF(t.counter_name,''), t.description) AS key, t.id, t.occurred_at
+    const people: { key: string; label: string }[] = await m.query(
+      `SELECT ck AS key, label FROM (
+         SELECT DISTINCT ON (ck) ck, label, occurred_at, id FROM (
+           SELECT ${counterKeySql("t")} AS ck, COALESCE(NULLIF(t.counter_name,''), t.description) AS label, t.id, t.occurred_at
              FROM transactions t JOIN accounts a ON a.id=t.account_id
             WHERE t.needs_label AND t.type='person_transfer' AND a.kind <> 'jar'
-         ) s ORDER BY key, occurred_at DESC, id DESC
+         ) s ORDER BY ck, occurred_at DESC, id DESC
        ) d ORDER BY occurred_at DESC, id DESC LIMIT $1`,
       [MAX_RECIPIENT_QUESTIONS],
     );
     for (const p of people) {
-      questions.push({ id: `recipient_label:${p.id}`, kind: "recipient_label", text: `Кто это: ${p.key}?` });
+      questions.push({ id: `recipient_label:${p.key}`, kind: "recipient_label", text: `Кто это: ${p.label}?` });
     }
 
     const badCases: TodayDto["badCases"] = [];

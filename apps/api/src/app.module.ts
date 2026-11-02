@@ -9,6 +9,7 @@ import { HealthController } from "./health.controller";
 import { MonoModule } from "./mono/mono.module";
 import { PlanModule } from "./plan/plan.module";
 import { TodayModule } from "./today/today.module";
+import { TransactionsModule } from "./transactions/transactions.module";
 
 @Module({})
 export class AppModule {
@@ -28,6 +29,7 @@ export class AppModule {
         MonoModule,
         PlanModule,
         TodayModule,
+        TransactionsModule,
       ],
       controllers: [HealthController],
     };
