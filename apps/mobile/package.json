@@ -1,0 +1,27 @@
+{
+  "name": "@tablo/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "ios": "expo run:ios",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@react-native-community/slider": "5.2.1",
+    "@shopify/react-native-skia": "2.14.0",
+    "@tablo/tokens": "workspace:*",
+    "expo": "^58.0.22",
+    "expo-dev-client": "~58.0.18",
+    "expo-status-bar": "~58.0.4",
+    "react": "^19.3.1",
+    "react-native": "^0.88.1",
+    "react-native-reanimated": "4.7.1",
+    "react-native-worklets": "0.13.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "typescript": "^6.0.3"
+  }
+}
