@@ -37,6 +37,8 @@ export interface TestAppOptions {
   config?: Partial<AppConfig>;
   /** Replaces MonoClient so no test ever reaches the real monobank. */
   client?: unknown;
+  /** Replaces providers by token (e.g. the Expo fetch). */
+  overrides?: [unknown, unknown][];
 }
 
 export async function createTestApp(
@@ -47,6 +49,7 @@ export async function createTestApp(
     imports: [AppModule.forRoot(await makeConfig(databaseUrl, opts.config))],
   });
   if (opts.client) builder.overrideProvider(MonoClient).useValue(opts.client);
+  for (const [token, value] of opts.overrides ?? []) builder.overrideProvider(token as never).useValue(value);
   const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication();
   await app.init();

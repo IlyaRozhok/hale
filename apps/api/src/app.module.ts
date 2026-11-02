@@ -7,6 +7,7 @@ import { entities } from "./db/entities";
 import { migrations } from "./db/data-source";
 import { HealthController } from "./health.controller";
 import { MonoModule } from "./mono/mono.module";
+import { NotificationsModule } from "./notifications/notifications.module";
 import { PlanModule } from "./plan/plan.module";
 import { TodayModule } from "./today/today.module";
 import { TransactionsModule } from "./transactions/transactions.module";
@@ -27,6 +28,7 @@ export class AppModule {
         }),
         AuthModule,
         MonoModule,
+        NotificationsModule,
         PlanModule,
         TodayModule,
         TransactionsModule,

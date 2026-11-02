@@ -1,0 +1,156 @@
+import type { INestApplication } from "@nestjs/common";
+import request from "supertest";
+import { DataSource as DS, type DataSource } from "typeorm";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
+import { NotificationsService } from "../src/notifications/notifications.service";
+import { EXPO_FETCH, type FetchLike } from "../src/notifications/expo-push";
+import { Clock } from "../src/today/clock";
+
+let app: INestApplication;
+let ds: DataSource;
+let auth: string;
+let clock: Clock;
+let svc: NotificationsService;
+let sent: { to: string; title: string; body: string }[];
+/** Per-token answer for the fake Expo endpoint; default ok. */
+let answer: Record<string, { status: "ok" } | { status: "error"; details: { error: string } }>;
+let httpFail = false;
+
+const fakeFetch: FetchLike = async (url, init) => {
+  expect(url).toBe("https://exp.host/--/api/v2/push/send");
+  if (httpFail) return { ok: false, status: 500, json: async () => ({}) };
+  const msgs = JSON.parse(init.body) as { to: string; title: string; body: string }[];
+  sent.push(...msgs);
+  return { ok: true, status: 200, json: async () => ({ data: msgs.map((m) => answer[m.to] ?? { status: "ok" }) }) };
+};
+
+const at = (iso: string) => {
+  clock.fixed = new Date(iso);
+};
+const post = (p: string, b: object) => request(app.getHttpServer()).post(p).set("Authorization", auth).send(b);
+const device = (name: string, token: string | null) =>
+  ds.query(`INSERT INTO devices (name, push_token, token_hash) VALUES ($1,$2,$3)`, [name, token, `h-${name}`]);
+const tokens = async () => (await ds.query(`SELECT name, push_token FROM devices ORDER BY id`)) as { name: string; push_token: string | null }[];
+const logged = async () => (await ds.query(`SELECT key FROM notifications_log ORDER BY id`)).map((r: { key: string }) => r.key) as string[];
+
+beforeAll(async () => {
+  const url = await createMigratedDatabase();
+  ds = new DS({ type: "postgres", url });
+  await ds.initialize();
+  app = await createTestApp(url, { overrides: [[EXPO_FETCH, fakeFetch]] });
+  clock = app.get(Clock);
+  svc = app.get(NotificationsService);
+  const login = await request(app.getHttpServer()).post("/auth/login").send({ password: TEST_PASSWORD, deviceName: "login-device" });
+  auth = `Bearer ${login.body.token as string}`;
+});
+afterAll(async () => {
+  await app.close();
+  await ds.destroy();
+});
+beforeEach(async () => {
+  await ds.query(
+    `TRUNCATE notifications_log, scheduled_payments, income_events, expected_incomes, loans, bridge_plans, daily_snapshots
+     RESTART IDENTITY CASCADE`,
+  );
+  await ds.query(`UPDATE devices SET push_token=NULL`);
+  await ds.query(`DELETE FROM devices WHERE name <> 'login-device'`);
+  await ds.query(`UPDATE settings SET last_sync_at='2026-11-13T07:00:00Z', lifestyle_cap=100000000, food_floor=45000`);
+  const fop = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop',500000,'UAH',15,25) RETURNING id`))[0].id;
+  await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-12','2026-12-20','expected')`, [fop]);
+  sent = [];
+  answer = {};
+  httpFail = false;
+  at("2026-11-13T08:00:00Z"); // 10:00 Kyiv
+});
+
+const taxDue = (due: string) =>
+  ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('tax','Единый налог',1234500,'UAH',$1)`, [due]);
+
+describe("POST /devices/push-token", () => {
+  it("requires auth and a valid token, then stores it on the calling device", async () => {
+    await request(app.getHttpServer()).post("/devices/push-token").send({ token: "ExponentPushToken[a]" }).expect(401);
+    await post("/devices/push-token", { token: "nope" }).expect(400);
+    await post("/devices/push-token", { token: "ExponentPushToken[abc]" }).expect(204);
+    expect((await tokens()).find((d) => d.name === "login-device")?.push_token).toBe("ExponentPushToken[abc]");
+  });
+
+  it("moves a token away from another device", async () => {
+    await device("old", "ExponentPushToken[abc]");
+    await post("/devices/push-token", { token: "ExponentPushToken[abc]" }).expect(204);
+    expect((await tokens()).find((d) => d.name === "old")?.push_token).toBeNull();
+  });
+});
+
+describe("tick", () => {
+  it("sends a due tax reminder to every device and logs it once", async () => {
+    await taxDue("2026-11-20");
+    await device("a", "ExponentPushToken[a]");
+    await device("b", "ExponentPushToken[b]");
+    await svc.tick();
+    expect(sent.map((m) => m.to).sort()).toEqual(["ExponentPushToken[a]", "ExponentPushToken[b]"]);
+    expect(sent[0]!.body).toContain("₴12 345");
+    expect(await logged()).toEqual(["tax:1:d7"]);
+    await svc.tick();
+    expect(sent).toHaveLength(2);
+  });
+
+  it("logs nothing when there are no devices, so it retries", async () => {
+    await taxDue("2026-11-20");
+    await svc.tick();
+    expect(sent).toEqual([]);
+    expect(await logged()).toEqual([]);
+    await device("a", "ExponentPushToken[a]");
+    await svc.tick();
+    expect(await logged()).toEqual(["tax:1:d7"]);
+  });
+
+  it("does not mark as sent when every device fails, even on a transport error", async () => {
+    await taxDue("2026-11-20");
+    await device("a", "ExponentPushToken[a]");
+    answer["ExponentPushToken[a]"] = { status: "error", details: { error: "MessageRateExceeded" } };
+    await svc.tick();
+    expect(await logged()).toEqual([]);
+    httpFail = true;
+    await svc.tick();
+    expect(await logged()).toEqual([]);
+    httpFail = false;
+    answer = {};
+    await svc.tick();
+    expect(await logged()).toEqual(["tax:1:d7"]);
+  });
+
+  it("counts as sent if one device succeeds, and clears a DeviceNotRegistered token", async () => {
+    await taxDue("2026-11-20");
+    await device("a", "ExponentPushToken[a]");
+    await device("b", "ExponentPushToken[b]");
+    answer["ExponentPushToken[a]"] = { status: "error", details: { error: "DeviceNotRegistered" } };
+    await svc.tick();
+    expect(await logged()).toEqual(["tax:1:d7"]);
+    expect((await tokens()).find((d) => d.name === "a")?.push_token).toBeNull();
+    expect((await tokens()).find((d) => d.name === "b")?.push_token).toBe("ExponentPushToken[b]");
+  });
+
+  it("allows one ordinary notification a day, by log", async () => {
+    await device("a", "ExponentPushToken[a]");
+    const exp = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('usdc',270000,'USD',15,25) RETURNING id`))[0].id;
+    await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-11','2026-11-20','expected')`, [exp]);
+    at("2026-11-16T08:00:00Z");
+    await svc.tick();
+    expect(await logged()).toEqual(["usdc:2:2026-11-16"]);
+    at("2026-11-16T12:00:00Z");
+    await svc.tick();
+    expect(sent).toHaveLength(1);
+    at("2026-11-17T08:00:00Z");
+    await svc.tick();
+    expect(await logged()).toEqual(["usdc:2:2026-11-16", "usdc:2:2026-11-17"]);
+  });
+
+  it("reports a broken sync once", async () => {
+    await device("a", "ExponentPushToken[a]");
+    await ds.query(`UPDATE settings SET last_sync_at='2026-11-10T07:00:00Z'`);
+    await svc.tick();
+    await svc.tick();
+    expect(await logged()).toEqual(["sync_broken:2026-11-10"]);
+  });
+});
