@@ -7,6 +7,7 @@ import { entities } from "./db/entities";
 import { migrations } from "./db/data-source";
 import { HealthController } from "./health.controller";
 import { MonoModule } from "./mono/mono.module";
+import { PlanModule } from "./plan/plan.module";
 
 @Module({})
 export class AppModule {
@@ -24,6 +25,7 @@ export class AppModule {
         }),
         AuthModule,
         MonoModule,
+        PlanModule,
       ],
       controllers: [HealthController],
     };

@@ -5,9 +5,11 @@ RUN corepack enable
 WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json apps/api/
+COPY packages/contracts/package.json packages/contracts/
 RUN pnpm install --frozen-lockfile --filter @tablo/api...
 COPY tsconfig.base.json ./
 COPY apps/api apps/api
+COPY packages/contracts packages/contracts
 RUN pnpm --filter @tablo/api build
 # Self-contained production tree with real (non-symlinked) dependencies.
 RUN pnpm --filter @tablo/api deploy --prod /out

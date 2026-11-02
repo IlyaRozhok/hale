@@ -9,6 +9,7 @@ import { JOB_CLOCK, JobRunner } from "./jobs/job-runner";
 import { MonoClient } from "./mono.client";
 import { MonoController } from "./mono.controller";
 import { OWN_IDENTITY, ReclassifyService } from "../transactions/reclassify.service";
+import { PlanModule } from "../plan/plan.module";
 import { RateGate } from "./rate-gate";
 import { ReconcileService } from "./reconcile.service";
 import { WebhookBodyErrorFilter } from "./webhook-body.filter";
@@ -17,7 +18,7 @@ import { WebhookService } from "./webhook.service";
 
 /** Single RateGate and MonoClient for the whole app, so the 60 s spacing is global. */
 @Module({
-  imports: [ScheduleModule.forRoot()],
+  imports: [ScheduleModule.forRoot(), PlanModule],
   providers: [
     RateGate,
     {

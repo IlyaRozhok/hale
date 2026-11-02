@@ -5,12 +5,14 @@ import { Init1793577600000 } from "./migrations/0001-init";
 import { NullableAmountUah1793664000000 } from "./migrations/0002-nullable-amount-uah";
 import { SettingsLastSync1793750400000 } from "./migrations/0003-settings-last-sync";
 import { OwnIdentityNeedsLabel1793836800000 } from "./migrations/0004-own-identity-needs-label";
+import { PlanLinks1793923200000 } from "./migrations/0005-plan-links";
 
 export const migrations = [
   Init1793577600000,
   NullableAmountUah1793664000000,
   SettingsLastSync1793750400000,
   OwnIdentityNeedsLabel1793836800000,
+  PlanLinks1793923200000,
 ];
 
 export function createDataSource(url: string): DataSource {

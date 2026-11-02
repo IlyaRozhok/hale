@@ -1,4 +1,4 @@
-import { Inject, Injectable, type OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, Optional, type OnModuleInit } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import {
   classify,
@@ -8,10 +8,13 @@ import {
   type TxType,
 } from "../domain/classify";
 import { JobRunner } from "../mono/jobs/job-runner";
+import { PlanService } from "../plan/plan.service";
 
 export const RECLASSIFY_JOB_KIND = "reclassify";
 export const OWN_IDENTITY = Symbol("OWN_IDENTITY");
 const CHUNK = 500;
+/** Types the planned-data matcher cares about; other rows skip its per-row transaction. */
+const PLAN_TYPES: ReadonlySet<TxType> = new Set<TxType>(["obligation", "debt_payment", "tax", "loan_in", "income"]);
 const PAIR_WINDOW_S = 600;
 
 /** What the bank statements cannot tell us about who "me" is. */
@@ -44,6 +47,7 @@ export class ReclassifyService implements OnModuleInit {
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(JobRunner) private readonly runner: JobRunner,
     @Inject(OWN_IDENTITY) private readonly own: OwnIdentity,
+    @Optional() @Inject(PlanService) private readonly plan?: PlanService,
   ) {}
 
   onModuleInit(): void {
@@ -107,6 +111,7 @@ export class ReclassifyService implements OnModuleInit {
             WHERE id=$1 AND type_source IS DISTINCT FROM 'owner'`,
           [r.id, out.type, out.category, out.source === "owner" ? "rule" : out.source, out.needsLabel],
         );
+        if (PLAN_TYPES.has(out.type)) await this.plan?.onClassified(r.id);
         n++;
       }
     }

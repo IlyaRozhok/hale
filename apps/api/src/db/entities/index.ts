@@ -71,6 +71,7 @@ export class IncomeEvent {
   @Column({ type: "timestamptz", nullable: true }) received_at!: Date | null;
   @Column({ type: "bigint", transformer: bt, nullable: true }) amount_uah!: number | null;
   @Column({ type: "text", default: "expected" }) status!: string;
+  @Column({ type: "integer", nullable: true }) matched_transaction_id!: number | null;
 }
 
 @Entity("scheduled_payments")
