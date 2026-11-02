@@ -221,3 +221,16 @@ describe("MonoClient", () => {
     expect(fetchFn).not.toHaveBeenCalled();
   });
 });
+
+describe("request timeout", () => {
+  it("passes an abort signal to fetch and treats an abort as a network error", async () => {
+    const { client, calls } = setup(async () => json([]));
+    await client.currency();
+    expect(calls[0]!.init.signal).toBeInstanceOf(AbortSignal);
+
+    const aborting = setup(async () => {
+      throw new DOMException("The operation timed out", "TimeoutError");
+    });
+    await expect(aborting.client.currency()).rejects.toThrow(/failed: .*timed out/);
+  });
+});

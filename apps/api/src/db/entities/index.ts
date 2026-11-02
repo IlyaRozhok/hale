@@ -27,7 +27,7 @@ export class Transaction {
   @Column({ type: "text", nullable: true }) comment!: string | null;
   @Column({ type: "integer", nullable: true }) mcc!: number | null;
   @money() amount!: number;
-  @money() amount_uah!: number;
+  @Column({ type: "bigint", transformer: bt, nullable: true }) amount_uah!: number | null;
   @Column({ type: "numeric", precision: 20, scale: 8, nullable: true, transformer: nt })
   fx_rate!: number | null;
   @Column({ type: "boolean", default: false }) hold!: boolean;

@@ -19,7 +19,7 @@ async function listTables(url: string): Promise<string[]> {
   return rows.map((r) => r.table_name as string).sort();
 }
 
-describe("0001-init migration", () => {
+describe("migrations", () => {
   it("runs up on a clean database and reverts down to empty", async () => {
     const url = await createTestDatabase();
     const ds = createDataSource(url);
@@ -32,6 +32,7 @@ describe("0001-init migration", () => {
     expect(settings[0].tax_rate_bp).toBe(600);
     expect(settings[0].limit_visual).toBe("mercury");
 
+    await ds.undoLastMigration();
     await ds.undoLastMigration();
     expect(await listTables(url)).toEqual([]);
     await ds.destroy();

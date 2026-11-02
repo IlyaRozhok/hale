@@ -14,6 +14,9 @@ export const MONO_BASE_URL = "https://api.monobank.ua";
 /** 31 days + 1 hour, in seconds. */
 export const MONO_MAX_STATEMENT_WINDOW_S = 2_682_000;
 
+/** A hung connection counts as a network error. */
+export const MONO_REQUEST_TIMEOUT_MS = 30_000;
+
 export interface MonoClientOptions {
   /** From config; optional at boot, required when a private call is made. */
   token: string | undefined;
@@ -106,6 +109,7 @@ export class MonoClient {
         method: opts.method ?? "GET",
         headers,
         body: opts.body,
+        signal: AbortSignal.timeout(MONO_REQUEST_TIMEOUT_MS),
       });
     } catch (e) {
       const reason = e instanceof Error ? e.message : "unknown error";

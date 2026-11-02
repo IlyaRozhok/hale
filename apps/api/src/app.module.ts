@@ -6,6 +6,7 @@ import { ConfigModule } from "./config.module";
 import { entities } from "./db/entities";
 import { migrations } from "./db/data-source";
 import { HealthController } from "./health.controller";
+import { MonoModule } from "./mono/mono.module";
 
 @Module({})
 export class AppModule {
@@ -22,6 +23,7 @@ export class AppModule {
           synchronize: false,
         }),
         AuthModule,
+        MonoModule,
       ],
       controllers: [HealthController],
     };
