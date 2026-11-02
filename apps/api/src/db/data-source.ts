@@ -7,6 +7,7 @@ import { SettingsLastSync1793750400000 } from "./migrations/0003-settings-last-s
 import { OwnIdentityNeedsLabel1793836800000 } from "./migrations/0004-own-identity-needs-label";
 import { PlanLinks1793923200000 } from "./migrations/0005-plan-links";
 import { RecurringPayments1794009600000 } from "./migrations/0006-recurring-payments";
+import { BridgePlanBasis1794096000000 } from "./migrations/0007-bridge-plan-basis";
 
 export const migrations = [
   Init1793577600000,
@@ -15,6 +16,7 @@ export const migrations = [
   OwnIdentityNeedsLabel1793836800000,
   PlanLinks1793923200000,
   RecurringPayments1794009600000,
+  BridgePlanBasis1794096000000,
 ];
 
 export function createDataSource(url: string): DataSource {

@@ -138,6 +138,7 @@ export class BridgePlan {
   @Column({ type: "bigint", transformer: bt, default: 0 }) credit_plan!: number;
   @Column({ type: "date" }) created_on!: string;
   @Column({ type: "date", nullable: true }) closed_on!: string | null;
+  @Column({ type: "text", default: "" }) basis!: string;
 }
 
 @Entity("daily_snapshots")

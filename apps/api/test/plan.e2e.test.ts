@@ -369,6 +369,20 @@ describe("recurring payments", () => {
     expect(p).toEqual({ name: "Rent", amount: 1_700_000, kind: "obligation", match_hint: "rent" });
   });
 
+  it("does not create a current-month payment whose day is already past when the series is first created", async () => {
+    const id = (await api.post("/plan/recurring", { ...rent, day_of_month: 10 }).expect(201)).body.id as number;
+    const plan = app.get(PlanService);
+    const dues = async () =>
+      (await ds.query(`SELECT due_on::text AS d FROM scheduled_payments WHERE recurring_id=$1 ORDER BY due_on`, [id])).map(
+        (r: { d: string }) => r.d,
+      );
+    expect(await plan.generateRecurring("2027-01-15")).toBe(1);
+    expect(await dues()).toEqual(["2027-02-10"]);
+    // later runs are unaffected: next month's row appears as usual
+    await plan.generateRecurring("2027-02-01");
+    expect(await dues()).toEqual(["2027-02-10", "2027-03-10"]);
+  });
+
   it("skips inactive series", async () => {
     await api.post("/plan/recurring", { ...rent, active: false }).expect(201);
     expect(await app.get(PlanService).generateRecurring("2027-01-15")).toBe(0);

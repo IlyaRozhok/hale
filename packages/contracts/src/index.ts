@@ -141,3 +141,50 @@ export const seedFile = z
   .strict();
 export type SeedFile = z.infer<typeof seedFile>;
 export type SeedPayment = z.infer<typeof seedPayment>;
+
+// --- today ------------------------------------------------------------------
+export const bridgeInput = z.object({ dailyAmount: money.positive() }).strict();
+export type BridgeInput = z.infer<typeof bridgeInput>;
+
+export interface BridgeStateDto {
+  creditNeeded: number;
+  recommendedDaily: number;
+  maxDailyWithinCredit: number;
+  shortfall: number;
+  overPlan: boolean;
+}
+
+export interface DailyStateDto {
+  mode: "normal" | "bridge";
+  daysLeft: number;
+  free: number;
+  dailyLimit: number;
+  leftToday: number;
+  /** 0..1 share of today's limit still unspent. */
+  level: number;
+  needsIncomeDate: boolean;
+  bridge: BridgeStateDto | null;
+}
+
+export interface TodayDto {
+  date: string;
+  state: DailyStateDto;
+  /** UAH per USD; 0 when no rate is known. */
+  usdRate: number;
+  rateStale: boolean;
+  accounts: { own: number; credit: number; fop: number; binance: number };
+  upcoming: { id: string; name: string; amount: number; dueOn: string; kind: string }[];
+  questions: { id: string; kind: "usdc_arrived" | "income_date" | "recipient_label"; text: string }[];
+  badCases: { id: string; text: string }[];
+  runOutOn: string | null;
+  /** Last successful sync, null if there was none yet. */
+  syncedAt: string | null;
+  syncStale: boolean;
+  limitVisual: "mercury" | "ring";
+}
+
+export interface BridgePreviewDto {
+  dailyAmount: number;
+  creditNeeded: number;
+  shortfall: number;
+}

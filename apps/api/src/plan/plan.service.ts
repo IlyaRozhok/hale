@@ -66,7 +66,11 @@ export class PlanService implements OnApplicationBootstrap {
       );
     let created = 0;
     for (const r of series) {
+      // A series being created now has no history: a day already past this month was paid (or not
+      // tracked) before setup, and would show up as overdue.
+      const fresh = (await this.ds.query(`SELECT 1 FROM scheduled_payments WHERE recurring_id=$1 LIMIT 1`, [r.id])).length === 0;
       for (const due of monthlyDueDates(r.day_of_month, today)) {
+        if (fresh && due < today) continue;
         const out: unknown[] = await this.ds.query(
           `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, match_hint, recurring_id)
            VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (recurring_id, due_on) DO NOTHING RETURNING id`,
