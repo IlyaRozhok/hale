@@ -7,3 +7,4 @@ private/
 .superpowers/
 .DS_Store
 .terraform/
+.idea/
