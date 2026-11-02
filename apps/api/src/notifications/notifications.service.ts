@@ -7,6 +7,8 @@ import { TodayService } from "../today/today.service";
 import { ExpoPush } from "./expo-push";
 import { dueNotifications, type Notification, type NotifyState } from "./schedule";
 
+const LOAN_ALERT_DAYS = 2;
+
 /** Sends the notifications that `dueNotifications` says are due; logs a key only after a device accepted it. */
 @Injectable()
 export class NotificationsService {
@@ -37,7 +39,15 @@ export class NotificationsService {
       const now = this.clock.now();
       const due = dueNotifications(await this.loadState(now), now);
       const delivered: string[] = [];
-      for (const n of due) if (await this.deliver(n, now)) delivered.push(n.key);
+      let ordinaryDone = false;
+      for (const n of due) {
+        // Tax reminders all go out; of the ordinary candidates, stop at the first that gets through.
+        if (n.kind !== "tax" && ordinaryDone) continue;
+        if (await this.deliver(n, now)) {
+          delivered.push(n.key);
+          if (n.kind !== "tax") ordinaryDone = true;
+        }
+      }
       return delivered;
     } finally {
       this.ticking = false;
@@ -52,6 +62,12 @@ export class NotificationsService {
          FROM scheduled_payments WHERE kind='tax' AND paid_at IS NULL AND due_on BETWEEN $1 AND $2 ORDER BY due_on, id`,
       [addDays(date, -1), addDays(date, 7)],
     );
+    // A loan alert is only for a loan taken in the last two days; older open loans stay on the screen only.
+    const recent: { id: number }[] = await this.ds.query(`SELECT id FROM loans WHERE received_on >= $1::date`, [
+      addDays(date, -LOAN_ALERT_DAYS),
+    ]);
+    const recentIds = new Set(recent.map((l) => `loan:${l.id}`));
+    const badCases = t.badCases.filter((b) => !b.id.startsWith("loan:") || recentIds.has(b.id));
     const keys: { key: string }[] = await this.ds.query(`SELECT key FROM notifications_log`);
     const ordinary = await this.ds.query(
       `SELECT 1 FROM notifications_log WHERE kind <> 'tax' AND (sent_at AT TIME ZONE 'Europe/Kyiv')::date = $1::date LIMIT 1`,
@@ -61,7 +77,7 @@ export class NotificationsService {
       taxes: taxes.map((p) => ({ id: p.id, name: p.name, amount: p.amount, currency: p.currency, dueOn: p.due_on, paid: false })),
       leftToday: t.state.leftToday,
       dailyLimit: t.state.dailyLimit,
-      badCases: t.badCases,
+      badCases,
       questions: t.questions,
       syncedAt: t.syncedAt,
       sentKeys: new Set(keys.map((k) => k.key)),

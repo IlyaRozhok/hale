@@ -76,9 +76,10 @@ function taxNotifications(t: TaxPayment, date: string, hour: number, sent: Reado
 }
 
 /**
- * Notifications due at `now`. Tax reminders are not limited; of the ordinary ones at most one is
- * returned, by priority: bad case, over limit, USDC, income date, broken sync. Ordinary ones are held
- * until 10:00 Kyiv and nothing ordinary goes out after one already did today. A reminder is only due on its
+ * Notifications due at `now`. Tax reminders are not limited. Ordinary candidates come in priority order
+ * (bad case, over limit, USDC, income date, broken sync) and the caller sends only the first that gets
+ * through, so a failing top item cannot starve the rest. Ordinary ones are held until 10:00 Kyiv and none
+ * goes out after one already did today, except over_limit, which keeps the evening to itself. A reminder is only due on its
  * own day, so one that was missed is skipped rather than back-filled.
  */
 export function dueNotifications(state: NotifyState, now: Date): Notification[] {
@@ -88,10 +89,8 @@ export function dueNotifications(state: NotifyState, now: Date): Notification[] 
   const fresh = (key: string) => !state.sentKeys.has(key);
 
   for (const t of state.taxes) out.push(...taxNotifications(t, date, hour, state.sentKeys));
-  if (state.ordinarySentToday) return out;
-
   const ordinary: Notification[] = [];
-  if (hour >= REMINDER_HOUR) {
+  if (hour >= REMINDER_HOUR && !state.ordinarySentToday) {
     for (const b of state.badCases) {
       ordinary.push({ key: `bad:${b.id}`, kind: "bad_case", title: "Денежный план", body: b.text });
     }
@@ -104,7 +103,7 @@ export function dueNotifications(state: NotifyState, now: Date): Notification[] 
       body: `Сегодня потрачено ${money(state.dailyLimit - state.leftToday)} при лимите ${money(state.dailyLimit)}, это на ${money(-state.leftToday)} больше. Завтра лимит пересчитается.`,
     });
   }
-  if (hour >= REMINDER_HOUR) {
+  if (hour >= REMINDER_HOUR && !state.ordinarySentToday) {
     for (const q of state.questions) {
       if (q.kind === "usdc_arrived") {
         const eventId = q.id.slice(q.id.indexOf(":") + 1);
@@ -128,7 +127,6 @@ export function dueNotifications(state: NotifyState, now: Date): Notification[] 
       }
     }
   }
-  const next = ordinary.find((n) => fresh(n.key));
-  if (next) out.push(next);
+  out.push(...ordinary.filter((n) => fresh(n.key)));
   return out;
 }

@@ -12,6 +12,7 @@ import { DataSource, type EntityManager } from "typeorm";
 import { type Payment, matchPayment, monthlyDueDates, monthlyEvents } from "../domain/recurring-match";
 import { kyivDate } from "../domain/money";
 import { Clock } from "../today/clock";
+import { INTEREST_TEXT, SHORT_LOAN_TEXT } from "./short-loan";
 import type { IncomeEvent, ScheduledPayment } from "../db/entities";
 
 export const BINANCE = "Binance";
@@ -232,14 +233,15 @@ export class PlanService implements OnApplicationBootstrap {
 
       if (t.type === "loan_in") {
         await m.query(
-          `INSERT INTO loans (amount, received_on, source_transaction_id, note)
-           SELECT $2, $3, $1, 'loan_in' WHERE NOT EXISTS (SELECT 1 FROM loans WHERE source_transaction_id=$1)
+          `INSERT INTO loans (amount, received_on, source_transaction_id, note, kind)
+           SELECT $2, $3, $1, 'loan_in', $4 WHERE NOT EXISTS (SELECT 1 FROM loans WHERE source_transaction_id=$1)
            ON CONFLICT DO NOTHING`,
-          [t.id, Math.abs(t.amount_uah ?? t.amount), t.local_date],
+          [t.id, Math.abs(t.amount_uah ?? t.amount), t.local_date, SHORT_LOAN_TEXT.test(t.text) ? "short" : "other"],
         );
       } else if (t.type === "income" && t.account_kind === "fop") {
         await this.markFopEvents(m, t);
       } else if (t.type === "obligation" || t.type === "debt_payment" || t.type === "tax" || t.type === "spend") {
+        if (t.type === "debt_payment") await this.repayShortLoans(m, t);
         const linked = await m.query(`SELECT 1 FROM scheduled_payments WHERE transaction_id=$1`, [t.id]);
         if (linked.length > 0) {
           if (t.type === "spend") await this.retypeAsDebt(m, t.id);
@@ -266,6 +268,34 @@ export class PlanService implements OnApplicationBootstrap {
         }
       }
     });
+  }
+
+  /**
+   * A repayment of a short loan (Кредит до завтра, МФО) pays the oldest open short loans first, up to
+   * its amount; a loan stays open (with `repaid_amount` growing) until fully covered. Applied once per row.
+   */
+  private async repayShortLoans(m: EntityManager, t: TxRow): Promise<void> {
+    if (t.amount >= 0 || !SHORT_LOAN_TEXT.test(t.text) || INTEREST_TEXT.test(t.text)) return;
+    const fresh = await m.query(
+      `INSERT INTO loan_repayments (transaction_id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING transaction_id`,
+      [t.id],
+    );
+    if (fresh.length === 0) return;
+    let left = Math.abs(t.amount_uah ?? t.amount);
+    const loans: { id: number; amount: number; repaid_amount: number }[] = await m.query(
+      `SELECT id, amount::float8 AS amount, repaid_amount::float8 AS repaid_amount FROM loans
+        WHERE kind='short' AND repaid_at IS NULL AND received_on <= $1 ORDER BY received_on, id FOR UPDATE`,
+      [t.local_date],
+    );
+    for (const l of loans) {
+      if (left <= 0) break;
+      const pay = Math.min(left, l.amount - l.repaid_amount);
+      left -= pay;
+      const total = l.repaid_amount + pay;
+      await m.query(`UPDATE loans SET repaid_amount=$2::bigint, repaid_at = CASE WHEN $2::bigint >= amount THEN $3::timestamptz END WHERE id=$1`, [
+        l.id, total, t.occurred_at,
+      ]);
+    }
   }
 
   /** A store installment that classify() saw as spend is a debt payment; owner rows stay as they are. */

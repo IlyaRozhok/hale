@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import { NotificationsService } from "../src/notifications/notifications.service";
 import { EXPO_FETCH, type FetchLike } from "../src/notifications/expo-push";
+import { PlanService } from "../src/plan/plan.service";
 import { Clock } from "../src/today/clock";
 
 let app: INestApplication;
@@ -16,13 +17,15 @@ let sent: { to: string; title: string; body: string }[];
 /** Per-token answer for the fake Expo endpoint; default ok. */
 let answer: Record<string, { status: "ok" } | { status: "error"; details: { error: string } }>;
 let httpFail = false;
+/** Titles the fake Expo rejects, to simulate one persistently failing notification. */
+let failTitles = new Set<string>();
 
 const fakeFetch: FetchLike = async (url, init) => {
   expect(url).toBe("https://exp.host/--/api/v2/push/send");
   if (httpFail) return { ok: false, status: 500, json: async () => ({}) };
   const msgs = JSON.parse(init.body) as { to: string; title: string; body: string }[];
   sent.push(...msgs);
-  return { ok: true, status: 200, json: async () => ({ data: msgs.map((m) => answer[m.to] ?? { status: "ok" }) }) };
+  return { ok: true, status: 200, json: async () => ({ data: msgs.map((m) => (failTitles.has(m.title) ? { status: "error", details: { error: "MessageRateExceeded" } } : (answer[m.to] ?? { status: "ok" }))) }) };
 };
 
 const at = (iso: string) => {
@@ -50,17 +53,18 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   await ds.query(
-    `TRUNCATE notifications_log, scheduled_payments, income_events, expected_incomes, loans, bridge_plans, daily_snapshots
+    `TRUNCATE notifications_log, scheduled_payments, transactions, accounts, income_events, expected_incomes, loans, bridge_plans, daily_snapshots
      RESTART IDENTITY CASCADE`,
   );
   await ds.query(`UPDATE devices SET push_token=NULL`);
   await ds.query(`DELETE FROM devices WHERE name <> 'login-device'`);
-  await ds.query(`UPDATE settings SET last_sync_at='2026-11-13T07:00:00Z', lifestyle_cap=100000000, food_floor=45000`);
+  await ds.query(`UPDATE settings SET last_sync_at='2026-11-13T07:00:00Z', tracking_start='2026-01-01', lifestyle_cap=100000000, food_floor=45000`);
   const fop = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop',500000,'UAH',15,25) RETURNING id`))[0].id;
   await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-12','2026-12-20','expected')`, [fop]);
   sent = [];
   answer = {};
   httpFail = false;
+  failTitles = new Set();
   at("2026-11-13T08:00:00Z"); // 10:00 Kyiv
 });
 
@@ -152,5 +156,80 @@ describe("tick", () => {
     await svc.tick();
     await svc.tick();
     expect(await logged()).toEqual(["sync_broken:2026-11-10"]);
+  });
+});
+
+async function spendTx(accountId: number, amount: number, type: string, date: string, description = "x"): Promise<number> {
+  return (
+    await ds.query(
+      `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, raw)
+       VALUES ($1,$2,$3,$4,$5,$6,$6,$7,'{}') RETURNING id`,
+      [`tx-${Math.random()}`, accountId, `${date}T10:00:00Z`, date, description, amount, type],
+    )
+  )[0].id;
+}
+const usdcEvent = async () => {
+  const exp = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('usdc',270000,'USD',15,25) RETURNING id`))[0].id;
+  await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-11','2026-11-20','expected')`, [exp]);
+};
+
+describe("fix round 1", () => {
+  it("a failing top candidate does not starve the next one", async () => {
+    await device("a", "ExponentPushToken[a]");
+    await usdcEvent();
+    await ds.query(`INSERT INTO loans (amount, received_on) VALUES (100000, '2026-11-15')`);
+    failTitles = new Set(["Денежный план"]);
+    at("2026-11-16T08:00:00Z");
+    await svc.tick();
+    expect(await logged()).toEqual(["usdc:2:2026-11-16"]);
+    failTitles = new Set();
+    at("2026-11-16T09:00:00Z");
+    await svc.tick();
+    // the one ordinary notification of the day went out; the loan alert waits for tomorrow
+    expect(await logged()).toEqual(["usdc:2:2026-11-16"]);
+    at("2026-11-17T08:00:00Z");
+    await svc.tick();
+    expect(await logged()).toEqual(["usdc:2:2026-11-16", "bad:loan:1"]);
+  });
+
+  it("alerts only for loans taken within the last two days", async () => {
+    await device("a", "ExponentPushToken[a]");
+    await ds.query(`INSERT INTO loans (amount, received_on) VALUES (100000, '2026-11-01')`);
+    await svc.tick();
+    expect(await logged()).toEqual([]);
+    await ds.query(`INSERT INTO loans (amount, received_on) VALUES (100000, '2026-11-12')`);
+    await svc.tick();
+    expect(await logged()).toEqual(["bad:loan:2"]);
+  });
+
+  it("keeps the evening for the over-limit notice even after a morning one", async () => {
+    await device("a", "ExponentPushToken[a]");
+    await usdcEvent();
+    const card = (await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ('acc-n','black','UAH',1000000) RETURNING id`))[0].id;
+    at("2026-11-16T08:00:00Z");
+    await svc.tick();
+    expect(await logged()).toEqual(["usdc:2:2026-11-16"]);
+    await spendTx(card, -500_000, "spend", "2026-11-16");
+    at("2026-11-16T19:00:00Z"); // 21:00 Kyiv
+    await svc.tick();
+    expect(await logged()).toEqual(["usdc:2:2026-11-16", "over_limit:2026-11-16"]);
+    await svc.tick();
+    expect(await logged()).toHaveLength(2);
+  });
+
+  it("a tax payment closed by a matched transaction gets no further reminders", async () => {
+    await device("a", "ExponentPushToken[a]");
+    const fop = (await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ('acc-fop','fop','UAH',5000000) RETURNING id`))[0].id;
+    await taxDue("2026-11-20");
+    await svc.tick();
+    expect(await logged()).toEqual(["tax:1:d7"]);
+    const t = await spendTx(fop, -1_234_500, "tax", "2026-11-19", "ГУ ДПС єдиний податок");
+    await app.get(PlanService).onClassified(t);
+    expect((await ds.query(`SELECT paid_at IS NOT NULL AS paid, transaction_id FROM scheduled_payments`))[0]).toEqual({ paid: true, transaction_id: t });
+    for (const day of ["2026-11-19", "2026-11-20", "2026-11-21"]) {
+      at(`${day}T08:00:00Z`);
+      await svc.tick();
+    }
+    expect((await logged()).filter((k) => k.startsWith("tax:"))).toEqual(["tax:1:d7"]);
   });
 });

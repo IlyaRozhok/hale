@@ -3,6 +3,7 @@ import request from "supertest";
 import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
+import { PlanService } from "../src/plan/plan.service";
 import { Clock } from "../src/today/clock";
 
 let app: INestApplication;
@@ -40,7 +41,7 @@ beforeEach(async () => {
      RESTART IDENTITY CASCADE`,
   );
   await ds.query(
-    `UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, last_sync_at=NULL`,
+    `UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, last_sync_at=NULL, tracking_start='2026-01-01'`,
   );
   at("2026-11-02T10:00:00Z");
 });
@@ -207,6 +208,57 @@ describe("borrowed", () => {
   });
 });
 
+describe("loan tracking", () => {
+  it("an imported loan from before tracking neither alerts nor changes free; a new one does both", async () => {
+    await account("black", 1_000_000);
+    await income("fop", "2026-11-12");
+    await ds.query(`UPDATE settings SET tracking_start='2026-11-01'`);
+    const before = await today();
+    await ds.query(`INSERT INTO loans (amount, received_on) VALUES (500000, '2025-12-10')`);
+    const old = await today();
+    expect(old.badCases).toEqual([]);
+    expect(old.state.free).toBe(before.state.free);
+    await ds.query(`INSERT INTO loans (amount, received_on) VALUES (100000, '2026-11-02')`);
+    const fresh = await today();
+    expect(fresh.badCases).toHaveLength(1);
+    expect(fresh.state.free).toBe(before.state.free - 100_000);
+  });
+
+  it("a repayment of a short loan (2010 against 2000) leaves nothing borrowed", async () => {
+    const card = await account("black", 1_000_000);
+    await income("fop", "2026-11-12");
+    const base = await today();
+    const plan = app.get(PlanService);
+    const loan = await tx(card, 200_000, "loan_in", { description: "Кредит До завтра на 7 днів" });
+    await plan.onClassified(loan);
+    expect((await ds.query(`SELECT kind FROM loans`))[0].kind).toBe("short");
+    const mid = await today();
+    expect(mid.state.free).toBe(base.state.free - 200_000);
+    const rep = await tx(card, -201_000, "debt_payment", { description: "Погашення Кредит До завтра на 7 днів" });
+    await plan.onClassified(rep);
+    await plan.onClassified(rep);
+    const loans = await ds.query(`SELECT repaid_amount::int AS r, repaid_at IS NOT NULL AS done FROM loans`);
+    expect(loans).toEqual([{ r: 200_000, done: true }]);
+    const after = await today();
+    expect(after.badCases).toEqual([]);
+    expect(after.state.free).toBe(base.state.free);
+  });
+
+  it("a partial repayment keeps the rest borrowed and covers the oldest loan first", async () => {
+    const card = await account("black", 1_000_000);
+    await income("fop", "2026-11-12");
+    const base = await today();
+    const plan = app.get(PlanService);
+    await plan.onClassified(await tx(card, 200_000, "loan_in", { description: "Кредит До завтра", date: "2026-11-01" }));
+    await plan.onClassified(await tx(card, 100_000, "loan_in", { description: "Moneyveo", date: "2026-11-02" }));
+    await plan.onClassified(await tx(card, -250_000, "debt_payment", { description: "Погашення Кредит До завтра", date: "2026-11-02" }));
+    expect(await ds.query(`SELECT repaid_amount::int AS r, repaid_at IS NOT NULL AS done FROM loans ORDER BY id`)).toEqual([
+      { r: 200_000, done: true }, { r: 50_000, done: false },
+    ]);
+    expect((await today()).state.free).toBe(base.state.free - 50_000);
+  });
+});
+
 describe("tax reserve and own money", () => {
   it("subtracts a quarterly estimate, unpaid scheduled tax and takes off unlinked tax payments", async () => {
     await account("black", 1_000_000);
@@ -291,7 +343,9 @@ describe("bridge mode", () => {
     await setBalance(card, 3_000_000 - 2_997_000 - 5_000);
     const r = await today();
     expect(r.state.bridge.overPlan).toBe(true);
-    const bad = r.badCases.find((b: { id: string }) => b.id === "bridge_over_plan");
+    const bad = r.badCases.find((b: { id: string }) => b.id.startsWith("bridge_over_plan:"));
+    // the id carries the plan id, so a later plan that goes over alerts again
+    expect(bad.id).toBe(`bridge_over_plan:${(await plans())[0].id}`);
     expect(bad.text).toContain("Минус вышел за план моста на ₴");
     expect(bad.text).toMatch(/закончатся|уже нет/);
   });

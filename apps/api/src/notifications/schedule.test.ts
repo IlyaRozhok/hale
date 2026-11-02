@@ -99,19 +99,29 @@ describe("ordinary limit and priority", () => {
     syncedAt: "2026-11-10T08:00:00Z",
   });
 
-  it("sends at most one ordinary notification per tick, by priority", () => {
-    expect(keys(all, "2026-11-21", "21:30")).toEqual(["bad:loan:3"]);
-    expect(keys({ ...all, sentKeys: new Set(["bad:loan:3"]) }, "2026-11-21", "21:30")).toEqual(["over_limit:2026-11-21"]);
+  it("lists all fresh ordinary candidates in priority order", () => {
+    expect(keys(all, "2026-11-21", "21:30")).toEqual([
+      "bad:loan:3", "over_limit:2026-11-21", "usdc:7:2026-11-21", "income_date:2026-11", "sync_broken:2026-11-10",
+    ]);
+  });
+
+  it("drops what was sent, so the next one leads", () => {
+    const first = (st: NotifyState, t: string) => keys(st, "2026-11-21", t)[0];
+    expect(first(all, "21:30")).toBe("bad:loan:3");
+    expect(first({ ...all, sentKeys: new Set(["bad:loan:3"]) }, "21:30")).toBe("over_limit:2026-11-21");
     const noOver = { ...all, leftToday: 5, sentKeys: new Set(["bad:loan:3"]) };
-    expect(keys(noOver, "2026-11-21", "12:00")).toEqual(["usdc:7:2026-11-21"]);
+    expect(first(noOver, "12:00")).toBe("usdc:7:2026-11-21");
     const noUsdc = { ...noOver, questions: all.questions.slice(1) };
-    expect(keys(noUsdc, "2026-11-21", "12:00")).toEqual(["income_date:2026-11"]);
+    expect(first(noUsdc, "12:00")).toBe("income_date:2026-11");
     expect(keys({ ...noUsdc, questions: [] }, "2026-11-21", "12:00")).toEqual(["sync_broken:2026-11-10"]);
   });
 
-  it("sends nothing ordinary when one already went today; lower ones wait", () => {
-    expect(keys({ ...all, ordinarySentToday: true }, "2026-11-21", "21:30")).toEqual([]);
-    expect(keys({ ...all, sentKeys: new Set(["bad:loan:3"]), leftToday: 5 }, "2026-11-22", "10:00")).toEqual(["usdc:7:2026-11-22"]);
+  it("sends nothing ordinary when one already went today, except the over-limit evening; lower ones wait", () => {
+    expect(keys({ ...all, ordinarySentToday: true }, "2026-11-21", "21:30")).toEqual(["over_limit:2026-11-21"]);
+    expect(keys({ ...all, ordinarySentToday: true }, "2026-11-21", "12:00")).toEqual([]);
+    const sent = new Set(["over_limit:2026-11-21"]);
+    expect(keys({ ...all, ordinarySentToday: true, sentKeys: sent }, "2026-11-21", "21:30")).toEqual([]);
+    expect(keys({ ...all, sentKeys: new Set(["bad:loan:3"]), leftToday: 5 }, "2026-11-22", "10:00")[0]).toBe("usdc:7:2026-11-22");
   });
 
   it("holds ordinary notifications until 10:00", () => {

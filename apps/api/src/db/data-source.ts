@@ -9,6 +9,7 @@ import { PlanLinks1793923200000 } from "./migrations/0005-plan-links";
 import { RecurringPayments1794009600000 } from "./migrations/0006-recurring-payments";
 import { BridgePlanBasis1794096000000 } from "./migrations/0007-bridge-plan-basis";
 import { RuleDirection1794182400000 } from "./migrations/0008-rule-direction";
+import { LoanTracking1794268800000 } from "./migrations/0009-loan-tracking";
 
 export const migrations = [
   Init1793577600000,
@@ -19,6 +20,7 @@ export const migrations = [
   RecurringPayments1794009600000,
   BridgePlanBasis1794096000000,
   RuleDirection1794182400000,
+  LoanTracking1794268800000,
 ];
 
 export function createDataSource(url: string): DataSource {

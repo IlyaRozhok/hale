@@ -118,6 +118,8 @@ export class Loan {
   @Column({ type: "date" }) received_on!: string;
   @Column({ type: "integer", nullable: true }) source_transaction_id!: number | null;
   @Column({ type: "timestamptz", nullable: true }) repaid_at!: Date | null;
+  @Column({ type: "text", default: "other" }) kind!: "short" | "other";
+  @Column({ type: "bigint", transformer: bt, default: 0 }) repaid_amount!: number;
   @Column({ type: "text", nullable: true }) note!: string | null;
 }
 
@@ -130,6 +132,7 @@ export class Settings {
   @Column({ type: "bigint", transformer: bt, default: 0 }) esv_quarter!: number;
   @Column({ type: "text", default: "mercury" }) limit_visual!: "mercury" | "ring";
   @Column({ type: "timestamptz", nullable: true }) last_sync_at!: Date | null;
+  @Column({ type: "date", default: () => "CURRENT_DATE" }) tracking_start!: string;
 }
 
 @Entity("bridge_plans")

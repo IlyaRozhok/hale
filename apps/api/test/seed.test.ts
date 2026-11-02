@@ -52,4 +52,12 @@ describe("seed-private", () => {
     await applySeed(ds, parseSeed(SEED));
     expect((await ds.query(`SELECT lifestyle_cap::int AS c FROM settings`))[0].c).toBe(777);
   });
+
+  it("starts tracking on the seed date", async () => {
+    await ds.query(
+      `UPDATE settings SET lifestyle_cap=0, food_floor=0, tax_rate_bp=600, esv_quarter=0, limit_visual='mercury', tracking_start='2020-01-01'`,
+    );
+    await applySeed(ds, parseSeed(SEED));
+    expect((await ds.query(`SELECT tracking_start = CURRENT_DATE AS today FROM settings`))[0].today).toBe(true);
+  });
 });

@@ -28,6 +28,14 @@ interface Plan {
   basis: string;
 }
 
+/** An open loan inside the tracked period; `remaining` is what is still owed. */
+interface Loan {
+  id: number;
+  amount: number;
+  remaining: number;
+  received_on: string;
+}
+
 interface Facts {
   date: string;
   input: Omit<DailyInput, "spentToday" | "bridgeDaily" | "creditPlan" | "cardsMoney"> & { cardsMoney: number };
@@ -38,7 +46,7 @@ interface Facts {
   rateStale: boolean;
   slots: { own: number; fop: number; binance: number };
   upcoming: TodayDto["upcoming"];
-  loans: { id: number; amount: number; received_on: string }[];
+  loans: Loan[];
   basis: string;
   plan: Plan | null;
   syncedAt: Date | null;
@@ -186,11 +194,11 @@ export class TodayService {
     const settings = (
       await m.query(
         `SELECT lifestyle_cap::float8 AS lifestyle_cap, food_floor::float8 AS food_floor, tax_rate_bp,
-                esv_quarter::float8 AS esv_quarter, limit_visual, last_sync_at FROM settings WHERE id=1`,
+                esv_quarter::float8 AS esv_quarter, limit_visual, last_sync_at, tracking_start::text AS tracking_start FROM settings WHERE id=1`,
       )
     )[0] as {
       lifestyle_cap: number; food_floor: number; tax_rate_bp: number; esv_quarter: number;
-      limit_visual: "mercury" | "ring"; last_sync_at: Date | null;
+      limit_visual: "mercury" | "ring"; last_sync_at: Date | null; tracking_start: string;
     };
 
     const rateRows: { currency: string; rate: number; fetched_at: Date }[] = await m.query(
@@ -237,13 +245,14 @@ export class TodayService {
     const lastIncome = (
       await m.query(`SELECT ((max(received_at) AT TIME ZONE 'Europe/Kyiv')::date)::text AS d FROM income_events WHERE status = 'received'`)
     )[0].d as string | null;
-    // Loans since the last received income: they are what was borrowed in this cycle.
-    const loans: { id: number; amount: number; received_on: string }[] = await m.query(
-      `SELECT id, amount::float8 AS amount, received_on::text AS received_on FROM loans
-        WHERE repaid_at IS NULL AND ($1::date IS NULL OR received_on >= $1::date) ORDER BY received_on, id`,
-      [lastIncome],
+    // Loans since the last received income, within the tracked period (earlier ones are history):
+    // they are what was borrowed in this cycle, less what short-loan repayments already covered.
+    const loans: Loan[] = await m.query(
+      `SELECT id, amount::float8 AS amount, (amount - repaid_amount)::float8 AS remaining, received_on::text AS received_on FROM loans
+        WHERE repaid_at IS NULL AND received_on >= $2::date AND ($1::date IS NULL OR received_on >= $1::date) ORDER BY received_on, id`,
+      [lastIncome, settings.tracking_start],
     );
-    const borrowed = loans.reduce((s, l) => s + l.amount, 0);
+    const borrowed = loans.reduce((s, l) => s + l.remaining, 0);
 
     // payments: unpaid ones feed the limit; the window's payments (paid or not, native amounts) define the bridge basis
     const end = next && next >= date ? next : addDays(date, HORIZON_DAYS);
@@ -402,7 +411,7 @@ export class TodayService {
     if (state.bridge?.overPlan && plan) {
       const over = -(f.input.cardsMoney + f.input.fopMoney + f.input.binanceMoney) - plan.creditPlan;
       badCases.push({
-        id: "bridge_over_plan",
+        id: `bridge_over_plan:${plan.id}`,
         text: `Минус вышел за план моста на ${fmt(over)}.${runOutText(runOutOn, f.date)}`,
       });
     }
