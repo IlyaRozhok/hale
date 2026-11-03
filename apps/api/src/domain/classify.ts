@@ -67,6 +67,8 @@ const words = (s: string) => lc(s).match(/[\p{L}\p{N}]+/gu) ?? [];
 
 /** Bank text for money coming from the owner's fop account. */
 export const FOP_WITHDRAWAL = /рахунку\s+фоп/i;
+/** Bank text for dollars leaving the fop's dollar account for its hryvnia account. */
+const FOP_TO_HRYVNIA = /^на\s+гривневий\s+рахунок\s+фоп/i;
 const OWN_CARD = /^з\s+(білої|чорної)\s+картки/i;
 const JAR_PAYOUT = /^(часткове зняття банки|виплата банки)/i;
 const JAR_TOPUP = /^поповнення\s+[«"]([^»"]+)[»"]/i;
@@ -179,6 +181,7 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
     ownJarTopup ||
     MIGRATION.test(d) ||
     (incoming && FOP_WITHDRAWAL.test(d)) ||
+    (!incoming && FOP_TO_HRYVNIA.test(d)) ||
     (tx.pairedOwnTransfer === true && mcc !== null && TRANSFER_MCCS.has(mcc))
   ) {
     return done("own_transfer");

@@ -71,6 +71,15 @@ describe("own money", () => {
     ).toBe("own_transfer");
   });
 
+  it("selling dollars to the fop's hryvnia account is own_transfer, not a person", () => {
+    const r = classify(
+      tx({ accountKind: "fop", amount: -10000, mcc: 4829, description: "На гривневий рахунок ФОП для переказу на картку" }),
+      ctx(),
+    );
+    expect(r.type).toBe("own_transfer");
+    expect(r.needsLabel).toBe(false);
+  });
+
   it("payment from fop to the tax office is tax", () => {
     const r = classify(tx({ accountKind: "fop", amount: -100000, mcc: 4829, description: "ГУ ДПС у Київській Області" }), ctx());
     expect(r).toMatchObject({ type: "tax", needsLabel: false });
