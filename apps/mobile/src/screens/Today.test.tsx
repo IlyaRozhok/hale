@@ -295,7 +295,7 @@ describe("Today, normal mode", () => {
 
     it("stays open after a short, slow drag", async () => {
       await swipe(await open(), 450, 1000);
-      await act(async () => new Promise((r) => setTimeout(r, 300)));
+      await act(async () => new Promise<void>((r) => setTimeout(r, 300)));
       expect(screen.getByLabelText("Сумма")).toBeTruthy();
     });
 
