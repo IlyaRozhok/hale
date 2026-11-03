@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Settings } from "./Settings";
-import { Today } from "./Today";
-import { balanceFixture, fakeApi, makeClient, renderWith, taxFixture, todayFixture } from "../testing";
+import { Plan } from "./Plan";
+import { fakeApi, makeClient, renderWith, taxFixture, todayFixture } from "../testing";
 import { NetworkError } from "../api/client";
 import { TODAY_KEY } from "../api/queries";
 
@@ -31,7 +31,7 @@ describe("Settings, lifestyle cap", () => {
         cap === 15_000_000 ? { dailyLimit: 90000, leftForGoalsMonthly: 1500000, rateStale: false } : { dailyLimit: 50000, leftForGoalsMonthly: 0, rateStale: false },
       ),
     });
-    await renderWith(<Settings />, api);
+    await renderWith(<Settings onClose={noop} />, api);
     const slider = await screen.findByLabelText("Потолок трат в месяц");
     expect(slider.props.value).toBe(100000);
     expect(await screen.findByText("₴500")).toBeTruthy(); // the current cap's consequence is shown from the start
@@ -49,7 +49,7 @@ describe("Settings, lifestyle cap", () => {
 
   it("saves the cap when the slider is released", async () => {
     const api = fakeApi();
-    await renderWith(<Settings />, api);
+    await renderWith(<Settings onClose={noop} />, api);
     const slider = await screen.findByLabelText("Потолок трат в месяц");
     await fireEvent(slider, "valueChange", 150000);
     await fireEvent(slider, "slidingComplete", 150000);
@@ -60,7 +60,7 @@ describe("Settings, lifestyle cap", () => {
     const patchSettings = jest.fn(async () => {
       throw new NetworkError();
     });
-    await renderWith(<Settings />, fakeApi({ patchSettings }));
+    await renderWith(<Settings onClose={noop} />, fakeApi({ patchSettings }));
     const slider = await screen.findByLabelText("Потолок трат в месяц");
     await fireEvent(slider, "valueChange", 150000);
     await fireEvent(slider, "slidingComplete", 150000);
@@ -72,13 +72,20 @@ describe("Settings, lifestyle cap", () => {
 describe("Settings, preview accuracy", () => {
   it("warns that the figure may be inaccurate when a rate is missing", async () => {
     const previewSettings = jest.fn(async () => ({ dailyLimit: 90000, leftForGoalsMonthly: 0, rateStale: true }));
-    await renderWith(<Settings />, fakeApi({ previewSettings }));
+    await renderWith(<Settings onClose={noop} />, fakeApi({ previewSettings }));
     expect(await screen.findByText(/цифра может быть неточной/)).toBeTruthy();
   });
 
   it("recalculates the preview after a loan or a tax payment is saved", async () => {
     const api = fakeApi({ payments: jest.fn(async () => [taxFixture({ id: 2 })]) });
-    await renderWith(<Settings />, api);
+    // Settings opens over the Plan screen, and both stay mounted while the sheet is up.
+    await renderWith(
+      <>
+        <Settings onClose={noop} />
+        <Plan />
+      </>,
+      api,
+    );
     await waitFor(() => expect(api.previewSettings).toHaveBeenCalledTimes(1));
     await fireEvent.changeText(await screen.findByLabelText("Сумма займа"), "100");
     await fireEvent.changeText(screen.getByLabelText("Дата займа, ГГГГ-ММ-ДД"), "2026-11-02");
@@ -89,175 +96,15 @@ describe("Settings, preview accuracy", () => {
   });
 });
 
-describe("Settings, Binance balance", () => {
-  const withBalance = () => ({ manualBalances: jest.fn(async () => [balanceFixture({ id: 1, name: "Other", amount: 1 }), balanceFixture()]) });
-  const type = async (text: string) => {
-    await fireEvent.changeText(await screen.findByLabelText("Новый баланс Binance, $"), text);
-    await fireEvent.press(screen.getByRole("button", { name: "Сохранить баланс" }));
-  };
-
-  it("shows the balance in dollars with hryvnias alongside", async () => {
-    const client = makeClient();
-    client.setQueryData(TODAY_KEY, todayFixture());
-    await renderWith(<Settings />, fakeApi(withBalance()), client);
-    expect(await screen.findByText("$2,700.00, ₴111,375")).toBeTruthy();
-  });
-
-  it("saves a new value, zero included, and refreshes the balance and Today", async () => {
-    const api = fakeApi(withBalance());
-    const client = makeClient();
-    client.setQueryData(TODAY_KEY, todayFixture());
-    await renderWith(<Settings />, api, client);
-    await screen.findByText(/\$2,700\.00/);
-    await type("2 500,50");
-    await waitFor(() => expect(api.patchManualBalance).toHaveBeenCalledWith(7, 250_050));
-    expect(await screen.findByText("Баланс сохранён.")).toBeTruthy();
-    expect(api.manualBalances).toHaveBeenCalledTimes(2);
-    await waitFor(() => expect(client.getQueryState(TODAY_KEY)?.isInvalidated).toBe(true));
-    await type("0");
-    await waitFor(() => expect(api.patchManualBalance).toHaveBeenLastCalledWith(7, 0));
-  });
-
-  it("creates the row the first time", async () => {
-    const api = fakeApi();
-    await renderWith(<Settings />, api);
-    expect(await screen.findByText("Баланс не задан")).toBeTruthy();
-    await type("100");
-    await waitFor(() => expect(api.createManualBalance).toHaveBeenCalledWith({ name: "Binance", amount: 10_000, currency: "USD" }));
-    expect(api.patchManualBalance).not.toHaveBeenCalled();
-  });
-
-  it("refuses a bad amount before sending, and reports a failed save or load", async () => {
-    const api = fakeApi({
-      ...withBalance(),
-      patchManualBalance: jest.fn(async () => {
-        throw new NetworkError();
-      }),
-    });
-    await renderWith(<Settings />, api);
-    await screen.findByText(/\$2,700\.00/);
-    await type("abc");
-    expect(await screen.findByText("Проверьте сумму.")).toBeTruthy();
-    expect(api.patchManualBalance).not.toHaveBeenCalled();
-    await type("5");
-    expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
-  });
-
-  it("says so when the balance cannot be loaded", async () => {
-    const manualBalances = jest.fn(async () => {
-      throw new NetworkError();
-    });
-    await renderWith(<Settings />, fakeApi({ manualBalances }));
-    expect(await screen.findByText("Не получилось загрузить баланс.")).toBeTruthy();
-  });
-});
-
-describe("Settings, tax payments", () => {
-  const payments = () =>
-    jest.fn(async () => [
-      taxFixture({ id: 1, name: "Налог за 2 кв.", amount: 900_000, due_on: "2026-08-20", paid_at: "2026-08-19T09:00:00.000Z" }),
-      taxFixture({ id: 2 }),
-      taxFixture({ id: 3, kind: "obligation", name: "Квартплата" }),
-    ]);
-
-  it("lists tax payments with sum, due date and a paid mark", async () => {
-    await renderWith(<Settings />, fakeApi({ payments: payments() }));
-    expect(await screen.findByText("Налог за 3 кв.")).toBeTruthy();
-    expect(screen.getByText("₴12,000")).toBeTruthy();
-    expect(screen.getByText("срок 20.11")).toBeTruthy();
-    expect(screen.getByText("Налог за 2 кв.")).toBeTruthy();
-    expect(screen.getByText("₴9,000")).toBeTruthy();
-    expect(screen.getByText("Оплачен")).toBeTruthy();
-    expect(screen.queryByText("Квартплата")).toBeNull();
-  });
-
-  it("marks a payment as paid with one tap and reloads the list", async () => {
-    const api = fakeApi({ payments: payments() });
-    await renderWith(<Settings />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Отметить оплаченным" }));
-    await waitFor(() => expect(api.markPaid).toHaveBeenCalledWith(2));
-    await waitFor(() => expect(api.payments.mock.calls.length).toBeGreaterThan(1));
-  });
-
-  it("adds a payment for a new quarter", async () => {
-    const api = fakeApi({ payments: payments() });
-    await renderWith(<Settings />, api);
-    await fireEvent.changeText(await screen.findByLabelText("Название платежа"), "Налог за 4 кв.");
-    await fireEvent.changeText(screen.getByLabelText("Сумма платежа"), "15 000,50");
-    await fireEvent.changeText(screen.getByLabelText("Срок оплаты, ГГГГ-ММ-ДД"), "2027-02-20");
-    await fireEvent.press(screen.getByRole("button", { name: "Добавить платёж" }));
-    await waitFor(() =>
-      expect(api.createPayment).toHaveBeenCalledWith({ kind: "tax", name: "Налог за 4 кв.", amount: 1_500_050, currency: "UAH", due_on: "2027-02-20", tax_quarter: "2026-Q4" }),
-    );
-    await waitFor(() => expect(screen.getByLabelText("Название платежа").props.value).toBe(""));
-  });
-
-  it("does not send an incomplete payment", async () => {
-    const api = fakeApi({ payments: payments() });
-    await renderWith(<Settings />, api);
-    await fireEvent.changeText(await screen.findByLabelText("Название платежа"), "Налог");
-    await fireEvent.changeText(screen.getByLabelText("Сумма платежа"), "abc");
-    await fireEvent.changeText(screen.getByLabelText("Срок оплаты, ГГГГ-ММ-ДД"), "2027-02-20");
-    await fireEvent.press(screen.getByRole("button", { name: "Добавить платёж" }));
-    expect(await screen.findByText("Проверьте название, сумму и срок.")).toBeTruthy();
-    expect(api.createPayment).not.toHaveBeenCalled();
-  });
-
-  it("says so when a payment cannot be saved", async () => {
-    const createPayment = jest.fn(async () => {
-      throw new NetworkError();
-    });
-    await renderWith(<Settings />, fakeApi({ payments: payments(), createPayment }));
-    await fireEvent.changeText(await screen.findByLabelText("Название платежа"), "Налог");
-    await fireEvent.changeText(screen.getByLabelText("Сумма платежа"), "100");
-    await fireEvent.changeText(screen.getByLabelText("Срок оплаты, ГГГГ-ММ-ДД"), "2027-02-20");
-    await fireEvent.press(screen.getByRole("button", { name: "Добавить платёж" }));
-    expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
-    expect(screen.getByLabelText("Название платежа").props.value).toBe("Налог");
-  });
-});
-
-describe("Settings, manual loan", () => {
-  it("creates a loan and Today then shows the bad case", async () => {
-    const badCase = { id: "loan:1", text: "Взят займ ₴5,000 (02.11): столько не хватало." };
-    let created = false;
-    const api = fakeApi({
-      today: jest.fn(async () => todayFixture({ badCases: created ? [badCase] : [] })),
-      createLoan: jest.fn(async () => {
-        created = true;
-      }),
-    });
-    await renderWith(
-      <>
-        <Today onOpenActivity={noop} />
-        <Settings />
-      </>,
-      api,
-    );
-    await screen.findByText("Сегодня можно");
-    expect(screen.queryByText(badCase.text)).toBeNull();
-    await fireEvent.changeText(await screen.findByLabelText("Сумма займа"), "5000");
-    await fireEvent.changeText(screen.getByLabelText("Дата займа, ГГГГ-ММ-ДД"), "2026-11-02");
-    await fireEvent.changeText(screen.getByLabelText("Заметка к займу"), "до зарплаты");
-    await fireEvent.press(screen.getByRole("button", { name: "Добавить займ" }));
-    await waitFor(() => expect(api.createLoan).toHaveBeenCalledWith({ amount: 500_000, received_on: "2026-11-02", note: "до зарплаты" }));
-    expect(await screen.findByText(badCase.text)).toBeTruthy();
-    expect(screen.getByText("Займ добавлен.")).toBeTruthy();
-  });
-
-  it("rejects a bad amount or date before sending, and reports a failed save", async () => {
-    const createLoan = jest.fn(async () => {
-      throw new NetworkError();
-    });
-    await renderWith(<Settings />, fakeApi({ createLoan }));
-    await fireEvent.changeText(await screen.findByLabelText("Сумма займа"), "0");
-    await fireEvent.press(screen.getByRole("button", { name: "Добавить займ" }));
-    expect(await screen.findByText("Проверьте сумму и дату.")).toBeTruthy();
-    expect(createLoan).not.toHaveBeenCalled();
-    await fireEvent.changeText(screen.getByLabelText("Сумма займа"), "100");
-    await fireEvent.changeText(screen.getByLabelText("Дата займа, ГГГГ-ММ-ДД"), "2026-11-02");
-    await fireEvent.press(screen.getByRole("button", { name: "Добавить займ" }));
-    expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
+describe("Settings, closing", () => {
+  it("has a close control and only the lifestyle cap", async () => {
+    const onClose = jest.fn();
+    await renderWith(<Settings onClose={onClose} />, fakeApi());
+    await screen.findByLabelText("Потолок трат в месяц");
+    expect(screen.queryByText("Показ лимита")).toBeNull();
+    expect(screen.queryByLabelText("Сумма займа")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
+    expect(onClose).toHaveBeenCalled();
   });
 });
 
@@ -266,7 +113,7 @@ describe("Settings, refetch of Today", () => {
     const client = makeClient();
     client.setQueryData(TODAY_KEY, todayFixture());
     const api = fakeApi();
-    await renderWith(<Settings />, api, client);
+    await renderWith(<Settings onClose={noop} />, api, client);
     const slider = await screen.findByLabelText("Потолок трат в месяц");
     await fireEvent(slider, "slidingComplete", 120000);
     await waitFor(() => expect(client.getQueryState(TODAY_KEY)?.isInvalidated).toBe(true));

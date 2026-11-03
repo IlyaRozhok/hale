@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { LoanInput, RecipientLabelName, ScheduledPaymentInput, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
+import type { GoalInput, GoalPatch } from "@hale/contracts";
+import type { TransactionsFilter } from "./client";
 import { useApi } from "./context";
 
 export const TODAY_KEY = ["today"] as const;
+export const GOALS_KEY = ["goals"] as const;
 export const TRANSACTIONS_KEY = ["transactions"] as const;
 export const SETTINGS_KEY = ["settings"] as const;
 export const PAYMENTS_KEY = ["payments"] as const;
@@ -110,12 +113,12 @@ export function useSetIncomeDate() {
 // --- activity -----------------------------------------------------------------
 
 /** Pages of operations by cursor, optionally only the ones waiting for an answer. */
-export function useTransactions(needsLabel: boolean) {
+export function useTransactions(filter: TransactionsFilter) {
   const api = useApi();
   return useInfiniteQuery({
-    queryKey: [...TRANSACTIONS_KEY, { needsLabel }],
+    queryKey: [...TRANSACTIONS_KEY, filter],
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) => api.transactions({ cursor: pageParam, needsLabel: needsLabel ? true : undefined }),
+    queryFn: ({ pageParam }) => api.transactions({ cursor: pageParam, ...filter }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 }
@@ -220,4 +223,33 @@ export function useCreateLoan() {
     mutationFn: (input: LoanInput) => api.createLoan(input),
     onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: TODAY_KEY }), client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY })]),
   });
+}
+
+export function useGoals() {
+  const api = useApi();
+  return useQuery({ queryKey: GOALS_KEY, queryFn: () => api.goals() });
+}
+
+/** Goal changes show on the list and on Today's cards. */
+function useGoalMutation<V>(mutationFn: (vars: V) => Promise<unknown>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: GOALS_KEY }), client.invalidateQueries({ queryKey: TODAY_KEY })]),
+  });
+}
+
+export function useCreateGoal() {
+  const api = useApi();
+  return useGoalMutation((input: GoalInput) => api.createGoal(input));
+}
+
+export function usePatchGoal() {
+  const api = useApi();
+  return useGoalMutation(({ id, patch }: { id: number; patch: GoalPatch }) => api.patchGoal(id, patch));
+}
+
+export function useDeleteGoal() {
+  const api = useApi();
+  return useGoalMutation((id: number) => api.deleteGoal(id));
 }

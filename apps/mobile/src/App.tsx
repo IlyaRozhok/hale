@@ -14,13 +14,14 @@ import { createStorePersister, shouldPersist } from "./api/persist";
 import { CACHE_KEY, TOKEN_KEY, keychain } from "./api/secureStore";
 import { Login } from "./screens/Login";
 import { Activity } from "./screens/Activity";
-import { Settings } from "./screens/Settings";
+import { Plan } from "./screens/Plan";
+import { TabBar } from "./components/TabBar";
 import { createPushDeps } from "./pushNative";
 import { registerPush } from "./push";
 import { useApi } from "./api/context";
 import { Today } from "./screens/Today";
 
-const { color, type } = tokens;
+const { color } = tokens;
 const DAY = 24 * 60 * 60 * 1000;
 const DEVICE_NAME = "iPhone";
 
@@ -32,7 +33,7 @@ const theme = {
 const Tabs = createBottomTabNavigator();
 
 function TodayTab({ navigation }: { navigation: NavigationProp<ParamListBase> }) {
-  return <Today onOpenActivity={() => navigation.navigate("Activity")} />;
+  return <Today onOpenActivity={() => navigation.navigate("Activity")} onOpenPlan={() => navigation.navigate("Plan")} />;
 }
 
 function Main() {
@@ -44,19 +45,10 @@ function Main() {
 
   return (
     <NavigationContainer theme={theme}>
-      <Tabs.Navigator
-        screenOptions={{
-          headerShown: false,
-          tabBarActiveTintColor: color.fg.default,
-          tabBarInactiveTintColor: color.fg.subtle,
-          tabBarLabelStyle: type.label,
-          tabBarIcon: () => null,
-          tabBarIconStyle: { display: "none" },
-        }}
-      >
+      <Tabs.Navigator tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false }}>
         <Tabs.Screen name="Today" component={TodayTab} options={{ title: "Сегодня" }} />
         <Tabs.Screen name="Activity" component={Activity} options={{ title: "Операции" }} />
-        <Tabs.Screen name="Settings" component={Settings} options={{ title: "Настройки" }} />
+        <Tabs.Screen name="Plan" component={Plan} options={{ title: "План" }} />
       </Tabs.Navigator>
     </NavigationContainer>
   );

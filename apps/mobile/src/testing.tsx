@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { render } from "@testing-library/react-native";
-import type { ManualBalanceDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@hale/contracts";
+import type { GoalDto, ManualBalanceDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@hale/contracts";
 import { ApiProvider } from "./api/context";
 import type { Api } from "./api/client";
 
@@ -30,8 +30,13 @@ export function todayFixture(over: Partial<TodayDto> = {}): TodayDto {
     syncedAt: new Date(2026, 10, 2, 9, 5).toISOString(),
     syncStale: false,
     limitVisual: "mercury",
+    goals: [],
     ...over,
   };
+}
+
+export function goalFixture(over: Partial<GoalDto> = {}): GoalDto {
+  return { id: 1, name: "Подушка", target_cents: 500_000, saved_cents: 50_000, sort: 0, ...over };
 }
 
 /** Anonymised card purchase in hryvnias. */
@@ -81,7 +86,7 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     manualBalances: jest.fn(async () => []),
     createManualBalance: jest.fn(async () => balanceFixture()),
     patchManualBalance: jest.fn(async () => balanceFixture()),
-    transactions: jest.fn(async () => ({ items: [txFixture()], nextCursor: null })),
+    transactions: jest.fn(async () => ({ items: [txFixture()], nextCursor: null, dayTotals: { "2026-11-02": -8500 } })),
     editTransaction: jest.fn(async () => ({ transaction: txFixture(), updated: 1 })),
     labelRecipient: jest.fn(async () => ({ updated: 1 })),
     settings: jest.fn(async () => settingsFixture()),
@@ -92,6 +97,10 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     markPaid: jest.fn(async () => undefined),
     createLoan: jest.fn(async () => undefined),
     registerPushToken: jest.fn(async () => undefined),
+    goals: jest.fn(async () => []),
+    createGoal: jest.fn(async () => goalFixture()),
+    patchGoal: jest.fn(async () => goalFixture()),
+    deleteGoal: jest.fn(async () => undefined),
     ...over,
   } as never;
 }

@@ -1,14 +1,11 @@
 import { useState } from "react";
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import Slider from "@react-native-community/slider";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 import { formatMoney } from "../format";
 import { useCapPreview, useSaveSettings, useSettings } from "../api/queries";
-import { BinanceBalance } from "../components/BinanceBalance";
 import { Glass } from "../components/Glass";
-import { ManualLoan } from "../components/ManualLoan";
-import { TaxPayments } from "../components/TaxPayments";
+import { Icon } from "../components/Icon";
 
 const { color, space, touchMin, type } = tokens;
 
@@ -20,8 +17,7 @@ const CAP_STEP = 5_000;
 const DEFAULT_CAP_KOPECKS = 10_000_000;
 const SAVE_FAILED = "Не удалось сохранить. Значение возвращено.";
 
-export function Settings() {
-  const insets = useSafeAreaInsets();
+export function Settings({ onClose }: { onClose: () => void }) {
   const settings = useSettings();
   const save = useSaveSettings();
   const [draft, setDraft] = useState<number | null>(null);
@@ -42,12 +38,17 @@ export function Settings() {
 
   return (
     <ScrollView
-      style={[styles.root, { marginTop: insets.top }]}
-      contentContainerStyle={[styles.content, { paddingTop: space.lg, paddingBottom: insets.bottom + space.xl }]}
+      style={styles.root}
+      contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={false} onRefresh={() => void settings.refetch()} />}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.title}>Настройки</Text>
+      <View style={styles.head}>
+        <Text style={styles.title}>Настройки</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Закрыть" onPress={onClose} style={styles.close}>
+          <Icon name="close" color={color.fg.muted} />
+        </Pressable>
+      </View>
       {error && <Text style={styles.text}>{error}</Text>}
       {settings.isError && !saved && <Text style={styles.muted}>Не получилось загрузить настройки.</Text>}
 
@@ -88,17 +89,15 @@ export function Settings() {
           </Glass>
         </>
       )}
-
-      <BinanceBalance />
-      <TaxPayments />
-      <ManualLoan />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: color.surface.base },
-  content: { paddingHorizontal: space.xl, gap: space.lg },
+  content: { paddingHorizontal: space.xl, paddingVertical: space.lg, gap: space.lg },
+  head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  close: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
   title: { ...type.title, color: color.fg.default },
   stack: { gap: space.md },
   heading: { ...type.title, color: color.fg.default },

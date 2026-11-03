@@ -79,8 +79,31 @@ describe("api client", () => {
     await expect(bad.api.today()).rejects.toBeInstanceOf(ApiError);
   });
 
+  it("sends group and a URL-encoded search with the transactions query", async () => {
+    const fetchImpl = vi.fn(async () => json({ items: [], nextCursor: null, dayTotals: {} }));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await api.transactions({ group: "spend", q: "кафе & co" });
+    expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toBe(`https://api.example.test/transactions?group=spend&q=${encodeURIComponent("кафе & co")}`);
+  });
+
+  it("creates, patches and deletes goals under /plan/goals", async () => {
+    const fetchImpl = vi.fn(async () => json({}));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await api.goals();
+    await api.createGoal({ name: "Подушка", target_cents: 500000 });
+    await api.patchGoal(3, { saved_cents: 100 });
+    await api.deleteGoal(3);
+    const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([u, i]) => [i.method ?? "GET", u.replace("https://api.example.test", "")])).toEqual([
+      ["GET", "/plan/goals"],
+      ["POST", "/plan/goals"],
+      ["PATCH", "/plan/goals/3"],
+      ["DELETE", "/plan/goals/3"],
+    ]);
+  });
+
   it("builds the transactions query and sends edits with PATCH", async () => {
-    const fetchImpl = vi.fn(async () => json({ items: [], nextCursor: null }));
+    const fetchImpl = vi.fn(async () => json({ items: [], nextCursor: null, dayTotals: {} }));
     const { api } = setup(fetchImpl as unknown as typeof fetch);
     await api.transactions({ cursor: "a b", needsLabel: true });
     await api.transactions({});

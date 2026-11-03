@@ -13,11 +13,12 @@ export function TodaySkeleton() {
         <View style={[styles.bar, { width: 120, height: LAYOUT.eyebrow }]} />
         <View style={[styles.bar, { width: 220, height: LAYOUT.amount }]} />
         <View style={[styles.bar, { width: 150, height: LAYOUT.note }]} />
+        <View style={{ height: LAYOUT.pool }} />
       </Glass>
-      <Glass style={{ height: LAYOUT.accountsPanel }}>
+      <Glass style={{ height: LAYOUT.goals }}>
         <View />
       </Glass>
-      <Glass style={{ height: LAYOUT.upcomingPanel }}>
+      <Glass style={{ height: LAYOUT.upcoming }}>
         <View />
       </Glass>
     </View>

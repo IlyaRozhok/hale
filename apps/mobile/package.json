@@ -42,6 +42,9 @@
   },
   "jest": {
     "preset": "jest-expo",
+    "setupFilesAfterEnv": [
+      "<rootDir>/src/jest.setup.tsx"
+    ],
     "testMatch": [
       "<rootDir>/src/**/*.test.tsx"
     ]

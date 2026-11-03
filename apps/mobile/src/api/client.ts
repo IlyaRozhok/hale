@@ -1,5 +1,8 @@
 import type {
   BridgePreviewDto,
+  GoalDto,
+  GoalInput,
+  GoalPatch,
   LoanInput,
   ManualBalanceDto,
   ManualBalanceInput,
@@ -54,7 +57,7 @@ export interface Api {
   manualBalances(): Promise<ManualBalanceDto[]>;
   createManualBalance(input: ManualBalanceInput): Promise<ManualBalanceDto>;
   patchManualBalance(id: number, amount: number): Promise<ManualBalanceDto>;
-  transactions(query: { cursor?: string; needsLabel?: boolean }): Promise<TransactionPageDto>;
+  transactions(query: TransactionsFilter & { cursor?: string }): Promise<TransactionPageDto>;
   editTransaction(id: number, patch: Pick<TransactionPatch, "type" | "category" | "applyToSimilar">): Promise<TransactionEditDto>;
   labelRecipient(counterKey: string, label: RecipientLabelName): Promise<RecipientLabelResultDto>;
   settings(): Promise<SettingsDto>;
@@ -65,7 +68,13 @@ export interface Api {
   markPaid(id: number): Promise<void>;
   createLoan(input: LoanInput): Promise<void>;
   registerPushToken(token: string): Promise<void>;
+  goals(): Promise<GoalDto[]>;
+  createGoal(input: GoalInput): Promise<GoalDto>;
+  patchGoal(id: number, patch: GoalPatch): Promise<GoalDto>;
+  deleteGoal(id: number): Promise<void>;
 }
+
+export type TransactionsFilter = { needsLabel?: boolean; group?: "spend" | "income" | "all"; q?: string };
 
 export interface ApiOptions {
   baseUrl: string;
@@ -79,7 +88,7 @@ export interface ApiOptions {
 export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch }: ApiOptions): Api {
   const root = baseUrl.replace(/\/+$/, "");
 
-  async function request<T>(method: "GET" | "POST" | "PATCH", path: string, body?: unknown): Promise<T> {
+  async function request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
     const token = await getToken();
     const headers: Record<string, string> = { accept: "application/json" };
     if (token) headers.authorization = `Bearer ${token}`;
@@ -111,8 +120,17 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     manualBalances: () => request("GET", "/plan/manual-balances"),
     createManualBalance: (input) => request("POST", "/plan/manual-balances", input),
     patchManualBalance: (id, amount) => request("PATCH", `/plan/manual-balances/${id}`, { amount }),
-    transactions: ({ cursor, needsLabel }) => {
-      const q = [cursor !== undefined && `cursor=${encodeURIComponent(cursor)}`, needsLabel !== undefined && `needsLabel=${needsLabel}`].filter(Boolean);
+    goals: () => request("GET", "/plan/goals"),
+    createGoal: (input) => request("POST", "/plan/goals", input),
+    patchGoal: (id, patch) => request("PATCH", `/plan/goals/${id}`, patch),
+    deleteGoal: async (id) => void (await request("DELETE", `/plan/goals/${id}`)),
+    transactions: ({ cursor, needsLabel, group, q: search }) => {
+      const q = [
+        group !== undefined && `group=${group}`,
+        search !== undefined && `q=${encodeURIComponent(search)}`,
+        cursor !== undefined && `cursor=${encodeURIComponent(cursor)}`,
+        needsLabel !== undefined && `needsLabel=${needsLabel}`,
+      ].filter(Boolean);
       return request("GET", `/transactions${q.length ? `?${q.join("&")}` : ""}`);
     },
     editTransaction: (id, patch) => request("PATCH", `/transactions/${id}`, patch),
