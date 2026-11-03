@@ -4,6 +4,7 @@ packages:
   - "infra"
 allowBuilds:
   "@embedded-postgres/darwin-arm64": true
+  "@embedded-postgres/linux-arm64": true
   "@embedded-postgres/linux-x64": true
   "@parcel/watcher": false
   "@swc/core": true
