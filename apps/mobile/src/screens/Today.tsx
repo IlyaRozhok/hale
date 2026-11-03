@@ -85,6 +85,8 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const usd = formatUsd(state.leftToday, data.usdRate);
   const offlineSince = today.isError ? today.dataUpdatedAt : null;
   const questions = data.questions.filter((q) => !answered.has(q.id));
+  const hasLimit = state.dailyLimit > 0;
+  const noLimitNote = state.mode === "bridge" ? "Лимит появится, когда вы подтвердите план ниже." : "До следующего дохода свободных денег нет.";
 
   const answer = (id: string, run: () => Promise<unknown>) => {
     hide(id, true);
@@ -94,22 +96,28 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   return (
     <View style={styles.root}>
       <View style={styles.metal} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <LimitVisual mode={data.limitVisual} level={level} />
+        <LimitVisual mode="mercury" level={level} />
       </View>
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingTop: top, paddingBottom: insets.bottom + space.xl }]}
+        style={{ marginTop: insets.top }}
+        contentContainerStyle={[styles.content, { paddingTop: space.lg, paddingBottom: insets.bottom + space.xl }]}
         refreshControl={<RefreshControl refreshing={today.isRefetching && !today.isPending} onRefresh={() => void today.refetch()} />}
       >
         <StaleBanner lines={freshnessLines(data, offlineSince, now())} />
         <Glass
           accessible
-          accessibilityLabel={`Сегодня можно ${formatMoney(state.leftToday)}, из ${formatMoney(state.dailyLimit)} на день`}
+          accessibilityLabel={
+            hasLimit
+              ? `Сегодня можно ${formatMoney(state.leftToday)}, из ${formatMoney(state.dailyLimit)} на день`
+              : `Сегодня можно ${formatMoney(state.leftToday)}. ${noLimitNote}`
+          }
         >
           <Text style={styles.eyebrow}>Сегодня можно</Text>
           <Text style={styles.amount}>{formatMoney(state.leftToday)}</Text>
-          <Text style={styles.note}>{`из ${formatMoney(state.dailyLimit)} на день`}</Text>
-          {usd ? <Text style={styles.subtle}>{usd} сейчас</Text> : null}
-          {state.leftToday <= 0 && <Text style={styles.note}>Лимит на сегодня использован. Завтра будет новый.</Text>}
+          {hasLimit && <Text style={styles.note}>{`из ${formatMoney(state.dailyLimit)} на день`}</Text>}
+          {hasLimit && usd ? <Text style={styles.subtle}>{usd} сейчас</Text> : null}
+          {hasLimit && state.leftToday <= 0 && <Text style={styles.note}>Лимит на сегодня использован. Завтра будет новый.</Text>}
+          {!hasLimit && <Text style={styles.note}>{noLimitNote}</Text>}
         </Glass>
 
         {state.mode === "bridge" && state.bridge && (

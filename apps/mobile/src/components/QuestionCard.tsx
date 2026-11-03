@@ -76,7 +76,10 @@ export function QuestionCard({ question, today, onConfirmUsdc, onMatchUsdc, onDi
     if (counterKey) {
       return (
         <Pressable accessibilityRole="button" onPress={() => onLabelRecipient(counterKey)} style={styles.whole}>
-          <Glass>{text}</Glass>
+          <Glass style={styles.stack}>
+            {text}
+            <Text style={styles.hint}>Нажмите, чтобы указать</Text>
+          </Glass>
         </Pressable>
       );
     }

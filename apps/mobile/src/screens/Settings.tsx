@@ -6,7 +6,6 @@ import { tokens } from "@hale/tokens";
 import { formatMoney } from "../format";
 import { useCapPreview, useSaveSettings, useSettings } from "../api/queries";
 import { BinanceBalance } from "../components/BinanceBalance";
-import { Chip } from "../components/Chip";
 import { Glass } from "../components/Glass";
 import { ManualLoan } from "../components/ManualLoan";
 import { TaxPayments } from "../components/TaxPayments";
@@ -43,8 +42,8 @@ export function Settings() {
 
   return (
     <ScrollView
-      style={styles.root}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + space.lg, paddingBottom: insets.bottom + space.xl }]}
+      style={[styles.root, { marginTop: insets.top }]}
+      contentContainerStyle={[styles.content, { paddingTop: space.lg, paddingBottom: insets.bottom + space.xl }]}
       refreshControl={<RefreshControl refreshing={false} onRefresh={() => void settings.refetch()} />}
       keyboardShouldPersistTaps="handled"
     >
@@ -54,14 +53,6 @@ export function Settings() {
 
       {saved && cap !== null && (
         <>
-          <Glass style={styles.stack}>
-            <Text style={styles.heading}>Показ лимита</Text>
-            <View style={styles.chips}>
-              <Chip role="radio" label="Ртуть" selected={saved.limit_visual === "mercury"} onPress={() => persist({ limit_visual: "mercury" })} />
-              <Chip role="radio" label="Кольцо" selected={saved.limit_visual === "ring"} onPress={() => persist({ limit_visual: "ring" })} />
-            </View>
-          </Glass>
-
           <Glass style={styles.stack}>
             <Text style={styles.heading}>Потолок трат</Text>
             <Text style={styles.value}>{`${formatMoney(cap * 100)} в месяц`}</Text>
@@ -111,7 +102,6 @@ const styles = StyleSheet.create({
   title: { ...type.title, color: color.fg.default },
   stack: { gap: space.md },
   heading: { ...type.title, color: color.fg.default },
-  chips: { flexDirection: "row", gap: space.sm },
   text: { ...type.body, color: color.fg.default },
   muted: { ...type.body, color: color.fg.muted, flexShrink: 1 },
   value: { ...type.body, color: color.fg.default, fontVariant: ["tabular-nums"] },

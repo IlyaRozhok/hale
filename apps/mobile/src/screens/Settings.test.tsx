@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Settings } from "./Settings";
 import { Today } from "./Today";
-import { balanceFixture, fakeApi, makeClient, renderWith, settingsFixture, taxFixture, todayFixture } from "../testing";
+import { balanceFixture, fakeApi, makeClient, renderWith, taxFixture, todayFixture } from "../testing";
 import { NetworkError } from "../api/client";
 import { TODAY_KEY } from "../api/queries";
 
@@ -14,8 +14,6 @@ jest.mock("@react-native-community/slider", () => {
   return { __esModule: true, default: (props: object) => React.createElement("Slider", props) };
 });
 
-const HIDDEN = { includeHiddenElements: true };
-const visualOf = () => screen.getByTestId("limit-visual", HIDDEN).props.accessibilityHint as string;
 const noop = () => undefined;
 
 describe("Settings, lifestyle cap", () => {
@@ -88,43 +86,6 @@ describe("Settings, preview accuracy", () => {
     await waitFor(() => expect(api.previewSettings).toHaveBeenCalledTimes(2));
     await fireEvent.press(await screen.findByRole("button", { name: "Отметить оплаченным" }));
     await waitFor(() => expect(api.previewSettings).toHaveBeenCalledTimes(3));
-  });
-});
-
-describe("Settings, limit visual", () => {
-  it("switching to the ring changes Today at once, before the server answers", async () => {
-    let finish: () => void = noop;
-    const patchSettings = jest.fn(() => new Promise<ReturnType<typeof settingsFixture>>((r) => (finish = () => r(settingsFixture({ limit_visual: "ring" })))));
-    await renderWith(
-      <>
-        <Today onOpenActivity={noop} />
-        <Settings />
-      </>,
-      fakeApi({ patchSettings }),
-    );
-    await waitFor(() => expect(visualOf()).toBe("mercury:0.72"));
-    await fireEvent.press(await screen.findByRole("radio", { name: "Кольцо" }));
-    await waitFor(() => expect(visualOf()).toBe("ring:0.72"));
-    expect(patchSettings).toHaveBeenCalledWith({ limit_visual: "ring" });
-    await act(async () => finish());
-  });
-
-  it("reverts and shows text when the switch cannot be saved", async () => {
-    const patchSettings = jest.fn(async () => {
-      throw new NetworkError();
-    });
-    await renderWith(
-      <>
-        <Today onOpenActivity={noop} />
-        <Settings />
-      </>,
-      fakeApi({ patchSettings }),
-    );
-    await waitFor(() => expect(visualOf()).toBe("mercury:0.72"));
-    await fireEvent.press(await screen.findByRole("radio", { name: "Кольцо" }));
-    expect(await screen.findByText("Не удалось сохранить. Значение возвращено.")).toBeTruthy();
-    expect(visualOf()).toBe("mercury:0.72");
-    expect(screen.getByRole("radio", { name: "Ртуть" }).props.accessibilityState.selected).toBe(true);
   });
 });
 

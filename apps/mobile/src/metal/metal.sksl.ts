@@ -53,6 +53,8 @@ half4 main(float2 fragCoord) {
   float3 col = float3(c) * float3(0.97, 0.985, 1.0);
   float a = 1.0;
   if (pool > 0.5) {
+    // Nothing left: without this the waves would still peek above the bottom edge.
+    if (level <= 0.001) return half4(0.0);
     float wave = level + 0.018 * sin(uv.x * 7.0 + t * 0.9) + 0.012 * sin(uv.x * 13.0 - t * 0.7);
     a = smoothstep(wave, wave - 0.006, uv.y);
     // Bright meniscus along the surface line.

@@ -60,10 +60,10 @@ describe("Today, normal mode", () => {
     expect(screen.queryByText(/превыш|перерасход|красн/i)).toBeNull();
   });
 
-  it("renders the ring mode from the response", async () => {
+  it("always shows mercury, even if the server still has the ring saved", async () => {
     await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ limitVisual: "ring" })) }));
     await screen.findByText("Сегодня можно");
-    expect(levelOf()).toBe("ring:0.72");
+    expect(levelOf()).toBe("mercury:0.72");
   });
 
   it("shows calm bad-case cards", async () => {
@@ -206,6 +206,13 @@ describe("Today, bridge", () => {
     expect(screen.getByText("₴20,070")).toBeTruthy();
     expect(screen.getByLabelText("Сумма в день")).toBeTruthy();
     expect(screen.getByText("Подтвердить план")).toBeTruthy();
+  });
+
+  it("with no limit yet, asks to confirm the plan instead of saying the limit was used", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state: { ...bridgeState(), dailyLimit: 0, leftToday: 0 } })) }));
+    expect(await screen.findByText("Лимит появится, когда вы подтвердите план ниже.")).toBeTruthy();
+    expect(screen.queryByText(/использован/)).toBeNull();
+    expect(screen.queryByText(/на день$/)).toBeNull();
   });
 
   it("sends one preview 300 ms after the slider stops and shows the new credit needed", async () => {
