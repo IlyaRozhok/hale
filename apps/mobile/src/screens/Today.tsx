@@ -151,7 +151,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
           {settingsButton}
         </View>
         <StaleBanner lines={freshnessLines(data, offlineSince, now())} />
-        <View style={styles.hero}>
+        <Glass style={styles.hero}>
           <View
             style={styles.heroText}
             accessible
@@ -180,7 +180,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
               <LimitVisual mode="mercury" level={level} />
             </View>
           )}
-        </View>
+        </Glass>
 
         {state.mode === "bridge" && state.bridge && (
           <ActionRow
@@ -252,12 +252,12 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: color.surface.base },
+  root: { flex: 1 },
   headerEnd: { alignItems: "flex-end" },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md },
   date: { ...type.label, color: color.fg.default, flexShrink: 1 },
-  profile: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: color.surface.inset },
-  hero: { borderRadius: radius.xl, overflow: "hidden", backgroundColor: color.surface.inset },
+  profile: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: color.glass.row },
+  hero: { overflow: "hidden", paddingHorizontal: 0, paddingVertical: 0 },
   heroText: { paddingHorizontal: space.lg, paddingVertical: space.lg, gap: 2 },
   spentLine: { flexDirection: "row", justifyContent: "space-between", gap: space.md, marginTop: space.xs },
   metal: { height: LAYOUT.pool },

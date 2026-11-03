@@ -65,15 +65,22 @@ describe("floating glass, in the worst case", () => {
   });
   it("keeps the menu's icons readable over the brightest metal, with no scrim", () => {
     const backing = over(color.glass.floating.tint, brightest);
-    expect(contrastRatio(color.fg.subtle, backing)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(color.fg.default, backing)).toBeGreaterThanOrEqual(3);
   });
-  it("the fallback fill is opaque and readable", () => {
-    expect(color.glass.floating.fallback).toMatch(/^#[0-9A-F]{6}$/);
-    expect(contrastRatio(color.fg.muted, color.glass.floating.fallback)).toBeGreaterThanOrEqual(4.5);
+  it("keeps text readable on cards and list rows over the backdrop's brightest ridge", () => {
+    for (const tint of [color.glass.surface.tint, color.glass.row]) {
+      const backing = over(tint, color.backdrop.peak);
+      expect(contrastRatio(color.fg.default, backing)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(color.fg.muted, backing)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(color.fg.subtle, backing)).toBeGreaterThanOrEqual(3);
+      expect(contrastRatio(color.money.expense, backing)).toBeGreaterThanOrEqual(3);
+    }
   });
-  it("cards are opaque, and text on them is readable", () => {
-    expect(color.glass.surface.fill).toMatch(/^#[0-9A-F]{6}$/);
-    expect(contrastRatio(color.fg.muted, color.glass.surface.fill)).toBeGreaterThanOrEqual(4.5);
+  it("the fallback fills are opaque and readable", () => {
+    for (const fill of [color.glass.floating.fallback, color.glass.surface.fallback]) {
+      expect(fill).toMatch(/^#[0-9A-F]{6}$/);
+      expect(contrastRatio(color.fg.muted, fill)).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
 

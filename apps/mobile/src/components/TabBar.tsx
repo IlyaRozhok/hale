@@ -36,7 +36,7 @@ export function TabBar({ state, navigation }: Pick<BottomTabBarProps, "state" | 
               onPress={onPress}
               style={[styles.tab, focused && styles.active]}
             >
-              <Icon name={tab.icon} color={focused ? color.accent.fgOnAccent : color.fg.subtle} />
+              <Icon name={tab.icon} color={focused ? color.accent.fgOnAccent : color.fg.default} />
             </Pressable>
           );
         })}

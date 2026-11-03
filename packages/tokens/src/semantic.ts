@@ -15,14 +15,18 @@ export const color = {
     overlay: p.graphite[700],
     selected: p.silver[100],
     /** Dims what is behind a window, while the glass still has something to show. */
-    scrim: blackAlpha(0.5),
+    scrim: blackAlpha(0.6),
   },
   glass: {
-    /** Cards: nothing passes behind them, so a fill and a thin edge. */
-    surface: { fill: p.graphite[900], edge: whiteAlpha(0.1) },
     /** The menu and windows: the system's glass, dark enough for text over the brightest metal. */
-    floating: { tint: blackAlpha(0.72), fallback: p.graphite[800] },
+    floating: { tint: blackAlpha(0.55), fallback: p.graphite[800] },
+    /** Cards: the same glass, a little darker, as they carry the most text. */
+    surface: { tint: blackAlpha(0.6), fallback: p.graphite[900] },
+    /** List rows: too many for real glass, so a see-through fill. */
+    row: blackAlpha(0.6),
   },
+  /** The app's backdrop of metal folds; `peak` caps its brightest ridge. */
+  backdrop: { peak: p.silver[400] },
   // Statuses differ by lightness, and danger (errors) by a calm red. Each also carries a text label.
   status: {
     success: p.silver[400],

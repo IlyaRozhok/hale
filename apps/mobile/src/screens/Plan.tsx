@@ -68,7 +68,7 @@ export function Plan() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: color.surface.base },
+  root: { flex: 1 },
   content: { paddingHorizontal: space.xl, paddingTop: space.lg, gap: space.lg },
   // Lines up with the text inside the panels below it.
   title: { ...type.title, color: color.fg.default, paddingHorizontal: space.lg },

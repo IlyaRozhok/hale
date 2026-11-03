@@ -1,5 +1,6 @@
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text } from "react-native";
 import { tokens } from "@hale/tokens";
+import { Glass } from "./Glass";
 
 const { color, radius, space, type } = tokens;
 
@@ -7,17 +8,17 @@ const { color, radius, space, type } = tokens;
 export function StaleBanner({ lines }: { lines: string[] }) {
   if (lines.length === 0) return null;
   return (
-    <View style={styles.box} accessible accessibilityRole="alert">
+    <Glass style={styles.box} accessible accessibilityRole="alert">
       {lines.map((l) => (
         <Text key={l} style={styles.text}>
           {l}
         </Text>
       ))}
-    </View>
+    </Glass>
   );
 }
 
 const styles = StyleSheet.create({
-  box: { backgroundColor: color.surface.raised, borderRadius: radius.lg, padding: space.md, gap: space.xs },
+  box: { borderRadius: radius.lg, padding: space.md, gap: space.xs },
   text: { ...type.label, color: color.fg.muted },
 });

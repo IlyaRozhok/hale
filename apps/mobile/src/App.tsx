@@ -16,6 +16,7 @@ import { Login } from "./screens/Login";
 import { Activity } from "./screens/Activity";
 import { Plan } from "./screens/Plan";
 import { TabBar } from "./components/TabBar";
+import { Backdrop } from "./metal/Backdrop";
 import { createPushDeps } from "./pushNative";
 import { registerPush } from "./push";
 import { useApi } from "./api/context";
@@ -27,7 +28,7 @@ const DEVICE_NAME = "iPhone";
 
 const theme = {
   ...DarkTheme,
-  colors: { ...DarkTheme.colors, background: color.surface.base, card: color.surface.inset, text: color.fg.default, primary: color.fg.default, border: color.surface.inset },
+  colors: { ...DarkTheme.colors, background: "transparent", card: color.surface.inset, text: color.fg.default, primary: color.fg.default, border: color.surface.inset },
 };
 
 const Tabs = createBottomTabNavigator();
@@ -45,7 +46,7 @@ function Main() {
 
   return (
     <NavigationContainer theme={theme}>
-      <Tabs.Navigator tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false }}>
+      <Tabs.Navigator tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false, sceneStyle: styles.scene }}>
         <Tabs.Screen name="Today" component={TodayTab} options={{ title: "Сегодня" }} />
         <Tabs.Screen name="Activity" component={Activity} options={{ title: "Операции" }} />
         <Tabs.Screen name="Plan" component={Plan} options={{ title: "План" }} />
@@ -96,6 +97,9 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
+      <View style={styles.backdrop}>
+        <Backdrop />
+      </View>
       <PersistQueryClientProvider
         client={client}
         persistOptions={{ persister, maxAge: 7 * DAY, dehydrateOptions: { shouldDehydrateQuery: shouldPersist } }}
@@ -108,4 +112,8 @@ export default function App() {
   );
 }
 
-const styles = StyleSheet.create({ blank: { flex: 1, backgroundColor: color.surface.base } });
+const styles = StyleSheet.create({
+  blank: { flex: 1 },
+  scene: { backgroundColor: "transparent" },
+  backdrop: { ...(StyleSheet.absoluteFill as object), backgroundColor: color.surface.base },
+});

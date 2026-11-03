@@ -42,7 +42,7 @@ const styles = StyleSheet.create({
     gap: space.md,
     paddingVertical: space.sm,
     paddingHorizontal: space.lg,
-    backgroundColor: color.surface.inset,
+    backgroundColor: color.glass.row,
   },
   first: { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingTop: space.md },
   last: { borderBottomLeftRadius: radius.lg, borderBottomRightRadius: radius.lg, paddingBottom: space.md },

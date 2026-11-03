@@ -95,6 +95,7 @@ describe("Settings, preview accuracy", () => {
     await waitFor(() => expect(screen.queryByLabelText("Сумма займа")).toBeNull());
     const closes = screen.getAllByRole("button", { name: "Закрыть" });
     await fireEvent.press(closes[closes.length - 1]!);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Новый займ" })).toBeNull());
     await fireEvent.press(await screen.findByRole("button", { name: "Налоги" }));
     await fireEvent.press(await screen.findByRole("button", { name: "Отметить оплаченным" }));
     await waitFor(() => expect(api.previewSettings).toHaveBeenCalledTimes(3));

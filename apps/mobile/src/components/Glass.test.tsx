@@ -14,10 +14,17 @@ const flat = (id: string) => StyleSheet.flatten(screen.getByTestId(id).props.sty
 describe("Glass", () => {
   beforeEach(() => jest.mocked(isLiquidGlassAvailable).mockReturnValue(true));
 
-  it("a card is a plain fill with a thin edge, with no blur", async () => {
+  it("a card is the system's glass too, more strongly tinted, with no fill of its own", async () => {
+    await render(<Glass><Text>Текст</Text></Glass>);
+    const glass = screen.getByTestId("native-glass");
+    expect(glass.props.tintColor).toBe(tokens.color.glass.surface.tint);
+    expect(StyleSheet.flatten(glass.props.style).backgroundColor).toBeUndefined();
+  });
+
+  it("a card falls back to an opaque fill where the system has no such glass", async () => {
+    jest.mocked(isLiquidGlassAvailable).mockReturnValue(false);
     await render(<Glass testID="card"><Text>Текст</Text></Glass>);
-    expect(flat("card")).toMatchObject({ backgroundColor: tokens.color.glass.surface.fill, borderColor: tokens.color.glass.surface.edge, borderWidth: StyleSheet.hairlineWidth });
-    expect(screen.queryByTestId("native-glass")).toBeNull();
+    expect(flat("card").backgroundColor).toBe(tokens.color.glass.surface.fallback);
   });
 
   it("a floating panel is the system's glass, tinted from the tokens", async () => {

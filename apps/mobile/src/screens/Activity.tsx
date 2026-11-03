@@ -143,7 +143,7 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: color.surface.base, paddingHorizontal: space.xl, gap: space.md },
+  root: { flex: 1, paddingHorizontal: space.xl, gap: space.md },
   title: { ...type.title, color: color.fg.default },
   filters: { flexDirection: "row", gap: space.sm },
   head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },

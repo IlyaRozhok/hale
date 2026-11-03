@@ -67,7 +67,7 @@ export function Login({ onSignedIn, deviceName }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: color.surface.base, justifyContent: "center", padding: space.xl },
+  root: { flex: 1, justifyContent: "center", padding: space.xl },
   form: { gap: space.lg },
   title: { ...type.display, color: color.fg.default },
   input: {

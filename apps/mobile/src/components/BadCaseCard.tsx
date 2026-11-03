@@ -1,7 +1,8 @@
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, StyleSheet, Text } from "react-native";
 import { tokens } from "@hale/tokens";
+import { Glass } from "./Glass";
 
-const { color, radius, space, touchMin, type } = tokens;
+const { color, space, touchMin, type } = tokens;
 
 type Props = {
   text: string;
@@ -22,7 +23,7 @@ export function askDeleteLoan(text: string, onDelete: () => void): void {
 /** A calm note about a hard moment: one compact row, plain text, no alarm. */
 export function BadCaseCard({ text, onRepay, onDelete }: Props) {
   return (
-    <View style={styles.row}>
+    <Glass style={styles.row}>
       <Text style={styles.text}>{text}</Text>
       {onDelete ? (
         <Pressable accessibilityRole="button" accessibilityLabel={`Удалить: ${text}`} onPress={() => askDeleteLoan(text, onDelete)} style={styles.action}>
@@ -34,7 +35,7 @@ export function BadCaseCard({ text, onRepay, onDelete }: Props) {
           <Text style={styles.actionText}>Погасил</Text>
         </Pressable>
       ) : null}
-    </View>
+    </Glass>
   );
 }
 
@@ -46,8 +47,6 @@ const styles = StyleSheet.create({
     gap: space.md,
     paddingHorizontal: space.lg,
     paddingVertical: space.xs,
-    borderRadius: radius.xl,
-    backgroundColor: color.surface.inset,
   },
   text: { ...type.label, color: color.fg.muted, flex: 1 },
   action: { minHeight: touchMin, justifyContent: "center" },
