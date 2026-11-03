@@ -169,6 +169,15 @@ describe("people", () => {
     });
   });
 
+  it.each(["Переказ на картку", "545708****4563", "Поповнення «На свято»"])("an unnamed transfer stays person_transfer without a question: %s", (description) => {
+    expect(classify(tx({ description, mcc: 4829 }), ctx())).toMatchObject({ type: "person_transfer", needsLabel: false });
+    expect(classify(tx({ description, mcc: 4829, accountKind: "fop" }), ctx())).toMatchObject({ type: "person_transfer", needsLabel: false });
+  });
+
+  it("the bank's counterparty name decides over a generic description", () => {
+    expect(classify(tx({ description: "Переказ на картку", counterName: "Таечка", mcc: 4829 }), ctx()).needsLabel).toBe(true);
+  });
+
   it("incoming from a person is person_in", () => {
     expect(classify(tx({ description: "Від: Тест Тестовий", amount: 10000, mcc: 4829 }), ctx())).toMatchObject({
       type: "person_in",

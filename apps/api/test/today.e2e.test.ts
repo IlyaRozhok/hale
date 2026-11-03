@@ -17,6 +17,7 @@ const http = () => app.getHttpServer();
 const api = {
   get: (p: string) => request(http()).get(p).set("Authorization", auth),
   post: (p: string, b: object = {}) => request(http()).post(p).set("Authorization", auth).send(b),
+  delete: (p: string) => request(http()).delete(p).set("Authorization", auth),
 };
 const at = (iso: string) => {
   clock.fixed = new Date(iso);
@@ -175,7 +176,7 @@ describe("the first day", () => {
     await account("black", 1_000_000);
     const before = await today();
     expect(before.state).toMatchObject({ daysLeft: 30, dailyLimit: Math.floor(1_000_000 / 30), needsIncomeDate: true });
-    expect(before.questions.map((q: { id: string }) => q.id)).toEqual(["income_date"]);
+    expect(before.questions).toEqual([]);
 
     await applySeed(ds, seed, NOW);
     expect(await ds.query(`SELECT 1 FROM daily_snapshots`)).toHaveLength(0);
@@ -256,7 +257,7 @@ describe("borrowed", () => {
     const r = await today();
     expect(r.state.free).toBe(1_000_000 - 100_000);
     expect(r.badCases).toHaveLength(1);
-    expect(r.badCases[0].text).toContain("₴1 000");
+    expect(r.badCases[0].text).toContain("₴1,000");
   });
 
   it("lists only unrepaid loans as bad cases", async () => {
@@ -268,6 +269,20 @@ describe("borrowed", () => {
     const r = await today();
     expect(r.badCases).toHaveLength(1);
     expect(r.badCases[0].id).toMatch(/^loan:/);
+  });
+
+  it("states a loan neutrally and offers removal only for one entered by hand", async () => {
+    const card = await account("black", 1_000_000);
+    await income("fop", "2026-11-12");
+    const bank = await tx(card, 200_000, "loan_in", { date: "2026-11-01" });
+    await ds.query(`INSERT INTO loans (amount, received_on) VALUES (1000, '2026-11-01')`);
+    await ds.query(`INSERT INTO loans (amount, received_on, source_transaction_id) VALUES (500000, '2026-11-02', $1)`, [bank]);
+    const r = await today();
+    expect(r.badCases[0]).toMatchObject({ text: "Займ ₴10 от 01.11" });
+    expect(r.badCases[0].removableLoanId).toEqual(expect.any(Number));
+    expect(r.badCases[1].text).toMatch(/^Займ ₴5,000 от 02\.11/);
+    expect(r.badCases[1].removableLoanId).toBeUndefined();
+    for (const b of r.badCases) expect(b.text).not.toMatch(/не хватало/);
   });
 });
 
@@ -534,6 +549,28 @@ describe("bridge mode", () => {
     expect((await today()).state.bridge.confirmed).toBe(true);
   });
 
+  it("cancelling closes the plan and returns to the recommendation; a new plan can follow", async () => {
+    await setup();
+    await api.post("/bridge", { dailyAmount: 100_000 }).expect(201);
+    const cancelled = await api.delete("/bridge").expect(200);
+    expect(cancelled.body.state.bridge.confirmed).toBe(false);
+    expect(cancelled.body.state.dailyLimit).toBe(45_000);
+    expect((await plans())[0].closed_on).not.toBeNull();
+
+    const again = await api.post("/bridge", { dailyAmount: 60_000 }).expect(201);
+    expect(again.body.state.bridge.confirmed).toBe(true);
+    expect(await plans()).toHaveLength(2);
+  });
+
+  it("cancelling with no open plan changes nothing, the day's limit stays fixed", async () => {
+    const card = await setup();
+    const before = await today();
+    await setBalance(card, 4_532_500);
+    const r = await api.delete("/bridge").expect(200);
+    expect(r.body.state.dailyLimit).toBe(before.state.dailyLimit);
+    expect(await plans()).toHaveLength(0);
+  });
+
   it("saves the choice, keeps credit_plan on ordinary spending, and recomputes it on new payments or a new income date", async () => {
     const card = await setup();
     const saved = await api.post("/bridge", { dailyAmount: 100_000 }).expect(201);
@@ -708,7 +745,35 @@ describe("questions, upcoming and run-out", () => {
     at("2026-11-02T10:00:00Z");
     expect((await today()).questions.map((q: { kind: string }) => q.kind)).not.toContain("usdc_arrived");
     await ds.query(`DELETE FROM income_events`);
-    expect((await today()).questions.map((q: { kind: string }) => q.kind)).toContain("income_date");
+    // needsIncomeDate stays, but with no expected income there is nothing to answer.
+    const none = await today();
+    expect(none.state.needsIncomeDate).toBe(true);
+    expect(none.questions.map((q: { kind: string }) => q.kind)).not.toContain("income_date");
+  });
+
+  it("asks only about real names from the last 30 days, with count and total", async () => {
+    const card = await account("black", 5_000_000);
+    at("2026-11-16T10:00:00Z");
+    await tx(card, -100_000, "person_transfer", { counter: "Таечка", needsLabel: true, date: "2026-11-10" });
+    await tx(card, -150_000, "person_transfer", { counter: "Таечка", needsLabel: true, date: "2026-11-12" });
+    await tx(card, -150_000, "person_transfer", { counter: "Таечка", needsLabel: true, date: "2026-10-01" }); // older than 30 days
+    await tx(card, -5_000, "person_transfer", { counter: "Переказ на картку", needsLabel: true, date: "2026-11-14" });
+    await tx(card, -5_000, "person_transfer", { counter: "545708****4563", needsLabel: true, date: "2026-11-15" });
+    await tx(card, -5_000, "person_transfer", { counter: "Старий Знайомий", needsLabel: true, date: "2026-10-01" });
+    const people = (await today()).questions.filter((q: { kind: string }) => q.kind === "recipient_label");
+    expect(people).toHaveLength(1);
+    expect(people[0]).toMatchObject({ subject: "Таечка", text: "Таечка: 2 перевода, ₴2,500" });
+  });
+
+  it("a generic text does not use up one of the three question slots", async () => {
+    const card = await account("black", 5_000_000);
+    at("2026-11-16T10:00:00Z");
+    for (const [n, name] of ["Анна", "Борис", "Віра"].entries()) {
+      await tx(card, -1_000, "person_transfer", { counter: name, needsLabel: true, date: `2026-11-0${n + 1}` });
+    }
+    await tx(card, -1_000, "person_transfer", { counter: "Переказ на картку", needsLabel: true, date: "2026-11-15" });
+    const people = (await today()).questions.filter((q: { kind: string }) => q.kind === "recipient_label");
+    expect(people.map((q: { subject: string }) => q.subject).sort()).toEqual(["Анна", "Борис", "Віра"]);
   });
 
   describe("is this credit from Binance", () => {
@@ -731,7 +796,7 @@ describe("questions, upcoming and run-out", () => {
 
       const before = await today();
       expect(matchQs(before)).toEqual([
-        { id: `usdc_match:${ev}:${t}`, kind: "usdc_match", text: "Пришло ₴120 000 (16.11). Это вывод с Binance?" },
+        { id: `usdc_match:${ev}:${t}`, kind: "usdc_match", text: "Пришло ₴120,000 (16.11). Это вывод с Binance?" },
       ]);
       expect(before.accounts.binance).toBe(500_000 * RATE);
 

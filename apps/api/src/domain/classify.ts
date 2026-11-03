@@ -1,3 +1,4 @@
+import { isCounterpartyName } from "./counterparty";
 import {
   CASH_MCCS,
   type Category,
@@ -162,6 +163,8 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
     category: string = typeCategory(type),
     needsLabel = false,
   ): ClassifyResult => ({ type, category, source, needsLabel });
+  // A question needs someone to ask about: a bank template stays a plain transfer.
+  const hasName = isCounterpartyName(tx.counterName?.trim() || d);
 
   // 1. Owner rules
   for (const rule of ctx.rules) {
@@ -199,7 +202,7 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
 
   if (tx.accountKind === "fop") {
     if (incoming) return done("income");
-    if (mcc === null || TRANSFER_MCCS.has(mcc)) return done("person_transfer", "auto", "transfer", true);
+    if (mcc === null || TRANSFER_MCCS.has(mcc)) return done("person_transfer", "auto", "transfer", hasName);
   }
 
   // A bank refund text is a refund whatever its MCC (transfer MCC 4829 included); a refund of a
@@ -217,7 +220,7 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
 
   // Money movement left over: people
   if (incoming) return done("person_in", "auto", "transfer", mcc === null);
-  return done("person_transfer", "auto", "transfer", true);
+  return done("person_transfer", "auto", "transfer", hasName);
 }
 
 export interface PairCandidate {

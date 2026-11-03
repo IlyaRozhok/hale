@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Inject, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Post, Delete } from "@nestjs/common";
 import { bridgeInput, settingsPreviewInput, type BridgePreviewDto, type SettingsPreviewDto, type TodayDto } from "@hale/contracts";
 import { TodayService } from "./today.service";
 
@@ -30,6 +30,11 @@ export class TodayController {
   @Post("bridge")
   choose(@Body() body: unknown): Promise<TodayDto> {
     return this.today.chooseBridge(parseBridge(body));
+  }
+
+  @Delete("bridge")
+  cancel(): Promise<TodayDto> {
+    return this.today.cancelBridge();
   }
 
   @Post("bridge/preview")

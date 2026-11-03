@@ -10,6 +10,7 @@ import { runOutDate } from "../domain/run-out";
 import { taxReserve } from "../domain/tax";
 import { usdcMatchRows } from "../domain/usdc-match";
 import { BINANCE } from "../plan/plan.service";
+import { isCounterpartyName, transfersWord } from "../domain/counterparty";
 import { counterKeySql } from "../transactions/counter-key";
 import { Clock } from "./clock";
 import { quarterTaxFacts } from "./tax-facts";
@@ -22,6 +23,8 @@ const DEFAULT_LIFESTYLE_CAP = 10_000_000;
 /** Design §5.3: about ₴450 a day, used while the owner has not set a food floor (0 would mean a ₴0 bridge limit). */
 const DEFAULT_FOOD_FLOOR = 45_000;
 const MAX_RECIPIENT_QUESTIONS = 3;
+/** Older transfers are history: asking about them now changes nothing. */
+const QUESTION_WINDOW_DAYS = 30;
 
 const CODE_BY_ALPHA = new Map(Object.entries(CURRENCY_ALPHA).map(([code, alpha]) => [alpha, Number(code)]));
 
@@ -38,6 +41,7 @@ interface Loan {
   amount: number;
   remaining: number;
   received_on: string;
+  manual: boolean;
 }
 
 interface Facts {
@@ -60,7 +64,7 @@ interface Facts {
   now: Date;
 }
 
-const fmt = (kopecks: number) => `₴${Math.round(kopecks / 100).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")}`;
+const fmt = (kopecks: number) => `₴${Math.round(kopecks / 100).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
 
 const fmtDay = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
 
@@ -222,6 +226,20 @@ export class TodayService {
     return this.getToday();
   }
 
+  /** Closes the open plan, if any; the day then gets a fresh limit, as when a plan ends by itself. */
+  async cancelBridge(): Promise<TodayDto> {
+    const date = kyivDate(this.clock.now());
+    await this.ds.transaction(async (m) => {
+      const closed: unknown[] = await m.query(
+        `UPDATE bridge_plans SET closed_on=$1 WHERE closed_on IS NULL RETURNING id`,
+        [date],
+      );
+      // TypeORM returns [rows, count] for an UPDATE on Postgres.
+      if ((closed[1] as number) > 0) await m.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [date]);
+    });
+    return this.getToday();
+  }
+
   // --- engine call ------------------------------------------------------------
   private compute(
     f: Facts,
@@ -316,7 +334,8 @@ export class TodayService {
     // Loans since the last received income, within the tracked period (earlier ones are history):
     // they are what was borrowed in this cycle, less what short-loan repayments already covered.
     const loans: Loan[] = await m.query(
-      `SELECT id, amount::float8 AS amount, (amount - repaid_amount)::float8 AS remaining, received_on::text AS received_on FROM loans
+      `SELECT id, amount::float8 AS amount, (amount - repaid_amount)::float8 AS remaining, received_on::text AS received_on,
+              source_transaction_id IS NULL AS manual FROM loans
         WHERE repaid_at IS NULL AND received_on >= $2::date AND ($1::date IS NULL OR received_on >= $1::date) ORDER BY received_on, id`,
       [lastIncome, settings.tracking_start],
     );
@@ -489,33 +508,41 @@ export class TodayService {
       const ev = (await m.query(`SELECT id FROM income_events WHERE status <> 'received' ORDER BY expected_on, id LIMIT 1`))[0] as
         | { id: number }
         | undefined;
-      questions.push({
-        id: ev ? `income_date:${ev.id}` : "income_date",
-        kind: "income_date",
-        text: "Когда ожидается следующий доход?",
-      });
+      // With no expected income there is no date to answer: the limit simply runs on 30 days.
+      if (ev) questions.push({ id: `income_date:${ev.id}`, kind: "income_date", text: "Когда ожидается следующий доход?" });
     }
-    const people: { key: string; label: string }[] = await m.query(
-      `SELECT ck AS key, label FROM (
-         SELECT DISTINCT ON (ck) ck, label, occurred_at, id FROM (
-           SELECT ${counterKeySql("t")} AS ck, COALESCE(NULLIF(t.counter_name,''), t.description) AS label, t.id, t.occurred_at
-             FROM transactions t JOIN accounts a ON a.id=t.account_id
-            WHERE t.needs_label AND t.type='person_transfer' AND a.kind <> 'jar'
-         ) s ORDER BY ck, occurred_at DESC, id DESC
-       ) d ORDER BY occurred_at DESC, id DESC LIMIT $1`,
-      [MAX_RECIPIENT_QUESTIONS],
+    const people: { key: string; label: string; count: number; total: number }[] = await m.query(
+      `SELECT ck AS key, label, count, total FROM (
+         SELECT DISTINCT ON (ck) ck, label, occurred_at, id,
+                COUNT(*) OVER (PARTITION BY ck)::int AS count,
+                (COALESCE(SUM(ABS(amount_uah)) OVER (PARTITION BY ck), 0))::float8 AS total
+           FROM (
+             SELECT ${counterKeySql("t")} AS ck, COALESCE(NULLIF(t.counter_name,''), t.description) AS label, t.id, t.occurred_at, t.amount_uah
+               FROM transactions t JOIN accounts a ON a.id=t.account_id
+              WHERE t.needs_label AND t.type='person_transfer' AND a.kind <> 'jar'
+                AND t.local_date > $1::date - ${QUESTION_WINDOW_DAYS}
+           ) s ORDER BY ck, occurred_at DESC, id DESC
+       ) d ORDER BY occurred_at DESC, id DESC`,
+      [f.date],
     );
-    for (const p of people) {
-      questions.push({ id: `recipient_label:${p.key}`, kind: "recipient_label", text: `Кто это: ${p.label}?` });
+    for (const p of people.filter((x) => isCounterpartyName(x.label)).slice(0, MAX_RECIPIENT_QUESTIONS)) {
+      questions.push({
+        id: `recipient_label:${p.key}`,
+        kind: "recipient_label",
+        subject: p.label,
+        text: `${p.label}: ${p.count} ${transfersWord(p.count)}, ${fmt(p.total)}`,
+      });
     }
 
     const badCases: TodayDto["badCases"] = [];
     const runOutOn = runOutDate({ free: state.free, avgDailySpend: f.avgDailySpend, today: f.date });
     for (const l of f.loans) {
-      badCases.push({
-        id: `loan:${l.id}`,
-        text: `Взят займ ${fmt(l.amount)} (${fmtDay(l.received_on)}): столько не хватало.${runOutText(runOutOn, f.date)}`,
-      });
+      const fact = `Займ ${fmt(l.amount)} от ${fmtDay(l.received_on)}`;
+      badCases.push(
+        l.manual
+          ? { id: `loan:${l.id}`, text: fact, removableLoanId: l.id }
+          : { id: `loan:${l.id}`, text: `${fact}${runOutOn ? `.${runOutText(runOutOn, f.date)}` : ""}` },
+      );
     }
     if (state.bridge?.overPlan && plan) {
       const over = -(f.input.cardsMoney + f.input.fopMoney + f.input.binanceMoney) - plan.creditPlan;

@@ -247,8 +247,19 @@ export interface TodayDto {
   rateStale: boolean;
   accounts: { own: number; credit: number; fop: number; binance: number };
   upcoming: { id: string; name: string; amount: number; dueOn: string; kind: string }[];
-  questions: { id: string; kind: "usdc_arrived" | "usdc_match" | "income_date" | "recipient_label"; text: string }[];
-  badCases: { id: string; text: string }[];
+  questions: {
+    id: string;
+    kind: "usdc_arrived" | "usdc_match" | "income_date" | "recipient_label";
+    text: string;
+    /** Who a recipient question is about. */
+    subject?: string;
+  }[];
+  badCases: {
+    id: string;
+    text: string;
+    /** Set on a loan entered by hand, which the owner may remove; a loan from the bank has none. */
+    removableLoanId?: number;
+  }[];
   runOutOn: string | null;
   /** Last successful contact with the bank (webhook item, reconcile or balance refresh), null if there was none yet. */
   syncedAt: string | null;
