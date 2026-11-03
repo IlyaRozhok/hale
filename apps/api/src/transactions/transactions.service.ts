@@ -82,6 +82,12 @@ const LABEL_TYPE: Record<RecipientLabelName, TxType> = {
   one_off: "person_transfer",
 };
 
+/** Which types each list group shows. own_transfer, loan_in, goal_contribution and untyped rows are only in "all". */
+const GROUP_TYPES: Record<"spend" | "income", readonly string[]> = {
+  spend: ["spend", "obligation", "tax", "debt_payment", "person_transfer", "cash_out"],
+  income: ["income", "person_in", "cash_in"],
+};
+
 export class InvalidCursorError extends Error {}
 
 @Injectable()
@@ -97,6 +103,13 @@ export class TransactionsService {
     const arg = (v: unknown) => `$${args.push(v)}`;
     if (q.type) where.push(`t.type = ${arg(q.type)}`);
     if (q.needsLabel !== undefined) where.push(`t.needs_label = ${arg(q.needsLabel)}`);
+    if (q.group && q.group !== "all") where.push(`t.type = ANY(${arg(GROUP_TYPES[q.group])}::text[])`);
+    if (q.q) {
+      const like = arg(`%${q.q.replace(/[\\%_]/g, "\\$&")}%`);
+      where.push(`(t.description ILIKE ${like} ESCAPE '\\' OR t.counter_name ILIKE ${like} ESCAPE '\\')`);
+    }
+    const filters = [...where];
+    const filterArgs = [...args];
     if (q.cursor) {
       const c = decodeCursor(q.cursor);
       if (!c) throw new InvalidCursorError("bad cursor");
@@ -111,7 +124,20 @@ export class TransactionsService {
     return {
       items: page.map(view),
       nextCursor: rows.length > q.limit ? encodeCursor(page[page.length - 1]!) : null,
+      dayTotals: await this.dayTotals([...new Set(page.map((r) => r.local_date))], filters, filterArgs),
     };
+  }
+
+  /** Totals for whole days, ignoring the cursor, so a day split across pages still adds up. */
+  private async dayTotals(dates: string[], filters: string[], args: unknown[]): Promise<Record<string, number>> {
+    if (dates.length === 0) return {};
+    const rows: { local_date: string; total: number }[] = await this.ds.query(
+      `SELECT t.local_date::text AS local_date, COALESCE(SUM(t.amount_uah), 0)::float8 AS total ${FROM}
+        WHERE ${[...filters, `t.local_date = ANY($${args.length + 1}::date[])`].join(" AND ")}
+        GROUP BY t.local_date`,
+      [...args, dates],
+    );
+    return Object.fromEntries(rows.map((r) => [r.local_date, r.total]));
   }
 
   /**

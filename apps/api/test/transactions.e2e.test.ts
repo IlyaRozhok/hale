@@ -92,6 +92,68 @@ describe("GET /transactions", () => {
     await api.get("/transactions?needsLabel=maybe").expect(400);
   });
 
+  it("validates group and q", async () => {
+    await api.get("/transactions?group=nope").expect(400);
+    await api.get("/transactions?q=").expect(400);
+    await api.get(`/transactions?q=${"x".repeat(101)}`).expect(400);
+  });
+
+  it("group spend and income leave transfers between own accounts only under all", async () => {
+    const a = await account();
+    const spendTypes = ["spend", "obligation", "tax", "debt_payment", "person_transfer", "cash_out"];
+    const incomeTypes = ["income", "person_in", "cash_in"];
+    const onlyAll = ["own_transfer", "loan_in", "goal_contribution", null];
+    for (const type of [...spendTypes, ...incomeTypes, ...onlyAll]) await tx(a, { type, description: `t:${type}` });
+    const types = async (q: string) =>
+      ((await api.get(`/transactions${q}`).expect(200)).body.items as { type: string | null }[]).map((t) => t.type);
+    expect((await types("?group=spend")).sort()).toEqual([...spendTypes].sort());
+    expect((await types("?group=income")).sort()).toEqual([...incomeTypes].sort());
+    expect(await types("?group=all")).toHaveLength(13);
+    expect(await types("")).toHaveLength(13);
+  });
+
+  it("q searches description and counterparty, with % and _ taken literally", async () => {
+    const a = await account();
+    // Cyrillic case folding depends on the database locale (production folds, the test database may not).
+    await tx(a, { description: "Крем Кафе" });
+    await tx(a, { description: "Переказ", name: "Кафе Ліда" });
+    await tx(a, { description: "Uklon" });
+    await tx(a, { description: "АТБ" });
+    await tx(a, { description: "100% sale" });
+    await tx(a, { description: "1000 sale" });
+    const found = async (q: string) =>
+      ((await api.get(`/transactions?q=${encodeURIComponent(q)}`).expect(200)).body.items as { description: string }[])
+        .map((t) => t.description)
+        .sort();
+    expect(await found(" Кафе ")).toEqual(["Крем Кафе", "Переказ"]);
+    expect(await found("UKLON")).toEqual(["Uklon"]);
+    expect(await found("100%")).toEqual(["100% sale"]);
+    expect(await found("1_0")).toEqual([]);
+    expect(await found("'; DROP TABLE transactions; --")).toEqual([]);
+  });
+
+  it("dayTotals covers a whole day split across pages, under the same filters", async () => {
+    const a = await account();
+    await tx(a, { at: "2026-11-10T12:00:00.000Z", amount: -100 });
+    await tx(a, { at: "2026-11-10T11:00:00.000Z", amount: -200 });
+    await tx(a, { at: "2026-11-10T10:00:00.000Z", amount: -400 });
+    await tx(a, { at: "2026-11-10T09:00:00.000Z", amount: -9000, type: "own_transfer" });
+    await tx(a, { at: "2026-11-10T08:00:00.000Z", amount: -5000, amountUah: null });
+    await tx(a, { at: "2026-11-09T10:00:00.000Z", amount: -800 });
+
+    const first = await api.get("/transactions?group=spend&limit=2").expect(200);
+    expect(first.body.dayTotals).toEqual({ "2026-11-10": -700 });
+    const second = await api.get(`/transactions?group=spend&limit=2&cursor=${first.body.nextCursor as string}`).expect(200);
+    expect(second.body.dayTotals["2026-11-10"]).toBe(-700);
+    const all = await api.get("/transactions?group=all&limit=1").expect(200);
+    expect(all.body.dayTotals).toEqual({ "2026-11-10": -9700 });
+  });
+
+  it("dayTotals is empty for an empty page", async () => {
+    const page = await api.get("/transactions?group=spend").expect(200);
+    expect(page.body).toMatchObject({ items: [], dayTotals: {}, nextCursor: null });
+  });
+
   it("pages newest first without gaps or repeats while new rows arrive", async () => {
     const a = await account();
     const ids: number[] = [];

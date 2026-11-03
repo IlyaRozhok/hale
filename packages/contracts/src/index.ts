@@ -261,6 +261,8 @@ export const transactionsQuery = z
     limit: z.coerce.number().int().min(1).max(200).default(50),
     type: txType.optional(),
     needsLabel: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
+    group: z.enum(["spend", "income", "all"]).optional(),
+    q: z.string().trim().min(1).max(100).optional(),
   })
   .strict();
 export type TransactionsQuery = z.infer<typeof transactionsQuery>;
@@ -306,6 +308,8 @@ export interface TransactionDto {
 export interface TransactionPageDto {
   items: TransactionDto[];
   nextCursor: string | null;
+  /** Sum of amountUah per local date of this page, over the whole day and under the same filters. */
+  dayTotals: Record<string, number>;
 }
 
 export interface TransactionEditDto {
