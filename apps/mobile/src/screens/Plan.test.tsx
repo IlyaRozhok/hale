@@ -34,7 +34,7 @@ describe("Plan, goals", () => {
     expect(await screen.findByText("Подушка")).toBeTruthy();
     expect(screen.getByText("$500 из $5,000")).toBeTruthy();
     const bar = screen.getByLabelText("Прогресс: 10%");
-    expect(StyleSheet.flatten(bar.children[0]!.props.style as never)).toMatchObject({ width: "10%" });
+    expect(StyleSheet.flatten((bar.children[0] as unknown as { props: { style: never } }).props.style)).toMatchObject({ width: "10%" });
   });
 
   it("adds a goal from a name and a target in dollars", async () => {

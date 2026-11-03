@@ -1,21 +1,38 @@
-import { useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, SectionList, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 import type { TransactionDto } from "@hale/contracts";
 import { useTransactions } from "../api/queries";
+import { dayHeader, formatSignedMoney, kyivDate } from "../format";
 import { Chip } from "../components/Chip";
+import { Field } from "../components/Field";
 import { Glass } from "../components/Glass";
+import { Icon } from "../components/Icon";
 import { RecipientLabelSheet } from "../components/RecipientLabelSheet";
 import { TxEditSheet } from "../components/TxEditSheet";
 import { TxRow } from "../components/TxRow";
 
 const { color, radius, space, touchMin, type } = tokens;
 
-/** The operations list: newest first, pages by cursor, a filter for rows that wait for an answer. */
-export function Activity() {
+type Tab = "spend" | "income" | "all" | "ask";
+
+const TABS: { tab: Tab; label: string; empty: string }[] = [
+  { tab: "spend", label: "Траты", empty: "Трат пока нет." },
+  { tab: "income", label: "Доходы", empty: "Доходов пока нет." },
+  { tab: "all", label: "Все", empty: "Операций пока нет." },
+  { tab: "ask", label: "Вопросы", empty: "Ответов никто не ждёт." },
+];
+
+const SEARCH_DELAY_MS = 300;
+
+/** The operations list by day, newest first, pages by cursor. Transfers between own accounts only show under "Все". */
+export function Activity({ now = () => new Date() }: { /** Test seam for the current moment. */ now?: () => Date }) {
   const insets = useSafeAreaInsets();
-  const [onlyAsk, setOnlyAsk] = useState(false);
+  const [tab, setTab] = useState<Tab>("spend");
+  const [searching, setSearching] = useState(false);
+  const [text, setText] = useState("");
+  const [search, setSearch] = useState("");
   const [open, setOpen] = useState<TransactionDto | null>(null);
   // A row waiting for an answer opens the label sheet; "Изменить тип" there switches to the full editor.
   const [forceEdit, setForceEdit] = useState(false);
@@ -23,14 +40,46 @@ export function Activity() {
     setOpen(null);
     setForceEdit(false);
   };
-  const list = useTransactions(onlyAsk);
-  const items = list.data?.pages.flatMap((p) => p.items) ?? [];
+
+  useEffect(() => {
+    const id = setTimeout(() => setSearch(text.trim()), SEARCH_DELAY_MS);
+    return () => clearTimeout(id);
+  }, [text]);
+
+  const toggleSearch = () => {
+    if (searching) {
+      setText("");
+      setSearch("");
+    }
+    setSearching(!searching);
+  };
+
+  const list = useTransactions({ ...(tab === "ask" ? { needsLabel: true } : { group: tab }), ...(search ? { q: search } : {}) });
+  const pages = list.data?.pages ?? [];
+  const items = pages.flatMap((p) => p.items);
+  const totals = Object.assign({}, ...pages.map((p) => p.dayTotals)) as Record<string, number | undefined>;
+  const today = kyivDate(now());
+  const sections = items.reduce<{ date: string; data: TransactionDto[] }[]>((acc, tx) => {
+    const lastSection = acc[acc.length - 1];
+    if (lastSection?.date === tx.localDate) lastSection.data.push(tx);
+    else acc.push({ date: tx.localDate, data: [tx] });
+    return acc;
+  }, []);
+  const emptyText = search ? "Ничего не нашлось." : TABS.find((t) => t.tab === tab)!.empty;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + space.lg }]}>
-      <Text style={styles.title}>Операции</Text>
+      <View style={styles.head}>
+        <Text style={styles.title}>Операции</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Поиск" accessibilityState={{ expanded: searching }} onPress={toggleSearch} style={styles.searchButton}>
+          <Icon name={searching ? "close" : "search"} color={color.fg.muted} size={20} />
+        </Pressable>
+      </View>
+      {searching && <Field label="Поиск по операциям" value={text} onChangeText={setText} autoFocus returnKeyType="search" />}
       <View style={styles.filters}>
-        <Chip label="Нужен ответ" selected={onlyAsk} onPress={() => setOnlyAsk((v) => !v)} />
+        {TABS.map((t) => (
+          <Chip key={t.tab} label={t.label} selected={tab === t.tab} onPress={() => setTab(t.tab)} />
+        ))}
       </View>
       {list.isError && items.length === 0 ? (
         <Glass style={styles.stack}>
@@ -40,12 +89,24 @@ export function Activity() {
           </Pressable>
         </Glass>
       ) : (
-        <FlatList
+        <SectionList
           testID="activity-list"
-          data={items}
+          sections={sections}
           keyExtractor={(t) => String(t.id)}
-          renderItem={({ item }) => <TxRow tx={item} onPress={() => setOpen(item)} />}
-          ItemSeparatorComponent={Gap}
+          stickySectionHeadersEnabled={false}
+          keyboardShouldPersistTaps="handled"
+          renderSectionHeader={({ section }) => {
+            const total = totals[section.date];
+            return (
+              <View style={styles.day}>
+                <Text style={styles.dayText}>{dayHeader(section.date, today)}</Text>
+                {total !== undefined ? <Text style={styles.dayText}>{formatSignedMoney(total)}</Text> : null}
+              </View>
+            );
+          }}
+          renderItem={({ item, index, section }) => (
+            <TxRow tx={item} onPress={() => setOpen(item)} first={index === 0} last={index === section.data.length - 1} />
+          )}
           contentContainerStyle={{ paddingBottom: space.xl }}
           onEndReachedThreshold={0.5}
           onEndReached={() => {
@@ -53,9 +114,7 @@ export function Activity() {
           }}
           refreshing={list.isRefetching && !list.isFetchingNextPage}
           onRefresh={() => void list.refetch()}
-          ListEmptyComponent={
-            list.isPending ? <ActivityIndicator color={color.fg.muted} /> : <Text style={styles.muted}>{onlyAsk ? "Ответов никто не ждёт." : "Операций пока нет."}</Text>
-          }
+          ListEmptyComponent={list.isPending ? <ActivityIndicator color={color.fg.muted} /> : <Text style={styles.muted}>{emptyText}</Text>}
           ListFooterComponent={list.isFetchingNextPage ? <ActivityIndicator color={color.fg.muted} style={styles.footer} /> : undefined}
         />
       )}
@@ -72,13 +131,14 @@ export function Activity() {
   );
 }
 
-const Gap = () => <View style={styles.gap} />;
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: color.surface.base, paddingHorizontal: space.xl, gap: space.md },
   title: { ...type.title, color: color.fg.default },
   filters: { flexDirection: "row", gap: space.sm },
-  gap: { height: space.sm },
+  head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  searchButton: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
+  day: { flexDirection: "row", justifyContent: "space-between", gap: space.md, paddingTop: space.lg, paddingBottom: space.sm },
+  dayText: { ...type.caption, color: color.fg.subtle, fontVariant: ["tabular-nums"] },
   stack: { gap: space.md },
   text: { ...type.body, color: color.fg.default },
   muted: { ...type.body, color: color.fg.muted },
