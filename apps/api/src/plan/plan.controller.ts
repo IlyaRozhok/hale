@@ -15,6 +15,8 @@ import {
 import {
   expectedIncomeInput,
   expectedIncomePatch,
+  goalInput,
+  goalPatch,
   incomeDateInput,
   loanInput,
   loanPatch,
@@ -29,7 +31,7 @@ import {
 } from "@hale/contracts";
 import { DataSource, type ObjectLiteral, type Repository } from "typeorm";
 import type { z } from "zod";
-import { ExpectedIncome, Loan, ManualBalance, RecurringPayment, ScheduledPayment, Settings } from "../db/entities";
+import { ExpectedIncome, Goal, Loan, ManualBalance, RecurringPayment, ScheduledPayment, Settings } from "../db/entities";
 import { PlanService } from "./plan.service";
 
 function parse<S extends z.ZodType>(schema: S, body: unknown): z.infer<S> {
@@ -172,6 +174,28 @@ export class PlanController {
   @Delete("recurring/:id")
   deleteRecurring(@Param("id", ParseIntPipe) id: number) {
     return removeRow(this.ds.getRepository(RecurringPayment), id);
+  }
+
+  // --- goals ----------------------------------------------------------------
+  @Get("goals")
+  listGoals() {
+    return this.ds.getRepository(Goal).find({ order: { sort: "ASC", id: "ASC" } });
+  }
+
+  @Post("goals")
+  createGoal(@Body() body: unknown) {
+    const repo = this.ds.getRepository(Goal);
+    return repo.save(repo.create(parse(goalInput, body)));
+  }
+
+  @Patch("goals/:id")
+  patchGoal(@Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
+    return patchRow(this.ds.getRepository(Goal), id, parse(goalPatch, body));
+  }
+
+  @Delete("goals/:id")
+  deleteGoal(@Param("id", ParseIntPipe) id: number) {
+    return removeRow(this.ds.getRepository(Goal), id);
   }
 
   // --- loans ----------------------------------------------------------------

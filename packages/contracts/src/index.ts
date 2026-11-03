@@ -95,6 +95,30 @@ export const loanInput = z
 export const loanPatch = partial(z.object(loanShape));
 export type LoanInput = z.infer<typeof loanInput>;
 
+// --- goals ------------------------------------------------------------------
+const goalShape = {
+  name: z.string().trim().min(1).max(100),
+  target_cents: money.positive(),
+  saved_cents: money.nonnegative(),
+  sort: z.number().int(),
+};
+export const goalInput = z
+  .object({ name: goalShape.name, target_cents: goalShape.target_cents, saved_cents: goalShape.saved_cents.optional(), sort: goalShape.sort.optional() })
+  .strict();
+export const goalPatch = partial(z.object(goalShape));
+export type GoalInput = z.infer<typeof goalInput>;
+export type GoalPatch = z.infer<typeof goalPatch>;
+
+export interface GoalDto {
+  id: number;
+  name: string;
+  /** US cents. */
+  target_cents: number;
+  /** US cents. */
+  saved_cents: number;
+  sort: number;
+}
+
 // --- manual balances --------------------------------------------------------
 const balanceShape = {
   name: z.string().min(1).max(100),
@@ -230,6 +254,8 @@ export interface TodayDto {
   syncedAt: string | null;
   syncStale: boolean;
   limitVisual: "mercury" | "ring";
+  /** Savings goals in US cents, in display order. */
+  goals: { id: number; name: string; saved: number; target: number }[];
 }
 
 export interface BridgePreviewDto {

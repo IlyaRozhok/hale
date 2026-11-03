@@ -56,6 +56,7 @@ interface Facts {
   trackingStart: string;
   syncedAt: Date | null;
   limitVisual: "mercury" | "ring";
+  goals: TodayDto["goals"];
   now: Date;
 }
 
@@ -420,6 +421,9 @@ export class TodayService {
       trackingStart: settings.tracking_start,
       syncedAt: settings.last_contact,
       limitVisual: settings.limit_visual,
+      goals: await m.query(
+        `SELECT id, name, saved_cents::float8 AS saved, target_cents::float8 AS target FROM goals ORDER BY sort, id`,
+      ),
     };
   }
 
@@ -534,6 +538,7 @@ export class TodayService {
       syncedAt: f.syncedAt ? f.syncedAt.toISOString() : null,
       syncStale: !f.syncedAt || f.now.getTime() - f.syncedAt.getTime() > STALE_SYNC_MS,
       limitVisual: f.limitVisual,
+      goals: f.goals,
     };
   }
 }

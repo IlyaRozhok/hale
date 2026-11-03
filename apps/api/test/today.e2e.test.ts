@@ -38,7 +38,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await ds.query(
     `TRUNCATE jobs, rules, transactions, accounts, fx_rates, income_events, expected_incomes,
-              scheduled_payments, recurring_payments, manual_balances, loans, bridge_plans, daily_snapshots
+              scheduled_payments, recurring_payments, manual_balances, loans, bridge_plans, daily_snapshots, goals
      RESTART IDENTITY CASCADE`,
   );
   await ds.query(
@@ -99,6 +99,17 @@ describe("auth", () => {
   it("requires a token", async () => {
     await request(http()).get("/today").expect(401);
     await request(http()).post("/bridge").send({ dailyAmount: 1 }).expect(401);
+  });
+});
+
+describe("goals on the home screen", () => {
+  it("lists goals in sort order, in USD cents", async () => {
+    await ds.query(`INSERT INTO goals (name, target_cents, saved_cents, sort) VALUES ('Машина',1000000,0,2),('Подушка',500000,50000,1)`);
+    const body = await today();
+    expect(body.goals).toEqual([
+      { id: 2, name: "Подушка", saved: 50000, target: 500000 },
+      { id: 1, name: "Машина", saved: 0, target: 1000000 },
+    ]);
   });
 });
 

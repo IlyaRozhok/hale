@@ -190,8 +190,18 @@ export class NotificationLog {
   @Column({ type: "text" }) kind!: string;
 }
 
+@Entity("goals")
+export class Goal {
+  @id() id!: number;
+  @Column({ type: "text" }) name!: string;
+  @Column({ type: "bigint", transformer: bt }) target_cents!: number;
+  @Column({ type: "bigint", transformer: bt, default: 0 }) saved_cents!: number;
+  @Column({ type: "integer", default: 0 }) sort!: number;
+  @Column({ type: "timestamptz", default: () => "now()" }) created_at!: Date;
+}
+
 export const entities = [
   Account, Transaction, Rule, ExpectedIncome, IncomeEvent, ScheduledPayment, RecurringPayment,
   ManualBalance, Loan, Settings, BridgePlan, DailySnapshot, FxRate, Job,
-  Device, NotificationLog,
+  Device, NotificationLog, Goal,
 ];

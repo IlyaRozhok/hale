@@ -34,7 +34,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await ds.query(
     `TRUNCATE jobs, rules, transactions, accounts, fx_rates, income_events, expected_incomes,
-              scheduled_payments, recurring_payments, manual_balances, loans RESTART IDENTITY CASCADE`,
+              scheduled_payments, recurring_payments, manual_balances, loans, goals RESTART IDENTITY CASCADE`,
   );
   await ds.query(`UPDATE settings SET lifestyle_cap=0, food_floor=0, tax_rate_bp=600, esv_quarter=0`);
 });
@@ -451,5 +451,31 @@ describe("recurring payments", () => {
   it("skips inactive series", async () => {
     await api.post("/plan/recurring", { ...rent, active: false }).expect(201);
     expect(await app.get(PlanService).generateRecurring("2027-01-15")).toBe(0);
+  });
+});
+
+describe("goals", () => {
+  it("creates, lists in order, updates and deletes", async () => {
+    const b = (await api.post("/plan/goals", { name: "Машина", target_cents: 1_000_000, sort: 2 }).expect(201)).body;
+    expect(b).toMatchObject({ name: "Машина", target_cents: 1_000_000, saved_cents: 0, sort: 2 });
+    const a = (await api.post("/plan/goals", { name: "Подушка", target_cents: 500_000, saved_cents: 50_000, sort: 1 }).expect(201)).body;
+
+    const list = (await api.get("/plan/goals").expect(200)).body as { id: number }[];
+    expect(list.map((g) => g.id)).toEqual([a.id, b.id]);
+
+    const patched = (await api.patch(`/plan/goals/${b.id}`, { saved_cents: 25_000 }).expect(200)).body;
+    expect(patched).toMatchObject({ saved_cents: 25_000, target_cents: 1_000_000 });
+
+    await api.del(`/plan/goals/${a.id}`).expect(200);
+    expect((await api.get("/plan/goals").expect(200)).body).toHaveLength(1);
+  });
+
+  it("rejects bad input and unknown ids", async () => {
+    await api.post("/plan/goals", { name: "", target_cents: 100 }).expect(400);
+    await api.post("/plan/goals", { name: "x", target_cents: 0 }).expect(400);
+    await api.post("/plan/goals", { name: "x", target_cents: 100, saved_cents: -1 }).expect(400);
+    await api.post("/plan/goals", { name: "x", target_cents: 100, extra: 1 }).expect(400);
+    await api.patch("/plan/goals/999", { saved_cents: 1 }).expect(404);
+    await api.del("/plan/goals/999").expect(404);
   });
 });
