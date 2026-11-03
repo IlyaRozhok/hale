@@ -29,9 +29,11 @@ export const color = {
     soft: p.silver[200],
     fgOnAccent: p.black,
   },
+  // Hue only on amounts, and always with a sign, so colour is never the only signal.
   money: {
-    income: p.silver[100],
-    expense: p.white,
+    income: p.sage,
+    expense: p.coral,
+    neutral: p.white,
     bonus: p.silver[100],
   },
   data: {

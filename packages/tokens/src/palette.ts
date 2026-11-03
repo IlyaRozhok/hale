@@ -13,6 +13,9 @@ export const palette = {
     300: "#BFC3C9",
     400: "#9EA3AB",
   },
+  /** The only hues: muted, because an ordinary expense is not an error. */
+  coral: "#E39A8F",
+  sage: "#8CC7A1",
   graphite: {
     500: "#54585F",
     700: "#2C2F34",

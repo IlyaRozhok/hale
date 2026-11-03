@@ -22,6 +22,15 @@ describe("silver tokens contrast (WCAG AA 4.5:1)", () => {
   it("status.success on surface.base", () => {
     expect(contrastRatio(color.status.success, color.surface.base)).toBeGreaterThanOrEqual(4.5);
   });
+  it("money colours on surface.base and surface.inset", () => {
+    for (const c of [color.money.expense, color.money.income, color.money.neutral]) {
+      expect(contrastRatio(c, color.surface.base)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(c, color.surface.inset)).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(color.money.expense).toBe("#E39A8F");
+    expect(color.money.income).toBe("#8CC7A1");
+    expect(color.money.neutral).toBe(color.fg.default);
+  });
   it("accent.fgOnAccent on accent.default", () => {
     expect(contrastRatio(color.accent.fgOnAccent, color.accent.default)).toBeGreaterThanOrEqual(4.5);
   });
