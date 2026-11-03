@@ -18,6 +18,8 @@ import {
   goalInput,
   goalPatch,
   incomeDateInput,
+  installmentInput,
+  installmentPatch,
   loanInput,
   loanPatch,
   loanRepayInput,
@@ -34,6 +36,7 @@ import { DataSource, type ObjectLiteral, type Repository } from "typeorm";
 import type { z } from "zod";
 import { ExpectedIncome, Goal, Loan, ManualBalance, RecurringPayment, ScheduledPayment, Settings } from "../db/entities";
 import { LoansService } from "./loans.service";
+import { PlanEntriesService } from "./plan-entries.service";
 import { PlanService } from "./plan.service";
 
 function parse<S extends z.ZodType>(schema: S, body: unknown): z.infer<S> {
@@ -65,6 +68,7 @@ export class PlanController {
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(PlanService) private readonly plan: PlanService,
     @Inject(LoansService) private readonly loans: LoansService,
+    @Inject(PlanEntriesService) private readonly entries: PlanEntriesService,
   ) {}
 
   // --- expected incomes -----------------------------------------------------
@@ -74,9 +78,11 @@ export class PlanController {
   }
 
   @Post("expected-incomes")
-  createExpected(@Body() body: unknown): Promise<ExpectedIncome> {
+  async createExpected(@Body() body: unknown): Promise<ExpectedIncome> {
     const repo = this.ds.getRepository(ExpectedIncome);
-    return repo.save(repo.create(parse(expectedIncomeInput, body)));
+    const row = await repo.save(repo.create(parse(expectedIncomeInput, body)));
+    await this.entries.generated();
+    return row;
   }
 
   @Patch("expected-incomes/:id")
@@ -87,15 +93,17 @@ export class PlanController {
     if (!cur) throw new NotFoundException();
     const merged = { ...cur, ...data };
     if (merged.window_start_day > merged.window_end_day) throw new BadRequestException("window start is after its end");
-    return patchRow(repo, id, data);
+    return this.entries.patchExpected(id, data);
   }
 
   @Delete("expected-incomes/:id")
   async deleteExpected(@Param("id", ParseIntPipe) id: number): Promise<{ deleted: true }> {
-    return this.ds.transaction(async (m) => {
+    const done = await this.ds.transaction(async (m) => {
       await m.query(`DELETE FROM income_events WHERE expected_income_id=$1`, [id]);
       return removeRow(m.getRepository(ExpectedIncome), id);
     });
+    await this.entries.freshLimit();
+    return done;
   }
 
   // --- income events --------------------------------------------------------
@@ -134,22 +142,44 @@ export class PlanController {
   }
 
   @Post("payments")
-  createPayment(@Body() body: unknown): Promise<ScheduledPayment> {
-    return this.plan.createPayment(parse(scheduledPaymentInput, body));
+  async createPayment(@Body() body: unknown): Promise<ScheduledPayment> {
+    const row = await this.plan.createPayment(parse(scheduledPaymentInput, body));
+    await this.entries.freshLimit();
+    return row;
   }
 
   @Patch("payments/:id")
-  patchPayment(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<ScheduledPayment> {
-    return this.ds.transaction(async (m) => {
-      const row = await patchRow(m.getRepository(ScheduledPayment), id, parse(scheduledPaymentPatch, body));
-      await this.plan.dropEstimate(m, row);
-      return row;
+  async patchPayment(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<ScheduledPayment> {
+    const row = await this.ds.transaction(async (m) => {
+      const r = await patchRow(m.getRepository(ScheduledPayment), id, parse(scheduledPaymentPatch, body));
+      await this.plan.dropEstimate(m, r);
+      return r;
     });
+    await this.entries.freshLimit();
+    return row;
   }
 
   @Delete("payments/:id")
-  deletePayment(@Param("id", ParseIntPipe) id: number) {
-    return removeRow(this.ds.getRepository(ScheduledPayment), id);
+  async deletePayment(@Param("id", ParseIntPipe) id: number) {
+    const done = await removeRow(this.ds.getRepository(ScheduledPayment), id);
+    await this.entries.freshLimit();
+    return done;
+  }
+
+  // --- installments ---------------------------------------------------------
+  @Post("installments")
+  createInstallment(@Body() body: unknown) {
+    return this.entries.createInstallment(parse(installmentInput, body));
+  }
+
+  @Patch("installments/:name")
+  patchInstallment(@Param("name") name: string, @Body() body: unknown) {
+    return this.entries.patchInstallment(name, parse(installmentPatch, body));
+  }
+
+  @Delete("installments/:name")
+  deleteInstallment(@Param("name") name: string) {
+    return this.entries.removeInstallment(name);
   }
 
   @Post("payments/:id/mark-paid")
@@ -164,19 +194,21 @@ export class PlanController {
   }
 
   @Post("recurring")
-  createRecurring(@Body() body: unknown): Promise<RecurringPayment> {
+  async createRecurring(@Body() body: unknown): Promise<RecurringPayment> {
     const repo = this.ds.getRepository(RecurringPayment);
-    return repo.save(repo.create(parse(recurringInput, body)));
+    const row = await repo.save(repo.create(parse(recurringInput, body)));
+    await this.entries.generated();
+    return row;
   }
 
   @Patch("recurring/:id")
   patchRecurring(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<RecurringPayment> {
-    return patchRow(this.ds.getRepository(RecurringPayment), id, parse(recurringPatch, body));
+    return this.entries.patchRecurring(id, parse(recurringPatch, body));
   }
 
   @Delete("recurring/:id")
   deleteRecurring(@Param("id", ParseIntPipe) id: number) {
-    return removeRow(this.ds.getRepository(RecurringPayment), id);
+    return this.entries.removeRecurring(id);
   }
 
   // --- goals ----------------------------------------------------------------

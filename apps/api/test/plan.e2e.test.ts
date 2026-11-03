@@ -375,6 +375,150 @@ describe("repaying and reviewing loans", () => {
   });
 });
 
+describe("editing the plan from the phone", () => {
+  const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv" }).format(new Date());
+  const monthsAhead = (n: number, day: number) => {
+    const t = today();
+    const d = new Date(Date.UTC(Number(t.slice(0, 4)), Number(t.slice(5, 7)) - 1 + n, 1));
+    const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    return `${d.toISOString().slice(0, 7)}-${String(Math.min(day, last)).padStart(2, "0")}`;
+  };
+  const rows = (where = "true") =>
+    ds.query(`SELECT name, amount::float8 AS amount, currency, due_on::text AS due_on, paid_at IS NOT NULL AS paid, recurring_id FROM scheduled_payments WHERE ${where} ORDER BY due_on, id`);
+  const series = async (over: object = {}) =>
+    (await api.post("/plan/recurring", { name: "Квартира", amount: 100_000, currency: "UAH", day_of_month: 28, ...over }).expect(201)).body.id as number;
+  const snapshot = () => ds.query(`INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1, 1, 'normal') ON CONFLICT (local_date) DO UPDATE SET daily_limit=1`, [today()]);
+  const snapshots = async () => (await ds.query(`SELECT 1 FROM daily_snapshots WHERE local_date=$1`, [today()])).length;
+
+  beforeEach(() => ds.query(`DELETE FROM daily_snapshots`));
+
+  describe("a monthly payment", () => {
+    it("appears in the plan at once", async () => {
+      await series();
+      expect((await rows()).map((r: { due_on: string }) => r.due_on)).toEqual([monthsAhead(0, 28), monthsAhead(1, 28)]);
+    });
+
+    it("a new amount and name reach the unpaid rows, not the paid ones", async () => {
+      const id = await series();
+      await ds.query(`UPDATE scheduled_payments SET paid_at=now() WHERE due_on=$1`, [monthsAhead(0, 28)]);
+      await snapshot();
+      await api.patch(`/plan/recurring/${id}`, { amount: 120_000, name: "Аренда" }).expect(200);
+      expect(await rows()).toEqual([
+        expect.objectContaining({ name: "Квартира", amount: 100_000, paid: true }),
+        expect.objectContaining({ name: "Аренда", amount: 120_000, paid: false }),
+      ]);
+      expect(await snapshots()).toBe(0);
+    });
+
+    it("a new day moves the unpaid rows, within each month", async () => {
+      const id = await series();
+      await api.patch(`/plan/recurring/${id}`, { day_of_month: 31 }).expect(200);
+      expect((await rows()).map((r: { due_on: string }) => r.due_on)).toEqual([monthsAhead(0, 31), monthsAhead(1, 31)]);
+    });
+
+    it("deleting it takes away what is unpaid and keeps what was paid", async () => {
+      const id = await series();
+      await ds.query(`UPDATE scheduled_payments SET paid_at=now() WHERE due_on=$1`, [monthsAhead(0, 28)]);
+      await snapshot();
+      await api.del(`/plan/recurring/${id}`).expect(200);
+      expect(await rows()).toEqual([expect.objectContaining({ due_on: monthsAhead(0, 28), paid: true, recurring_id: null })]);
+      expect(await snapshots()).toBe(0);
+      await api.del(`/plan/recurring/${id}`).expect(404);
+    });
+  });
+
+  describe("a one-off payment", () => {
+    it("adding, changing and deleting one gives the day a fresh limit", async () => {
+      await snapshot();
+      const { id } = (await api.post("/plan/payments", { kind: "obligation", name: "Страховка", amount: 500, currency: "UAH", due_on: monthsAhead(0, 28) }).expect(201)).body as { id: number };
+      expect(await snapshots()).toBe(0);
+      await snapshot();
+      await api.patch(`/plan/payments/${id}`, { amount: 600 }).expect(200);
+      expect(await snapshots()).toBe(0);
+      await snapshot();
+      await api.del(`/plan/payments/${id}`).expect(200);
+      expect(await snapshots()).toBe(0);
+    });
+  });
+
+  describe("an installment", () => {
+    const add = (over: object = {}) =>
+      api.post("/plan/installments", { name: "Телефон", amount: 200_000, currency: "UAH", remaining: 3, first_due: monthsAhead(1, 31), ...over });
+
+    it("creates its monthly payments, within each month", async () => {
+      await add().expect(201);
+      expect(await rows()).toEqual([1, 2, 3].map((n) => expect.objectContaining({ name: "Телефон", amount: 200_000, due_on: monthsAhead(n, 31), paid: false })));
+      const kinds = await ds.query(`SELECT DISTINCT kind FROM scheduled_payments`);
+      expect(kinds).toEqual([{ kind: "installment" }]);
+    });
+
+    it("validates", async () => {
+      await add({ remaining: 0 }).expect(400);
+      await add({ remaining: 121 }).expect(400);
+      await add({ name: "" }).expect(400);
+      await add({ first_due: "01.02.2027" }).expect(400);
+    });
+
+    it("a change reaches the payments still to make", async () => {
+      await add().expect(201);
+      await ds.query(`UPDATE scheduled_payments SET paid_at=now() WHERE due_on=$1`, [monthsAhead(1, 31)]);
+      await snapshot();
+      await api.patch(`/plan/installments/${encodeURIComponent("Телефон")}`, { amount: 150_000, name: "iPhone" }).expect(200);
+      expect((await rows()).map((r: { name: string; amount: number }) => [r.name, r.amount])).toEqual([["Телефон", 200_000], ["iPhone", 150_000], ["iPhone", 150_000]]);
+      expect(await snapshots()).toBe(0);
+    });
+
+    it("deleting takes away the payments still to make and leaves the paid ones", async () => {
+      await add().expect(201);
+      await ds.query(`UPDATE scheduled_payments SET paid_at=now() WHERE due_on=$1`, [monthsAhead(1, 31)]);
+      await api.del(`/plan/installments/${encodeURIComponent("Телефон")}`).expect(200);
+      expect(await rows()).toEqual([expect.objectContaining({ paid: true })]);
+    });
+
+    it("a name with nothing left to pay is not found, and other kinds with that name stay", async () => {
+      await api.post("/plan/payments", { kind: "obligation", name: "Телефон", amount: 500, currency: "UAH", due_on: monthsAhead(0, 28) }).expect(201);
+      await api.del(`/plan/installments/${encodeURIComponent("Телефон")}`).expect(404);
+      await api.patch(`/plan/installments/${encodeURIComponent("Телефон")}`, { amount: 1 }).expect(404);
+      expect(await rows()).toHaveLength(1);
+    });
+  });
+
+  describe("an expected income", () => {
+    const add = async () =>
+      (await api.post("/plan/expected-incomes", { source: "fop", amount: 100_000, currency: "UAH", window_start_day: 20, window_end_day: 25 }).expect(201)).body.id as number;
+    const events = () => ds.query(`SELECT period, expected_on::text AS d, status FROM income_events ORDER BY period`);
+
+    it("gets its dates at once", async () => {
+      await add();
+      expect(await events()).toEqual([
+        expect.objectContaining({ period: monthsAhead(0, 1).slice(0, 7) }),
+        expect.objectContaining({ period: monthsAhead(1, 1).slice(0, 7) }),
+      ]);
+    });
+
+    it("a new amount gives the day a fresh limit", async () => {
+      const id = await add();
+      await snapshot();
+      await api.patch(`/plan/expected-incomes/${id}`, { amount: 200_000 }).expect(200);
+      expect(await snapshots()).toBe(0);
+    });
+
+    it("a change leaves dates the owner set alone", async () => {
+      const id = await add();
+      await ds.query(`UPDATE income_events SET expected_on=$1 WHERE period=$2`, [monthsAhead(0, 22), monthsAhead(0, 1).slice(0, 7)]);
+      await api.patch(`/plan/expected-incomes/${id}`, { amount: 200_000, window_start_day: 5, window_end_day: 10 }).expect(200);
+      expect((await events())[0].d).toBe(monthsAhead(0, 22));
+    });
+
+    it("deleting one gives the day a fresh limit", async () => {
+      const id = await add();
+      await snapshot();
+      await api.del(`/plan/expected-incomes/${id}`).expect(200);
+      expect(await snapshots()).toBe(0);
+    });
+  });
+});
+
 describe("loans", () => {
   it("a loan from a bank row cannot be deleted: the next sync would bring it back", async () => {
     const a = await account("black");
@@ -565,6 +709,7 @@ describe("recurring payments", () => {
 
   it("creates this and next month's payment each run, once, across months and February", async () => {
     const id = (await api.post("/plan/recurring", { ...rent, match_hint: "rent" }).expect(201)).body.id as number;
+    await ds.query(`DELETE FROM scheduled_payments`); // the rows for today's real date, made on creation
     const plan = app.get(PlanService);
     const dues = async () =>
       (await ds.query(`SELECT due_on::text AS d FROM scheduled_payments WHERE recurring_id=$1 ORDER BY due_on`, [id])).map(
@@ -584,6 +729,7 @@ describe("recurring payments", () => {
 
   it("does not create a current-month payment whose day is already past when the series is first created", async () => {
     const id = (await api.post("/plan/recurring", { ...rent, day_of_month: 10 }).expect(201)).body.id as number;
+    await ds.query(`DELETE FROM scheduled_payments`); // the rows for today's real date, made on creation
     const plan = app.get(PlanService);
     const dues = async () =>
       (await ds.query(`SELECT due_on::text AS d FROM scheduled_payments WHERE recurring_id=$1 ORDER BY due_on`, [id])).map(

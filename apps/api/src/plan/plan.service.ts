@@ -89,6 +89,11 @@ export class PlanService implements OnApplicationBootstrap {
     if (fresh) await this.ds.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [today]);
   }
 
+  /** The owner just added something to the plan: its dates are needed now. */
+  refresh(): Promise<void> {
+    return this.generate();
+  }
+
   /** Just after midnight on the first day of a quarter this is what keeps the reserve in place. */
   @Cron("1 0 * * *", { timeZone: "Europe/Kyiv" })
   async dailyTaxEstimateJob(): Promise<void> {

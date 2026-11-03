@@ -38,6 +38,24 @@ export const expectedIncomePatch = partial(
   }),
 );
 export type ExpectedIncomeInput = z.infer<typeof expectedIncomeInput>;
+export type ExpectedIncomePatch = z.infer<typeof expectedIncomePatch>;
+
+export interface ExpectedIncomeDto {
+  id: number;
+  source: "fop" | "usdc";
+  amount: number;
+  currency: string;
+  window_start_day: number;
+  window_end_day: number;
+}
+
+export interface IncomeEventDto {
+  id: number;
+  expected_income_id: number;
+  period: string;
+  expected_on: string;
+  status: string;
+}
 
 export const incomeDateInput = z.object({ date: isoDate }).strict();
 export const matchTransactionInput = z
@@ -81,6 +99,32 @@ export const recurringInput = z
   .strict();
 export const recurringPatch = partial(z.object(recurringShape));
 export type RecurringInput = z.infer<typeof recurringInput>;
+export type RecurringPatch = z.infer<typeof recurringPatch>;
+
+export interface RecurringDto {
+  id: number;
+  kind: "obligation" | "installment" | "tax";
+  name: string;
+  amount: number;
+  currency: string;
+  day_of_month: number;
+  active: boolean;
+}
+
+// --- installments -----------------------------------------------------------
+/** A series of equal monthly payments, known by its name. */
+export const installmentInput = z
+  .object({
+    name: paymentShape.name,
+    amount: money.positive(),
+    currency,
+    remaining: z.number().int().min(1).max(120),
+    first_due: isoDate,
+  })
+  .strict();
+export const installmentPatch = partial(z.object({ name: paymentShape.name, amount: money.positive(), currency }));
+export type InstallmentInput = z.infer<typeof installmentInput>;
+export type InstallmentPatch = z.infer<typeof installmentPatch>;
 
 // --- loans ------------------------------------------------------------------
 const loanShape = {
@@ -217,6 +261,8 @@ export interface ScheduledPaymentDto {
   currency: string;
   due_on: string;
   paid_at: string | null;
+  /** The monthly series this payment came from, if any. */
+  recurring_id: number | null;
   tax_quarter: string | null;
   /** The app's own estimate for an ended quarter; replaced once the owner enters real figures. */
   is_estimate: boolean;
