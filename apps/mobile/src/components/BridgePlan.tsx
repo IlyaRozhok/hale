@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import Slider from "@react-native-community/slider";
 import { tokens } from "@hale/tokens";
 import type { DailyStateDto } from "@hale/contracts";
@@ -16,13 +16,14 @@ type Props = {
   state: DailyStateDto;
   usdRate: number;
   onConfirm: (dailyAmount: number) => void;
+  onCancel: () => void;
   confirming: boolean;
 };
 
 const roundToStep = (v: number) => Math.max(MIN, Math.round(v / STEP) * STEP);
 
 /** The bridge plan: pick a daily amount, see the credit it needs, confirm if it fits the limit. */
-export function BridgePlan({ state, usdRate, onConfirm, confirming }: Props) {
+export function BridgePlan({ state, usdRate, onConfirm, onCancel, confirming }: Props) {
   const base = state.bridge;
   // Unmoved, the slider shows the server's exact amount, so the numbers beside it are the server's too.
   const current = state.dailyLimit > 0 ? state.dailyLimit : (base?.recommendedDaily ?? MIN);
@@ -38,6 +39,11 @@ export function BridgePlan({ state, usdRate, onConfirm, confirming }: Props) {
   const daily = formatUsd(value, usdRate);
   const needsAction = !base.confirmed || changed;
   const canConfirm = fresh && !confirming && !preview.failed;
+  const askCancel = () =>
+    Alert.alert("Отменить план?", "Лимит на сегодня будет посчитан заново.", [
+      { text: "Оставить", style: "cancel" },
+      { text: "Отменить план", style: "destructive", onPress: onCancel },
+    ]);
 
   return (
     <Glass style={styles.stack}>
@@ -83,12 +89,17 @@ export function BridgePlan({ state, usdRate, onConfirm, confirming }: Props) {
           onPress={() => onConfirm(value)}
           style={[styles.confirm, !canConfirm && styles.pending]}
         >
-          <Text style={styles.confirmText}>Подтвердить план</Text>
+          <Text style={styles.confirmText}>{base.confirmed ? `Подтвердить ${formatMoney(value)} в день` : "Подтвердить план"}</Text>
         </Pressable>
       ) : (
         <Text style={styles.text} accessibilityRole="text">
-          План подтверждён: {formatMoney(value)} в день.
+          План подтверждён: {formatMoney(value)} в день. Сдвиньте ползунок, чтобы изменить.
         </Text>
+      )}
+      {base.confirmed && !changed && (
+        <Pressable accessibilityRole="button" onPress={askCancel} style={styles.cancel}>
+          <Text style={styles.cancelText}>Отменить план</Text>
+        </Pressable>
       )}
     </Glass>
   );
@@ -110,4 +121,6 @@ const styles = StyleSheet.create({
     backgroundColor: color.accent.default,
   },
   confirmText: { ...type.label, color: color.accent.fgOnAccent },
+  cancel: { minHeight: touchMin, alignItems: "center", justifyContent: "center" },
+  cancelText: { ...type.label, color: color.fg.muted },
 });

@@ -28,7 +28,7 @@ export function Upcoming({ items }: Props) {
               <Text style={styles.day}>{day}</Text>
               <Text style={styles.month}>{month}</Text>
             </View>
-            <Text style={styles.name} numberOfLines={1}>
+            <Text style={styles.name} numberOfLines={2}>
               {p.name}
             </Text>
             <Text style={styles.amount}>{formatMoney(p.amount)}</Text>

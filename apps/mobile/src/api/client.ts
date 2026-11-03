@@ -50,6 +50,7 @@ export interface Api {
   today(): Promise<TodayDto>;
   previewBridge(dailyAmount: number): Promise<BridgePreviewDto>;
   chooseBridge(dailyAmount: number): Promise<TodayDto>;
+  cancelBridge(): Promise<TodayDto>;
   confirmIncome(eventId: number): Promise<void>;
   setIncomeDate(eventId: number, date: string): Promise<void>;
   matchUsdc(eventId: number, transactionId: number): Promise<void>;
@@ -67,6 +68,7 @@ export interface Api {
   createPayment(input: ScheduledPaymentInput): Promise<ScheduledPaymentDto>;
   markPaid(id: number): Promise<void>;
   createLoan(input: LoanInput): Promise<void>;
+  deleteLoan(id: number): Promise<void>;
   registerPushToken(token: string): Promise<void>;
   goals(): Promise<GoalDto[]>;
   createGoal(input: GoalInput): Promise<GoalDto>;
@@ -113,6 +115,7 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     today: () => request("GET", "/today"),
     previewBridge: (dailyAmount) => request("POST", "/bridge/preview", { dailyAmount }),
     chooseBridge: (dailyAmount) => request("POST", "/bridge", { dailyAmount }),
+    cancelBridge: () => request("DELETE", "/bridge"),
     confirmIncome: async (eventId) => void (await request("POST", `/plan/incomes/${eventId}/confirm`)),
     setIncomeDate: async (eventId, date) => void (await request("POST", `/plan/incomes/${eventId}/date`, { date })),
     matchUsdc: async (eventId, transactionId) => void (await request("POST", `/plan/incomes/${eventId}/match-transaction`, { transactionId })),
@@ -142,6 +145,7 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     createPayment: (input) => request("POST", "/plan/payments", input),
     markPaid: async (id) => void (await request("POST", `/plan/payments/${id}/mark-paid`)),
     createLoan: async (input) => void (await request("POST", "/plan/loans", input)),
+    deleteLoan: async (id) => void (await request("DELETE", `/plan/loans/${id}`)),
     registerPushToken: async (token) => void (await request("POST", "/devices/push-token", { token })),
   };
 }

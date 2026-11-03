@@ -1,5 +1,6 @@
 import { RefreshControl, ScrollView, StyleSheet, Text } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePullRefresh } from "../usePullRefresh";
 import { tokens } from "@hale/tokens";
 import { useToday } from "../api/queries";
 import { AccountsList } from "../components/AccountsList";
@@ -14,11 +15,12 @@ const { color, space, type } = tokens;
 export function Plan() {
   const insets = useSafeAreaInsets();
   const today = useToday();
+  const pull = usePullRefresh(today.refetch);
   return (
     <ScrollView
       style={[styles.root, { marginTop: insets.top }]}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={today.isRefetching && !today.isPending} onRefresh={() => void today.refetch()} />}
+      refreshControl={<RefreshControl {...pull} />}
       keyboardShouldPersistTaps="handled"
     >
       <Text style={styles.title}>План</Text>

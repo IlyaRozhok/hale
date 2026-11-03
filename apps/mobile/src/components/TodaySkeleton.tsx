@@ -26,7 +26,7 @@ export function TodaySkeleton() {
 }
 
 const styles = StyleSheet.create({
-  root: { gap: space.lg },
+  root: { gap: space.md },
   header: { gap: space.xs },
   bar: { backgroundColor: color.surface.raised, borderRadius: radius.md },
 });

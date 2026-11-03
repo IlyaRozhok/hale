@@ -123,6 +123,8 @@ describe("api client", () => {
     await api.patchSettings({ limit_visual: "ring" });
     await api.previewSettings(10_000_000);
     await api.markPaid(3);
+    await api.deleteLoan(7);
+    await api.cancelBridge();
     await api.createLoan({ amount: 500000, received_on: "2026-11-02", note: "x" });
     await api.registerPushToken("ExponentPushToken[abc]");
     const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
@@ -131,6 +133,8 @@ describe("api client", () => {
       "PATCH /settings",
       "POST /settings/preview",
       "POST /plan/payments/3/mark-paid",
+      "DELETE /plan/loans/7",
+      "DELETE /bridge",
       "POST /plan/loans",
       "POST /devices/push-token",
     ]);

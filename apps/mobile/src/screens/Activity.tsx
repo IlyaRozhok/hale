@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 import type { TransactionDto } from "@hale/contracts";
 import { useTransactions } from "../api/queries";
+import { usePullRefresh } from "../usePullRefresh";
 import { dayHeader, formatSignedMoney, kyivDate } from "../format";
 import { Chip } from "../components/Chip";
 import { Field } from "../components/Field";
@@ -55,6 +56,7 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
   };
 
   const list = useTransactions({ ...(tab === "ask" ? { needsLabel: true } : { group: tab }), ...(search ? { q: search } : {}) });
+  const pull = usePullRefresh(list.refetch);
   const pages = list.data?.pages ?? [];
   const items = pages.flatMap((p) => p.items);
   const totals = Object.assign({}, ...pages.map((p) => p.dayTotals)) as Record<string, number | undefined>;
@@ -112,8 +114,8 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
           onEndReached={() => {
             if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage();
           }}
-          refreshing={list.isRefetching && !list.isFetchingNextPage}
-          onRefresh={() => void list.refetch()}
+          refreshing={pull.refreshing}
+          onRefresh={pull.onRefresh}
           ListEmptyComponent={list.isPending ? <ActivityIndicator color={color.fg.muted} /> : <Text style={styles.muted}>{emptyText}</Text>}
           ListFooterComponent={list.isFetchingNextPage ? <ActivityIndicator color={color.fg.muted} style={styles.footer} /> : undefined}
         />

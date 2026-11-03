@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
-import { StyleSheet } from "react-native";
+import { Alert, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { BridgeStateDto, DailyStateDto } from "@hale/contracts";
 import { Today } from "./Today";
@@ -16,6 +16,10 @@ jest.mock("@react-native-community/slider", () => {
 });
 
 const noop = () => undefined;
+const pressAlert = (alert: jest.SpyInstance, label: string) => {
+  const buttons = alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[];
+  buttons.find((b) => b.text === label)!.onPress!();
+};
 const bridgeState = (bridge: Partial<BridgeStateDto> = {}): DailyStateDto => ({
   mode: "bridge",
   daysLeft: 18,
@@ -108,12 +112,11 @@ describe("Today, normal mode", () => {
     await waitFor(() => expect(screen.queryByText("Потолок трат")).toBeNull());
   });
 
-  it("shows a negative remainder calmly, with the metal at zero", async () => {
+  it("states an overspent day calmly, in the ordinary colour", async () => {
     const state = { ...todayFixture().state, leftToday: -12000, level: 0 };
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })) }));
-    const amount = await screen.findByText("−₴120");
+    const amount = await screen.findByText("₴120");
     expect(StyleSheet.flatten(amount.props.style).color).toBe(tokens.color.fg.default);
-    expect(levelOf()).toBe("mercury:0");
     expect(screen.queryByText(/превыш|перерасход|красн/i)).toBeNull();
   });
 
@@ -123,10 +126,89 @@ describe("Today, normal mode", () => {
     expect(levelOf()).toBe("mercury:0.72");
   });
 
-  it("shows calm bad-case cards", async () => {
-    const badCases = [{ id: "loan:1", text: "Взят займ ₴5,000 (01.11): столько не хватало." }];
+  describe("limit states", () => {
+    const withState = (over: Partial<DailyStateDto>) => {
+      const fixture = todayFixture();
+      return fakeApi({ today: jest.fn(async () => ({ ...fixture, state: { ...fixture.state, ...over } })) });
+    };
+
+    it("overspent: says how far over the limit, with no minus", async () => {
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 95000, leftToday: -60100, level: 0 }));
+      expect(await screen.findByText("Сверх лимита")).toBeTruthy();
+      expect(screen.getByText("₴601")).toBeTruthy();
+      expect(screen.getByText("Завтра будет новый лимит.")).toBeTruthy();
+      expect(screen.getByText(/Потрачено ₴1,551/)).toBeTruthy();
+      expect(screen.queryByText("Сегодня можно")).toBeNull();
+      expect(screen.queryByText(/−/)).toBeNull();
+      expect(screen.getByLabelText("Сверх лимита ₴601, из ₴950 на день")).toBeTruthy();
+    });
+
+    it("exactly used up: the limit is used, nothing over it", async () => {
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 95000, leftToday: 0, level: 0 }));
+      expect(await screen.findByText("Сегодня можно")).toBeTruthy();
+      expect(screen.getByText("₴0")).toBeTruthy();
+      expect(screen.getByText("Лимит на сегодня использован. Завтра будет новый.")).toBeTruthy();
+    });
+
+    it("draws the metal only while something is left", async () => {
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 95000, leftToday: 0, level: 0 }));
+      await screen.findByText("Сегодня можно");
+      expect(screen.queryByTestId("limit-visual", HIDDEN)).toBeNull();
+    });
+
+    it("shows what was spent today", async () => {
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 200000, leftToday: 124000, level: 0.62 }));
+      expect(await screen.findByText(/Потрачено ₴760/)).toBeTruthy();
+      expect(levelOf()).toBe("mercury:0.62");
+    });
+  });
+
+  describe("refreshing", () => {
+    const control = () => screen.getByTestId("today-scroll").props.refreshControl.props as { refreshing: boolean; onRefresh: () => void };
+
+    it("a background refetch never shows the spinner", async () => {
+      let finish: (v: ReturnType<typeof todayFixture>) => void = noop;
+      const today = jest.fn(async () => todayFixture());
+      const api = fakeApi({ today });
+      const client = makeClient();
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api, client);
+      await screen.findByText("Сегодня можно");
+      today.mockImplementationOnce(() => new Promise((r) => (finish = r)));
+      await act(async () => void client.refetchQueries({ queryKey: ["today"] }));
+      expect(control().refreshing).toBe(false);
+      await act(async () => finish(todayFixture()));
+    });
+
+    it("a pull shows it until the data arrives", async () => {
+      let finish: (v: ReturnType<typeof todayFixture>) => void = noop;
+      const today = jest.fn(async () => todayFixture());
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today }));
+      await screen.findByText("Сегодня можно");
+      today.mockImplementationOnce(() => new Promise((r) => (finish = r)));
+      await act(async () => control().onRefresh());
+      expect(control().refreshing).toBe(true);
+      await act(async () => finish(todayFixture()));
+      await waitFor(() => expect(control().refreshing).toBe(false));
+    });
+  });
+
+  it("states a bad case without a remove action when it came from the bank", async () => {
+    const badCases = [{ id: "loan:1", text: "Займ ₴5,000 от 01.11" }];
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ badCases })) }));
     expect(await screen.findByText(badCases[0]!.text)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Убрать/ })).toBeNull();
+  });
+
+  it("removes a loan entered by hand, after asking", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation(noop);
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴10 от 03.11", removableLoanId: 7 }] })) });
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Убрать: Займ ₴10 от 03.11" }));
+    expect(api.deleteLoan).not.toHaveBeenCalled();
+    await act(async () => pressAlert(alert, "Убрать"));
+    await waitFor(() => expect(api.deleteLoan).toHaveBeenCalledWith(7));
+    await waitFor(() => expect(api.today).toHaveBeenCalledTimes(2));
+    alert.mockRestore();
   });
 
   it("makes every button at least the minimum touch size", async () => {
@@ -238,16 +320,26 @@ describe("Today, questions", () => {
     expect(await screen.findByText(USDC_MATCH.text)).toBeTruthy();
   });
 
-  it("with no income event there is no route to Activity: a hint about the settings instead", async () => {
+  it("hides a date question with no income event, even from an older cached answer", async () => {
     const questions = [{ id: "income_date", kind: "income_date" as const, text: "Когда ожидается следующий доход?" }];
-    const onOpenActivity = jest.fn();
-    await renderWith(<Today onOpenActivity={onOpenActivity} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    await screen.findByText("Сегодня можно");
+    expect(screen.queryByText(/^Осталось разобрать/)).toBeNull();
+  });
+
+  it("names the person from the subject field, and copes with an older answer without one", async () => {
+    const questions = [
+      { id: "recipient_label:aaaa", kind: "recipient_label" as const, text: "Иван: 3 перевода, ₴2,500", subject: "Иван" },
+      { id: "recipient_label:bbbb", kind: "recipient_label" as const, text: "Кто это: Ольга?" },
+    ];
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
     await openQuestions();
-    expect(await screen.findByText(/задаётся в настройках плана/)).toBeTruthy();
-    await fireEvent.press(screen.getByText("Когда ожидается следующий доход?"));
-    expect(onOpenActivity).not.toHaveBeenCalled();
-    expect(screen.queryByText("Через неделю")).toBeNull();
-    expect(screen.queryByRole("button", { name: /доход/ })).toBeNull();
+    await fireEvent.press(await screen.findByText("Иван: 3 перевода, ₴2,500"));
+    expect(await screen.findByText("Иван")).toBeTruthy();
+    const closes = screen.getAllByRole("button", { name: "Закрыть" });
+    await fireEvent.press(closes[closes.length - 1]!);
+    await fireEvent.press(await screen.findByText("Кто это: Ольга?"));
+    expect(await screen.findByText("Ольга")).toBeTruthy();
   });
 
   it("a recipient question opens the label sheet for that recipient, and the card goes away once answered", async () => {
@@ -402,7 +494,27 @@ describe("Today, bridge", () => {
     await tick(310);
     await waitFor(() => expect(api.previewBridge).toHaveBeenCalledWith(60000));
     await tick(50);
-    expect(screen.getByText("Подтвердить план")).toBeTruthy();
+    expect(screen.getByText("Подтвердить ₴600 в день")).toBeTruthy();
+  });
+
+  it("a confirmed plan can be cancelled, after asking", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation(noop);
+    const api = fakeApi({ today: bridgeToday({ confirmed: true }) });
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await openBridge();
+    await fireEvent.press(await screen.findByRole("button", { name: "Отменить план" }));
+    expect(api.cancelBridge).not.toHaveBeenCalled();
+    await act(async () => pressAlert(alert, "Отменить план"));
+    await tick(0);
+    expect(api.cancelBridge).toHaveBeenCalled();
+    alert.mockRestore();
+  });
+
+  it("an unconfirmed plan has nothing to cancel", async () => {
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: bridgeToday() }));
+    await openBridge();
+    await screen.findByLabelText("Сумма в день");
+    expect(screen.queryByRole("button", { name: "Отменить план" })).toBeNull();
   });
 
   it("a failed preview says so, offers retry and keeps confirm disabled", async () => {

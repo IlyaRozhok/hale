@@ -14,8 +14,6 @@ const DATE_CHOICES = [
   { label: "Через 2 недели", days: 14 },
 ];
 
-const NO_INCOME_HINT = "Ожидаемый доход пока не задан, поэтому лимит считается на 30 дней. Доход задаётся в настройках плана на сервере.";
-
 /** The numeric part of ids like "usdc_arrived:12"; null when the id carries none. */
 export function eventIdOf(id: string): number | null {
   const n = Number(id.split(":")[1]);
@@ -83,15 +81,6 @@ export function QuestionCard({ question, today, onConfirmUsdc, onMatchUsdc, onDi
         </Pressable>
       );
     }
-  }
-  if (question.kind === "income_date") {
-    // No expected income exists yet, so there is no date to set here.
-    return (
-      <Glass style={styles.stack}>
-        {text}
-        <Text style={styles.hint}>{NO_INCOME_HINT}</Text>
-      </Glass>
-    );
   }
   return (
     <Pressable accessibilityRole="button" onPress={onOpenActivity} style={styles.whole}>

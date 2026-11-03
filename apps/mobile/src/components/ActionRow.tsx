@@ -3,7 +3,7 @@ import { tokens } from "@hale/tokens";
 
 const { color, radius, space, touchMin, type } = tokens;
 
-/** One line that asks for attention and opens what it talks about. */
+/** One quiet line that opens what it talks about; it should not compete with the cards. */
 export function ActionRow({ label, onPress }: { label: string; onPress: () => void }) {
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={styles.row}>
@@ -21,10 +21,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: space.md,
     paddingHorizontal: space.lg,
-    paddingVertical: space.md,
     borderRadius: radius.xl,
-    backgroundColor: color.surface.inset,
   },
-  label: { ...type.body, color: color.fg.default, flexShrink: 1 },
+  label: { ...type.label, color: color.fg.muted, flexShrink: 1 },
   arrow: { ...type.title, color: color.fg.subtle },
 });

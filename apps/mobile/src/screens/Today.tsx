@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 import type { DailyStateDto, TodayDto } from "@hale/contracts";
 import { LimitVisual } from "../metal";
 import { formatMoney, formatStamp, formatUsd, kyivDate, longDate } from "../format";
-import { useChooseBridge, useConfirmIncome, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
+import { useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
 import { ActionRow } from "../components/ActionRow";
 import { BadCaseCard } from "../components/BadCaseCard";
 import { BridgePlan } from "../components/BridgePlan";
@@ -13,12 +13,13 @@ import { Glass } from "../components/Glass";
 import { GoalCards } from "../components/GoalCards";
 import { Icon } from "../components/Icon";
 import { LAYOUT } from "../components/layout";
-import { QuestionCard } from "../components/QuestionCard";
+import { QuestionCard, eventIdOf } from "../components/QuestionCard";
 import { RecipientLabelSheet } from "../components/RecipientLabelSheet";
 import { Sheet } from "../components/Sheet";
 import { StaleBanner } from "../components/StaleBanner";
 import { TodaySkeleton } from "../components/TodaySkeleton";
 import { Upcoming } from "../components/Upcoming";
+import { usePullRefresh } from "../usePullRefresh";
 import { Settings } from "./Settings";
 
 const { color, radius, space, touchMin, type } = tokens;
@@ -56,6 +57,9 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
   const matchUsdc = useMatchUsdc();
   const dismissUsdc = useDismissUsdcMatch();
   const chooseBridge = useChooseBridge();
+  const cancelBridge = useCancelBridge();
+  const deleteLoan = useDeleteLoan();
+  const pull = usePullRefresh(today.refetch);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
   const [sheet, setSheet] = useState<"bridge" | "questions" | "settings" | null>(null);
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
@@ -69,7 +73,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
     });
 
   const data = today.data;
-  const top = insets.top + space.lg;
+  const top = insets.top + space.sm;
   const closeSheet = () => setSheet(null);
   /** Closes the sheet only if it is still the one open: a late answer must not close another. */
   const closeIfOpen = (name: "bridge" | "questions") => setSheet((s) => (s === name ? null : s));
@@ -107,9 +111,14 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
 
   const { state } = data;
   const level = state.leftToday > 0 ? Math.min(1, Math.max(0, state.level)) : 0;
-  const usd = formatUsd(state.leftToday, data.usdRate);
+  const over = state.leftToday < 0;
+  const spent = Math.max(0, state.dailyLimit - state.leftToday);
+  const shownLeft = Math.abs(state.leftToday);
+  const usd = formatUsd(shownLeft, data.usdRate);
+  const heading = over ? "Сверх лимита" : "Сегодня можно";
   const offlineSince = today.isError ? today.dataUpdatedAt : null;
-  const questions = data.questions.filter((q) => !answered.has(q.id));
+  // A date question with no income event cannot be answered; an older cached answer may still hold one.
+  const questions = data.questions.filter((q) => !answered.has(q.id) && !(q.kind === "income_date" && eventIdOf(q.id) === null));
   const hasLimit = state.dailyLimit > 0;
   const noLimitNote = state.mode === "bridge" ? "Лимит появится, когда вы подтвердите план." : "До следующего дохода свободных денег нет.";
 
@@ -129,9 +138,10 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
   return (
     <View style={styles.root}>
       <ScrollView
+        testID="today-scroll"
         style={{ marginTop: insets.top }}
         contentContainerStyle={[styles.content, { paddingTop: space.sm, paddingBottom: space.xl }]}
-        refreshControl={<RefreshControl refreshing={today.isRefetching && !today.isPending} onRefresh={() => void today.refetch()} />}
+        refreshControl={<RefreshControl {...pull} />}
       >
         <View style={styles.header}>
           <Text style={styles.date}>{longDate(data.date)}</Text>
@@ -144,20 +154,28 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
             accessible
             accessibilityLabel={
               hasLimit
-                ? `Сегодня можно ${formatMoney(state.leftToday)}, из ${formatMoney(state.dailyLimit)} на день`
-                : `Сегодня можно ${formatMoney(state.leftToday)}. ${noLimitNote}`
+                ? `${heading} ${formatMoney(shownLeft)}, из ${formatMoney(state.dailyLimit)} на день`
+                : `${heading} ${formatMoney(shownLeft)}. ${noLimitNote}`
             }
           >
-            <Text style={styles.eyebrow}>Сегодня можно</Text>
-            <Text style={styles.amount}>{formatMoney(state.leftToday)}</Text>
+            <Text style={styles.eyebrow}>{heading}</Text>
+            <Text style={styles.amount}>{formatMoney(shownLeft)}</Text>
             {hasLimit && <Text style={styles.note}>{limitNote(state)}</Text>}
-            {hasLimit && usd ? <Text style={styles.subtle}>{usd} сейчас</Text> : null}
-            {hasLimit && state.leftToday <= 0 && <Text style={styles.note}>Лимит на сегодня использован. Завтра будет новый.</Text>}
+            {hasLimit && (
+              <View style={styles.spentLine}>
+                <Text style={styles.subtle}>Потрачено {formatMoney(spent)}</Text>
+                {usd ? <Text style={styles.subtle}>{usd} сейчас</Text> : null}
+              </View>
+            )}
+            {over && <Text style={styles.note}>Завтра будет новый лимит.</Text>}
+            {hasLimit && state.leftToday === 0 && <Text style={styles.note}>Лимит на сегодня использован. Завтра будет новый.</Text>}
             {!hasLimit && <Text style={styles.note}>{noLimitNote}</Text>}
           </View>
-          <View style={styles.metal} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-            <LimitVisual mode="mercury" level={level} />
-          </View>
+          {level > 0 && (
+            <View style={styles.metal} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+              <LimitVisual mode="mercury" level={level} />
+            </View>
+          )}
         </View>
 
         {state.mode === "bridge" && state.bridge && (
@@ -168,7 +186,11 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
         )}
         {questions.length > 0 && <ActionRow label={`Осталось разобрать: ${questions.length}`} onPress={() => setSheet("questions")} />}
         {data.badCases.map((b) => (
-          <BadCaseCard key={b.id} text={b.text} />
+          <BadCaseCard
+            key={b.id}
+            text={b.text}
+            onRemove={b.removableLoanId === undefined ? undefined : () => deleteLoan.mutate(b.removableLoanId!, { onError: () => Alert.alert("Не удалось убрать займ", "Проверьте связь и попробуйте ещё раз.") })}
+          />
         ))}
 
         {goals.length > 0 ? <GoalCards goals={goals} /> : <ActionRow label="Добавить цель" onPress={onOpenPlan} />}
@@ -182,6 +204,10 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
             usdRate={data.usdRate}
             confirming={chooseBridge.isPending}
             onConfirm={(amount) => chooseBridge.mutate(amount, { onSuccess: () => closeIfOpen("bridge") })}
+            onCancel={() => cancelBridge.mutate(undefined, {
+                onSuccess: () => closeIfOpen("bridge"),
+                onError: () => Alert.alert("Не удалось отменить план", "Проверьте связь и попробуйте ещё раз."),
+              })}
           />
         </Sheet>
       )}
@@ -196,7 +222,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
                 closeSheet();
                 onOpenActivity();
               }}
-              onLabelRecipient={(counterKey) => setLabeling({ id: q.id, counterKey, name: q.text.replace(/^Кто это:\s*/, "").replace(/\?$/, "") })}
+              onLabelRecipient={(counterKey) => setLabeling({ id: q.id, counterKey, name: q.subject ?? q.text.replace(/^Кто это:\s*/, "").replace(/\?$/, "") })}
               onConfirmUsdc={(eventId) => answer(q.id, () => confirmIncome.mutateAsync(eventId))}
               onMatchUsdc={(eventId, transactionId) => answer(q.id, () => matchUsdc.mutateAsync({ eventId, transactionId }))}
               onDismissUsdc={(transactionId) => answer(q.id, () => dismissUsdc.mutateAsync(transactionId))}
@@ -226,9 +252,10 @@ const styles = StyleSheet.create({
   date: { ...type.label, color: color.fg.default, flexShrink: 1 },
   profile: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: color.surface.inset },
   hero: { borderRadius: radius.xl, overflow: "hidden", backgroundColor: color.surface.inset },
-  heroText: { paddingHorizontal: space.lg, paddingTop: space.lg },
+  heroText: { paddingHorizontal: space.lg, paddingVertical: space.lg, gap: 2 },
+  spentLine: { flexDirection: "row", justifyContent: "space-between", gap: space.md, marginTop: space.xs },
   metal: { height: LAYOUT.pool },
-  content: { paddingHorizontal: space.xl, gap: space.lg },
+  content: { paddingHorizontal: space.xl, gap: space.md },
   stack: { gap: space.md },
   eyebrow: { ...type.body, color: color.fg.muted, height: LAYOUT.eyebrow + 4 },
   amount: { fontSize: 52, lineHeight: LAYOUT.amount, fontWeight: "500", color: color.fg.default, fontVariant: ["tabular-nums"] },

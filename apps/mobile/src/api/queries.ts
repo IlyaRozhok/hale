@@ -47,6 +47,15 @@ export function useChooseBridge() {
   });
 }
 
+export function useCancelBridge() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.cancelBridge(),
+    onSuccess: (today: TodayDto) => client.setQueryData(TODAY_KEY, today),
+  });
+}
+
 export function useConfirmIncome() {
   const api = useApi();
   const client = useQueryClient();
@@ -222,6 +231,15 @@ export function useCreateLoan() {
   return useMutation({
     mutationFn: (input: LoanInput) => api.createLoan(input),
     onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: TODAY_KEY }), client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY })]),
+  });
+}
+
+export function useDeleteLoan() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteLoan(id),
+    onSuccess: () => client.invalidateQueries({ queryKey: TODAY_KEY }),
   });
 }
 
