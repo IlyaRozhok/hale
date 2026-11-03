@@ -124,6 +124,7 @@ export class Loan {
   @Column({ type: "text", default: "other" }) kind!: "short" | "other";
   @Column({ type: "bigint", transformer: bt, default: 0 }) repaid_amount!: number;
   @Column({ type: "bigint", transformer: bt, default: 0 }) service_cost!: number;
+  @Column({ type: "boolean", default: false }) repaid_date_unknown!: boolean;
   @Column({ type: "text", nullable: true }) note!: string | null;
 }
 

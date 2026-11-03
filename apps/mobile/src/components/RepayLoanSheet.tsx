@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text } from "react-native";
 import { tokens } from "@hale/tokens";
+import { ApiError } from "../api/client";
 import { useRepayLoan } from "../api/queries";
 import { formatMoney, isIsoDate, kyivDate, parseHryvnias } from "../format";
+import { ErrorText } from "./ErrorText";
 import { Field } from "./Field";
 import { Sheet } from "./Sheet";
 
@@ -33,7 +35,11 @@ export function RepayLoanSheet({ loanId, remaining, name, onClose }: Props) {
     setMessage(null);
     repay.mutate(
       { id: loanId, input: { amount: kopecks, date } },
-      { onSuccess: onClose, onError: () => setMessage("Не удалось сохранить. Попробуйте ещё раз.") },
+      {
+        onSuccess: onClose,
+        onError: (e) =>
+          setMessage(e instanceof ApiError && e.status === 422 ? "Дата должна быть не раньше дня займа и не позже сегодня." : "Не удалось сохранить. Попробуйте ещё раз."),
+      },
     );
   };
 
@@ -42,7 +48,7 @@ export function RepayLoanSheet({ loanId, remaining, name, onClose }: Props) {
       <Field label="Сумма" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
       <Field label="Дата, ГГГГ-ММ-ДД" value={date} onChangeText={setDate} keyboardType="numbers-and-punctuation" autoCapitalize="none" />
       {effect && <Text style={styles.text}>{effect}</Text>}
-      {message && <Text style={styles.text}>{message}</Text>}
+      {message && <ErrorText>{message}</ErrorText>}
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ disabled: repay.isPending }}

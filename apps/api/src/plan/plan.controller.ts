@@ -225,6 +225,11 @@ export class PlanController {
     return this.loans.history();
   }
 
+  @Post("loans/old/repaid")
+  repayOldLoans() {
+    return this.loans.repayOld();
+  }
+
   @Post("loans/:id/repay")
   repayLoan(@Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
     return this.loans.repay(id, parse(loanRepayInput, body));

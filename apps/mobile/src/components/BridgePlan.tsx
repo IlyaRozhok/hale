@@ -5,6 +5,7 @@ import { tokens } from "@hale/tokens";
 import type { DailyStateDto } from "@hale/contracts";
 import { formatMoney, formatUsd } from "../format";
 import { useBridgePreview } from "../api/queries";
+import { ErrorText } from "./ErrorText";
 import { Glass } from "./Glass";
 
 const { color, radius, space, touchMin, type } = tokens;
@@ -71,16 +72,14 @@ export function BridgePlan({ state, usdRate, onConfirm, onCancel, confirming }: 
       />
       {preview.failed && (
         <View style={styles.stack}>
-          <Text style={styles.text}>Не удалось пересчитать</Text>
+          <ErrorText>Не удалось пересчитать</ErrorText>
           <Pressable accessibilityRole="button" onPress={preview.retry} style={styles.confirm}>
             <Text style={styles.confirmText}>Повторить</Text>
           </Pressable>
         </View>
       )}
       {!preview.failed && fresh && shown.shortfall > 0 ? (
-        <Text style={styles.text}>
-          Не хватает {formatMoney(shown.shortfall)}: столько выходит за кредитный лимит. Попробуйте сумму поменьше.
-        </Text>
+        <ErrorText>Не хватает {formatMoney(shown.shortfall)}: столько выходит за кредитный лимит. Попробуйте сумму поменьше.</ErrorText>
       ) : needsAction ? (
         <Pressable
           accessibilityRole="button"

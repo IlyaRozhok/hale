@@ -78,7 +78,7 @@ const styles = StyleSheet.create({
     color: color.fg.default,
     ...type.body,
   },
-  error: { ...type.body, color: color.fg.default },
+  error: { ...type.body, color: color.status.danger },
   button: {
     minHeight: touchMin,
     alignItems: "center",

@@ -105,6 +105,8 @@ export interface LoanRowDto {
   receivedOn: string;
   /** Set once the loan is fully repaid. */
   repaidOn: string | null;
+  /** False when the owner only knows it was repaid: repaidOn is then the day that was said. */
+  repaidDateKnown: boolean;
   repaidAmount: number;
   /** Paid on this loan beyond its principal. */
   serviceCost: number;

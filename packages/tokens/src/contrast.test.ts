@@ -31,6 +31,13 @@ describe("silver tokens contrast (WCAG AA 4.5:1)", () => {
     expect(color.money.income).toBe("#8CC7A1");
     expect(color.money.neutral).toBe(color.fg.default);
   });
+  it("status.danger is a calm red, readable on every surface", () => {
+    for (const s of [color.surface.base, color.surface.inset, color.surface.raised]) {
+      expect(contrastRatio(color.status.danger, s)).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(color.status.danger).toBe("#F08585");
+    expect(color.status.danger).not.toBe(color.money.expense);
+  });
   it("accent.fgOnAccent on accent.default", () => {
     expect(contrastRatio(color.accent.fgOnAccent, color.accent.default)).toBeGreaterThanOrEqual(4.5);
   });

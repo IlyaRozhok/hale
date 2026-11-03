@@ -320,6 +320,41 @@ describe("repaying and reviewing loans", () => {
     expect(h.stats).toMatchObject({ borrowed: 120_000, stillOpen: 70_000 });
   });
 
+  it("closes every loan from before tracking at once, with no date claimed, and leaves the others", async () => {
+    await ds.query(`UPDATE settings SET tracking_start='2026-11-01'`);
+    const old = await manual(50_000, "2026-09-01");
+    const part = await manual(40_000, "2026-08-01");
+    await api.post(`/plan/loans/${part}/repay`, { amount: 10_000, date: "2026-08-02" }).expect(201);
+    const current = await manual(70_000, "2026-11-02");
+    expect((await api.post("/plan/loans/old/repaid").expect(201)).body).toEqual({ closed: 2 });
+    const h = await history();
+    expect(h.old).toEqual([]);
+    expect(h.open.map((l: { id: number }) => l.id)).toEqual([current]);
+    expect(h.repaid).toEqual([
+      expect.objectContaining({ id: old, remaining: 0, repaidAmount: 50_000, repaidDateKnown: false }),
+      expect.objectContaining({ id: part, remaining: 0, repaidAmount: 40_000, repaidDateKnown: false }),
+    ]);
+    expect(h.stats).toMatchObject({ borrowed: 160_000, repaid: 90_000, stillOpen: 70_000 });
+    expect((await api.post("/plan/loans/old/repaid").expect(201)).body).toEqual({ closed: 0 });
+  });
+
+  it("a repayment with a date keeps it", async () => {
+    const id = await manual(1_000);
+    await api.post(`/plan/loans/${id}/repay`, { amount: 1_000, date: "2026-11-02" }).expect(201);
+    expect((await history()).repaid[0]).toMatchObject({ repaidOn: "2026-11-02", repaidDateKnown: true });
+  });
+
+  it("closing old lender loans moves what their payments covered from cost to principal", async () => {
+    await ds.query(`UPDATE settings SET tracking_start='2026-11-01'`);
+    await bank(100_000, "Від: Llc Moneyveo", "2026-09-01", "short");
+    const a = await account("black");
+    const fee = await tx(a, { amount: -112_000, description: "Platon*pgid_commission", date: "2026-09-10" });
+    await reclassify([fee]);
+    expect((await history()).stats.serviceCost).toBe(112_000);
+    await api.post("/plan/loans/old/repaid").expect(201);
+    expect((await history()).stats).toMatchObject({ repaid: 100_000, serviceCost: 12_000 });
+  });
+
   it("the cost of loans is interest, penalties, gateway fees and lender repayments beyond the principal", async () => {
     await bank(100_000, "Кредит До завтра на 9 днів", "2026-11-01", "short");
     const a = await account("black");

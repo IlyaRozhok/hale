@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { GoalDto } from "@hale/contracts";
+import { ErrorText } from "./ErrorText";
 import { useCreateGoal, useDeleteGoal, useGoals, usePatchGoal } from "../api/queries";
 import { formatDollars, goalPercent, parseBalance } from "../format";
 import { Chip } from "./Chip";
@@ -67,7 +68,7 @@ function GoalItem({ goal }: { goal: GoalDto }) {
           <TextButton label="Удалить" a11y={`Удалить цель: ${goal.name}`} onPress={confirmRemove} />
         </View>
       )}
-      {message ? <Text style={styles.muted}>{message}</Text> : null}
+      {message ? <ErrorText>{message}</ErrorText> : null}
     </View>
   );
 }
@@ -87,6 +88,7 @@ export function GoalsSection() {
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const add = () => {
     const cents = parseBalance(target);
@@ -96,13 +98,14 @@ export function GoalsSection() {
       return;
     }
     setMessage(null);
+    setNotice(null);
     create.mutate(
       { name: title, target_cents: cents },
       {
         onSuccess: () => {
           setName("");
           setTarget("");
-          setMessage("Цель добавлена.");
+          setNotice("Цель добавлена.");
         },
         onError: () => setMessage(SAVE_FAILED),
       },
@@ -112,12 +115,13 @@ export function GoalsSection() {
   return (
     <Glass style={styles.stack}>
       <Text style={styles.heading}>Цели</Text>
-      {goals.isError && !goals.data ? <Text style={styles.muted}>Не получилось загрузить цели.</Text> : null}
+      {goals.isError && !goals.data ? <ErrorText>Не получилось загрузить цели.</ErrorText> : null}
       {goals.data?.map((g) => <GoalItem key={g.id} goal={g} />)}
       <Field label="Название цели" value={name} onChangeText={setName} />
       <Field label="Сумма цели, $" keyboardType="decimal-pad" value={target} onChangeText={setTarget} />
       <Chip label="Добавить цель" onPress={add} disabled={create.isPending} />
-      {message ? <Text style={styles.muted}>{message}</Text> : null}
+      {message ? <ErrorText>{message}</ErrorText> : null}
+      {notice ? <Text style={styles.muted}>{notice}</Text> : null}
     </Glass>
   );
 }

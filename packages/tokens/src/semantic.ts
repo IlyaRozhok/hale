@@ -18,11 +18,11 @@ export const color = {
     /** Dark scrim for every panel and text that sits over the liquid metal (design §8). */
     overMetal: blackAlpha(0.75),
   },
-  // No hue: statuses differ by lightness, so every status must also carry a text label.
+  // Statuses differ by lightness, and danger (errors) by a calm red. Each also carries a text label.
   status: {
     success: p.silver[400],
     warning: p.silver[200],
-    danger: p.white,
+    danger: p.rose,
   },
   accent: {
     default: p.silver[100],

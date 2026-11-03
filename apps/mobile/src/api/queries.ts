@@ -266,6 +266,11 @@ export function useDeleteLoan() {
   return useLoanMutation((id: number) => api.deleteLoan(id));
 }
 
+export function useRepayOldLoans() {
+  const api = useApi();
+  return useLoanMutation<void>(() => api.repayOldLoans());
+}
+
 export function useRepayLoan() {
   const api = useApi();
   return useLoanMutation(({ id, input }: { id: number; input: LoanRepayInput }) => api.repayLoan(id, input));

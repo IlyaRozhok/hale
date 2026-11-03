@@ -6,6 +6,7 @@ import type { DailyStateDto, TodayDto } from "@hale/contracts";
 import { LimitVisual } from "../metal";
 import { formatMoney, formatStamp, formatUsd, kyivDate, longDate } from "../format";
 import { useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
+import { ErrorText } from "../components/ErrorText";
 import { ActionRow } from "../components/ActionRow";
 import { BadCaseCard } from "../components/BadCaseCard";
 import { BridgePlan } from "../components/BridgePlan";
@@ -97,7 +98,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
           <View style={styles.headerEnd}>{settingsButton}</View>
           {today.isError ? (
             <Glass style={styles.stack}>
-              <Text style={styles.body}>Не получилось загрузить данные. Проверьте связь и попробуйте ещё раз.</Text>
+              <ErrorText>Не получилось загрузить данные. Проверьте связь и попробуйте ещё раз.</ErrorText>
               <Pressable accessibilityRole="button" onPress={() => void today.refetch()} style={styles.button}>
                 <Text style={styles.buttonText}>Повторить</Text>
               </Pressable>

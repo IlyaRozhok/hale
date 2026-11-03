@@ -4,6 +4,7 @@ import { tokens } from "@hale/tokens";
 import { useLabelRecipient, useRecipient } from "../api/queries";
 import { formatMoney, shortDate } from "../format";
 import { LABEL_CHOICES } from "../labels";
+import { ErrorText } from "./ErrorText";
 import { Chip } from "./Chip";
 import { Sheet } from "./Sheet";
 
@@ -24,7 +25,7 @@ export function RecipientLabelSheet({ counterKey, name, onClose, onLabeled, onEd
         </Text>
       )}
       <Text style={styles.context}>Ответ относится ко всем переводам этому получателю.</Text>
-      {failed && <Text style={styles.text}>Не удалось сохранить. Попробуйте ещё раз.</Text>}
+      {failed && <ErrorText>Не удалось сохранить. Попробуйте ещё раз.</ErrorText>}
       {LABEL_CHOICES.map((c) => {
         const selected = summary?.label === c.label;
         return (

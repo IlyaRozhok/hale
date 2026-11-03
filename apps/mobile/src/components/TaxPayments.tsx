@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
+import { ErrorText } from "./ErrorText";
 import { useCreatePayment, useMarkPaid, useTaxPayments } from "../api/queries";
 import { formatMoney, isIsoDate, parseHryvnias, shortDate, taxQuarterOfDue } from "../format";
 import { Chip } from "./Chip";
@@ -42,7 +43,7 @@ export function TaxPayments() {
   return (
     <Glass style={styles.stack}>
       <Text style={styles.heading}>Налоговые платежи</Text>
-      {payments.isError && <Text style={styles.muted}>Не получилось загрузить платежи.</Text>}
+      {payments.isError && <ErrorText>Не получилось загрузить платежи.</ErrorText>}
       {payments.data?.map((p) => (
         <View key={p.id} style={styles.row}>
           <View style={styles.left}>
@@ -59,12 +60,12 @@ export function TaxPayments() {
           </View>
         </View>
       ))}
-      {markPaid.isError && <Text style={styles.text}>Не удалось отметить. Попробуйте ещё раз.</Text>}
+      {markPaid.isError && <ErrorText>Не удалось отметить. Попробуйте ещё раз.</ErrorText>}
       <Text style={styles.label}>Новый платёж</Text>
       <Field label="Название платежа" value={name} onChangeText={setName} />
       <Field label="Сумма платежа" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
       <Field label="Срок оплаты, ГГГГ-ММ-ДД" value={due} onChangeText={setDue} keyboardType="numbers-and-punctuation" autoCapitalize="none" />
-      {message && <Text style={styles.text}>{message}</Text>}
+      {message && <ErrorText>{message}</ErrorText>}
       <Chip label="Добавить платёж" selected disabled={create.isPending} onPress={add} />
     </Glass>
   );

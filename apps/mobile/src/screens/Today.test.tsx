@@ -4,7 +4,7 @@ import { tokens } from "@hale/tokens";
 import type { BridgeStateDto, DailyStateDto } from "@hale/contracts";
 import { Today } from "./Today";
 import { fakeApi, makeClient, renderWith, todayFixture } from "../testing";
-import { NetworkError } from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
 
 jest.mock("../metal", () => {
   const { View } = require("react-native");
@@ -269,6 +269,20 @@ describe("Today, normal mode", () => {
     let node = screen.getByText("Сохранить").parent;
     while (node && node.props.keyboardShouldPersistTaps === undefined) node = node.parent;
     expect(node?.props.keyboardShouldPersistTaps).toBe("handled");
+  });
+
+  it("says what is wrong when the repayment date does not fit the loan", async () => {
+    const api = fakeApi({
+      today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })),
+      repayLoan: jest.fn(async () => {
+        throw new ApiError(422);
+      }),
+    });
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    const text = await screen.findByText("Дата должна быть не раньше дня займа и не позже сегодня.");
+    expect(StyleSheet.flatten(text.props.style).color).toBe(tokens.color.status.danger);
   });
 
   it("keeps the repayment form open when the save fails", async () => {

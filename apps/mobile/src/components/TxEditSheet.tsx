@@ -4,6 +4,7 @@ import { tokens } from "@hale/tokens";
 import type { TransactionDto, TransactionPatch } from "@hale/contracts";
 import { useEditTransaction } from "../api/queries";
 import { SPEND_CATEGORIES, TYPE_CHOICES, answerText, categoryLabel, typeLabel } from "../labels";
+import { ErrorText } from "./ErrorText";
 import { ActionRow } from "./ActionRow";
 import { Chip } from "./Chip";
 import { Sheet } from "./Sheet";
@@ -39,7 +40,7 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
           thumbColor={color.fg.default}
         />
       </View>
-      {failed && <Text style={styles.text}>Не удалось сохранить. Попробуйте ещё раз.</Text>}
+      {failed && <ErrorText>Не удалось сохранить. Попробуйте ещё раз.</ErrorText>}
       <Text style={styles.heading}>Тип</Text>
       <View style={styles.chips}>
         {TYPE_CHOICES.map((t) => (

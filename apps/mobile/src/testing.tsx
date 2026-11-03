@@ -75,7 +75,7 @@ export function balanceFixture(over: Partial<ManualBalanceDto> = {}): ManualBala
 }
 
 export function loanFixture(over: Partial<LoanRowDto> = {}): LoanRowDto {
-  return { id: 7, amount: 500_000, remaining: 500_000, receivedOn: "2026-11-01", repaidOn: null, repaidAmount: 0, serviceCost: 0, title: "Друг", manual: true, ...over };
+  return { id: 7, amount: 500_000, remaining: 500_000, receivedOn: "2026-11-01", repaidOn: null, repaidDateKnown: true, repaidAmount: 0, serviceCost: 0, title: "Друг", manual: true, ...over };
 }
 
 export function loanHistoryFixture(over: Partial<LoanHistoryDto> = {}): LoanHistoryDto {
@@ -110,6 +110,7 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     deleteLoan: jest.fn(async () => undefined),
     repayLoan: jest.fn(async () => undefined),
     loanHistory: jest.fn(async () => loanHistoryFixture()),
+    repayOldLoans: jest.fn(async () => undefined),
     registerPushToken: jest.fn(async () => undefined),
     goals: jest.fn(async () => []),
     createGoal: jest.fn(async () => goalFixture()),

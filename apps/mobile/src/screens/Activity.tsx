@@ -6,6 +6,7 @@ import type { TransactionDto } from "@hale/contracts";
 import { useTransactions } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
 import { dayHeader, formatSignedMoney, kyivDate } from "../format";
+import { ErrorText } from "../components/ErrorText";
 import { Chip } from "../components/Chip";
 import { Field } from "../components/Field";
 import { Glass } from "../components/Glass";
@@ -90,7 +91,7 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
       </View>
       {list.isError && items.length === 0 ? (
         <Glass style={styles.stack}>
-          <Text style={styles.text}>Не получилось загрузить операции. Проверьте связь и попробуйте ещё раз.</Text>
+          <ErrorText>Не получилось загрузить операции. Проверьте связь и попробуйте ещё раз.</ErrorText>
           <Pressable accessibilityRole="button" onPress={() => void list.refetch()} style={styles.button}>
             <Text style={styles.buttonText}>Повторить</Text>
           </Pressable>

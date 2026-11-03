@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Alert, StyleSheet } from "react-native";
 import { Plan } from "./Plan";
 import { Today } from "./Today";
@@ -63,6 +63,23 @@ describe("Plan, loans", () => {
     expect(screen.queryByRole("button", { name: "Удалить: Розстрочка на картку" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Погасил: Кредит До завтра" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Удалить: Кредит До завтра" })).toBeNull();
+  });
+
+  it("closes all the old loans at once, after asking, and shows they have no date", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation(noop);
+    const first = history();
+    const second = loanHistoryFixture({ repaid: [loanFixture({ id: 8, title: "Розстрочка на картку", manual: false, remaining: 0, repaidOn: "2026-11-03", repaidDateKnown: false, repaidAmount: 500_000 })] });
+    const loanHistory = jest.fn(async () => first).mockResolvedValueOnce(first).mockResolvedValue({ ...first, ...second });
+    const api = fakeApi({ loanHistory });
+    await open(api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Все уже погашены" }));
+    expect(api.repayOldLoans).not.toHaveBeenCalled();
+    const buttons = alert.mock.calls[0]![2]!;
+    await act(async () => buttons.find((b) => b.text === "Да, погашены")!.onPress!());
+    await waitFor(() => expect(api.repayOldLoans).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("₴5,000 от 01.11, погашен, дата неизвестна")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Все уже погашены" })).toBeNull();
+    alert.mockRestore();
   });
 
   it("repaying from the list refreshes it", async () => {

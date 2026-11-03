@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import Slider from "@react-native-community/slider";
 import { tokens } from "@hale/tokens";
+import { ErrorText } from "../components/ErrorText";
 import { formatMoney } from "../format";
 import { useCapPreview, useSaveSettings, useSettings } from "../api/queries";
 import { Glass } from "../components/Glass";
@@ -49,8 +50,8 @@ export function Settings({ onClose }: { onClose: () => void }) {
           <Icon name="close" color={color.fg.muted} />
         </Pressable>
       </View>
-      {error && <Text style={styles.text}>{error}</Text>}
-      {settings.isError && !saved && <Text style={styles.muted}>Не получилось загрузить настройки.</Text>}
+      {error && <ErrorText>{error}</ErrorText>}
+      {settings.isError && !saved && <ErrorText>Не получилось загрузить настройки.</ErrorText>}
 
       {saved && cap !== null && (
         <>
@@ -84,7 +85,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
                 {preview.data.rateStale && <Text style={styles.muted}>Курс валюты неизвестен или устарел: цифра может быть неточной.</Text>}
               </View>
             ) : preview.failed ? (
-              <Text style={styles.muted}>Не удалось пересчитать.</Text>
+              <ErrorText>Не удалось пересчитать.</ErrorText>
             ) : null}
           </Glass>
         </>

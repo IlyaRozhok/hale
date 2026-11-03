@@ -5,6 +5,7 @@ import { tokens } from "@hale/tokens";
 import type { TodayDto } from "@hale/contracts";
 import { TODAY_KEY, useManualBalances, useSaveBinanceBalance } from "../api/queries";
 import { formatMoney, formatOriginal, parseBalance } from "../format";
+import { ErrorText } from "./ErrorText";
 import { Chip } from "./Chip";
 import { Field } from "./Field";
 import { Glass } from "./Glass";
@@ -19,6 +20,7 @@ export function BinanceBalance() {
   const save = useSaveBinanceBalance();
   const [amount, setAmount] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const current = balances.data?.find((b) => b.name === "Binance");
 
   const submit = () => {
@@ -28,12 +30,13 @@ export function BinanceBalance() {
       return;
     }
     setMessage(null);
+    setNotice(null);
     save.mutate(
       { id: current?.id ?? null, amount: cents },
       {
         onSuccess: () => {
           setAmount("");
-          setMessage("Баланс сохранён.");
+          setNotice("Баланс сохранён.");
         },
         onError: () => setMessage("Не удалось сохранить. Попробуйте ещё раз."),
       },
@@ -43,7 +46,7 @@ export function BinanceBalance() {
   return (
     <Glass style={styles.stack}>
       <Text style={styles.heading}>Баланс Binance</Text>
-      {balances.isError && <Text style={styles.muted}>Не получилось загрузить баланс.</Text>}
+      {balances.isError && <ErrorText>Не получилось загрузить баланс.</ErrorText>}
       {balances.data && (
         <Text style={styles.text}>
           {current ? formatOriginal(current.amount, current.currency) : "Баланс не задан"}
@@ -51,7 +54,8 @@ export function BinanceBalance() {
         </Text>
       )}
       <Field label="Новый баланс Binance, $" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
-      {message && <Text style={styles.text}>{message}</Text>}
+      {message && <ErrorText>{message}</ErrorText>}
+      {notice && <Text style={styles.text}>{notice}</Text>}
       <Chip label="Сохранить баланс" selected disabled={save.isPending || !balances.data} onPress={submit} />
     </Glass>
   );

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { StyleSheet, Text } from "react-native";
 import { tokens } from "@hale/tokens";
+import { ErrorText } from "./ErrorText";
 import { useCreateLoan } from "../api/queries";
 import { isIsoDate, kyivDate, parseHryvnias } from "../format";
 import { Chip } from "./Chip";
@@ -16,6 +17,7 @@ export function ManualLoan() {
   const [date, setDate] = useState(() => kyivDate());
   const [note, setNote] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const add = () => {
     const kopecks = parseHryvnias(amount);
@@ -24,6 +26,7 @@ export function ManualLoan() {
       return;
     }
     setMessage(null);
+    setNotice(null);
     const text = note.trim();
     create.mutate(
       { amount: kopecks, received_on: date, ...(text ? { note: text } : {}) },
@@ -31,7 +34,7 @@ export function ManualLoan() {
         onSuccess: () => {
           setAmount("");
           setNote("");
-          setMessage("Займ добавлен.");
+          setNotice("Займ добавлен.");
         },
         onError: () => setMessage("Не удалось сохранить. Попробуйте ещё раз."),
       },
@@ -44,7 +47,8 @@ export function ManualLoan() {
       <Field label="Сумма займа" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
       <Field label="Дата займа, ГГГГ-ММ-ДД" value={date} onChangeText={setDate} keyboardType="numbers-and-punctuation" autoCapitalize="none" />
       <Field label="Заметка к займу" value={note} onChangeText={setNote} />
-      {message && <Text style={styles.text}>{message}</Text>}
+      {message && <ErrorText>{message}</ErrorText>}
+      {notice && <Text style={styles.text}>{notice}</Text>}
       <Chip label="Добавить займ" selected disabled={create.isPending} onPress={add} />
     </Glass>
   );

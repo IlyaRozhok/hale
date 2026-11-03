@@ -43,6 +43,19 @@ export class LoansService {
     return (await this.rows(`l.id=$1`, [id]))[0]!;
   }
 
+  /**
+   * The owner knows the loans from before tracking were repaid, not when. They are not in the limit,
+   * so the day's limit stays.
+   */
+  async repayOld(): Promise<{ closed: number }> {
+    const rows: unknown[] = await this.ds.query(
+      `UPDATE loans SET repaid_amount = amount, repaid_at = now(), repaid_date_unknown = true
+        WHERE repaid_at IS NULL AND received_on < (SELECT tracking_start FROM settings WHERE id=1) RETURNING id`,
+    );
+    // TypeORM returns [rows, count] for an UPDATE on Postgres.
+    return { closed: rows[1] as number };
+  }
+
   /** A mistaken manual entry goes away; a loan from a bank row would come back with the next sync. */
   async remove(id: number): Promise<{ deleted: true }> {
     const today = kyivDate(this.clock.now());
@@ -96,7 +109,7 @@ export class LoansService {
   private async rows(where: string, args: unknown[]): Promise<LoanRowDto[]> {
     const rows: (Omit<LoanRowDto, "title"> & { title: string | null })[] = await this.ds.query(
       `SELECT l.id, l.amount::float8 AS amount, (l.amount - l.repaid_amount)::float8 AS remaining, l.received_on::text AS "receivedOn",
-              ((l.repaid_at AT TIME ZONE 'Europe/Kyiv')::date)::text AS "repaidOn", l.repaid_amount::float8 AS "repaidAmount",
+              ((l.repaid_at AT TIME ZONE 'Europe/Kyiv')::date)::text AS "repaidOn", NOT l.repaid_date_unknown AS "repaidDateKnown", l.repaid_amount::float8 AS "repaidAmount",
               l.service_cost::float8 AS "serviceCost", l.source_transaction_id IS NULL AS manual,
               CASE WHEN l.source_transaction_id IS NULL THEN l.note ELSE t.description END AS title
          FROM loans l LEFT JOIN transactions t ON t.id = l.source_transaction_id

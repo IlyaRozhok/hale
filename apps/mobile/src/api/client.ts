@@ -75,6 +75,7 @@ export interface Api {
   deleteLoan(id: number): Promise<void>;
   repayLoan(id: number, input: LoanRepayInput): Promise<void>;
   loanHistory(): Promise<LoanHistoryDto>;
+  repayOldLoans(): Promise<void>;
   registerPushToken(token: string): Promise<void>;
   goals(): Promise<GoalDto[]>;
   createGoal(input: GoalInput): Promise<GoalDto>;
@@ -155,6 +156,7 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     deleteLoan: async (id) => void (await request("DELETE", `/plan/loans/${id}`)),
     repayLoan: async (id, input) => void (await request("POST", `/plan/loans/${id}/repay`, input)),
     loanHistory: () => request("GET", "/plan/loans/history"),
+    repayOldLoans: async () => void (await request("POST", "/plan/loans/old/repaid")),
     registerPushToken: async (token) => void (await request("POST", "/devices/push-token", { token })),
   };
 }

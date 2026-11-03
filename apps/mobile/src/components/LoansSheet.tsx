@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { LoanRowDto } from "@hale/contracts";
-import { useDeleteLoan, useLoanHistory } from "../api/queries";
+import { useDeleteLoan, useLoanHistory, useRepayOldLoans } from "../api/queries";
 import { formatMoney, shortDate } from "../format";
 import { askDeleteLoan } from "./BadCaseCard";
+import { ErrorText } from "./ErrorText";
 import { RepayLoanSheet } from "./RepayLoanSheet";
 import { Sheet } from "./Sheet";
 
@@ -15,7 +16,7 @@ const nameOf = (l: LoanRowDto) => l.title ?? "Займ";
 function detail(l: LoanRowDto): string {
   const base = `${formatMoney(l.amount)} от ${shortDate(l.receivedOn)}`;
   if (l.repaidOn !== null) {
-    return `${base}, погашен ${shortDate(l.repaidOn)}${l.serviceCost > 0 ? `, ещё ${formatMoney(l.serviceCost)} на обслуживание` : ""}`;
+    return `${base}, погашен${l.repaidDateKnown ? ` ${shortDate(l.repaidOn)}` : ", дата неизвестна"}${l.serviceCost > 0 ? `, ещё ${formatMoney(l.serviceCost)} на обслуживание` : ""}`;
   }
   return l.remaining < l.amount ? `${base}, осталось ${formatMoney(l.remaining)}` : base;
 }
@@ -24,6 +25,7 @@ function detail(l: LoanRowDto): string {
 export function LoansSheet({ onClose }: { onClose: () => void }) {
   const history = useLoanHistory();
   const remove = useDeleteLoan();
+  const repayOld = useRepayOldLoans();
   const [repaying, setRepaying] = useState<LoanRowDto | null>(null);
   const data = history.data;
   const total = data ? data.open.length + data.old.length + data.repaid.length : 0;
@@ -56,20 +58,31 @@ export function LoansSheet({ onClose }: { onClose: () => void }) {
     </View>
   );
 
-  const section = (title: string, loans: LoanRowDto[], note?: string) =>
+  const section = (title: string, loans: LoanRowDto[], note?: string, action?: ReactNode) =>
     loans.length > 0 && (
       <View style={styles.section}>
         <Text style={styles.heading}>{title}</Text>
         {note && <Text style={styles.detail}>{note}</Text>}
+        {action}
         {loans.map(row)}
       </View>
     );
+
+  const askRepayOld = () =>
+    Alert.alert("Все старые займы уже погашены?", "Они уйдут в погашенные без даты. На лимит это не влияет.", [
+      { text: "Нет", style: "cancel" },
+      {
+        text: "Да, погашены",
+        onPress: () =>
+          repayOld.mutate(undefined, { onError: () => Alert.alert("Не удалось закрыть займы", "Проверьте связь и попробуйте ещё раз.") }),
+      },
+    ]);
 
   return (
     <Sheet title="Займы" onClose={onClose}>
       {history.isError && !data && (
         <>
-          <Text style={styles.name}>Не получилось загрузить займы.</Text>
+          <ErrorText>Не получилось загрузить займы.</ErrorText>
           <Pressable accessibilityRole="button" onPress={() => void history.refetch()} style={styles.retry}>
             <Text style={styles.retryText}>Повторить</Text>
           </Pressable>
@@ -85,7 +98,14 @@ export function LoansSheet({ onClose }: { onClose: () => void }) {
             <Stat label="Открыто сейчас" value={data.stats.stillOpen} />
           </View>
           {section("Открытые", data.open)}
-          {section("До начала учёта", data.old, "Не входят в лимит. Банк не показывает, что они погашены, отметьте сами.")}
+          {section(
+            "До начала учёта",
+            data.old,
+            "Не входят в лимит. Банк не показывает, что они погашены.",
+            <Pressable accessibilityRole="button" onPress={askRepayOld} disabled={repayOld.isPending} style={styles.retry}>
+              <Text style={styles.retryText}>Все уже погашены</Text>
+            </Pressable>,
+          )}
           {section("Погашенные", data.repaid)}
         </>
       )}
