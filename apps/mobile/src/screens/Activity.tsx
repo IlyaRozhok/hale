@@ -11,6 +11,7 @@ import { Chip } from "../components/Chip";
 import { Field } from "../components/Field";
 import { Glass } from "../components/Glass";
 import { Icon } from "../components/Icon";
+import { LAYOUT } from "../components/layout";
 import { RecipientLabelSheet } from "../components/RecipientLabelSheet";
 import { TxEditSheet } from "../components/TxEditSheet";
 import { TxRow } from "../components/TxRow";
@@ -115,7 +116,7 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
           renderItem={({ item, index, section }) => (
             <TxRow tx={item} onPress={() => setOpen(item)} first={index === 0} last={index === section.data.length - 1} />
           )}
-          contentContainerStyle={{ paddingBottom: space.xl }}
+          contentContainerStyle={{ paddingBottom: LAYOUT.tabBar + insets.bottom }}
           onEndReachedThreshold={0.5}
           onEndReached={() => {
             if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage();

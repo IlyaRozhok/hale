@@ -1,6 +1,6 @@
-import { color, radius, space, touchMin, type } from "./semantic";
+import { color, metal, radius, space, touchMin, type } from "./semantic";
 
-export const tokens = { color, space, radius, type, touchMin } as const;
+export const tokens = { color, space, radius, type, touchMin, metal } as const;
 
 export type Tokens = typeof tokens;
 

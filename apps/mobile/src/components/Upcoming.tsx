@@ -40,7 +40,7 @@ export function Upcoming({ items }: Props) {
 }
 
 const styles = StyleSheet.create({
-  card: { gap: space.md, backgroundColor: color.surface.inset },
+  card: { gap: space.md },
   head: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
   caption: { ...type.caption, color: color.fg.subtle, fontVariant: ["tabular-nums"] },
   row: { flexDirection: "row", alignItems: "center", gap: space.md },

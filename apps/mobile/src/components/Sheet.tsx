@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Glass } from "./Glass";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 
@@ -14,7 +15,7 @@ export function Sheet({ title, subtitle, onClose, children }: Props) {
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView behavior="padding" style={styles.root}>
         <Pressable accessible={false} onPress={onClose} style={styles.scrim} />
-        <View style={[styles.panel, { paddingBottom: insets.bottom + space.lg }]}>
+        <Glass kind="floating" style={[styles.panel, { paddingBottom: insets.bottom + space.lg }]}>
           <View style={styles.head}>
             <View style={styles.titles}>
               <Text style={styles.title}>{title}</Text>
@@ -25,7 +26,7 @@ export function Sheet({ title, subtitle, onClose, children }: Props) {
             </Pressable>
           </View>
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">{children}</ScrollView>
-        </View>
+        </Glass>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -33,10 +34,9 @@ export function Sheet({ title, subtitle, onClose, children }: Props) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, justifyContent: "flex-end" },
-  scrim: { ...StyleSheet.absoluteFill as object, backgroundColor: color.surface.overMetal },
+  scrim: { ...StyleSheet.absoluteFill as object, backgroundColor: color.surface.scrim },
   panel: {
     maxHeight: "85%",
-    backgroundColor: color.surface.raised,
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
     paddingHorizontal: space.xl,

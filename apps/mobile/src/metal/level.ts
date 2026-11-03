@@ -1,11 +1,13 @@
 // Pure level and time maths for the metal. No native imports: runs in node tests and, via the
 // 'worklet' directives, on the Reanimated UI thread.
 
+import { tokens } from "@hale/tokens";
+
 /** Time (seconds) the shader is frozen at when motion is reduced: a pleasant, fixed pose. */
-export const STILL_TIME = 4;
+export const STILL_TIME = tokens.metal.stillTime;
 
 /** Seconds for a level change to cover about 63% of its distance. */
-export const LEVEL_TAU = 0.35;
+export const LEVEL_TAU = tokens.metal.levelTau;
 
 /** Clamp a level to 0..1. NaN becomes 0. */
 export function clampLevel(level: number): number {

@@ -43,30 +43,53 @@ describe("silver tokens contrast (WCAG AA 4.5:1)", () => {
   });
 });
 
-describe("surface.overMetal over the brightest metal", () => {
-  /** Composites an rgba() string over opaque white (the worst case: metal is at most white). */
-  function overWhite(rgba: string): string {
+describe("floating glass, in the worst case", () => {
+  /** Composites an rgba() string over an opaque #RRGGBB. */
+  function over(rgba: string, hex: string): string {
     const m = /rgba\((\d+), (\d+), (\d+), ([\d.]+)\)/.exec(rgba);
     if (!m) throw new Error(`not rgba: ${rgba}`);
     const a = Number(m[4]);
-    const hex = [1, 2, 3].map((i) => Math.round(Number(m[i]) * a + 255 * (1 - a)).toString(16).padStart(2, "0"));
-    return `#${hex.join("")}`;
+    const out = [1, 2, 3].map((i) => {
+      const under = parseInt(hex.slice(i * 2 - 1, i * 2 + 1), 16);
+      return Math.round(Number(m[i]) * a + under * (1 - a)).toString(16).padStart(2, "0");
+    });
+    return `#${out.join("")}`;
   }
-  const backing = overWhite(color.surface.overMetal);
-  it("keeps fg.default and fg.muted at 4.5:1", () => {
+  const brightest = "#FFFFFF"; // the metal is at most white
+
+  it("keeps text readable on a window over the scrim, over the brightest metal", () => {
+    const backing = over(color.glass.floating.tint, over(color.surface.scrim, brightest));
     expect(contrastRatio(color.fg.default, backing)).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(color.fg.muted, backing)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(color.status.danger, backing)).toBeGreaterThanOrEqual(4.5);
+  });
+  it("keeps the menu's icons readable over the brightest metal, with no scrim", () => {
+    const backing = over(color.glass.floating.tint, brightest);
+    expect(contrastRatio(color.fg.subtle, backing)).toBeGreaterThanOrEqual(3);
+  });
+  it("the fallback fill is opaque and readable", () => {
+    expect(color.glass.floating.fallback).toMatch(/^#[0-9A-F]{6}$/);
+    expect(contrastRatio(color.fg.muted, color.glass.floating.fallback)).toBeGreaterThanOrEqual(4.5);
+  });
+  it("cards are opaque, and text on them is readable", () => {
+    expect(color.glass.surface.fill).toMatch(/^#[0-9A-F]{6}$/);
+    expect(contrastRatio(color.fg.muted, color.glass.surface.fill)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("metal settings", () => {
+  it("are in the tokens", () => {
+    expect(tokens.metal).toEqual({ renderScale: 2, levelTau: 0.35, stillTime: 4 });
   });
 });
 
 describe("token shape", () => {
-  it("has opaque surfaces and a separate glass token", () => {
+  it("has opaque surfaces and a translucent scrim", () => {
     for (const [name, v] of Object.entries(color.surface)) {
-      if (name === "glass" || name === "overMetal") continue;
+      if (name === "scrim") continue;
       expect(v, name).toMatch(/^#[0-9A-F]{6}$/);
     }
-    expect(color.surface.glass).toMatch(/^rgba\(/);
-    expect(color.surface.overMetal).toMatch(/^rgba\(/);
+    expect(color.surface.scrim).toMatch(/^rgba\(/);
   });
   it("exposes scales and touchMin", () => {
     expect(tokens.touchMin).toBe(44);

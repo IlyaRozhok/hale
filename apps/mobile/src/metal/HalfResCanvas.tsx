@@ -2,10 +2,11 @@ import type { ReactNode } from "react";
 import { View } from "react-native";
 import { Canvas, Fill, Shader } from "@shopify/react-native-skia";
 import { useDerivedValue, type SharedValue } from "react-native-reanimated";
+import { tokens } from "@hale/tokens";
 import { metalEffect } from "./metal.sksl";
 
 /** The metal is soft, so it renders at a quarter of the pixels (half width, half height). */
-const SCALE = 2;
+const SCALE = tokens.metal.renderScale;
 
 type CanvasProps = {
   width: number;

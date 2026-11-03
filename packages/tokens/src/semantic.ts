@@ -1,6 +1,6 @@
 import { palette as p, blackAlpha, whiteAlpha } from "./palette";
 
-/** Semantic Silver tokens. Surfaces are opaque; translucent fills live in surface.glass. */
+/** Semantic Silver tokens. Surfaces are opaque; what is translucent is the scrim and the glass. */
 export const color = {
   fg: {
     default: p.white,
@@ -14,9 +14,14 @@ export const color = {
     raised: p.graphite[800],
     overlay: p.graphite[700],
     selected: p.silver[100],
-    glass: whiteAlpha(0.14),
-    /** Dark scrim for every panel and text that sits over the liquid metal (design §8). */
-    overMetal: blackAlpha(0.75),
+    /** Dims what is behind a window, while the glass still has something to show. */
+    scrim: blackAlpha(0.5),
+  },
+  glass: {
+    /** Cards: nothing passes behind them, so a fill and a thin edge. */
+    surface: { fill: p.graphite[900], edge: whiteAlpha(0.1) },
+    /** The menu and windows: the system's glass, dark enough for text over the brightest metal. */
+    floating: { tint: blackAlpha(0.72), fallback: p.graphite[800] },
   },
   // Statuses differ by lightness, and danger (errors) by a calm red. Each also carries a text label.
   status: {
@@ -56,6 +61,9 @@ export const type = {
   title: { fontSize: 20, lineHeight: 28, fontWeight: "600" },
   display: { fontSize: 34, lineHeight: 40, fontWeight: "700" },
 } as const;
+
+/** The liquid metal: a quarter of the pixels (it is soft), how fast the level moves, the pose when motion is reduced. */
+export const metal = { renderScale: 2, levelTau: 0.35, stillTime: 4 } as const;
 
 /** Minimum touch target in points (Apple HIG). */
 export const touchMin = 44;

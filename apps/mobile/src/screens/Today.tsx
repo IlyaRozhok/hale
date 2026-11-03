@@ -143,7 +143,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
       <ScrollView
         testID="today-scroll"
         style={{ marginTop: insets.top }}
-        contentContainerStyle={[styles.content, { paddingTop: space.sm, paddingBottom: space.xl }]}
+        contentContainerStyle={[styles.content, { paddingTop: space.sm, paddingBottom: LAYOUT.tabBar + insets.bottom }]}
         refreshControl={<RefreshControl {...pull} />}
       >
         <View style={styles.header}>

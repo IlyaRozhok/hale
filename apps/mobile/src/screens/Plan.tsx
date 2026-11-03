@@ -8,6 +8,7 @@ import { AccountsList } from "../components/AccountsList";
 import { BinanceSheet } from "../components/BinanceBalance";
 import { Glass } from "../components/Glass";
 import { GoalsSheet } from "../components/GoalsSection";
+import { LAYOUT } from "../components/layout";
 import { IncomesSheet } from "../components/IncomesSheet";
 import { InstallmentsSheet } from "../components/InstallmentsSheet";
 import { LoansSheet } from "../components/LoansSheet";
@@ -41,7 +42,7 @@ export function Plan() {
   return (
     <ScrollView
       style={[styles.root, { marginTop: insets.top }]}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingBottom: LAYOUT.tabBar + insets.bottom }]}
       refreshControl={<RefreshControl {...pull} />}
     >
       <Text style={styles.title}>План</Text>
@@ -68,7 +69,7 @@ export function Plan() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: color.surface.base },
-  content: { paddingHorizontal: space.xl, paddingTop: space.lg, paddingBottom: space.xl, gap: space.lg },
+  content: { paddingHorizontal: space.xl, paddingTop: space.lg, gap: space.lg },
   // Lines up with the text inside the panels below it.
   title: { ...type.title, color: color.fg.default, paddingHorizontal: space.lg },
 });

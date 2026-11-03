@@ -18,6 +18,12 @@ function setup(index = 0, defaultPrevented = false) {
 }
 
 describe("TabBar", () => {
+  it("floats over the content, so that the content scrolls under its glass", async () => {
+    await render(setup().ui);
+    const bar = screen.getByTestId("tab-bar");
+    expect(StyleSheet.flatten(bar.props.style)).toMatchObject({ position: "absolute", left: 0, right: 0, bottom: 0 });
+  });
+
   it("is icons only, with a Russian name for assistive tech and the current tab selected", async () => {
     await render(setup(1).ui);
     expect(screen.getByRole("tab", { name: "Сегодня" }).props.accessibilityState.selected).toBe(false);

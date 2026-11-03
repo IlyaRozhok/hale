@@ -4,6 +4,7 @@ import { Plan } from "./Plan";
 import { Today } from "./Today";
 import { balanceFixture, fakeApi, goalFixture, loanFixture, loanHistoryFixture, makeClient, pickDate, renderWith, taxFixture, todayFixture } from "../testing";
 import { dateLabel, kyivDate, shiftDate } from "../format";
+import { LAYOUT } from "../components/layout";
 import { NetworkError } from "../api/client";
 import { TODAY_KEY } from "../api/queries";
 
@@ -112,6 +113,13 @@ describe("Plan, loans", () => {
 });
 
 describe("Plan, the screen", () => {
+  it("leaves room for the floating menu under the last line", async () => {
+    await renderWith(<Plan />, fakeApi());
+    let node = screen.getByText("План").parent;
+    while (node && node.props.contentContainerStyle === undefined) node = node.parent;
+    expect(StyleSheet.flatten(node!.props.contentContainerStyle).paddingBottom).toBeGreaterThanOrEqual(LAYOUT.tabBar);
+  });
+
   it("shows the data first: summaries and no input fields", async () => {
     const api = fakeApi({
       expectedIncomes: jest.fn(async () => [{ id: 1, source: "fop" as const, amount: 1_000_000, currency: "UAH", window_start_day: 25, window_end_day: 25 }]),

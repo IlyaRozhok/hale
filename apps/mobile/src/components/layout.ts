@@ -7,4 +7,6 @@ export const LAYOUT = {
   pool: 132,
   goals: 112,
   upcoming: 176,
+  /** Room a scrolling screen leaves for the floating menu, above the home indicator. */
+  tabBar: 72,
 } as const;

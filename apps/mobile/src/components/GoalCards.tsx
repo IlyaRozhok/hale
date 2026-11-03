@@ -32,7 +32,7 @@ export function GoalCards({ goals }: { goals: TodayDto["goals"] }) {
 
 const styles = StyleSheet.create({
   row: { flexDirection: "row", gap: space.md },
-  card: { flex: 1, gap: space.xs, backgroundColor: color.surface.inset },
+  card: { flex: 1, gap: space.xs },
   name: { ...type.caption, color: color.fg.subtle },
   amount: { ...type.title, color: color.fg.default, fontVariant: ["tabular-nums"] },
 });
