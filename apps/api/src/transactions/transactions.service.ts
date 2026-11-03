@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException, UnprocessableEntityException } f
 import type {
   RecipientLabelName,
   RecipientLabelResultDto,
+  RecipientSummaryDto,
   TransactionDto,
   TransactionEditDto,
   TransactionPageDto,
@@ -10,7 +11,8 @@ import type {
   TxTypeDto,
 } from "@hale/contracts";
 import { DataSource, type EntityManager } from "typeorm";
-import { type TxType, isWeakRuleValue, normaliseText, typeCategory } from "../domain/classify";
+import { isCounterpartyName } from "../domain/counterparty";
+import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
 import { PlanService } from "../plan/plan.service";
 import { counterKeySql } from "./counter-key";
 import { PLAN_TYPES } from "./reclassify.service";
@@ -20,7 +22,7 @@ const COLUMNS = `
   t.id, t.occurred_at, to_char(t.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS ts,
   t.local_date::text AS local_date, t.description, t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah,
   t.fx_rate::float8 AS fx_rate, a.currency, t.type, t.category, t.hold, t.needs_label,
-  ${KEY} AS counter_key, t.counter_name, a.kind AS account_kind`;
+  ${KEY} AS counter_key, t.counter_iban, t.counter_name, a.kind AS account_kind`;
 const FROM = `FROM transactions t JOIN accounts a ON a.id = t.account_id`;
 
 interface Row {
@@ -38,11 +40,26 @@ interface Row {
   hold: boolean;
   needs_label: boolean;
   counter_key: string;
+  counter_iban: string | null;
   counter_name: string | null;
   account_kind: string;
 }
 
-const view = (r: Row): TransactionDto => ({
+/** A stored answer about a recipient. */
+interface AnswerRule {
+  matchKind: "merchant" | "iban" | "recipient";
+  matchValue: string;
+  direction: "in" | "out" | null;
+  label: RecipientLabelName;
+}
+
+const answerFor = (
+  rules: readonly AnswerRule[],
+  r: { amount: number; description: string; counter_iban: string | null; counter_name: string | null },
+): RecipientLabelName | null =>
+  rules.find((rule) => ruleMatches(rule, { amount: r.amount, description: r.description, counterIban: r.counter_iban, counterName: r.counter_name }))?.label ?? null;
+
+const view = (r: Row, rules: readonly AnswerRule[]): TransactionDto => ({
   id: r.id,
   occurredAt: r.occurred_at.toISOString(),
   localDate: r.local_date,
@@ -58,6 +75,7 @@ const view = (r: Row): TransactionDto => ({
   counterKey: r.counter_key,
   counterName: r.counter_name,
   accountKind: r.account_kind,
+  recipientLabel: answerFor(rules, r),
 });
 
 const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6})\|(\d{1,10})$/;
@@ -73,18 +91,26 @@ function decodeCursor(c: string): { ts: string; id: number } | null {
 /** Types whose rows can settle a planned payment; a row retyped to anything else frees it. */
 const SETTLING_TYPES: ReadonlySet<string> = new Set(["obligation", "debt_payment", "tax"]);
 
-/** Owner label to the type it stands for; the other three stay spending. */
+/** Owner label to the type it stands for: what it does to the limit follows from the type. */
 const LABEL_TYPE: Record<RecipientLabelName, TxType> = {
-  obligation: "obligation",
+  close_regular: "person_transfer",
+  one_off: "person_transfer",
+  service: "spend",
   debt_repayment: "debt_payment",
+  lend: "loan_out",
+  own_account: "own_transfer",
+  skip: "person_transfer",
+  obligation: "obligation",
   shared_budget: "person_transfer",
   help: "person_transfer",
-  one_off: "person_transfer",
 };
+
+/** Types an answer can have given a recipient's outgoing rows, so that it can be changed. */
+const ANSWERED_TYPES = ["person_transfer", "obligation", "debt_payment", "spend", "loan_out", "own_transfer"];
 
 /** Which types each list group shows. own_transfer, loan_in, goal_contribution and untyped rows are only in "all". */
 const GROUP_TYPES: Record<"spend" | "income", readonly string[]> = {
-  spend: ["spend", "obligation", "tax", "debt_payment", "person_transfer", "cash_out"],
+  spend: ["spend", "obligation", "tax", "debt_payment", "person_transfer", "cash_out", "loan_out"],
   income: ["income", "person_in", "cash_in"],
 };
 
@@ -121,8 +147,9 @@ export class TransactionsService {
       args,
     );
     const page = rows.slice(0, q.limit);
+    const rules = await this.answerRules();
     return {
-      items: page.map(view),
+      items: page.map((r) => view(r, rules)),
       nextCursor: rows.length > q.limit ? encodeCursor(page[page.length - 1]!) : null,
       dayTotals: await this.dayTotals([...new Set(page.map((r) => r.local_date))], filters, filterArgs),
     };
@@ -179,24 +206,65 @@ export class TransactionsService {
     return { transaction: row, updated: changed.length };
   }
 
-  /** Gives a recipient's whole history the type the label stands for, and remembers it as a rule. */
+  /**
+   * Gives a recipient's whole history the type the answer stands for, and remembers it as a rule: by
+   * account number when known, so that transfers with only a bank text follow it too. A later answer
+   * replaces an earlier one.
+   */
   async labelRecipient(counterKey: string, label: RecipientLabelName): Promise<RecipientLabelResultDto> {
     const sample = (
       await this.ds.query(
-        `SELECT t.counter_name, t.description ${FROM} WHERE ${KEY} = $1
+        `SELECT t.counter_iban, t.counter_name, t.description ${FROM} WHERE ${KEY} = $1
           ORDER BY (t.type = 'person_transfer') DESC, t.occurred_at DESC, t.id DESC LIMIT 1`,
         [counterKey],
       )
-    )[0] as { counter_name: string | null; description: string } | undefined;
+    )[0] as { counter_iban: string | null; counter_name: string | null; description: string } | undefined;
     if (!sample) throw new NotFoundException("recipient not found");
-    const value = normaliseText(sample.counter_name?.trim() || sample.description);
+    const rule = ruleFor(sample);
     const type = LABEL_TYPE[label];
     const changed = await this.ds.transaction(async (m) => {
-      if (!isWeakRuleValue(value)) await this.saveRule(m, "recipient", value, type, null, label, "out");
+      if (rule.kind === "iban" || !isWeakRuleValue(rule.value)) {
+        await this.dropNameAnswer(m, sample);
+        await this.saveRule(m, rule.kind === "merchant" ? "recipient" : rule.kind, rule.value, type, null, label, "out");
+      }
       return this.apply(m, { key: counterKey, relabel: true }, type, null);
     });
     await this.settle(changed, type);
     return { updated: changed.length };
+  }
+
+  /** The answer by name that an answer by account number replaces: rules apply oldest first. */
+  private async dropNameAnswer(m: EntityManager, r: { counter_name: string | null; description: string }): Promise<void> {
+    await m.query(`DELETE FROM rules WHERE match_kind='recipient' AND label IS NOT NULL AND match_value=$1`, [
+      normaliseText(r.counter_name?.trim() || r.description),
+    ]);
+  }
+
+  /** Who a recipient is, what was sent to them in all, and the answer given about them. */
+  async recipient(counterKey: string): Promise<RecipientSummaryDto> {
+    const rows: { amount: number; amount_uah: number | null; local_date: string; description: string; counter_iban: string | null; counter_name: string | null }[] =
+      await this.ds.query(
+        `SELECT t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah, t.local_date::text AS local_date, t.description, t.counter_iban, t.counter_name
+           ${FROM} WHERE ${KEY} = $1 AND t.amount < 0 ORDER BY t.occurred_at DESC, t.id DESC`,
+        [counterKey],
+      );
+    const last = rows[0];
+    if (!last) throw new NotFoundException("recipient not found");
+    const labelOf = (r: (typeof rows)[number]) => r.counter_name?.trim() || r.description;
+    const rules = await this.answerRules();
+    return {
+      name: labelOf(rows.find((r) => isCounterpartyName(labelOf(r))) ?? last),
+      count: rows.length,
+      total: rows.reduce((s, r) => s + Math.abs(r.amount_uah ?? 0), 0),
+      lastOn: last.local_date,
+      label: answerFor(rules, last),
+    };
+  }
+
+  private answerRules(): Promise<AnswerRule[]> {
+    return this.ds.query(
+      `SELECT match_kind AS "matchKind", match_value AS "matchValue", direction, label FROM rules WHERE label IS NOT NULL ORDER BY id`,
+    );
   }
 
   private async apply(
@@ -213,7 +281,7 @@ export class TransactionsService {
     } else {
       args.push(scope.key);
       if (scope.sign) args.push(scope.sign);
-      where = `${KEY} = $4${scope.sign ? " AND sign(t.amount) = $5" : ""}${scope.relabel ? ` AND t.amount < 0 AND t.type IN ('person_transfer','obligation','debt_payment')` : ""}`;
+      where = `${KEY} = $4${scope.sign ? " AND sign(t.amount) = $5" : ""}${scope.relabel ? ` AND t.amount < 0 AND t.type = ANY('{${ANSWERED_TYPES.join(",")}}'::text[])` : ""}`;
     }
     const rows: { id: number }[] = await m.query(
       `WITH u AS (UPDATE transactions SET
@@ -268,7 +336,7 @@ export class TransactionsService {
 
   private async one(id: number): Promise<TransactionDto> {
     const r = (await this.ds.query(`SELECT ${COLUMNS} ${FROM} WHERE t.id=$1`, [id]))[0] as Row;
-    return view(r);
+    return view(r, await this.answerRules());
   }
 }
 

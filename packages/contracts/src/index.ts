@@ -325,6 +325,7 @@ export const txType = z.enum([
   "cash_in",
   "cash_out",
   "goal_contribution",
+  "loan_out",
 ]);
 export type TxTypeDto = z.infer<typeof txType>;
 
@@ -350,12 +351,34 @@ export const transactionPatch = z
   .refine((v) => v.type !== undefined || v.category !== undefined, "type or category is required");
 export type TransactionPatch = z.infer<typeof transactionPatch>;
 
-export const recipientLabelName = z.enum(["obligation", "debt_repayment", "shared_budget", "help", "one_off"]);
+/** shared_budget, help and obligation are earlier answers: still understood, no longer offered. */
+export const recipientLabelName = z.enum([
+  "close_regular",
+  "one_off",
+  "service",
+  "debt_repayment",
+  "lend",
+  "own_account",
+  "skip",
+  "shared_budget",
+  "help",
+  "obligation",
+]);
 export type RecipientLabelName = z.infer<typeof recipientLabelName>;
 export const recipientLabelInput = z
   .object({ counterKey: z.string().regex(/^[0-9a-f]{16}$/), label: recipientLabelName })
   .strict();
 export type RecipientLabelInput = z.infer<typeof recipientLabelInput>;
+export const counterKeyParam = z.string().regex(/^[0-9a-f]{16}$/);
+
+/** Everything sent to one recipient: what the question about them shows. */
+export interface RecipientSummaryDto {
+  name: string;
+  count: number;
+  total: number;
+  lastOn: string;
+  label: RecipientLabelName | null;
+}
 
 export interface TransactionDto {
   id: number;
@@ -376,6 +399,8 @@ export interface TransactionDto {
   counterKey: string;
   counterName: string | null;
   accountKind: string;
+  /** The owner's answer about this recipient, if any. */
+  recipientLabel: RecipientLabelName | null;
 }
 
 export interface TransactionPageDto {

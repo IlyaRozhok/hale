@@ -13,6 +13,7 @@ export const PAYMENTS_KEY = ["payments"] as const;
 export const CAP_PREVIEW_KEY = ["cap-preview"] as const;
 export const MANUAL_BALANCES_KEY = ["manual-balances"] as const;
 export const LOANS_KEY = ["loans"] as const;
+export const RECIPIENTS_KEY = ["recipients"] as const;
 /** Debounce between the last slider move and the preview request. */
 export const PREVIEW_DELAY_MS = 300;
 
@@ -143,12 +144,22 @@ export function useEditTransaction() {
   });
 }
 
+export function useRecipient(counterKey: string) {
+  const api = useApi();
+  return useQuery({ queryKey: [...RECIPIENTS_KEY, counterKey], queryFn: () => api.recipient(counterKey) });
+}
+
 export function useLabelRecipient() {
   const api = useApi();
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ counterKey, label }: { counterKey: string; label: RecipientLabelName }) => api.labelRecipient(counterKey, label),
-    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: TRANSACTIONS_KEY }), client.invalidateQueries({ queryKey: TODAY_KEY })]),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: TRANSACTIONS_KEY }),
+        client.invalidateQueries({ queryKey: TODAY_KEY }),
+        client.invalidateQueries({ queryKey: RECIPIENTS_KEY }),
+      ]),
   });
 }
 

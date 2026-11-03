@@ -27,6 +27,9 @@ const TABS: { tab: Tab; label: string; empty: string }[] = [
 
 const SEARCH_DELAY_MS = 300;
 
+/** A row an answer can be about: already answered, or still a plain transfer out. */
+const isTransferToSomeone = (t: TransactionDto) => t.amount < 0 && (t.recipientLabel !== null || t.type === "person_transfer");
+
 /** The operations list by day, newest first, pages by cursor. Transfers between own accounts only show under "Все". */
 export function Activity({ now = () => new Date() }: { /** Test seam for the current moment. */ now?: () => Date }) {
   const insets = useSafeAreaInsets();
@@ -35,12 +38,14 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
   const [text, setText] = useState("");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState<TransactionDto | null>(null);
-  // A row waiting for an answer opens the label sheet; "Изменить тип" there switches to the full editor.
-  const [forceEdit, setForceEdit] = useState(false);
+  // A row waiting for an answer opens the label sheet; "Изменить тип" there switches to the full editor,
+  // and the editor of an answered transfer leads back to the label sheet, to change the answer.
+  const [sheet, setSheet] = useState<"edit" | "answer" | null>(null);
   const close = () => {
     setOpen(null);
-    setForceEdit(false);
+    setSheet(null);
   };
+  const showAnswer = open !== null && (sheet === "answer" || (sheet === null && open.needsLabel));
 
   useEffect(() => {
     const id = setTimeout(() => setSearch(text.trim()), SEARCH_DELAY_MS);
@@ -120,15 +125,17 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
           ListFooterComponent={list.isFetchingNextPage ? <ActivityIndicator color={color.fg.muted} style={styles.footer} /> : undefined}
         />
       )}
-      {open && open.needsLabel && !forceEdit && (
+      {open && showAnswer && (
         <RecipientLabelSheet
           counterKey={open.counterKey}
           name={open.counterName ?? open.description}
           onClose={close}
-          onEditType={() => setForceEdit(true)}
+          onEditType={() => setSheet("edit")}
         />
       )}
-      {open && (!open.needsLabel || forceEdit) && <TxEditSheet tx={open} onClose={close} />}
+      {open && !showAnswer && (
+        <TxEditSheet tx={open} onClose={close} onAnswer={isTransferToSomeone(open) ? () => setSheet("answer") : undefined} />
+      )}
     </View>
   );
 }

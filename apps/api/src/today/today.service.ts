@@ -511,11 +511,11 @@ export class TodayService {
       // With no expected income there is no date to answer: the limit simply runs on 30 days.
       if (ev) questions.push({ id: `income_date:${ev.id}`, kind: "income_date", text: "Когда ожидается следующий доход?" });
     }
-    const people: { key: string; labels: string[]; count: number; total: number }[] = await m.query(
+    const people: { key: string; labels: string[]; count: number; total: number; last_on: string }[] = await m.query(
       `SELECT ck AS key, array_agg(label ORDER BY occurred_at DESC, id DESC) AS labels, COUNT(*)::int AS count,
-              COALESCE(SUM(ABS(amount_uah)), 0)::float8 AS total
+              COALESCE(SUM(ABS(amount_uah)), 0)::float8 AS total, MAX(local_date)::text AS last_on
          FROM (
-           SELECT ${counterKeySql("t")} AS ck, COALESCE(NULLIF(t.counter_name,''), t.description) AS label, t.id, t.occurred_at, t.amount_uah
+           SELECT ${counterKeySql("t")} AS ck, COALESCE(NULLIF(t.counter_name,''), t.description) AS label, t.id, t.occurred_at, t.amount_uah, t.local_date
              FROM transactions t JOIN accounts a ON a.id=t.account_id
             WHERE t.needs_label AND t.type='person_transfer' AND a.kind <> 'jar'
               AND t.local_date > $1::date - ${QUESTION_WINDOW_DAYS}
@@ -532,7 +532,7 @@ export class TodayService {
         id: `recipient_label:${p.key}`,
         kind: "recipient_label",
         subject: p.label,
-        text: `${p.label}: ${p.count} ${transfersWord(p.count)}, ${fmt(p.total)}`,
+        text: `${p.label}: ${p.count} ${transfersWord(p.count)}, ${fmt(p.total)}, последний ${fmtDay(p.last_on)}`,
       });
     }
 

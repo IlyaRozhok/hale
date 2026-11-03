@@ -22,7 +22,8 @@ export type TxType =
   | "person_in"
   | "cash_in"
   | "cash_out"
-  | "goal_contribution";
+  | "goal_contribution"
+  | "loan_out";
 
 export interface ClassifyInput {
   /** Signed minor units; positive is money in. */
@@ -105,7 +106,7 @@ export function isWeakRuleValue(value: string): boolean {
   return v.length < 4 || GENERIC_BANK_TEXT.has(v);
 }
 
-function ruleMatches(rule: ClassifyRule, tx: ClassifyInput): boolean {
+export function ruleMatches(rule: Pick<ClassifyRule, "matchKind" | "matchValue" | "direction">, tx: Pick<ClassifyInput, "amount" | "description" | "counterIban" | "counterName">): boolean {
   if (rule.direction === "out" && tx.amount >= 0) return false;
   if (rule.direction === "in" && tx.amount <= 0) return false;
   const v = lc(rule.matchValue);
@@ -143,6 +144,7 @@ export const typeCategory = (type: TxType): Category => {
     case "income": return "income";
     case "person_transfer":
     case "person_in":
+    case "loan_out":
     case "obligation": return "transfer";
     case "spend": return "uncategorized";
   }

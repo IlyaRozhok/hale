@@ -129,6 +129,7 @@ describe("api client", () => {
     await api.registerPushToken("ExponentPushToken[abc]");
     await api.repayLoan(7, { amount: 1000, date: "2026-11-02" });
     await api.loanHistory();
+    await api.recipient("0123456789abcdef");
     const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
     expect(calls.map(([u, i]) => `${i.method} ${u.replace("https://api.example.test", "")}`)).toEqual([
       "POST /recipients/label",
@@ -141,6 +142,7 @@ describe("api client", () => {
       "POST /devices/push-token",
       "POST /plan/loans/7/repay",
       "GET /plan/loans/history",
+      "GET /recipients/0123456789abcdef",
     ]);
     expect(calls[2]![1].body).toBe(JSON.stringify({ lifestyleCap: 10_000_000 }));
     expect(calls[7]![1].body).toBe(JSON.stringify({ token: "ExponentPushToken[abc]" }));

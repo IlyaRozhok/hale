@@ -100,7 +100,7 @@ describe("GET /transactions", () => {
 
   it("group spend and income leave transfers between own accounts only under all", async () => {
     const a = await account();
-    const spendTypes = ["spend", "obligation", "tax", "debt_payment", "person_transfer", "cash_out"];
+    const spendTypes = ["spend", "obligation", "tax", "debt_payment", "person_transfer", "cash_out", "loan_out"];
     const incomeTypes = ["income", "person_in", "cash_in"];
     const onlyAll = ["own_transfer", "loan_in", "goal_contribution", null];
     for (const type of [...spendTypes, ...incomeTypes, ...onlyAll]) await tx(a, { type, description: `t:${type}` });
@@ -108,8 +108,8 @@ describe("GET /transactions", () => {
       ((await api.get(`/transactions${q}`).expect(200)).body.items as { type: string | null }[]).map((t) => t.type);
     expect((await types("?group=spend")).sort()).toEqual([...spendTypes].sort());
     expect((await types("?group=income")).sort()).toEqual([...incomeTypes].sort());
-    expect(await types("?group=all")).toHaveLength(13);
-    expect(await types("")).toHaveLength(13);
+    expect(await types("?group=all")).toHaveLength(14);
+    expect(await types("")).toHaveLength(14);
   });
 
   it("q searches description and counterparty, with % and _ taken literally", async () => {
@@ -218,7 +218,7 @@ describe("GET /transactions", () => {
     expect(Object.keys(x).sort()).toEqual(
       [
         "accountKind", "amount", "amountUah", "category", "counterKey", "counterName", "currency", "description",
-        "fxRate", "hold", "id", "localDate", "needsLabel", "occurredAt", "type",
+        "fxRate", "hold", "id", "localDate", "needsLabel", "occurredAt", "recipientLabel", "type",
       ].sort(),
     );
     expect(x).toMatchObject({ accountKind: "fop", currency: "UAH", counterName: "Ivan P", hold: false });
@@ -438,6 +438,151 @@ describe("POST /recipients/label", () => {
     );
     await api.post("/recipients/label", { counterKey: key, label: "obligation" }).expect(201);
     expect((await row(`SELECT transaction_id FROM scheduled_payments`)).transaction_id).toBe(t1);
+  });
+});
+
+describe("answers about a transfer", () => {
+  async function person(over: { name?: string; iban?: string | null } = {}) {
+    const a = await account();
+    const name = over.name ?? "Olena K";
+    const iban = over.iban ?? null;
+    const t1 = await tx(a, { name, iban, description: "Переказ", type: "person_transfer", needsLabel: true, amount: -80_000, at: "2026-11-05T10:00:00.000Z" });
+    const t2 = await tx(a, { name, iban, description: "Переказ", type: "person_transfer", needsLabel: true, amount: -50_000, at: "2026-08-05T10:00:00.000Z" });
+    const items = (await api.get("/transactions").expect(200)).body.items as { id: number; counterKey: string }[];
+    return { a, t1, t2, key: items.find((i) => i.id === t1)!.counterKey };
+  }
+  const answer = (key: string, label: string) => api.post("/recipients/label", { counterKey: key, label }).expect(201);
+  const typeOf = async (id: number) => (await row("SELECT type FROM transactions WHERE id=$1", [id])).type as string;
+
+  it.each([
+    ["close_regular", "person_transfer"],
+    ["one_off", "person_transfer"],
+    ["service", "spend"],
+    ["debt_repayment", "debt_payment"],
+    ["lend", "loan_out"],
+    ["own_account", "own_transfer"],
+    ["skip", "person_transfer"],
+  ])("%s gives every transfer the type %s and is not asked again", async (label, type) => {
+    const { t1, t2, key } = await person();
+    await answer(key, label);
+    expect(await typeOf(t1)).toBe(type);
+    expect(await typeOf(t2)).toBe(type);
+    expect((await row("SELECT needs_label FROM transactions WHERE id=$1", [t1])).needs_label).toBe(false);
+  });
+
+  it("can be changed: the new answer replaces the old one, whatever the rows became", async () => {
+    const { t1, key } = await person();
+    for (const [label, type] of [["service", "spend"], ["lend", "loan_out"], ["own_account", "own_transfer"], ["one_off", "person_transfer"]] as const) {
+      await answer(key, label);
+      expect(await typeOf(t1)).toBe(type);
+    }
+    expect(await ds.query("SELECT label FROM rules")).toEqual([{ label: "one_off" }]);
+  });
+
+  it("a later transfer follows the answer", async () => {
+    const { a, key } = await person();
+    await answer(key, "skip");
+    const later = await tx(a, { name: "Olena K", description: "Переказ", type: null, source: null, at: "2026-11-25T10:00:00.000Z" });
+    await app.get(ReclassifyService).reclassifyIds([later]);
+    expect(await row("SELECT type, needs_label FROM transactions WHERE id=$1", [later])).toEqual({ type: "person_transfer", needs_label: false });
+  });
+
+  it("a known account number carries the answer to transfers with only a bank text", async () => {
+    const { a, key } = await person({ iban: "UA00PERSON" });
+    await answer(key, "lend");
+    const later = await tx(a, { name: "Переказ на картку", iban: "UA00PERSON", description: "Переказ", type: null, source: null, at: "2026-11-25T10:00:00.000Z" });
+    await app.get(ReclassifyService).reclassifyIds([later]);
+    expect(await typeOf(later)).toBe("loan_out");
+  });
+
+  it("an answer by account number replaces an earlier one by name", async () => {
+    const { key } = await person({ iban: "UA00PERSON" });
+    await ds.query(`INSERT INTO rules (match_kind, match_value, type, label, direction) VALUES ('recipient','olena k','person_transfer','help','out')`);
+    await answer(key, "lend");
+    expect(await ds.query("SELECT match_kind, label FROM rules")).toEqual([{ match_kind: "iban", label: "lend" }]);
+  });
+
+  describe("close person, regularly", () => {
+    const planned = (amount: number, currency = "UAH", due = "2026-11-05") =>
+      ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Support',$1,$2,$3)`, [amount, currency, due]);
+
+    it("the transfer matching the plan closes the payment and leaves the limit alone; the others count", async () => {
+      const { t1, t2, key } = await person();
+      await planned(80_000);
+      await answer(key, "close_regular");
+      expect((await row(`SELECT transaction_id FROM scheduled_payments`)).transaction_id).toBe(t1);
+      expect(await typeOf(t1)).toBe("obligation");
+      expect(await typeOf(t2)).toBe("person_transfer");
+    });
+
+    it("works for a later transfer, and again when it is reclassified", async () => {
+      const { a, key } = await person();
+      await answer(key, "close_regular");
+      await planned(90_000, "UAH", "2026-11-26");
+      const later = await tx(a, { name: "Olena K", description: "Переказ", type: null, source: null, amount: -90_000, at: "2026-11-26T10:00:00.000Z" });
+      const reclassify = app.get(ReclassifyService);
+      await reclassify.reclassifyIds([later]);
+      expect((await row(`SELECT transaction_id FROM scheduled_payments`)).transaction_id).toBe(later);
+      expect(await typeOf(later)).toBe("obligation");
+      await reclassify.reclassifyIds([later]);
+      expect(await typeOf(later)).toBe("obligation");
+    });
+
+    it("another answer gives the payment back", async () => {
+      const { t1, key } = await person();
+      await planned(80_000);
+      await answer(key, "close_regular");
+      await answer(key, "one_off");
+      expect(await row(`SELECT transaction_id, paid_at FROM scheduled_payments`)).toEqual({ transaction_id: null, paid_at: null });
+      expect(await typeOf(t1)).toBe("person_transfer");
+    });
+
+    it("a transfer with any other answer leaves the plan alone", async () => {
+      const { t1, key } = await person();
+      await planned(80_000);
+      await answer(key, "one_off");
+      expect((await row(`SELECT transaction_id FROM scheduled_payments`)).transaction_id).toBeNull();
+      expect(await typeOf(t1)).toBe("person_transfer");
+    });
+
+    it("a stranger's transfer of the planned amount leaves the plan alone", async () => {
+      const a = await account();
+      await planned(80_000);
+      const stranger = await tx(a, { name: "Petro", description: "Переказ", type: null, source: null, amount: -80_000, at: "2026-11-05T10:00:00.000Z" });
+      await app.get(ReclassifyService).reclassifyIds([stranger]);
+      expect((await row(`SELECT transaction_id FROM scheduled_payments`)).transaction_id).toBeNull();
+    });
+  });
+
+  describe("GET /recipients/:key", () => {
+    it("says who it is, how much in all, when last, and the answer given", async () => {
+      const { a, key } = await person();
+      await tx(a, { name: "Olena K", description: "Від Olena", type: "person_in", amount: 5_000, at: "2026-11-10T10:00:00.000Z" });
+      expect((await api.get(`/recipients/${key}`).expect(200)).body).toEqual({ name: "Olena K", count: 2, total: 130_000, lastOn: "2026-11-05", label: null });
+      await answer(key, "lend");
+      expect((await api.get(`/recipients/${key}`).expect(200)).body.label).toBe("lend");
+    });
+
+    it("names a person under an account number, not its bank text", async () => {
+      const a = await account();
+      await tx(a, { name: "Olena K", iban: "UA00PERSON", description: "Переказ", type: "person_transfer", at: "2026-11-01T10:00:00.000Z" });
+      const t = await tx(a, { name: "Переказ на картку", iban: "UA00PERSON", description: "Переказ", type: "person_transfer", at: "2026-11-05T10:00:00.000Z" });
+      const key = ((await api.get("/transactions").expect(200)).body.items as { id: number; counterKey: string }[]).find((i) => i.id === t)!.counterKey;
+      expect((await api.get(`/recipients/${key}`).expect(200)).body.name).toBe("Olena K");
+    });
+
+    it("rejects a bad key and an unknown one", async () => {
+      await api.get(`/recipients/zz`).expect(400);
+      await api.get(`/recipients/0123456789abcdef`).expect(404);
+    });
+  });
+
+  it("a transaction carries the answer given about its recipient", async () => {
+    const { t1, key } = await person();
+    const label = async () => ((await api.get("/transactions").expect(200)).body.items as { id: number; recipientLabel: string | null }[]).find((i) => i.id === t1)!.recipientLabel;
+    expect(await label()).toBeNull();
+    await answer(key, "skip");
+    expect(await label()).toBe("skip");
   });
 });
 

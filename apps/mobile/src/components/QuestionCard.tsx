@@ -76,7 +76,7 @@ export function QuestionCard({ question, today, onConfirmUsdc, onMatchUsdc, onDi
         <Pressable accessibilityRole="button" onPress={() => onLabelRecipient(counterKey)} style={styles.whole}>
           <Glass style={styles.stack}>
             {text}
-            <Text style={styles.hint}>Нажмите, чтобы указать</Text>
+            <Text style={styles.hint}>Что это за перевод? Нажмите, чтобы ответить</Text>
           </Glass>
         </Pressable>
       );

@@ -9,6 +9,7 @@ import {
 } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { DataSource, type EntityManager } from "typeorm";
+import { ruleMatches } from "../domain/classify";
 import { type Payment, matchPayment, matchTaxPayment, monthlyDueDates, monthlyEvents } from "../domain/recurring-match";
 import { kyivDate } from "../domain/money";
 import { estimateDueOn, precedingQuarter, quarterBounds, quarterOf } from "../domain/quarter";
@@ -20,6 +21,7 @@ import { ScheduledPayment, type IncomeEvent } from "../db/entities";
 
 export const BINANCE = "Binance";
 const MATCH_DAYS = 3;
+const PLANNED_RECIPIENT_LABELS = ["close_regular", "shared_budget"];
 
 /** Today's date in Kyiv, YYYY-MM-DD. */
 export function kyivToday(now: Date = new Date()): string {
@@ -332,6 +334,7 @@ export class PlanService implements OnApplicationBootstrap {
       );
       if (maybe.length === 0) return;
     }
+    if (typeHint === "person_transfer" && !(await this.isPlannedRecipient(txId))) return;
     await this.ds.transaction(async (m) => {
       const t = (
         await m.query(
@@ -353,6 +356,9 @@ export class PlanService implements OnApplicationBootstrap {
         );
       } else if (t.type === "income" && t.account_kind === "fop") {
         await this.markFopEvents(m, t);
+      } else if (t.type === "person_transfer") {
+        if (typeHint !== "person_transfer" && !(await this.isPlannedRecipient(txId))) return;
+        await this.settleFromPlannedRecipient(m, t);
       } else if (t.type === "obligation" || t.type === "debt_payment" || t.type === "tax" || t.type === "spend") {
         if (t.type === "debt_payment") await this.repayShortLoans(m, t);
         const linked = await m.query(`SELECT 1 FROM scheduled_payments WHERE transaction_id=$1`, [t.id]);
@@ -379,6 +385,47 @@ export class PlanService implements OnApplicationBootstrap {
         }
       }
     });
+  }
+
+  /** The owner said this recipient is a close person, sent money regularly. */
+  private async isPlannedRecipient(txId: number): Promise<boolean> {
+    const tx = (
+      await this.ds.query(
+        `SELECT amount::float8 AS amount, description, counter_iban AS "counterIban", counter_name AS "counterName" FROM transactions WHERE id=$1`,
+        [txId],
+      )
+    )[0] as { amount: number; description: string; counterIban: string | null; counterName: string | null } | undefined;
+    if (!tx || tx.amount >= 0) return false;
+    const rules: { matchKind: "merchant" | "iban" | "recipient"; matchValue: string; direction: "in" | "out" | null }[] = await this.ds.query(
+      `SELECT match_kind AS "matchKind", match_value AS "matchValue", direction FROM rules WHERE label = ANY($1::text[])`,
+      [PLANNED_RECIPIENT_LABELS],
+    );
+    return rules.some((r) => ruleMatches(r, tx));
+  }
+
+  /**
+   * Money to a close person counts against the day, except what the plan already set aside: a transfer
+   * that settles a planned payment becomes that payment, so it is not counted twice.
+   */
+  private async settleFromPlannedRecipient(m: EntityManager, t: TxRow): Promise<void> {
+    const linked = await m.query(`SELECT 1 FROM scheduled_payments WHERE transaction_id=$1`, [t.id]);
+    let settled = linked.length > 0;
+    if (!settled) {
+      const open: Payment[] = await m.query(
+        `SELECT id, kind, name, amount::float8 AS amount, currency, due_on::text AS due_on, paid_at, transaction_id, match_hint
+           FROM scheduled_payments WHERE kind='obligation' AND transaction_id IS NULL AND paid_at IS NULL ORDER BY due_on, id FOR UPDATE`,
+      );
+      const hit = matchPayment(
+        { id: t.id, type: "obligation", amount: t.amount, currency: t.currency, amountUah: t.amount_uah, localDate: t.local_date, text: t.text },
+        open,
+        await this.rates(m),
+      );
+      if (hit) {
+        await m.query(`UPDATE scheduled_payments SET paid_at=$2, transaction_id=$3 WHERE id=$1`, [hit.id, t.occurred_at, t.id]);
+        settled = true;
+      }
+    }
+    if (settled) await m.query(`UPDATE transactions SET type='obligation', category='transfer' WHERE id=$1`, [t.id]);
   }
 
   /**

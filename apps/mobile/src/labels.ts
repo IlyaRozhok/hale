@@ -14,6 +14,7 @@ const TYPES: Record<TxTypeDto, string> = {
   cash_in: "Внесение наличных",
   cash_out: "Снятие наличных",
   goal_contribution: "Взнос в цель",
+  loan_out: "Дал в долг",
 };
 
 export const TYPE_CHOICES = Object.keys(TYPES) as TxTypeDto[];
@@ -49,10 +50,22 @@ export const SPEND_CATEGORIES = [
 export const categoryLabel = (category: string | null): string =>
   category === null ? CATEGORIES.uncategorized! : (CATEGORIES[category] ?? category);
 
-export const LABEL_CHOICES: { label: RecipientLabelName; text: string }[] = [
-  { label: "shared_budget", text: "Общий бюджет" },
-  { label: "help", text: "Помощь" },
-  { label: "debt_repayment", text: "Возврат долга" },
-  { label: "one_off", text: "Разово" },
-  { label: "obligation", text: "Обязательное" },
+export const LABEL_CHOICES: { label: RecipientLabelName; text: string; effect: string }[] = [
+  { label: "close_regular", text: "Близкий человек, регулярно", effect: "Считается в дневном лимите. Платёж из плана лимит не тратит" },
+  { label: "one_off", text: "Разовая помощь или подарок", effect: "Считается в дневном лимите" },
+  { label: "service", text: "Оплата услуги или покупка", effect: "Считается в дневном лимите как трата" },
+  { label: "debt_repayment", text: "Возвращаю долг", effect: "Дневной лимит не тратит, денег становится меньше" },
+  { label: "lend", text: "Даю в долг", effect: "Дневной лимит не тратит, денег становится меньше" },
+  { label: "own_account", text: "Это мой счёт", effect: "Не расход: деньги остаются у вас" },
+  { label: "skip", text: "Не спрашивать", effect: "Считается в дневном лимите, вопроса больше не будет" },
 ];
+
+/** What an earlier answer now reads as; "obligation" is no longer offered but may have been given. */
+const EARLIER_ANSWERS: Partial<Record<RecipientLabelName, string>> = {
+  shared_budget: "Близкий человек, регулярно",
+  help: "Разовая помощь или подарок",
+  obligation: "Обязательный платёж",
+};
+
+export const answerText = (label: RecipientLabelName | null): string =>
+  label === null ? "не указано" : (EARLIER_ANSWERS[label] ?? LABEL_CHOICES.find((c) => c.label === label)!.text);

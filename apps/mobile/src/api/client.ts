@@ -10,6 +10,7 @@ import type {
   ManualBalanceInput,
   RecipientLabelName,
   RecipientLabelResultDto,
+  RecipientSummaryDto,
   ScheduledPaymentDto,
   ScheduledPaymentInput,
   SettingsDto,
@@ -63,6 +64,7 @@ export interface Api {
   transactions(query: TransactionsFilter & { cursor?: string }): Promise<TransactionPageDto>;
   editTransaction(id: number, patch: Pick<TransactionPatch, "type" | "category" | "applyToSimilar">): Promise<TransactionEditDto>;
   labelRecipient(counterKey: string, label: RecipientLabelName): Promise<RecipientLabelResultDto>;
+  recipient(counterKey: string): Promise<RecipientSummaryDto>;
   settings(): Promise<SettingsDto>;
   patchSettings(patch: SettingsPatch): Promise<SettingsDto>;
   previewSettings(lifestyleCap: number): Promise<SettingsPreviewDto>;
@@ -142,6 +144,7 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     },
     editTransaction: (id, patch) => request("PATCH", `/transactions/${id}`, patch),
     labelRecipient: (counterKey, label) => request("POST", "/recipients/label", { counterKey, label }),
+    recipient: (counterKey) => request("GET", `/recipients/${counterKey}`),
     settings: () => request("GET", "/settings"),
     patchSettings: (patch) => request("PATCH", "/settings", patch),
     previewSettings: (lifestyleCap) => request("POST", "/settings/preview", { lifestyleCap }),

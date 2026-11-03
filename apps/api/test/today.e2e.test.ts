@@ -773,7 +773,15 @@ describe("questions, upcoming and run-out", () => {
     await tx(card, -5_000, "person_transfer", { counter: "Старий Знайомий", needsLabel: true, date: "2026-10-01" });
     const people = (await today()).questions.filter((q: { kind: string }) => q.kind === "recipient_label");
     expect(people).toHaveLength(1);
-    expect(people[0]).toMatchObject({ subject: "Таечка", text: "Таечка: 2 перевода, ₴2,500" });
+    expect(people[0]).toMatchObject({ subject: "Таечка", text: "Таечка: 2 перевода, ₴2,500, последний 12.11" });
+  });
+
+  it("money lent does not use up the day's limit", async () => {
+    const card = await account("black", 5_000_000);
+    at("2026-11-16T10:00:00Z");
+    await tx(card, -100_000, "loan_out", { date: "2026-11-16" });
+    const { state } = await today();
+    expect(state.leftToday).toBe(state.dailyLimit);
   });
 
   it("a later generic row does not hide a person known by the same IBAN", async () => {
@@ -784,7 +792,7 @@ describe("questions, upcoming and run-out", () => {
     await ds.query(`UPDATE transactions SET counter_iban='UA00PERSON'`);
     const people = (await today()).questions.filter((q: { kind: string }) => q.kind === "recipient_label");
     expect(people).toHaveLength(1);
-    expect(people[0]).toMatchObject({ subject: "Таечка", text: "Таечка: 2 перевода, ₴30" });
+    expect(people[0]).toMatchObject({ subject: "Таечка", text: "Таечка: 2 перевода, ₴30, последний 15.11" });
   });
 
   it("a generic text does not use up one of the three question slots", async () => {

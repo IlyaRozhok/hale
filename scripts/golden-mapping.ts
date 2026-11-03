@@ -54,6 +54,7 @@ export function reportGroupOf(type: TxType, amount: number, fopWithdrawal: boole
     case "loan_in":
       return "Займы";
     case "person_transfer":
+    case "loan_out":
     case "obligation":
       return "Переводы";
     case "goal_contribution":

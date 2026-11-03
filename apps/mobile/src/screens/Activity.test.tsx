@@ -209,17 +209,61 @@ describe("Activity edit sheet", () => {
 describe("Activity recipient label", () => {
   const person = txFixture({ id: 5, description: "Перевод на карту", counterName: "Иван", type: "person_transfer", category: "transfer", needsLabel: true, counterKey: "fedcba9876543210" });
 
-  it("asks who it is with the five answers, in one tap", async () => {
+  it("asks what the transfer is, says what each answer does, and takes one tap", async () => {
     const api = fakeApi({ transactions: page([person]) });
     await renderWith(<Activity />, api);
     await fireEvent.press(await screen.findByText("Иван"));
-    expect(await screen.findByText("Кто это?")).toBeTruthy();
-    for (const t of ["Общий бюджет", "Помощь", "Возврат долга", "Разово", "Обязательное"]) {
+    expect(await screen.findByText("Что это за перевод?")).toBeTruthy();
+    expect(await screen.findByText("Переводов: 5, всего ₴1,000, последний 02.11")).toBeTruthy();
+    expect(api.recipient).toHaveBeenCalledWith("fedcba9876543210");
+    for (const t of ["Близкий человек, регулярно", "Разовая помощь или подарок", "Оплата услуги или покупка", "Возвращаю долг", "Даю в долг", "Это мой счёт", "Не спрашивать"]) {
       expect(screen.getByRole("button", { name: t })).toBeTruthy();
     }
-    await fireEvent.press(screen.getByRole("button", { name: "Помощь" }));
-    await waitFor(() => expect(api.labelRecipient).toHaveBeenCalledWith("fedcba9876543210", "help"));
-    await waitFor(() => expect(screen.queryByText("Кто это?")).toBeNull());
+    expect(screen.getByText("Считается в дневном лимите. Платёж из плана лимит не тратит")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Даю в долг" }));
+    await waitFor(() => expect(api.labelRecipient).toHaveBeenCalledWith("fedcba9876543210", "lend"));
+    await waitFor(() => expect(screen.queryByText("Что это за перевод?")).toBeNull());
+  });
+
+  it("can still be answered when the totals did not load", async () => {
+    const api = fakeApi({
+      transactions: page([person]),
+      recipient: jest.fn(async () => {
+        throw new Error("boom");
+      }),
+    });
+    await renderWith(<Activity />, api);
+    await fireEvent.press(await screen.findByText("Иван"));
+    await fireEvent.press(await screen.findByRole("button", { name: "Не спрашивать" }));
+    await waitFor(() => expect(api.labelRecipient).toHaveBeenCalledWith("fedcba9876543210", "skip"));
+  });
+
+  it("an answer given before can be changed from the operation", async () => {
+    const answered = { ...person, needsLabel: false, recipientLabel: "lend" as const, type: "loan_out" as const };
+    const api = fakeApi({
+      transactions: page([answered]),
+      recipient: jest.fn(async () => ({ name: "Иван", count: 5, total: 100_000, lastOn: "2026-11-02", label: "lend" as const })),
+    });
+    await renderWith(<Activity />, api);
+    await fireEvent.press(await screen.findByText("Иван"));
+    await fireEvent.press(await screen.findByRole("button", { name: "Что это за перевод: Даю в долг" }));
+    expect(await screen.findByText("Что это за перевод?")).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Даю в долг" }).props.accessibilityState.selected).toBe(true));
+    await fireEvent.press(screen.getByRole("button", { name: "Это мой счёт" }));
+    await waitFor(() => expect(api.labelRecipient).toHaveBeenCalledWith("fedcba9876543210", "own_account"));
+  });
+
+  it("a person transfer with no answer yet can get one from the operation; a purchase cannot", async () => {
+    const plain = { ...person, needsLabel: false };
+    const api = fakeApi({ transactions: page([plain, txFixture({ id: 6, description: "Кофейня" })]) });
+    await renderWith(<Activity />, api);
+    await fireEvent.press(await screen.findByText("Иван"));
+    expect(await screen.findByRole("button", { name: "Что это за перевод: не указано" })).toBeTruthy();
+    const closes = screen.getAllByRole("button", { name: "Закрыть" });
+    await fireEvent.press(closes[closes.length - 1]!);
+    await fireEvent.press(await screen.findByText("Кофейня"));
+    await screen.findByLabelText("Применить к похожим");
+    expect(screen.queryByRole("button", { name: /Что это за перевод/ })).toBeNull();
   });
 
   it("still lets the type be changed from the label sheet", async () => {

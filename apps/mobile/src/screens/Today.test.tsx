@@ -306,10 +306,10 @@ describe("Today, questions", () => {
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
     await openQuestions();
     await fireEvent.press(await screen.findByText("Кто это: Иван?"));
-    expect(await screen.findByText("Кто это?")).toBeTruthy();
+    expect(await screen.findByText("Что это за перевод?")).toBeTruthy();
     const closes = screen.getAllByRole("button", { name: "Закрыть" });
     await fireEvent.press(closes[closes.length - 1]!);
-    await waitFor(() => expect(screen.queryByText("Кто это?")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Что это за перевод?")).toBeNull());
     expect(screen.getByText("Кто это: Иван?")).toBeTruthy();
   });
 
@@ -406,9 +406,9 @@ describe("Today, questions", () => {
     await renderWith(<Today onOpenActivity={onOpenActivity} onOpenPlan={noop} />, api);
     await openQuestions();
     await fireEvent.press(await screen.findByText("Кто это: Иван?"));
-    expect(await screen.findByText("Кто это?")).toBeTruthy();
+    expect(await screen.findByText("Что это за перевод?")).toBeTruthy();
     expect(screen.getByText("Иван")).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button", { name: "Разово" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Разовая помощь или подарок" }));
     await waitFor(() => expect(api.labelRecipient).toHaveBeenCalledWith("0123456789abcdef", "one_off"));
     await waitFor(() => expect(screen.queryByText("Осталось разобрать: 1")).toBeNull());
     expect(onOpenActivity).not.toHaveBeenCalled();
@@ -460,7 +460,7 @@ describe("Today, decision rows", () => {
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
     await openQuestions();
     await fireEvent.press(await screen.findByText("Кто это: Иван?"));
-    expect(await screen.findByText("Кто это?")).toBeTruthy();
+    expect(await screen.findByText("Что это за перевод?")).toBeTruthy();
     expect(screen.getByText("Пришло на Binance?")).toBeTruthy();
   });
 });

@@ -11,8 +11,10 @@ import {
   Query,
 } from "@nestjs/common";
 import {
+  counterKeyParam,
   recipientLabelInput,
   type RecipientLabelResultDto,
+  type RecipientSummaryDto,
   transactionPatch,
   type TransactionEditDto,
   type TransactionPageDto,
@@ -53,4 +55,10 @@ export class TransactionsController {
     const b = parse(recipientLabelInput, body);
     return this.tx.labelRecipient(b.counterKey, b.label);
   }
+
+  @Get("recipients/:key")
+  recipient(@Param("key") key: string): Promise<RecipientSummaryDto> {
+    return this.tx.recipient(parse(counterKeyParam, key));
+  }
+
 }
