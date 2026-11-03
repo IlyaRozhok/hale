@@ -511,21 +511,23 @@ export class TodayService {
       // With no expected income there is no date to answer: the limit simply runs on 30 days.
       if (ev) questions.push({ id: `income_date:${ev.id}`, kind: "income_date", text: "Когда ожидается следующий доход?" });
     }
-    const people: { key: string; label: string; count: number; total: number }[] = await m.query(
-      `SELECT ck AS key, label, count, total FROM (
-         SELECT DISTINCT ON (ck) ck, label, occurred_at, id,
-                COUNT(*) OVER (PARTITION BY ck)::int AS count,
-                (COALESCE(SUM(ABS(amount_uah)) OVER (PARTITION BY ck), 0))::float8 AS total
-           FROM (
-             SELECT ${counterKeySql("t")} AS ck, COALESCE(NULLIF(t.counter_name,''), t.description) AS label, t.id, t.occurred_at, t.amount_uah
-               FROM transactions t JOIN accounts a ON a.id=t.account_id
-              WHERE t.needs_label AND t.type='person_transfer' AND a.kind <> 'jar'
-                AND t.local_date > $1::date - ${QUESTION_WINDOW_DAYS}
-           ) s ORDER BY ck, occurred_at DESC, id DESC
-       ) d ORDER BY occurred_at DESC, id DESC`,
+    const people: { key: string; labels: string[]; count: number; total: number }[] = await m.query(
+      `SELECT ck AS key, array_agg(label ORDER BY occurred_at DESC, id DESC) AS labels, COUNT(*)::int AS count,
+              COALESCE(SUM(ABS(amount_uah)), 0)::float8 AS total
+         FROM (
+           SELECT ${counterKeySql("t")} AS ck, COALESCE(NULLIF(t.counter_name,''), t.description) AS label, t.id, t.occurred_at, t.amount_uah
+             FROM transactions t JOIN accounts a ON a.id=t.account_id
+            WHERE t.needs_label AND t.type='person_transfer' AND a.kind <> 'jar'
+              AND t.local_date > $1::date - ${QUESTION_WINDOW_DAYS}
+         ) s GROUP BY ck ORDER BY MAX(occurred_at) DESC, MAX(id) DESC`,
       [f.date],
     );
-    for (const p of people.filter((x) => isCounterpartyName(x.label)).slice(0, MAX_RECIPIENT_QUESTIONS)) {
+    // One IBAN can have named and generic rows: the group is asked about under its latest real name.
+    const named = people.flatMap((p) => {
+      const label = p.labels.find((l) => isCounterpartyName(l));
+      return label ? [{ ...p, label }] : [];
+    });
+    for (const p of named.slice(0, MAX_RECIPIENT_QUESTIONS)) {
       questions.push({
         id: `recipient_label:${p.key}`,
         kind: "recipient_label",

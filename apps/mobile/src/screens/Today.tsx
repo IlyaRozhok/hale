@@ -111,15 +111,15 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
 
   const { state } = data;
   const level = state.leftToday > 0 ? Math.min(1, Math.max(0, state.level)) : 0;
-  const over = state.leftToday < 0;
+  const hasLimit = state.dailyLimit > 0;
+  const over = hasLimit && state.leftToday < 0;
   const spent = Math.max(0, state.dailyLimit - state.leftToday);
-  const shownLeft = Math.abs(state.leftToday);
+  const shownLeft = over ? -state.leftToday : Math.max(0, state.leftToday);
   const usd = formatUsd(shownLeft, data.usdRate);
   const heading = over ? "Сверх лимита" : "Сегодня можно";
   const offlineSince = today.isError ? today.dataUpdatedAt : null;
   // A date question with no income event cannot be answered; an older cached answer may still hold one.
   const questions = data.questions.filter((q) => !answered.has(q.id) && !(q.kind === "income_date" && eventIdOf(q.id) === null));
-  const hasLimit = state.dailyLimit > 0;
   const noLimitNote = state.mode === "bridge" ? "Лимит появится, когда вы подтвердите план." : "До следующего дохода свободных денег нет.";
 
   const answer = (id: string, run: () => Promise<unknown>) => {
@@ -170,6 +170,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
             {over && <Text style={styles.note}>Завтра будет новый лимит.</Text>}
             {hasLimit && state.leftToday === 0 && <Text style={styles.note}>Лимит на сегодня использован. Завтра будет новый.</Text>}
             {!hasLimit && <Text style={styles.note}>{noLimitNote}</Text>}
+            {!hasLimit && spent > 0 && <Text style={styles.subtle}>Потрачено {formatMoney(spent)}</Text>}
           </View>
           {level > 0 && (
             <View style={styles.metal} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">

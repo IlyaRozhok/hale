@@ -236,6 +236,14 @@ describe("tax quarter on payments", () => {
 });
 
 describe("loans", () => {
+  it("a loan from a bank row cannot be deleted: the next sync would bring it back", async () => {
+    const a = await account("black");
+    const t = await tx(a, { amount: 300_000, description: "Кредит" });
+    const id = await row(`INSERT INTO loans (amount, received_on, source_transaction_id, note, kind) VALUES (300000,'2026-11-02',$1,'loan_in','other') RETURNING id`, [t]);
+    await api.del(`/plan/loans/${id.id as number}`).expect(409);
+    expect(await ds.query("SELECT 1 FROM loans")).toHaveLength(1);
+  });
+
   it("a manual loan creates a loan row flagged as a bad case", async () => {
     const r = await api.post("/plan/loans", { amount: 500_000, received_on: "2026-11-01", note: "manual" }).expect(201);
     expect(r.body).toMatchObject({ amount: 500_000, bad_case: true, repaid_at: null });

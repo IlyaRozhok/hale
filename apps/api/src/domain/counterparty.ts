@@ -1,4 +1,5 @@
-const GENERIC_TEXT = /^(переказ|перевод|поповнення|пополнение)(\s|$)/iu;
+/** Whole bank templates only: "Переказ Тая М." names a person and must stay a question. */
+const GENERIC_TEXT = /^(?:(?:переказ|перевод)(?: коштів| средств)?(?: на (?:картку|карту)(?: monobank)?)?|(?:поповнення|пополнение)(?: рахунку| счёта| счета| банки)?(?: «[^»]*»)?)$/iu;
 /** Only digits, asterisks and separators: a masked card number with no name attached. */
 const MASKED_CARD = /^[\d*\s-]*\*[\d*\s-]*$/;
 

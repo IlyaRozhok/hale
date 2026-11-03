@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   Get,
@@ -218,8 +219,12 @@ export class PlanController {
   }
 
   @Delete("loans/:id")
-  deleteLoan(@Param("id", ParseIntPipe) id: number) {
-    return removeRow(this.ds.getRepository(Loan), id);
+  async deleteLoan(@Param("id", ParseIntPipe) id: number) {
+    const repo = this.ds.getRepository(Loan);
+    const loan = await repo.findOneBy({ id });
+    // A loan from a bank row would come back with the next sync.
+    if (loan?.source_transaction_id != null) throw new ConflictException("loan comes from a bank operation");
+    return removeRow(repo, id);
   }
 
   // --- manual balances ------------------------------------------------------

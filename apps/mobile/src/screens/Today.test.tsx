@@ -132,6 +132,14 @@ describe("Today, normal mode", () => {
       return fakeApi({ today: jest.fn(async () => ({ ...fixture, state: { ...fixture.state, ...over } })) });
     };
 
+    it("spending with no limit yet is not called going over a limit", async () => {
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 0, leftToday: -60100, level: 0 }));
+      expect(await screen.findByText("Сегодня можно")).toBeTruthy();
+      expect(screen.queryByText("Сверх лимита")).toBeNull();
+      expect(screen.getByText("₴0")).toBeTruthy();
+      expect(screen.getByText("Потрачено ₴601")).toBeTruthy();
+    });
+
     it("overspent: says how far over the limit, with no minus", async () => {
       await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 95000, leftToday: -60100, level: 0 }));
       expect(await screen.findByText("Сверх лимита")).toBeTruthy();

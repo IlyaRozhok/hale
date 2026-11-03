@@ -6,6 +6,10 @@ describe("isCounterpartyName", () => {
     expect(isCounterpartyName(label)).toBe(true);
   });
 
+  it.each(["Переказ Тая М.", "Перевод Анне", "Поповнення Іванов І."])("keeps a name that follows a generic word: %s", (label) => {
+    expect(isCounterpartyName(label)).toBe(true);
+  });
+
   it.each([
     "",
     "   ",

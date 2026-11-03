@@ -765,6 +765,17 @@ describe("questions, upcoming and run-out", () => {
     expect(people[0]).toMatchObject({ subject: "Таечка", text: "Таечка: 2 перевода, ₴2,500" });
   });
 
+  it("a later generic row does not hide a person known by the same IBAN", async () => {
+    const card = await account("black", 5_000_000);
+    at("2026-11-16T10:00:00Z");
+    await tx(card, -1_000, "person_transfer", { counter: "Таечка", needsLabel: true, date: "2026-11-10" });
+    await tx(card, -2_000, "person_transfer", { counter: "Переказ на картку", needsLabel: true, date: "2026-11-15" });
+    await ds.query(`UPDATE transactions SET counter_iban='UA00PERSON'`);
+    const people = (await today()).questions.filter((q: { kind: string }) => q.kind === "recipient_label");
+    expect(people).toHaveLength(1);
+    expect(people[0]).toMatchObject({ subject: "Таечка", text: "Таечка: 2 перевода, ₴30" });
+  });
+
   it("a generic text does not use up one of the three question slots", async () => {
     const card = await account("black", 5_000_000);
     at("2026-11-16T10:00:00Z");

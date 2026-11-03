@@ -8,7 +8,7 @@ export function usePullRefresh(refetch: () => Promise<unknown>) {
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    void refetch().finally(() => setRefreshing(false));
+    void refetch().catch(() => undefined).finally(() => setRefreshing(false));
   }, [refetch]);
   return { refreshing, onRefresh };
 }
