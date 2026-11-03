@@ -36,6 +36,8 @@ Then run, in order:
    `DATABASE_URL=postgres://hale:<POSTGRES_PASSWORD>@postgres:5432/hale`,
    `AGE_RECIPIENT=age1...` (public key), `RCLONE_REMOTE=hz:<bucket>/hale`,
    `RCLONE_CONFIG_HZ_TYPE=s3`, `RCLONE_CONFIG_HZ_PROVIDER=Other`,
+   `RCLONE_CONFIG_HZ_NO_CHECK_BUCKET=true` (otherwise Hetzner rejects uploads with
+   `LocationConstraintConflict`),
    `RCLONE_CONFIG_HZ_ENDPOINT=https://<location>.your-objectstorage.com`,
    `RCLONE_CONFIG_HZ_ACCESS_KEY_ID`, `RCLONE_CONFIG_HZ_SECRET_ACCESS_KEY`.
    Wrap EVERY value in single quotes, e.g.
