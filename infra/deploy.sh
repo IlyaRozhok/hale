@@ -47,7 +47,7 @@ remote "set -e; cd '$REMOTE_DIR/src' && docker build -f apps/api/Dockerfile -t '
 step "point compose at $image"
 remote "set -e; cd '$REMOTE_DIR/infra'
   sed -i '/^API_IMAGE=/d' .env; echo 'API_IMAGE=$image' >> .env
-  docker compose up -d postgres
+  docker compose up -d --wait postgres
   docker compose run --rm --no-deps api node dist/db/mig.js run"
 
 step "start stack"

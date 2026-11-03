@@ -13,7 +13,8 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hale -d hale"]
+      # Over TCP: during first-run init the temporary server answers only on the unix socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U hale -d hale"]
       interval: 10s
       timeout: 3s
       retries: 6
