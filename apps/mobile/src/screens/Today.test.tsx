@@ -254,6 +254,23 @@ describe("Today, normal mode", () => {
     expect(api.repayLoan).not.toHaveBeenCalled();
   });
 
+  it("the repayment form names the loan alone, without the note about the pace", async () => {
+    const text = "Займ ₴5,000 от 01.11. При текущем темпе деньги закончатся 18.11.";
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text, repayLoan: { id: 7, remaining: 500_000 } }] })) });
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: `Погасил: ${text}` }));
+    expect(screen.getByText("Займ ₴5,000 от 01.11")).toBeTruthy();
+  });
+
+  it("the repayment form's button works while the keyboard is up", async () => {
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })) });
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
+    let node = screen.getByText("Сохранить").parent;
+    while (node && node.props.keyboardShouldPersistTaps === undefined) node = node.parent;
+    expect(node?.props.keyboardShouldPersistTaps).toBe("handled");
+  });
+
   it("keeps the repayment form open when the save fails", async () => {
     const api = fakeApi({
       today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })),

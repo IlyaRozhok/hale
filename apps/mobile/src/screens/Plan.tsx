@@ -32,8 +32,8 @@ export function Plan() {
       <GoalsSection />
       <BinanceBalance />
       <TaxPayments />
-      <ManualLoan />
       <ActionRow label="Займы" onPress={() => setLoans(true)} />
+      <ManualLoan />
       {loans && <LoansSheet onClose={() => setLoans(false)} />}
     </ScrollView>
   );

@@ -74,8 +74,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
     paddingVertical: space.sm,
     borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: color.surface.inset,
     backgroundColor: color.surface.inset,
   },
-  selected: { borderWidth: 1, borderColor: color.fg.default },
+  selected: { borderColor: color.fg.default },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
 });

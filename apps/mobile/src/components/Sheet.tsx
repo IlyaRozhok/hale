@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 
@@ -12,7 +12,7 @@ export function Sheet({ title, subtitle, onClose, children }: Props) {
   const insets = useSafeAreaInsets();
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.root}>
+      <KeyboardAvoidingView behavior="padding" style={styles.root}>
         <Pressable accessible={false} onPress={onClose} style={styles.scrim} />
         <View style={[styles.panel, { paddingBottom: insets.bottom + space.lg }]}>
           <View style={styles.head}>
@@ -24,9 +24,9 @@ export function Sheet({ title, subtitle, onClose, children }: Props) {
               <Text style={styles.closeText}>Закрыть</Text>
             </Pressable>
           </View>
-          <ScrollView contentContainerStyle={styles.body}>{children}</ScrollView>
+          <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">{children}</ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

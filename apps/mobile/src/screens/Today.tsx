@@ -192,7 +192,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
           <BadCaseCard
             key={b.id}
             text={b.text}
-            onRepay={b.repayLoan && (() => setRepaying({ ...b.repayLoan!, name: b.text }))}
+            onRepay={b.repayLoan && (() => setRepaying({ ...b.repayLoan!, name: b.text.split(". ")[0]! }))}
             onDelete={b.removableLoanId === undefined ? undefined : () => deleteLoan.mutate(b.removableLoanId!, { onError: () => Alert.alert("Не удалось удалить займ", "Проверьте связь и попробуйте ещё раз.") })}
           />
         ))}
