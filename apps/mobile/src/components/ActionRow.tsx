@@ -1,14 +1,17 @@
 import { Pressable, StyleSheet, Text } from "react-native";
 import { tokens } from "@hale/tokens";
+import { Glass } from "./Glass";
 
-const { color, radius, space, touchMin, type } = tokens;
+const { color, space, touchMin, type } = tokens;
 
-/** One quiet line that opens what it talks about; it should not compete with the cards. */
+/** One quiet line that opens what it talks about; on glass, so the backdrop never runs under its text. */
 export function ActionRow({ label, onPress }: { label: string; onPress: () => void }) {
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={styles.row}>
-      <Text style={styles.label}>{label}</Text>
-      <Text style={styles.arrow}>›</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress}>
+      <Glass style={styles.row}>
+        <Text style={styles.label}>{label}</Text>
+        <Text style={styles.arrow}>›</Text>
+      </Glass>
     </Pressable>
   );
 }
@@ -20,9 +23,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: space.md,
-    paddingHorizontal: space.lg,
-    borderRadius: radius.xl,
+    paddingVertical: 0,
   },
-  label: { ...type.label, color: color.fg.muted, flexShrink: 1 },
+  label: { ...type.label, color: color.fg.default, flexShrink: 1 },
   arrow: { ...type.title, color: color.fg.subtle },
 });
