@@ -1,5 +1,5 @@
 import { StyleSheet, View } from "react-native";
-import { tokens } from "@tablo/tokens";
+import { tokens } from "@hale/tokens";
 import { Glass } from "./Glass";
 import { LAYOUT } from "./layout";
 

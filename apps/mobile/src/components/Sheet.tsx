@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { tokens } from "@tablo/tokens";
+import { tokens } from "@hale/tokens";
 
 const { color, radius, space, touchMin, type } = tokens;
 

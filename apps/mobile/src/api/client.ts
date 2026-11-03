@@ -14,7 +14,7 @@ import type {
   TransactionEditDto,
   TransactionPageDto,
   TransactionPatch,
-} from "@tablo/contracts";
+} from "@hale/contracts";
 
 export class ApiError extends Error {
   constructor(

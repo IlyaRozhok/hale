@@ -11,7 +11,7 @@ terraform {
   # git-ignored, *.tfstate is too). Back this file up: it is the only record
   # of what terraform created.
   backend "local" {
-    path = "../../private/terraform/tablo.tfstate"
+    path = "../../private/terraform/hale.tfstate"
   }
 }
 

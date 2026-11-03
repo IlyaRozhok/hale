@@ -7,13 +7,13 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: tablo
+      POSTGRES_USER: hale
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
-      POSTGRES_DB: tablo
+      POSTGRES_DB: hale
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tablo -d tablo"]
+      test: ["CMD-SHELL", "pg_isready -U hale -d hale"]
       interval: 10s
       timeout: 3s
       retries: 6
@@ -26,7 +26,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://tablo:${POSTGRES_PASSWORD}@postgres:5432/tablo
+      DATABASE_URL: postgres://hale:${POSTGRES_PASSWORD}@postgres:5432/hale
       JWT_SECRET: ${JWT_SECRET:?set in .env}
       OWNER_PASSWORD_HASH: ${OWNER_PASSWORD_HASH:?set in .env}
       MONOBANK_TOKEN: ${MONOBANK_TOKEN:-}

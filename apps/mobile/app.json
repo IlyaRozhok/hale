@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Tablo",
-    "slug": "tablo",
+    "name": "Hale",
+    "slug": "hale",
     "version": "0.0.1",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -10,7 +10,7 @@
     ],
     "newArchEnabled": true,
     "ios": {
-      "bundleIdentifier": "com.irozhok.tablo",
+      "bundleIdentifier": "com.irozhok.hale",
       "supportsTablet": false
     },
     "plugins": [

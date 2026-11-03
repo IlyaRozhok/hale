@@ -5,16 +5,16 @@
 # Exits non-zero if any step fails.
 #
 # Usage: DEPLOY_HOST=<server ip> DOMAIN=<domain> infra/deploy.sh
-# Optional: SSH_USER (root), SSH_CMD (default: ssh), REMOTE_DIR (/opt/tablo),
+# Optional: SSH_USER (root), SSH_CMD (default: ssh), REMOTE_DIR (/opt/hale),
 #           HEALTH_RETRIES (30), SSH_OPTS
-# Prereq: /opt/tablo/infra/.env already exists on the server (infra/README.md).
+# Prereq: /opt/hale/infra/.env already exists on the server (infra/README.md).
 set -euo pipefail
 
 : "${DEPLOY_HOST:?set DEPLOY_HOST to the server IP}"
 : "${DOMAIN:?set DOMAIN (used for the /health check)}"
 SSH_USER=${SSH_USER:-root}
 SSH_CMD=${SSH_CMD:-ssh}
-REMOTE_DIR=${REMOTE_DIR:-/opt/tablo}
+REMOTE_DIR=${REMOTE_DIR:-/opt/hale}
 HEALTH_RETRIES=${HEALTH_RETRIES:-30}
 CURL=${CURL:-curl}
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -29,7 +29,7 @@ if [ -n "$(git status --porcelain)" ]; then
   echo "warning: uncommitted changes are NOT deployed (only HEAD is shipped)" >&2
 fi
 rev=$(git rev-parse --short=12 HEAD)
-image="tablo-api:$rev"
+image="hale-api:$rev"
 
 step "sync $rev to $DEPLOY_HOST:$REMOTE_DIR/src"
 git archive HEAD | remote "set -e; rm -rf '$REMOTE_DIR/src'; mkdir -p '$REMOTE_DIR/src' '$REMOTE_DIR/infra'; tar -x -C '$REMOTE_DIR/src'"
@@ -39,7 +39,7 @@ remote "set -e; cd '$REMOTE_DIR'
   test -f infra/.env || { echo 'missing $REMOTE_DIR/infra/.env' >&2; exit 1; }
   cp src/infra/compose.yml src/infra/Caddyfile src/infra/*.sh infra/
   chmod +x infra/*.sh
-  install -m 644 src/infra/tablo.cron /etc/cron.d/tablo"
+  install -m 644 src/infra/hale.cron /etc/cron.d/hale"
 
 step "build $image on the server"
 remote "set -e; cd '$REMOTE_DIR/src' && docker build -f apps/api/Dockerfile -t '$image' ."

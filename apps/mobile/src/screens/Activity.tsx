@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { tokens } from "@tablo/tokens";
-import type { TransactionDto } from "@tablo/contracts";
+import { tokens } from "@hale/tokens";
+import type { TransactionDto } from "@hale/contracts";
 import { useTransactions } from "../api/queries";
 import { Chip } from "../components/Chip";
 import { Glass } from "../components/Glass";

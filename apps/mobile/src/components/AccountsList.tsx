@@ -1,4 +1,4 @@
-import type { TodayDto } from "@tablo/contracts";
+import type { TodayDto } from "@hale/contracts";
 import { Glass } from "./Glass";
 import { Line } from "./Line";
 

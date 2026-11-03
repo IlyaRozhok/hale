@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Inject, Post } from "@nestjs/common";
-import { bridgeInput, settingsPreviewInput, type BridgePreviewDto, type SettingsPreviewDto, type TodayDto } from "@tablo/contracts";
+import { bridgeInput, settingsPreviewInput, type BridgePreviewDto, type SettingsPreviewDto, type TodayDto } from "@hale/contracts";
 import { TodayService } from "./today.service";
 
 function parseBridge(body: unknown): number {

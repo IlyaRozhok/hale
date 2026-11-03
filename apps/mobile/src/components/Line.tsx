@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from "react-native";
-import { tokens } from "@tablo/tokens";
+import { tokens } from "@hale/tokens";
 import { formatMoneyWithUsd } from "../format";
 
 const { color, space, type } = tokens;

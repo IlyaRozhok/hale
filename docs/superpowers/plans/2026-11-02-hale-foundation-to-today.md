@@ -1,4 +1,4 @@
-# Tablo: от фундамента до экрана «Сегодня» на iPhone. План реализации
+# Hale: от фундамента до экрана «Сегодня» на iPhone. План реализации
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -68,7 +68,7 @@ scripts/check-raw-colors.mjs
 ### Task 1: Монорепозиторий и CI
 
 **Files:**
-- Create: `/Users/irozhok/Desktop/tablo/` с `pnpm-workspace.yaml`, `package.json`, `tsconfig.base.json`, `eslint.config.js`, `.gitignore`, `.nvmrc`, `.github/workflows/ci.yml`, `docs/` с копией описания и этого плана
+- Create: `/Users/irozhok/Desktop/hale/` с `pnpm-workspace.yaml`, `package.json`, `tsconfig.base.json`, `eslint.config.js`, `.gitignore`, `.nvmrc`, `.github/workflows/ci.yml`, `docs/` с копией описания и этого плана
 - Create: `scripts/check-raw-colors.mjs`
 - Test: `scripts/check-raw-colors.test.mjs`
 

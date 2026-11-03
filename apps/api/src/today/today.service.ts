@@ -1,6 +1,6 @@
 import { ConflictException, Inject, Injectable, Logger, UnprocessableEntityException } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
-import type { BridgePreviewDto, SettingsPreviewDto, TodayDto } from "@tablo/contracts";
+import type { BridgePreviewDto, SettingsPreviewDto, TodayDto } from "@hale/contracts";
 import { DataSource, type EntityManager } from "typeorm";
 import { leftForGoalsMonthly } from "../domain/goals";
 import { type DailyInput, type DailyState, computeDaily, sumDue } from "../domain/daily";

@@ -17,7 +17,7 @@ You need to provide:
 3. Your current public IP (for the SSH firewall rule), as `x.x.x.x/32`.
 4. A domain you control, with DNS you can edit.
 5. A Hetzner Object Storage bucket plus an access key and secret (backup target).
-6. An `age` key pair generated on YOUR machine: `age-keygen -o ~/tablo-backup.key`.
+6. An `age` key pair generated on YOUR machine: `age-keygen -o ~/hale-backup.key`.
    Only the public key (`age1...`) goes to the server. Keep the private key
    off the server, in your password manager and one other place: without it
    backups cannot be restored.
@@ -26,15 +26,15 @@ Then run, in order:
 
 1. `cd infra/terraform && export TF_VAR_hcloud_token=... TF_VAR_owner_ip_cidr=x.x.x.x/32 TF_VAR_ssh_public_key="$(cat ~/.ssh/id_ed25519.pub)"`
 2. `terraform init && terraform plan`, read the plan, then `terraform apply`.
-   State is written to `private/terraform/tablo.tfstate` (git-ignored). Back it up.
+   State is written to `private/terraform/hale.tfstate` (git-ignored). Back it up.
 3. Create a DNS `A` record for your domain pointing at the `server_ipv4` output
    (and `AAAA` for `server_ipv6`). Caddy cannot obtain a certificate before this resolves.
 4. Wait for cloud-init to finish (`ssh root@IP cloud-init status --wait`), then
-   create `/opt/tablo/infra/.env` on the server (mode 600) with:
+   create `/opt/hale/infra/.env` on the server (mode 600) with:
    `DOMAIN`, `POSTGRES_PASSWORD`, `JWT_SECRET` (32+ chars),
    `OWNER_PASSWORD_HASH` (argon2, see `.env.example`),
-   `DATABASE_URL=postgres://tablo:<POSTGRES_PASSWORD>@postgres:5432/tablo`,
-   `AGE_RECIPIENT=age1...` (public key), `RCLONE_REMOTE=hz:<bucket>/tablo`,
+   `DATABASE_URL=postgres://hale:<POSTGRES_PASSWORD>@postgres:5432/hale`,
+   `AGE_RECIPIENT=age1...` (public key), `RCLONE_REMOTE=hz:<bucket>/hale`,
    `RCLONE_CONFIG_HZ_TYPE=s3`, `RCLONE_CONFIG_HZ_PROVIDER=Other`,
    `RCLONE_CONFIG_HZ_ENDPOINT=https://<location>.your-objectstorage.com`,
    `RCLONE_CONFIG_HZ_ACCESS_KEY_ID`, `RCLONE_CONFIG_HZ_SECRET_ACCESS_KEY`.
@@ -61,11 +61,11 @@ Nothing here has been run. Until the token is set, reconcile and webhook install
 skip with one log line and nothing fails. Get a personal token at
 https://api.monobank.ua/ (log in with the monobank app).
 
-1. On the server, add to `/opt/tablo/infra/.env` (single-quoted like the rest):
+1. On the server, add to `/opt/hale/infra/.env` (single-quoted like the rest):
    `MONOBANK_TOKEN='<token>'` and
    `MONO_WEBHOOK_SECRET='<24+ chars of A-Za-z0-9_->'` (e.g. `openssl rand -hex 24`).
    `PUBLIC_URL` is set by `compose.yml` to `https://$DOMAIN`.
-2. Restart the api: `ssh root@IP 'cd /opt/tablo/infra && docker compose up -d api'`.
+2. Restart the api: `ssh root@IP 'cd /opt/hale/infra && docker compose up -d api'`.
    On start it compares the webhook in `client-info` with
    `https://$DOMAIN/mono/webhook/<secret>` and registers it if it differs.
 3. Sign in to get an owner token, then start the history import from 1 Jan 2025:
@@ -74,7 +74,7 @@ https://api.monobank.ua/ (log in with the monobank app).
    Expect `202`. monobank allows one request per 60 s, so the import runs in the
    background for a while (one request per account per 31-day window); it
    resumes by itself after a restart.
-4. Check: `docker compose exec postgres psql -U tablo -c "select count(*) from transactions"`
+4. Check: `docker compose exec postgres psql -U hale -c "select count(*) from transactions"`
    grows; `select kind,status,count(*) from jobs group by 1,2` shows
    `history.window` going from `pending` to `done`; spend a small amount and
    see a `webhook.item` job turn `done` and the row appear; `select last_sync_at from settings`
@@ -82,13 +82,13 @@ https://api.monobank.ua/ (log in with the monobank app).
 
 ## Backups
 
-- Why `DATABASE_URL` uses host `postgres`: `/etc/cron.d/tablo` sets
+- Why `DATABASE_URL` uses host `postgres`: `/etc/cron.d/hale` sets
   `PG_DUMP`/`PSQL` to `docker compose exec -T postgres ...`, so the tools run
   inside the postgres container, where `postgres` is the service name. The host
   itself cannot resolve it and Postgres publishes no port, so never call the
   host's own `pg_dump`/`psql` with this URL. A manual run on the server (do not
   `source` the .env file: the argon2 hash would be expanded):
-  `cd /opt/tablo/infra && PG_DUMP='docker compose exec -T postgres pg_dump' PSQL='docker compose exec -T postgres psql' ENV_FILE=/opt/tablo/infra/.env ./cron-run.sh backup ./backup.sh`.
+  `cd /opt/hale/infra && PG_DUMP='docker compose exec -T postgres pg_dump' PSQL='docker compose exec -T postgres psql' ENV_FILE=/opt/hale/infra/.env ./cron-run.sh backup ./backup.sh`.
 - Running repo scripts against production data (`pnpm seed:private`, `pnpm golden:import`):
   from your machine, `DEPLOY_HOST=<ip> infra/db-tunnel.sh` (keeps running) opens
   `127.0.0.1:15432` to the postgres container over SSH; Postgres stays unpublished.
@@ -100,13 +100,13 @@ https://api.monobank.ua/ (log in with the monobank app).
   Postgres and fails (non-zero) if any table is missing or `transactions` has
   fewer rows than the baseline. It needs the age PRIVATE key, which the server
   does not have, so run it from your machine, at least monthly:
-  `AGE_IDENTITY_FILE=~/tablo-backup.key RCLONE_REMOTE=... RCLONE_CONFIG_HZ_*=... infra/restore-check.sh`
+  `AGE_IDENTITY_FILE=~/hale-backup.key RCLONE_REMOTE=... RCLONE_CONFIG_HZ_*=... infra/restore-check.sh`
   (needs docker, or `RESTORE_ADMIN_URL` pointing at a scratch Postgres).
 - Full mode without a key fails; it never silently downgrades. Only an explicit
   `--shallow` skips the restore.
 - The server's weekly cron (Sunday 04:00 UTC) runs `restore-check.sh --shallow`:
   latest backup exists, is under 36 h old, is non-empty and age-encrypted.
-- Failures of either cron job are appended to `/var/log/tablo-jobs.log` and
+- Failures of either cron job are appended to `/var/log/hale-jobs.log` and
   inserted into the `jobs` table (`kind` = `backup.failed` /
   `restore_check.failed`, `status` = `failed`, `last_error`).
 

@@ -54,7 +54,7 @@ trap cleanup EXIT
 # --- locate the latest backup ---------------------------------------------
 if [ -n "${BACKUP_DIR:-}" ]; then
   # shellcheck disable=SC2012
-  latest=$(ls -1 "$BACKUP_DIR"/tablo-*.sql.gz.age 2>/dev/null | sort | tail -1 || true)
+  latest=$(ls -1 "$BACKUP_DIR"/hale-*.sql.gz.age 2>/dev/null | sort | tail -1 || true)
   [ -n "$latest" ] || fail "no backups in $BACKUP_DIR"
   cp "$latest" "$work/dump"
   cp "$latest.manifest" "$work/manifest" 2>/dev/null || : > "$work/manifest"
@@ -62,7 +62,7 @@ if [ -n "${BACKUP_DIR:-}" ]; then
 else
   : "${RCLONE_REMOTE:?set BACKUP_DIR or RCLONE_REMOTE}"
   # shellcheck disable=SC2086
-  bname=$($RCLONE lsf "$RCLONE_REMOTE" --include 'tablo-*.sql.gz.age' | sort | tail -1)
+  bname=$($RCLONE lsf "$RCLONE_REMOTE" --include 'hale-*.sql.gz.age' | sort | tail -1)
   [ -n "$bname" ] || fail "no backups in $RCLONE_REMOTE"
   # shellcheck disable=SC2086
   $RCLONE copyto "$RCLONE_REMOTE/$bname" "$work/dump"
@@ -72,7 +72,7 @@ fi
 [ -s "$work/dump" ] || fail "latest backup $bname is empty"
 
 if [ "$mode" = shallow ]; then
-  ts=${bname#tablo-}; ts=${ts%%.*}
+  ts=${bname#hale-}; ts=${ts%%.*}
   then_epoch=$(date -u -j -f %Y%m%dT%H%M%SZ "$ts" +%s 2>/dev/null || date -u -d "${ts:0:4}-${ts:4:2}-${ts:6:2} ${ts:9:2}:${ts:11:2}:${ts:13:2}" +%s)
   age_h=$(( ( $(date -u +%s) - then_epoch ) / 3600 ))
   [ "$age_h" -le "$MAX_AGE_HOURS" ] || fail "latest backup $bname is ${age_h}h old (limit ${MAX_AGE_HOURS}h)"

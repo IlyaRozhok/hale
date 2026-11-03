@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { tokens } from "@tablo/tokens";
+import { tokens } from "@hale/tokens";
 import { useCreatePayment, useMarkPaid, useTaxPayments } from "../api/queries";
 import { formatMoney, isIsoDate, parseHryvnias, shortDate, taxQuarterOfDue } from "../format";
 import { Chip } from "./Chip";

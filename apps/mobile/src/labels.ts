@@ -1,5 +1,5 @@
 // Russian names for server codes. No native imports: runs in node tests.
-import type { RecipientLabelName, TxTypeDto } from "@tablo/contracts";
+import type { RecipientLabelName, TxTypeDto } from "@hale/contracts";
 
 const TYPES: Record<TxTypeDto, string> = {
   income: "Доход",

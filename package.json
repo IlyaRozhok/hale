@@ -1,5 +1,5 @@
 {
-  "name": "tablo",
+  "name": "hale",
   "private": true,
   "type": "module",
   "engines": {
@@ -8,11 +8,11 @@
   "scripts": {
     "typecheck": "pnpm -r --if-present run typecheck && tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
-    "test": "vitest run && pnpm --filter @tablo/mobile run test:jest",
+    "test": "vitest run && pnpm --filter @hale/mobile run test:jest",
     "check:colors": "node scripts/check-raw-colors.mjs",
-    "golden:classify": "pnpm --filter @tablo/api exec tsx ../../scripts/golden-classify.ts",
-    "golden:import": "pnpm --filter @tablo/api exec tsx ../../scripts/golden-import.ts",
-    "seed:private": "pnpm --filter @tablo/api exec tsx ../../scripts/seed-private.ts",
+    "golden:classify": "pnpm --filter @hale/api exec tsx ../../scripts/golden-classify.ts",
+    "golden:import": "pnpm --filter @hale/api exec tsx ../../scripts/golden-import.ts",
+    "seed:private": "pnpm --filter @hale/api exec tsx ../../scripts/seed-private.ts",
     "coverage:domain": "vitest run --coverage --coverage.include=\"apps/api/src/domain/*.ts\" --coverage.exclude=\"**/*.test.ts\" --coverage.thresholds.lines=95 apps/api/src/domain"
   },
   "packageManager": "pnpm@12.16.1",

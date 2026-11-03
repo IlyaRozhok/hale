@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { tokens } from "@tablo/tokens";
+import { tokens } from "@hale/tokens";
 import { useApi } from "../api/context";
 import { NetworkError, UnauthorizedError } from "../api/client";
 
@@ -43,7 +43,7 @@ export function Login({ onSignedIn, deviceName }: Props) {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.root}>
       <View style={styles.form}>
-        <Text style={styles.title}>Табло</Text>
+        <Text style={styles.title}>Hale</Text>
         <TextInput
           accessibilityLabel="Пароль"
           placeholder="Пароль"

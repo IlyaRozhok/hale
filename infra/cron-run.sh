@@ -26,7 +26,7 @@ load_env() {
   done < "$1"
 }
 if [ -n "${ENV_FILE:-}" ]; then load_env "$ENV_FILE"; fi
-LOG_FILE=${LOG_FILE:-/var/log/tablo-jobs.log}
+LOG_FILE=${LOG_FILE:-/var/log/hale-jobs.log}
 PSQL=${PSQL:-psql}
 out=$(mktemp); trap 'rm -f "$out"' EXIT
 

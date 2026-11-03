@@ -1,10 +1,10 @@
 {
-  "name": "@tablo/api",
+  "name": "@hale/api",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/main.ts src/db/mig.ts --bundle --packages=external --alias:@tablo/contracts=../../packages/contracts/src/index.ts --platform=node --format=esm --target=node22 --outbase=src --outdir=dist",
+    "build": "esbuild src/main.ts src/db/mig.ts --bundle --packages=external --alias:@hale/contracts=../../packages/contracts/src/index.ts --platform=node --format=esm --target=node22 --outbase=src --outdir=dist",
     "start": "tsx src/main.ts",
     "start:prod": "node dist/main.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -18,7 +18,7 @@
     "@nestjs/platform-express": "^12.3.2",
     "@nestjs/schedule": "^12.0.2",
     "@nestjs/typeorm": "^12.0.2",
-    "@tablo/contracts": "workspace:*",
+    "@hale/contracts": "workspace:*",
     "argon2": "^0.45.1",
     "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",

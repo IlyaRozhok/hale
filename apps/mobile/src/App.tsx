@@ -6,7 +6,7 @@ import { DarkTheme, NavigationContainer, type NavigationProp, type ParamListBase
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { QueryClient, focusManager } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
-import { tokens } from "@tablo/tokens";
+import { tokens } from "@hale/tokens";
 import { API_URL } from "./config";
 import { createApi } from "./api/client";
 import { ApiProvider } from "./api/context";

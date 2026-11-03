@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { tokens } from "@tablo/tokens";
+import { tokens } from "@hale/tokens";
 import { useLabelRecipient } from "../api/queries";
 import { LABEL_CHOICES } from "../labels";
 import { Chip } from "./Chip";

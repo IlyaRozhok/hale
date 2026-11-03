@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { tokens } from "@tablo/tokens";
-import type { TransactionDto } from "@tablo/contracts";
+import { tokens } from "@hale/tokens";
+import type { TransactionDto } from "@hale/contracts";
 import { formatMoney, formatOriginal, shortDate } from "../format";
 import { categoryLabel, typeLabel } from "../labels";
 

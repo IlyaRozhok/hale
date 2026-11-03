@@ -4,7 +4,7 @@ Status: code and shader written, not yet run on a device. The owner gate (step 5
 
 ## What was built
 
-- `apps/mobile` (`@tablo/mobile`): Expo SDK 58, React Native 0.88, `@shopify/react-native-skia` 2.14, Reanimated 4, iOS only, dev client, bundle id `com.irozhok.tablo`.
+- `apps/mobile` (`@hale/mobile`): Expo SDK 58, React Native 0.88, `@shopify/react-native-skia` 2.14, Reanimated 4, iOS only, dev client, bundle id `com.irozhok.hale`.
 - `src/metal/metal.sksl.ts`: SkSL port of the mockup shader. One surface function (domain-warped fbm height, banded chrome reflection, specular); `pool` adds the mercury waterline and meniscus. Y is flipped because SkSL is top-down.
 - `Mercury.tsx` (mockup A) and `Ring.tsx` (mockup C, the same shader masked by a round-capped arc over a `data.track` ring). `LimitVisual` selects the mode.
 - `level.ts`: pure maths (clamp, NaN to 0, wave, shader time, frame-rate independent level easing), unit tested in node.
@@ -14,7 +14,7 @@ Status: code and shader written, not yet run on a device. The owner gate (step 5
 ## Verified
 
 - `level.ts` unit tests (13) pass; root typecheck, lint, test (340), `check:colors`, `infra/verify-bundle.sh` pass.
-- The SkSL compiles and renders: checked headlessly with CanvasKit (Skia WASM) `RuntimeEffect.Make`, with four uniforms and sane pixels (transparent above the waterline, metal below). Previews: `.superpowers/sdd/2026-11-02-tablo-foundation-to-today/task-14-sksl-*-canvaskit.png`. CanvasKit is the same Skia SkSL compiler but not the iOS Metal backend, so this is evidence, not proof.
+- The SkSL compiles and renders: checked headlessly with CanvasKit (Skia WASM) `RuntimeEffect.Make`, with four uniforms and sane pixels (transparent above the waterline, metal below). Previews: `.superpowers/sdd/2026-11-02-hale-foundation-to-today/task-14-sksl-*-canvaskit.png`. CanvasKit is the same Skia SkSL compiler but not the iOS Metal backend, so this is evidence, not proof.
 - `npx expo prebuild --platform ios` generates `ios/` (git-ignored).
 
 ## Not verified

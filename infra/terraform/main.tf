@@ -3,7 +3,7 @@ resource "hcloud_ssh_key" "owner" {
   public_key = var.ssh_public_key
 }
 
-resource "hcloud_firewall" "tablo" {
+resource "hcloud_firewall" "hale" {
   name = "${var.name}-fw"
 
   # SSH: owner's IP only.
@@ -31,13 +31,13 @@ resource "hcloud_firewall" "tablo" {
   # Everything else inbound (including 5432) is dropped by default.
 }
 
-resource "hcloud_server" "tablo" {
+resource "hcloud_server" "hale" {
   name         = var.name
   server_type  = var.server_type
   image        = "ubuntu-24.04"
   location     = var.location
   ssh_keys     = [hcloud_ssh_key.owner.id]
-  firewall_ids = [hcloud_firewall.tablo.id]
+  firewall_ids = [hcloud_firewall.hale.id]
   user_data    = file("${path.module}/cloud-init.yml")
 
   public_net {

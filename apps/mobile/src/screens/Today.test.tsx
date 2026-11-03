@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
-import { tokens } from "@tablo/tokens";
-import type { BridgeStateDto, DailyStateDto } from "@tablo/contracts";
+import { tokens } from "@hale/tokens";
+import type { BridgeStateDto, DailyStateDto } from "@hale/contracts";
 import { Today } from "./Today";
 import { fakeApi, makeClient, renderWith, todayFixture } from "../testing";
 import { NetworkError } from "../api/client";

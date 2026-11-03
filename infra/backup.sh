@@ -6,7 +6,7 @@
 #   AGE_RECIPIENT      age PUBLIC key (the private key never lives on the server)
 # Target (one of):
 #   BACKUP_DIR         local-target mode: copy into this directory (dev / tests)
-#   RCLONE_REMOTE      e.g. "hz:my-bucket/tablo"; rclone S3 settings come from
+#   RCLONE_REMOTE      e.g. "hz:my-bucket/hale"; rclone S3 settings come from
 #                      RCLONE_CONFIG_HZ_* env (Hetzner Object Storage)
 # Overrides (also the seams used by the tests):
 #   PG_DUMP, PSQL, RCLONE   command strings (default: pg_dump, psql, rclone)
@@ -28,7 +28,7 @@ if [ -z "${BACKUP_DIR:-}" ]; then
 fi
 
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
-name="tablo-$stamp.sql.gz.age"
+name="hale-$stamp.sql.gz.age"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
@@ -45,13 +45,13 @@ $PG_DUMP --no-owner --no-privileges "$DATABASE_URL" | gzip -9 | bash -c "$ENCRYP
 if [ -n "${BACKUP_DIR:-}" ]; then
   mkdir -p "$BACKUP_DIR"
   cp "$work/$name" "$work/$name.manifest" "$BACKUP_DIR/"
-  find "$BACKUP_DIR" -name 'tablo-*' -type f -mtime "+$RETENTION_DAYS" -delete
+  find "$BACKUP_DIR" -name 'hale-*' -type f -mtime "+$RETENTION_DAYS" -delete
 else
   # shellcheck disable=SC2086
   $RCLONE copyto "$work/$name" "$RCLONE_REMOTE/$name"
   # shellcheck disable=SC2086
   $RCLONE copyto "$work/$name.manifest" "$RCLONE_REMOTE/$name.manifest"
   # shellcheck disable=SC2086
-  $RCLONE delete --min-age "${RETENTION_DAYS}d" --include 'tablo-*' "$RCLONE_REMOTE"
+  $RCLONE delete --min-age "${RETENTION_DAYS}d" --include 'hale-*' "$RCLONE_REMOTE"
 fi
 echo "backup ok: $name (transactions=$tx)"

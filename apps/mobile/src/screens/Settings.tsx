@@ -2,7 +2,7 @@ import { useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import Slider from "@react-native-community/slider";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { tokens } from "@tablo/tokens";
+import { tokens } from "@hale/tokens";
 import { formatMoney } from "../format";
 import { useCapPreview, useSaveSettings, useSettings } from "../api/queries";
 import { BinanceBalance } from "../components/BinanceBalance";

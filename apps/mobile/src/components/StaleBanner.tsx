@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from "react-native";
-import { tokens } from "@tablo/tokens";
+import { tokens } from "@hale/tokens";
 
 const { color, radius, space, type } = tokens;
 

@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { tokens } from "@tablo/tokens";
-import type { TodayDto } from "@tablo/contracts";
+import { tokens } from "@hale/tokens";
+import type { TodayDto } from "@hale/contracts";
 import { shiftDate } from "../format";
 import { Glass } from "./Glass";
 

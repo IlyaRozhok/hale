@@ -26,7 +26,7 @@ import {
   scheduledPaymentInput,
   scheduledPaymentPatch,
   settingsPatch,
-} from "@tablo/contracts";
+} from "@hale/contracts";
 import { DataSource, type ObjectLiteral, type Repository } from "typeorm";
 import type { z } from "zod";
 import { ExpectedIncome, Loan, ManualBalance, RecurringPayment, ScheduledPayment, Settings } from "../db/entities";

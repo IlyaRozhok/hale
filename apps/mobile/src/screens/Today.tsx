@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { tokens } from "@tablo/tokens";
-import type { TodayDto } from "@tablo/contracts";
+import { tokens } from "@hale/tokens";
+import type { TodayDto } from "@hale/contracts";
 import { LimitVisual } from "../metal";
 import { formatMoney, formatStamp, formatUsd, kyivDate } from "../format";
 import { useChooseBridge, useConfirmIncome, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";

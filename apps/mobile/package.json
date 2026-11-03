@@ -1,5 +1,5 @@
 {
-  "name": "@tablo/mobile",
+  "name": "@hale/mobile",
   "version": "0.0.0",
   "private": true,
   "main": "index.ts",
@@ -14,8 +14,8 @@
     "@react-navigation/bottom-tabs": "^7.21.0",
     "@react-navigation/native": "^7.5.1",
     "@shopify/react-native-skia": "2.14.0",
-    "@tablo/contracts": "workspace:*",
-    "@tablo/tokens": "workspace:*",
+    "@hale/contracts": "workspace:*",
+    "@hale/tokens": "workspace:*",
     "@tanstack/react-query": "^5.105.1",
     "@tanstack/react-query-persist-client": "^5.105.1",
     "expo": "^58.0.22",

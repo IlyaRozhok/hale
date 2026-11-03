@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { txType } from "@tablo/contracts";
+import { txType } from "@hale/contracts";
 import { categoryLabel, LABEL_CHOICES, SPEND_CATEGORIES, typeLabel } from "./labels";
 
 describe("labels", () => {

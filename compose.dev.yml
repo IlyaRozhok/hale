@@ -4,9 +4,9 @@ services:
   postgres:
     image: postgres:17
     environment:
-      POSTGRES_USER: tablo
-      POSTGRES_PASSWORD: tablo
-      POSTGRES_DB: tablo
+      POSTGRES_USER: hale
+      POSTGRES_PASSWORD: hale
+      POSTGRES_DB: hale
     ports:
       - "5432:5432"
     volumes:

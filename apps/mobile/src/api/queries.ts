@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LoanInput, RecipientLabelName, ScheduledPaymentInput, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@tablo/contracts";
+import type { LoanInput, RecipientLabelName, ScheduledPaymentInput, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
 import { useApi } from "./context";
 
 export const TODAY_KEY = ["today"] as const;

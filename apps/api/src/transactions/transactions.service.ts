@@ -8,7 +8,7 @@ import type {
   TransactionPatch,
   TransactionsQuery,
   TxTypeDto,
-} from "@tablo/contracts";
+} from "@hale/contracts";
 import { DataSource, type EntityManager } from "typeorm";
 import { type TxType, isWeakRuleValue, normaliseText, typeCategory } from "../domain/classify";
 import { PlanService } from "../plan/plan.service";

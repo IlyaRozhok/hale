@@ -12,7 +12,7 @@ import { ReconcileService } from "./reconcile.service";
 const NOW_MS = Date.UTC(2026, 10, 2, 12, 0, 0);
 const clock = { now: () => NOW_MS };
 const SECRET = "webhook-secret-0123456789abcdef";
-const OUR_URL = `https://tablo.example.com/mono/webhook/${SECRET}`;
+const OUR_URL = `https://hale.example.com/mono/webhook/${SECRET}`;
 
 const stmt = (id: string, over: Partial<MonoStatementItem> = {}): MonoStatementItem => ({
   id, time: NOW_MS / 1000 - 3600, description: "Shop", mcc: 5411, originalMcc: 5411, hold: false,
@@ -36,7 +36,7 @@ beforeEach(async () => {
 function make(
   over: { webHookUrl?: string; statement?: (...a: unknown[]) => Promise<MonoStatementItem[]> } = {},
   cfg: { MONOBANK_TOKEN?: string; MONO_WEBHOOK_SECRET?: string; PUBLIC_URL?: string } = {
-    MONOBANK_TOKEN: "tok", MONO_WEBHOOK_SECRET: SECRET, PUBLIC_URL: "https://tablo.example.com",
+    MONOBANK_TOKEN: "tok", MONO_WEBHOOK_SECRET: SECRET, PUBLIC_URL: "https://hale.example.com",
   },
 ) {
   const client = {

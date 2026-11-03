@@ -30,18 +30,18 @@
 
 ### 5. Hetzner, домен, Object Storage, ключ age
 - Кто: владелец.
-- Что нужно: токен Hetzner Cloud (чтение и запись), SSH-ключ, свой IP как `x.x.x.x/32`, домен с доступом к DNS, бакет Object Storage с ключом и секретом, пара `age` (`age-keygen -o ~/tablo-backup.key`). Закрытый ключ age хранить вне сервера, в менеджере паролей и ещё в одном месте.
+- Что нужно: токен Hetzner Cloud (чтение и запись), SSH-ключ, свой IP как `x.x.x.x/32`, домен с доступом к DNS, бакет Object Storage с ключом и секретом, пара `age` (`age-keygen -o ~/hale-backup.key`). Закрытый ключ age хранить вне сервера, в менеджере паролей и ещё в одном месте.
 - Подробно: `infra/README.md`, раздел "Owner gate: first deploy", пункты 1-6 списка "You need to provide".
 - Успех: все шесть вещей на руках, закрытый ключ age сохранён в двух местах.
 
 ### 6. terraform apply и первый деплой
 - Кто: владелец.
 - Команды: по `infra/README.md`, "Then run, in order", пункты 1-6: `terraform init && terraform plan`, `terraform apply`, A-запись DNS, `.env` на сервере, `DEPLOY_HOST=<ip> DOMAIN=<домен> infra/deploy.sh`.
-- Успех: `curl -i https://<домен>/health` отвечает 200; `nc -vz <ip> 5432` не подключается. Файл состояния `private/terraform/tablo.tfstate` скопирован в резерв.
+- Успех: `curl -i https://<домен>/health` отвечает 200; `nc -vz <ip> 5432` не подключается. Файл состояния `private/terraform/hale.tfstate` скопирован в резерв.
 
 ### 7. Секреты на сервере
 - Кто: владелец.
-- Что: в `/opt/tablo/infra/.env` (режим 600, значения в одинарных кавычках) должны быть `JWT_SECRET` (32+ символа, `openssl rand -base64 48`), `OWNER_PASSWORD_HASH` (argon2, как в `.env.example`), затем `MONOBANK_TOKEN` (личный токен с https://api.monobank.ua/) и `MONO_WEBHOOK_SECRET` (`openssl rand -hex 24`). После правки: `ssh root@IP 'cd /opt/tablo/infra && docker compose up -d api'`.
+- Что: в `/opt/hale/infra/.env` (режим 600, значения в одинарных кавычках) должны быть `JWT_SECRET` (32+ символа, `openssl rand -base64 48`), `OWNER_PASSWORD_HASH` (argon2, как в `.env.example`), затем `MONOBANK_TOKEN` (личный токен с https://api.monobank.ua/) и `MONO_WEBHOOK_SECRET` (`openssl rand -hex 24`). После правки: `ssh root@IP 'cd /opt/hale/infra && docker compose up -d api'`.
 - Подробно: `infra/README.md`, "Owner gate: monobank token, webhook and history import", пункты 1-2.
 - Успех: логин по паролю возвращает токен; при первом запуске в логе API есть строка `monobank webhook was missing or foreign; installed ours` (при следующих перезапусках её не будет: вебхук уже наш).
 
@@ -50,14 +50,14 @@
 - Команда: `POST /mono/import` с `{"from":"2025-01-01"}` (точные `curl` в `infra/README.md`, пункт 3 того же раздела).
 - Сколько ждать: monobank даёт один запрос в 60 секунд, на каждый счёт по одному запросу на окно в 31 день. Для 20 месяцев и нескольких счетов это порядка нескольких часов (грубо: число счетов x 20 окон минут; например 5 счетов дают около 100 минут минимум). Импорт идёт в фоне и продолжается после перезапуска. Не ждать онлайн.
 - Покупки во время импорта: вебхук отвечает сразу, но его операции встают в ту же очередь за окнами истории, поэтому новые покупки появляются в приложении с опозданием, пока импорт не закончится. Это не поломка. Проверку "покупка меньше чем за минуту" (шаг 16.2) делать только после импорта.
-- Успех: ответ 202; на сервере (`ssh root@IP`, `cd /opt/tablo/infra`):
-  `docker compose exec postgres psql -U tablo -c "select count(*) from transactions"` растёт;
-  `docker compose exec postgres psql -U tablo -c "select kind,status,count(*) from jobs group by 1,2"` показывает, что `history.window` переходит из `pending` в `done`;
-  `docker compose exec postgres psql -U tablo -c "select last_sync_at from settings"` свежий.
+- Успех: ответ 202; на сервере (`ssh root@IP`, `cd /opt/hale/infra`):
+  `docker compose exec postgres psql -U hale -c "select count(*) from transactions"` растёт;
+  `docker compose exec postgres psql -U hale -c "select kind,status,count(*) from jobs group by 1,2"` показывает, что `history.window` переходит из `pending` в `done`;
+  `docker compose exec postgres psql -U hale -c "select last_sync_at from settings"` свежий.
 
 ### 9. Туннель к базе (нужен для шагов 10 и 11)
 - Кто: владелец, на своём компьютере в корне репозитория. Postgres на сервере наружу не открыт, `pnpm` и `private/` есть только у вас.
-- Команды: в первом терминале `DEPLOY_HOST=<ip сервера> infra/db-tunnel.sh` (оставить работать). Пароль базы: `ssh root@<ip> "grep ^POSTGRES_PASSWORD /opt/tablo/infra/.env"`. В `.env` значение в одинарных кавычках: в адрес они не входят, уберите их. Спецсимволы пароля в адресе кодируются процентами (`/` это `%2F`, `@` это `%40`, `+` это `%2B`), готовое значение даёт `node -p "encodeURIComponent(process.argv[1])" '<пароль>'`. Во втором терминале: `export DATABASE_URL='postgres://tablo:<закодированный пароль>@127.0.0.1:15432/tablo'`
+- Команды: в первом терминале `DEPLOY_HOST=<ip сервера> infra/db-tunnel.sh` (оставить работать). Пароль базы: `ssh root@<ip> "grep ^POSTGRES_PASSWORD /opt/hale/infra/.env"`. В `.env` значение в одинарных кавычках: в адрес они не входят, уберите их. Спецсимволы пароля в адресе кодируются процентами (`/` это `%2F`, `@` это `%40`, `+` это `%2B`), готовое значение даёт `node -p "encodeURIComponent(process.argv[1])" '<пароль>'`. Во втором терминале: `export DATABASE_URL='postgres://hale:<закодированный пароль>@127.0.0.1:15432/hale'`
 - Успех: `psql "$DATABASE_URL" -c "select count(*) from transactions"` отвечает (нужен psql на вашей машине).
 
 ### 10. Сверка классификатора (golden-import)
@@ -68,7 +68,7 @@
 ### 11. Личные данные: pnpm seed:private
 - Кто: владелец, локально, с `DATABASE_URL` из шага 9 и файлами из git-ignored `private/`.
 - Порядок: только после импорта (шаг 8). Сид выставляет `tracking_start` в текущую дату по Киеву, пишет настройки только пока они не тронуты (потом настройки меняются в приложении) и удаляет зафиксированный лимит за сегодня: он был посчитан без этих данных.
-- Команды: `pnpm seed:private`, затем перезапустить API, чтобы доходы и платежи появились сразу: `ssh root@<ip> 'cd /opt/tablo/infra && docker compose restart api'`. Без перезапуска это сделает ежечасная задача, но до неё лимит будет неверным.
+- Команды: `pnpm seed:private`, затем перезапустить API, чтобы доходы и платежи появились сразу: `ssh root@<ip> 'cd /opt/hale/infra && docker compose restart api'`. Без перезапуска это сделает ежечасная задача, но до неё лимит будет неверным.
 - Успех, проверить по приложению или SQL: аренда платится 6-го числа; $800 приходят 5-го числа; рассрочка на тач равна 12 699,80 грн. На главном экране в тот же день: лимит посчитан до даты следующего дохода, а не на 30 дней; вопроса "Когда ожидается следующий доход?" нет, если дата дохода ещё не прошла; в ближайших платежах есть аренда и рассрочки; `select count(*) from income_events` больше нуля.
 
 ### 12. Бэкап и восстановление
@@ -99,12 +99,12 @@
 Каждую отметить в таблице в конце файла.
 
 ### 16. Восемь проверок
-1. Деньги совпадают с monobank. Сравнить остатки по каждому счёту в приложении Tablo и в monobank. Успех: разница равна `creditLimit` (кредитный лимит) и больше ничему.
+1. Деньги совпадают с monobank. Сравнить остатки по каждому счёту в приложении Hale и в monobank. Успех: разница равна `creditLimit` (кредитный лимит) и больше ничему.
 2. Реальная покупка меньше чем за минуту. Потратить небольшую сумму картой. Успех: за 60 секунд операция в списке, `leftToday` уменьшился, уровень металла упал.
 3. Лимит на день не меняется. Утром записать дневной лимит, вечером после нескольких трат сверить. Успех: лимит за день тот же; на следующий день пересчитан.
 4. Мост за ноябрь. Взять ноябрьские цифры в приложении и свой ручной расчёт. Успех: совпадают до гривны.
 5. Напоминание о налогах. Дождаться напоминания (или сдвинуть срок в настройках на ближайшую дату). Успех: push пришёл; после отметки об уплате напоминание исчезло.
-6. Перезапуск сервера. `ssh root@IP 'cd /opt/tablo/infra && docker compose restart'`. Успех: число операций не уменьшилось; очередь `jobs` продолжила работу.
+6. Перезапуск сервера. `ssh root@IP 'cd /opt/hale/infra && docker compose restart'`. Успех: число операций не уменьшилось; очередь `jobs` продолжила работу.
 7. Бэкап восстанавливается: шаг 12, полный режим. Успех: `restore-check ok`.
 8. Вебхук выключен, сверка его восстанавливает. Снять вебхук (`POST` с пустым адресом на `https://api.monobank.ua/personal/webhook` с токеном владельца), совершить покупку, дождаться дневной сверки 04:00 по Киеву (или перезапустить api: при старте вебхук регистрируется заново). Успех: операция появилась, вебхук снова указан в `client-info`.
 

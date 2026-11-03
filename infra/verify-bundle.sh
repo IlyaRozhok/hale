@@ -7,8 +7,8 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 cd "$root"
-pnpm --filter @tablo/api build >/dev/null
-pnpm --filter @tablo/api deploy --prod "$out/app" >/dev/null
+pnpm --filter @hale/api build >/dev/null
+pnpm --filter @hale/api deploy --prod "$out/app" >/dev/null
 cd "$out/app"
 
 # mig.js imports typeorm/pg at load; with no args it prints usage and exits 2.

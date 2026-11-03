@@ -6,15 +6,15 @@
 #
 # Usage: DEPLOY_HOST=<server ip> infra/db-tunnel.sh
 # Optional: SSH_USER (root), SSH_CMD (ssh), SSH_OPTS, LOCAL_PORT (15432),
-#           REMOTE_DIR (/opt/tablo)
-# Then: DATABASE_URL=postgres://tablo:<POSTGRES_PASSWORD>@127.0.0.1:15432/tablo
+#           REMOTE_DIR (/opt/hale)
+# Then: DATABASE_URL=postgres://hale:<POSTGRES_PASSWORD>@127.0.0.1:15432/hale
 set -euo pipefail
 
 : "${DEPLOY_HOST:?set DEPLOY_HOST to the server IP}"
 SSH_USER=${SSH_USER:-root}
 SSH_CMD=${SSH_CMD:-ssh}
 LOCAL_PORT=${LOCAL_PORT:-15432}
-REMOTE_DIR=${REMOTE_DIR:-/opt/tablo}
+REMOTE_DIR=${REMOTE_DIR:-/opt/hale}
 
 # shellcheck disable=SC2086
 ip=$($SSH_CMD ${SSH_OPTS:-} "$SSH_USER@$DEPLOY_HOST" \

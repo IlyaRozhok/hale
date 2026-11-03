@@ -1,7 +1,7 @@
 // Push registration logic. No native imports: the expo-notifications wiring lives in pushNative.ts.
 import type { KeyValueStore } from "./api/persist";
 
-export const PUSH_ASKED_KEY = "tablo.push-asked";
+export const PUSH_ASKED_KEY = "hale.push-asked";
 
 export interface PushDeps {
   store: KeyValueStore;

@@ -50,8 +50,8 @@ const migrationTables = readdirSync(migrationsDir).flatMap((f) =>
   [...readFileSync(join(migrationsDir, f), "utf8").matchAll(/CREATE TABLE (\w+)/g)].map((m) => m[1]!),
 );
 
-describe("tablo.cron", () => {
-  const cron = readFileSync(join(infra, "tablo.cron"), "utf8");
+describe("hale.cron", () => {
+  const cron = readFileSync(join(infra, "hale.cron"), "utf8");
   it("runs pg_dump and psql inside the postgres container, where host `postgres` resolves", () => {
     expect(cron).toMatch(/^PG_DUMP=docker compose -f \S+ exec -T postgres pg_dump$/m);
     expect(cron).toMatch(/^PSQL=docker compose -f \S+ exec -T postgres psql$/m);
@@ -76,7 +76,7 @@ describe("restore-check table list", () => {
 describe("db-tunnel.sh", () => {
   let dir: string;
   beforeAll(() => {
-    dir = mkdtempSync(join(tmpdir(), "tablo-tunnel-"));
+    dir = mkdtempSync(join(tmpdir(), "hale-tunnel-"));
   });
   afterAll(() => {
     rmSync(dir, { recursive: true, force: true });
@@ -107,7 +107,7 @@ describe.skipIf(!pgBin)("backup.sh / restore-check.sh", () => {
   let port: number;
   let n = 0;
   const bin = (t: string) => join(pgBin!, t);
-  const url = (db: string) => `postgres://tablo@127.0.0.1:${port}/${db}`;
+  const url = (db: string) => `postgres://hale@127.0.0.1:${port}/${db}`;
   const psql = (db: string, sql: string) =>
     execFileSync(bin("psql"), [url(db), "-Atqc", sql], { encoding: "utf8" }).trim();
 
@@ -140,10 +140,10 @@ describe.skipIf(!pgBin)("backup.sh / restore-check.sh", () => {
   };
 
   beforeAll(async () => {
-    dir = mkdtempSync(join(tmpdir(), "tablo-infra-"));
+    dir = mkdtempSync(join(tmpdir(), "hale-infra-"));
     port = await freePort();
     const data = join(dir, "data");
-    execFileSync(bin("initdb"), ["-D", data, "-U", "tablo", "--auth=trust", "-E", "UTF8"], {
+    execFileSync(bin("initdb"), ["-D", data, "-U", "hale", "--auth=trust", "-E", "UTF8"], {
       stdio: "ignore",
     });
     execFileSync(
@@ -219,7 +219,7 @@ describe.skipIf(!pgBin)("backup.sh / restore-check.sh", () => {
   it("deletes backups older than the retention window", () => {
     const src = makeSource(1);
     const backups = backupTo(src);
-    const old = join(backups, "tablo-20200101T000000Z.sql.gz.age");
+    const old = join(backups, "hale-20200101T000000Z.sql.gz.age");
     writeFileSync(old, "x");
     execFileSync("touch", ["-t", "202001010000", old]);
     const r = run("backup.sh", { ...baseEnv(), DATABASE_URL: url(src), BACKUP_DIR: backups });
@@ -278,7 +278,7 @@ describe.skipIf(!pgBin)("backup.sh / restore-check.sh", () => {
   it("full mode without a key fails instead of downgrading to shallow", () => {
     const backups = mkdtempSync(join(dir, "nokey-"));
     const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
-    writeFileSync(join(backups, `tablo-${stamp}.sql.gz.age`), "age-encryption.org/v1\nrest");
+    writeFileSync(join(backups, `hale-${stamp}.sql.gz.age`), "age-encryption.org/v1\nrest");
     const r = run("restore-check.sh", { PATH: process.env.PATH ?? "", BACKUP_DIR: backups });
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("full mode needs AGE_IDENTITY_FILE");
@@ -311,14 +311,14 @@ describe.skipIf(!pgBin)("backup.sh / restore-check.sh", () => {
   it("shallow mode accepts a fresh age-shaped backup and rejects a stale or plain one", () => {
     const backups = mkdtempSync(join(dir, "shallow-"));
     const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
-    const f = join(backups, `tablo-${stamp}.sql.gz.age`);
+    const f = join(backups, `hale-${stamp}.sql.gz.age`);
     const env = { PATH: process.env.PATH ?? "", BACKUP_DIR: backups };
     writeFileSync(f, "age-encryption.org/v1\nrest");
     expect(run("restore-check.sh", env, ["--shallow"]).status).toBe(0);
     writeFileSync(f, "plain sql, not encrypted");
     expect(run("restore-check.sh", env, ["--shallow"]).status).not.toBe(0);
     rmSync(f);
-    writeFileSync(join(backups, "tablo-20200101T000000Z.sql.gz.age"), "age-encryption.org/v1\nx");
+    writeFileSync(join(backups, "hale-20200101T000000Z.sql.gz.age"), "age-encryption.org/v1\nx");
     expect(run("restore-check.sh", env, ["--shallow"]).status).not.toBe(0);
   });
 });

@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Slider from "@react-native-community/slider";
-import { tokens } from "@tablo/tokens";
-import type { DailyStateDto } from "@tablo/contracts";
+import { tokens } from "@hale/tokens";
+import type { DailyStateDto } from "@hale/contracts";
 import { formatMoney, formatUsd } from "../format";
 import { useBridgePreview } from "../api/queries";
 import { Glass } from "./Glass";

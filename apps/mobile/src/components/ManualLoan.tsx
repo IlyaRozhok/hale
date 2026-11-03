@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { StyleSheet, Text } from "react-native";
-import { tokens } from "@tablo/tokens";
+import { tokens } from "@hale/tokens";
 import { useCreateLoan } from "../api/queries";
 import { isIsoDate, kyivDate, parseHryvnias } from "../format";
 import { Chip } from "./Chip";

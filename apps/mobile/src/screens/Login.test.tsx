@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
-import { tokens } from "@tablo/tokens";
+import { tokens } from "@hale/tokens";
 import { Login } from "./Login";
 import { fakeApi, renderWith } from "../testing";
 import { NetworkError, UnauthorizedError } from "../api/client";

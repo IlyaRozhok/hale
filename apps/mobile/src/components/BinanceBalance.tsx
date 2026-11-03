@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { StyleSheet, Text } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
-import { tokens } from "@tablo/tokens";
-import type { TodayDto } from "@tablo/contracts";
+import { tokens } from "@hale/tokens";
+import type { TodayDto } from "@hale/contracts";
 import { TODAY_KEY, useManualBalances, useSaveBinanceBalance } from "../api/queries";
 import { formatMoney, formatOriginal, parseBalance } from "../format";
 import { Chip } from "./Chip";

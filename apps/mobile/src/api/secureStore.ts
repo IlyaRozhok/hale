@@ -10,5 +10,5 @@ export const keychain: KeyValueStore = {
   remove: (key) => SecureStore.deleteItemAsync(key, OPTIONS),
 };
 
-export const TOKEN_KEY = "tablo.token";
-export const CACHE_KEY = "tablo.today-cache";
+export const TOKEN_KEY = "hale.token";
+export const CACHE_KEY = "hale.today-cache";

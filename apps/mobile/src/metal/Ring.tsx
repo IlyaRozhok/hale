@@ -1,7 +1,7 @@
 import { Group, Mask, Path, Skia } from "@shopify/react-native-skia";
 import { useMemo } from "react";
 import type { SharedValue } from "react-native-reanimated";
-import { tokens } from "@tablo/tokens";
+import { tokens } from "@hale/tokens";
 import { HalfResCanvas, MetalFill } from "./HalfResCanvas";
 
 type Props = { size: number; time: SharedValue<number>; level: SharedValue<number> };

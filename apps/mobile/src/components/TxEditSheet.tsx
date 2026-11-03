@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { StyleSheet, Switch, Text, View } from "react-native";
-import { tokens } from "@tablo/tokens";
-import type { TransactionDto, TransactionPatch } from "@tablo/contracts";
+import { tokens } from "@hale/tokens";
+import type { TransactionDto, TransactionPatch } from "@hale/contracts";
 import { useEditTransaction } from "../api/queries";
 import { SPEND_CATEGORIES, TYPE_CHOICES, categoryLabel, typeLabel } from "../labels";
 import { Chip } from "./Chip";

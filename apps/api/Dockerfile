@@ -6,13 +6,13 @@ WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json apps/api/
 COPY packages/contracts/package.json packages/contracts/
-RUN pnpm install --frozen-lockfile --filter @tablo/api...
+RUN pnpm install --frozen-lockfile --filter @hale/api...
 COPY tsconfig.base.json ./
 COPY apps/api apps/api
 COPY packages/contracts packages/contracts
-RUN pnpm --filter @tablo/api build
+RUN pnpm --filter @hale/api build
 # Self-contained production tree with real (non-symlinked) dependencies.
-RUN pnpm --filter @tablo/api deploy --prod /out
+RUN pnpm --filter @hale/api deploy --prod /out
 
 FROM node:22-slim
 ENV NODE_ENV=production

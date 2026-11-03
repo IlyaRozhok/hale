@@ -24,12 +24,12 @@ declare module "vitest" {
 
 /** Starts one embedded Postgres for the whole test run. */
 export default async function setup(project: TestProject) {
-  const dir = await mkdtemp(join(tmpdir(), "tablo-pg-"));
+  const dir = await mkdtemp(join(tmpdir(), "hale-pg-"));
   const port = await freePort();
   const pg = new EmbeddedPostgres({
     databaseDir: dir,
-    user: "tablo",
-    password: "tablo",
+    user: "hale",
+    password: "hale",
     port,
     persistent: false,
     onLog: () => {},
@@ -37,7 +37,7 @@ export default async function setup(project: TestProject) {
   });
   await pg.initialise();
   await pg.start();
-  project.provide("pgAdminUrl", `postgres://tablo:tablo@127.0.0.1:${port}/postgres`);
+  project.provide("pgAdminUrl", `postgres://hale:hale@127.0.0.1:${port}/postgres`);
   return async () => {
     await pg.stop();
     await rm(dir, { recursive: true, force: true });

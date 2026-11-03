@@ -17,7 +17,7 @@ import {
   type TransactionEditDto,
   type TransactionPageDto,
   transactionsQuery,
-} from "@tablo/contracts";
+} from "@hale/contracts";
 import type { z } from "zod";
 import { InvalidCursorError, TransactionsService } from "./transactions.service";
 

@@ -31,5 +31,5 @@ variable "location" {
 
 variable "name" {
   type    = string
-  default = "tablo"
+  default = "hale"
 }

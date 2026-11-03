@@ -58,10 +58,10 @@ describe("loadConfig webhook settings", () => {
     const cfg = loadConfig({
       ...valid,
       MONO_WEBHOOK_SECRET: "s".repeat(24),
-      PUBLIC_URL: "https://tablo.example.com/",
+      PUBLIC_URL: "https://hale.example.com/",
     });
     expect(cfg.MONO_WEBHOOK_SECRET).toBe("s".repeat(24));
-    expect(cfg.PUBLIC_URL).toBe("https://tablo.example.com");
+    expect(cfg.PUBLIC_URL).toBe("https://hale.example.com");
     expect(() => loadConfig({ ...valid, MONO_WEBHOOK_SECRET: "short" })).toThrow(/MONO_WEBHOOK_SECRET/);
     expect(() => loadConfig({ ...valid, PUBLIC_URL: "not a url" })).toThrow(/PUBLIC_URL/);
   });

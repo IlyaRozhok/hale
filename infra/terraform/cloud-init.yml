@@ -10,11 +10,11 @@ packages:
   - unattended-upgrades
   - postgresql-client
 write_files:
-  - path: /etc/ssh/sshd_config.d/10-tablo.conf
+  - path: /etc/ssh/sshd_config.d/10-hale.conf
     content: |
       PasswordAuthentication no
       PermitRootLogin prohibit-password
 runcmd:
   - systemctl enable --now docker cron
   - systemctl restart ssh
-  - mkdir -p /opt/tablo/infra
+  - mkdir -p /opt/hale/infra
