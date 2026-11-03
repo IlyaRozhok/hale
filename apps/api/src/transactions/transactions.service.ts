@@ -128,13 +128,17 @@ export class TransactionsService {
     };
   }
 
-  /** Totals for whole days, ignoring the cursor, so a day split across pages still adds up. */
+  /**
+   * Totals for whole days, ignoring the cursor, so a day split across pages still adds up. A day
+   * with no known hryvnia amount has no total at all rather than a misleading zero.
+   */
   private async dayTotals(dates: string[], filters: string[], args: unknown[]): Promise<Record<string, number>> {
     if (dates.length === 0) return {};
     const rows: { local_date: string; total: number }[] = await this.ds.query(
       `SELECT t.local_date::text AS local_date, COALESCE(SUM(t.amount_uah), 0)::float8 AS total ${FROM}
         WHERE ${[...filters, `t.local_date = ANY($${args.length + 1}::date[])`].join(" AND ")}
-        GROUP BY t.local_date`,
+        GROUP BY t.local_date
+       HAVING COUNT(t.amount_uah) > 0`,
       [...args, dates],
     );
     return Object.fromEntries(rows.map((r) => [r.local_date, r.total]));

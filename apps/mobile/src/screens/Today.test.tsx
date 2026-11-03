@@ -152,6 +152,28 @@ describe("Today, normal mode", () => {
 });
 
 describe("Today, questions", () => {
+  it("a question that leads to Activity closes the sheet first", async () => {
+    const onOpenActivity = jest.fn();
+    const questions = [{ id: "usdc_arrived", kind: "usdc_arrived" as const, text: "Посмотреть операцию" }];
+    await renderWith(<Today onOpenActivity={onOpenActivity} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    await openQuestions();
+    await fireEvent.press(await screen.findByText("Посмотреть операцию"));
+    expect(onOpenActivity).toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText("Посмотреть операцию")).toBeNull());
+  });
+
+  it("closing the recipient sheet returns to the question list", async () => {
+    const questions = [{ id: "recipient_label:0123456789abcdef", kind: "recipient_label" as const, text: "Кто это: Иван?" }];
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    await openQuestions();
+    await fireEvent.press(await screen.findByText("Кто это: Иван?"));
+    expect(await screen.findByText("Кто это?")).toBeTruthy();
+    const closes = screen.getAllByRole("button", { name: "Закрыть" });
+    await fireEvent.press(closes[closes.length - 1]!);
+    await waitFor(() => expect(screen.queryByText("Кто это?")).toBeNull());
+    expect(screen.getByText("Кто это: Иван?")).toBeTruthy();
+  });
+
   it("a USDC arrival is confirmed with one tap and the card goes away", async () => {
     const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions })) });
@@ -236,7 +258,6 @@ describe("Today, questions", () => {
     await openQuestions();
     await fireEvent.press(await screen.findByText("Кто это: Иван?"));
     expect(await screen.findByText("Кто это?")).toBeTruthy();
-    expect(screen.queryByText("Кто это: Иван?")).toBeNull(); // the list has closed; the sheet names the person
     expect(screen.getByText("Иван")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Разово" }));
     await waitFor(() => expect(api.labelRecipient).toHaveBeenCalledWith("0123456789abcdef", "one_off"));
@@ -282,7 +303,7 @@ describe("Today, decision rows", () => {
     expect(await screen.findByText("План до зарплаты: ₴450 в день")).toBeTruthy();
   });
 
-  it("closes the question list before opening a recipient's label sheet", async () => {
+  it("keeps the other questions under a recipient's label sheet", async () => {
     const questions = [
       { id: "recipient_label:0123456789abcdef", kind: "recipient_label" as const, text: "Кто это: Иван?" },
       { id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" },
@@ -291,7 +312,7 @@ describe("Today, decision rows", () => {
     await openQuestions();
     await fireEvent.press(await screen.findByText("Кто это: Иван?"));
     expect(await screen.findByText("Кто это?")).toBeTruthy();
-    expect(screen.queryByText("Пришло на Binance?")).toBeNull();
+    expect(screen.getByText("Пришло на Binance?")).toBeTruthy();
   });
 });
 
@@ -318,7 +339,7 @@ describe("Today, bridge", () => {
   it("with no limit yet, asks to confirm the plan instead of saying the limit was used", async () => {
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state: { ...bridgeState(), dailyLimit: 0, leftToday: 0 } })) }));
     await openBridge();
-    expect(await screen.findByText("Лимит появится, когда вы подтвердите план ниже.")).toBeTruthy();
+    expect(await screen.findByText("Лимит появится, когда вы подтвердите план.")).toBeTruthy();
     expect(screen.queryByText(/использован/)).toBeNull();
     expect(screen.queryByText(/на день$/)).toBeNull();
   });
@@ -446,6 +467,13 @@ describe("Today, accessibility and old data", () => {
     const now = () => new Date("2026-11-02T10:00:00Z");
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} now={now} />, api, client);
     expect(await screen.findByText("Показаны данные за 01.11, не за сегодня.")).toBeTruthy();
+  });
+
+  it("settings stay reachable when the first load fails", async () => {
+    const api = fakeApi({ today: jest.fn(async () => { throw new Error("offline"); }) });
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await screen.findByText(/Не получилось загрузить данные/);
+    expect(screen.getByRole("button", { name: "Настройки" })).toBeTruthy();
   });
 
   it("shows no earlier-day note for today's data", async () => {

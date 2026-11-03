@@ -100,7 +100,7 @@ const goalShape = {
   name: z.string().trim().min(1).max(100),
   target_cents: money.positive(),
   saved_cents: money.nonnegative(),
-  sort: z.number().int(),
+  sort: z.number().int().min(0).max(1_000_000),
 };
 export const goalInput = z
   .object({ name: goalShape.name, target_cents: goalShape.target_cents, saved_cents: goalShape.saved_cents.optional(), sort: goalShape.sort.optional() })

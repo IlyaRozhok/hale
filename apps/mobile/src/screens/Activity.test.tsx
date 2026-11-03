@@ -109,6 +109,12 @@ describe("Activity list", () => {
     expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, needsLabel: true });
   });
 
+  it("limits the search field to what the server accepts", async () => {
+    await renderWith(<Activity />, fakeApi({ transactions: page() }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Поиск" }));
+    expect(screen.getByLabelText("Поиск по операциям").props.maxLength).toBe(100);
+  });
+
   it("searches 300 ms after typing stops and clears when the field is closed", async () => {
     jest.useFakeTimers();
     try {

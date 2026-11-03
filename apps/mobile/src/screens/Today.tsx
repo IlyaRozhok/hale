@@ -70,11 +70,25 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
 
   const data = today.data;
   const top = insets.top + space.lg;
+  const closeSheet = () => setSheet(null);
+  /** Closes the sheet only if it is still the one open: a late answer must not close another. */
+  const closeIfOpen = (name: "bridge" | "questions") => setSheet((s) => (s === name ? null : s));
+  const settingsButton = (
+    <Pressable accessibilityRole="button" accessibilityLabel="Настройки" onPress={() => setSheet("settings")} style={styles.profile}>
+      <Icon name="user" color={color.fg.muted} size={20} />
+    </Pressable>
+  );
+  const settingsModal = sheet === "settings" && (
+    <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={closeSheet}>
+      <Settings onClose={closeSheet} />
+    </Modal>
+  );
 
   if (!data) {
     return (
       <View style={styles.root}>
         <View style={[styles.content, { paddingTop: top }]}>
+          <View style={styles.headerEnd}>{settingsButton}</View>
           {today.isError ? (
             <Glass style={styles.stack}>
               <Text style={styles.body}>Не получилось загрузить данные. Проверьте связь и попробуйте ещё раз.</Text>
@@ -86,6 +100,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
             <TodaySkeleton />
           )}
         </View>
+        {settingsModal}
       </View>
     );
   }
@@ -96,21 +111,20 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
   const offlineSince = today.isError ? today.dataUpdatedAt : null;
   const questions = data.questions.filter((q) => !answered.has(q.id));
   const hasLimit = state.dailyLimit > 0;
-  const noLimitNote = state.mode === "bridge" ? "Лимит появится, когда вы подтвердите план ниже." : "До следующего дохода свободных денег нет.";
+  const noLimitNote = state.mode === "bridge" ? "Лимит появится, когда вы подтвердите план." : "До следующего дохода свободных денег нет.";
 
   const answer = (id: string, run: () => Promise<unknown>) => {
     const last = questions.length <= 1;
     hide(id, true);
     run().then(
       () => {
-        if (last) setSheet(null);
+        if (last) closeIfOpen("questions");
       },
       () => hide(id, false),
     );
   };
 
   const goals = data.goals ?? [];
-  const closeSheet = () => setSheet(null);
 
   return (
     <View style={styles.root}>
@@ -121,9 +135,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
       >
         <View style={styles.header}>
           <Text style={styles.date}>{longDate(data.date)}</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Настройки" onPress={() => setSheet("settings")} style={styles.profile}>
-            <Icon name="user" color={color.fg.muted} size={20} />
-          </Pressable>
+          {settingsButton}
         </View>
         <StaleBanner lines={freshnessLines(data, offlineSince, now())} />
         <View style={styles.hero}>
@@ -169,7 +181,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
             state={state}
             usdRate={data.usdRate}
             confirming={chooseBridge.isPending}
-            onConfirm={(amount) => chooseBridge.mutate(amount, { onSuccess: closeSheet })}
+            onConfirm={(amount) => chooseBridge.mutate(amount, { onSuccess: () => closeIfOpen("bridge") })}
           />
         </Sheet>
       )}
@@ -180,39 +192,36 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
               key={q.id}
               question={q}
               today={data.date}
-              onOpenActivity={onOpenActivity}
-              onLabelRecipient={(counterKey) => {
-                // Two modals cannot stack: the list closes before the label sheet opens.
-                setSheet(null);
-                setLabeling({ id: q.id, counterKey, name: q.text.replace(/^Кто это:\s*/, "").replace(/\?$/, "") });
+              onOpenActivity={() => {
+                closeSheet();
+                onOpenActivity();
               }}
+              onLabelRecipient={(counterKey) => setLabeling({ id: q.id, counterKey, name: q.text.replace(/^Кто это:\s*/, "").replace(/\?$/, "") })}
               onConfirmUsdc={(eventId) => answer(q.id, () => confirmIncome.mutateAsync(eventId))}
               onMatchUsdc={(eventId, transactionId) => answer(q.id, () => matchUsdc.mutateAsync({ eventId, transactionId }))}
               onDismissUsdc={(transactionId) => answer(q.id, () => dismissUsdc.mutateAsync(transactionId))}
               onSetDate={(eventId, date) => answer(q.id, () => setIncomeDate.mutateAsync({ eventId, date }))}
             />
           ))}
+          {/* Inside the list's modal: iOS presents it on top, and closing it returns to the list. */}
+          {labeling && (
+            <RecipientLabelSheet
+              counterKey={labeling.counterKey}
+              name={labeling.name}
+              onClose={() => setLabeling(null)}
+              onLabeled={() => hide(labeling.id, true)}
+            />
+          )}
         </Sheet>
       )}
-      {sheet === "settings" && (
-        <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={closeSheet}>
-          <Settings onClose={closeSheet} />
-        </Modal>
-      )}
-      {labeling && (
-        <RecipientLabelSheet
-          counterKey={labeling.counterKey}
-          name={labeling.name}
-          onClose={() => setLabeling(null)}
-          onLabeled={() => hide(labeling.id, true)}
-        />
-      )}
+      {settingsModal}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: color.surface.base },
+  headerEnd: { alignItems: "flex-end" },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md },
   date: { ...type.label, color: color.fg.default, flexShrink: 1 },
   profile: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: color.surface.inset },

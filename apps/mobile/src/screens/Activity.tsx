@@ -75,7 +75,7 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
           <Icon name={searching ? "close" : "search"} color={color.fg.muted} size={20} />
         </Pressable>
       </View>
-      {searching && <Field label="Поиск по операциям" value={text} onChangeText={setText} autoFocus returnKeyType="search" />}
+      {searching && <Field label="Поиск по операциям" value={text} onChangeText={setText} maxLength={100} autoFocus returnKeyType="search" />}
       <View style={styles.filters}>
         {TABS.map((t) => (
           <Chip key={t.tab} label={t.label} selected={tab === t.tab} onPress={() => setTab(t.tab)} />

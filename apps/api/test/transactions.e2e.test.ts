@@ -149,6 +149,14 @@ describe("GET /transactions", () => {
     expect(all.body.dayTotals).toEqual({ "2026-11-10": -9700 });
   });
 
+  it("dayTotals leaves out a day whose rows all have no known rate, instead of showing zero", async () => {
+    const a = await account();
+    await tx(a, { at: "2026-11-10T08:00:00.000Z", amount: -5000, amountUah: null });
+    const page = await api.get("/transactions?group=spend").expect(200);
+    expect(page.body.items).toHaveLength(1);
+    expect(page.body.dayTotals).toEqual({});
+  });
+
   it("dayTotals is empty for an empty page", async () => {
     const page = await api.get("/transactions?group=spend").expect(200);
     expect(page.body).toMatchObject({ items: [], dayTotals: {}, nextCursor: null });
