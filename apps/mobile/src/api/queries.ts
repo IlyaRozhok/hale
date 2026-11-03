@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LoanInput, RecipientLabelName, ScheduledPaymentInput, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
+import type { LoanInput, LoanRepayInput, RecipientLabelName, ScheduledPaymentInput, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
 import type { GoalInput, GoalPatch } from "@hale/contracts";
 import type { TransactionsFilter } from "./client";
 import { useApi } from "./context";
@@ -12,6 +12,7 @@ export const SETTINGS_KEY = ["settings"] as const;
 export const PAYMENTS_KEY = ["payments"] as const;
 export const CAP_PREVIEW_KEY = ["cap-preview"] as const;
 export const MANUAL_BALANCES_KEY = ["manual-balances"] as const;
+export const LOANS_KEY = ["loans"] as const;
 /** Debounce between the last slider move and the preview request. */
 export const PREVIEW_DELAY_MS = 300;
 
@@ -225,22 +226,38 @@ export function useMarkPaid() {
   });
 }
 
-export function useCreateLoan() {
+export function useLoanHistory() {
   const api = useApi();
+  return useQuery({ queryKey: LOANS_KEY, queryFn: () => api.loanHistory() });
+}
+
+/** A loan change shows on Today, in the loan history and in what the limit preview leaves. */
+function useLoanMutation<V>(mutationFn: (vars: V) => Promise<unknown>) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: LoanInput) => api.createLoan(input),
-    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: TODAY_KEY }), client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY })]),
+    mutationFn,
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: TODAY_KEY }),
+        client.invalidateQueries({ queryKey: LOANS_KEY }),
+        client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY }),
+      ]),
   });
+}
+
+export function useCreateLoan() {
+  const api = useApi();
+  return useLoanMutation((input: LoanInput) => api.createLoan(input));
 }
 
 export function useDeleteLoan() {
   const api = useApi();
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (id: number) => api.deleteLoan(id),
-    onSuccess: () => client.invalidateQueries({ queryKey: TODAY_KEY }),
-  });
+  return useLoanMutation((id: number) => api.deleteLoan(id));
+}
+
+export function useRepayLoan() {
+  const api = useApi();
+  return useLoanMutation(({ id, input }: { id: number; input: LoanRepayInput }) => api.repayLoan(id, input));
 }
 
 export function useGoals() {

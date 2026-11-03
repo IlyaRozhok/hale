@@ -1,7 +1,7 @@
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { DataSource as DS, type DataSource } from "typeorm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import { PlanService } from "../src/plan/plan.service";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
@@ -232,6 +232,111 @@ describe("tax quarter on payments", () => {
       );
     await add();
     await expect(add()).rejects.toThrow(/scheduled_payments_estimate_uq/);
+  });
+});
+
+describe("repaying and reviewing loans", () => {
+  beforeEach(() => ds.query(`UPDATE settings SET tracking_start='2026-01-01'`));
+  afterEach(() => ds.query(`UPDATE settings SET tracking_start=CURRENT_DATE`));
+
+  const manual = async (amount: number, received_on = "2026-11-01", note = "друг") =>
+    (await api.post("/plan/loans", { amount, received_on, note }).expect(201)).body.id as number;
+  const history = async () => (await api.get("/plan/loans/history").expect(200)).body;
+  const bank = async (amount: number, description = "Кредит готівкою", date = "2026-11-02", kind = "other") => {
+    const a = await account("black");
+    const t = await tx(a, { amount, description, date });
+    return (await row(
+      `INSERT INTO loans (amount, received_on, source_transaction_id, note, kind) VALUES ($1,$2,$3,'loan_in',$4) RETURNING id`,
+      [amount, date, t, kind],
+    )).id as number;
+  };
+
+  it("validates the repayment", async () => {
+    const id = await manual(100_000);
+    await api.post(`/plan/loans/${id}/repay`, { amount: 0, date: "2026-11-02" }).expect(400);
+    await api.post(`/plan/loans/${id}/repay`, { amount: 100, date: "02.11.2026" }).expect(400);
+    await api.post(`/plan/loans/999/repay`, { amount: 100, date: "2026-11-02" }).expect(404);
+    await api.post(`/plan/loans/${id}/repay`, { amount: 100, date: "2026-10-31" }).expect(422);
+    await api.post(`/plan/loans/${id}/repay`, { amount: 100, date: "2099-01-01" }).expect(422);
+  });
+
+  it("the full amount closes the loan, on the given date, in the Kyiv day", async () => {
+    const id = await manual(100_000);
+    await api.post(`/plan/loans/${id}/repay`, { amount: 100_000, date: "2026-11-02" }).expect(201);
+    const h = await history();
+    expect(h.open).toEqual([]);
+    expect(h.repaid).toEqual([
+      expect.objectContaining({ id, amount: 100_000, remaining: 0, repaidAmount: 100_000, repaidOn: "2026-11-02", serviceCost: 0, title: "друг", manual: true }),
+    ]);
+    await api.post(`/plan/loans/${id}/repay`, { amount: 100, date: "2026-11-02" }).expect(409);
+  });
+
+  it("less than what is owed keeps the loan open with the rest still owed", async () => {
+    const id = await manual(100_000);
+    await api.post(`/plan/loans/${id}/repay`, { amount: 30_000, date: "2026-11-02" }).expect(201);
+    const h = await history();
+    expect(h.repaid).toEqual([]);
+    expect(h.open[0]).toMatchObject({ id, remaining: 70_000, repaidAmount: 30_000, repaidOn: null });
+    await api.post(`/plan/loans/${id}/repay`, { amount: 70_000, date: "2026-11-02" }).expect(201);
+    expect((await history()).repaid[0]).toMatchObject({ id, repaidOn: "2026-11-02", remaining: 0 });
+  });
+
+  it("more than what is owed counts the excess as the cost of the loan", async () => {
+    const id = await manual(100_000);
+    await api.post(`/plan/loans/${id}/repay`, { amount: 115_000, date: "2026-11-02" }).expect(201);
+    const h = await history();
+    expect(h.repaid[0]).toMatchObject({ repaidAmount: 100_000, serviceCost: 15_000 });
+    expect(h.stats).toEqual({ borrowed: 100_000, repaid: 100_000, serviceCost: 15_000, stillOpen: 0 });
+  });
+
+  it("a bank loan can be repaid but not deleted, and is titled by its bank row", async () => {
+    const id = await bank(300_000);
+    await api.post(`/plan/loans/${id}/repay`, { amount: 300_000, date: "2026-11-03" }).expect(201);
+    await api.del(`/plan/loans/${id}`).expect(409);
+    expect((await history()).repaid[0]).toMatchObject({ id, title: "Кредит готівкою", manual: false });
+  });
+
+  it("marking a loan repaid or deleting a mistaken one gives the day a fresh limit", async () => {
+    const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv" }).format(new Date());
+    const snapshot = () => ds.query(`INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1, 1, 'normal') ON CONFLICT (local_date) DO UPDATE SET daily_limit=1`, [date]);
+    const has = async () => (await ds.query(`SELECT 1 FROM daily_snapshots WHERE local_date=$1`, [date])).length;
+    const paid = await manual(100_000);
+    const wrong = await manual(1_000);
+    await snapshot();
+    await api.post(`/plan/loans/${paid}/repay`, { amount: 100_000, date: "2026-11-02" }).expect(201);
+    expect(await has()).toBe(0);
+    await snapshot();
+    await api.del(`/plan/loans/${wrong}`).expect(200);
+    expect(await has()).toBe(0);
+  });
+
+  it("separates loans from before tracking began: not owed in the limit, still reviewable", async () => {
+    await ds.query(`UPDATE settings SET tracking_start='2026-11-01'`);
+    const old = await manual(50_000, "2026-09-01");
+    const current = await manual(70_000, "2026-11-02");
+    const h = await history();
+    expect(h.old.map((l: { id: number }) => l.id)).toEqual([old]);
+    expect(h.open.map((l: { id: number }) => l.id)).toEqual([current]);
+    expect(h.stats).toMatchObject({ borrowed: 120_000, stillOpen: 70_000 });
+  });
+
+  it("the cost of loans is interest, penalties, gateway fees and lender repayments beyond the principal", async () => {
+    await bank(100_000, "Кредит До завтра на 9 днів", "2026-11-01", "short");
+    const a = await account("black");
+    const repay = await tx(a, { amount: -112_000, description: "Погашення Кредит До завтра на 9 днів", date: "2026-11-02" });
+    const interest = await tx(a, { amount: -3_000, description: "Списання відсотків за жовтень", date: "2026-11-02" });
+    const penalty = await tx(a, { amount: -500, description: "Штраф за порушення погашення заборгованості", date: "2026-11-02" });
+    const fee = await tx(a, { amount: -2_000, description: "Platon*pgid_commission", date: "2026-11-02" });
+    const installment = await tx(a, { amount: -40_000, description: "Платіж розстрочки", date: "2026-11-02" });
+    await reclassify([repay, interest, penalty, fee, installment]);
+    expect((await history()).stats).toEqual({ borrowed: 100_000, repaid: 100_000, serviceCost: 17_500, stillOpen: 0 });
+  });
+
+  it("a lender payment that the owner retyped is not a loan cost", async () => {
+    const a = await account("black");
+    await tx(a, { amount: -2_000, description: "Platon*pgid_commission", date: "2026-11-02" });
+    await ds.query(`UPDATE transactions SET type='spend', type_source='owner'`);
+    expect((await history()).stats.serviceCost).toBe(0);
   });
 });
 

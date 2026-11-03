@@ -94,6 +94,40 @@ export const loanInput = z
   .strict();
 export const loanPatch = partial(z.object(loanShape));
 export type LoanInput = z.infer<typeof loanInput>;
+export const loanRepayInput = z.object({ amount: money.positive(), date: isoDate }).strict();
+export type LoanRepayInput = z.infer<typeof loanRepayInput>;
+
+export interface LoanRowDto {
+  id: number;
+  amount: number;
+  /** What is still owed. */
+  remaining: number;
+  receivedOn: string;
+  /** Set once the loan is fully repaid. */
+  repaidOn: string | null;
+  repaidAmount: number;
+  /** Paid on this loan beyond its principal. */
+  serviceCost: number;
+  /** The owner's note, or the bank's text for a loan from a bank row. */
+  title: string | null;
+  /** Entered by hand, so it can be deleted. */
+  manual: boolean;
+}
+
+export interface LoanHistoryDto {
+  stats: {
+    borrowed: number;
+    repaid: number;
+    /** Interest, penalties, fees and payments beyond the principal. */
+    serviceCost: number;
+    /** Still owed on loans inside the tracked period. */
+    stillOpen: number;
+  };
+  open: LoanRowDto[];
+  /** Taken before tracking began with no repayment on record: not in the limit. */
+  old: LoanRowDto[];
+  repaid: LoanRowDto[];
+}
 
 // --- goals ------------------------------------------------------------------
 const goalShape = {
@@ -259,6 +293,8 @@ export interface TodayDto {
     text: string;
     /** Set on a loan entered by hand, which the owner may remove; a loan from the bank has none. */
     removableLoanId?: number;
+    /** Set on an open loan: it can be marked repaid. */
+    repayLoan?: { id: number; remaining: number };
   }[];
   runOutOn: string | null;
   /** Last successful contact with the bank (webhook item, reconcile or balance refresh), null if there was none yet. */

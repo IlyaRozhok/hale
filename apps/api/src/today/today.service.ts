@@ -539,11 +539,12 @@ export class TodayService {
     const badCases: TodayDto["badCases"] = [];
     const runOutOn = runOutDate({ free: state.free, avgDailySpend: f.avgDailySpend, today: f.date });
     for (const l of f.loans) {
-      const fact = `Займ ${fmt(l.amount)} от ${fmtDay(l.received_on)}`;
+      const fact = `Займ ${fmt(l.amount)} от ${fmtDay(l.received_on)}${l.remaining < l.amount ? `, осталось ${fmt(l.remaining)}` : ""}`;
+      const repayLoan = { id: l.id, remaining: l.remaining };
       badCases.push(
         l.manual
-          ? { id: `loan:${l.id}`, text: fact, removableLoanId: l.id }
-          : { id: `loan:${l.id}`, text: `${fact}${runOutOn ? `.${runOutText(runOutOn, f.date)}` : ""}` },
+          ? { id: `loan:${l.id}`, text: fact, removableLoanId: l.id, repayLoan }
+          : { id: `loan:${l.id}`, text: `${fact}${runOutOn ? `.${runOutText(runOutOn, f.date)}` : ""}`, repayLoan },
       );
     }
     if (state.bridge?.overPlan && plan) {

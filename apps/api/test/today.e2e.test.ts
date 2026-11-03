@@ -284,6 +284,17 @@ describe("borrowed", () => {
     expect(r.badCases[1].removableLoanId).toBeUndefined();
     for (const b of r.badCases) expect(b.text).not.toMatch(/не хватало/);
   });
+
+  it("offers repaying any open loan, and shows what is still owed after a part was repaid", async () => {
+    const card = await account("black", 1_000_000);
+    await income("fop", "2026-11-12");
+    const bank = await tx(card, 200_000, "loan_in", { date: "2026-11-01" });
+    await ds.query(`INSERT INTO loans (amount, received_on, source_transaction_id, repaid_amount) VALUES (500000, '2026-11-01', $1, 200000)`, [bank]);
+    const id = (await ds.query(`SELECT id FROM loans`))[0].id as number;
+    const r = await today();
+    expect(r.badCases[0].repayLoan).toEqual({ id, remaining: 300_000 });
+    expect(r.badCases[0].text).toMatch(/^Займ ₴5,000 от 01\.11, осталось ₴3,000/);
+  });
 });
 
 describe("loan tracking", () => {

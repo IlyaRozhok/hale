@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { render } from "@testing-library/react-native";
-import type { GoalDto, ManualBalanceDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@hale/contracts";
+import type { GoalDto, LoanHistoryDto, LoanRowDto, ManualBalanceDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@hale/contracts";
 import { ApiProvider } from "./api/context";
 import type { Api } from "./api/client";
 
@@ -73,6 +73,14 @@ export function balanceFixture(over: Partial<ManualBalanceDto> = {}): ManualBala
   return { id: 7, name: "Binance", amount: 270_000, currency: "USD", counts_as_own: true, ...over };
 }
 
+export function loanFixture(over: Partial<LoanRowDto> = {}): LoanRowDto {
+  return { id: 7, amount: 500_000, remaining: 500_000, receivedOn: "2026-11-01", repaidOn: null, repaidAmount: 0, serviceCost: 0, title: "Друг", manual: true, ...over };
+}
+
+export function loanHistoryFixture(over: Partial<LoanHistoryDto> = {}): LoanHistoryDto {
+  return { stats: { borrowed: 0, repaid: 0, serviceCost: 0, stillOpen: 0 }, open: [], old: [], repaid: [], ...over };
+}
+
 export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock } {
   return {
     login: jest.fn(async () => "token"),
@@ -98,6 +106,8 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     markPaid: jest.fn(async () => undefined),
     createLoan: jest.fn(async () => undefined),
     deleteLoan: jest.fn(async () => undefined),
+    repayLoan: jest.fn(async () => undefined),
+    loanHistory: jest.fn(async () => loanHistoryFixture()),
     registerPushToken: jest.fn(async () => undefined),
     goals: jest.fn(async () => []),
     createGoal: jest.fn(async () => goalFixture()),

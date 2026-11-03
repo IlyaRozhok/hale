@@ -3,7 +3,9 @@ import type {
   GoalDto,
   GoalInput,
   GoalPatch,
+  LoanHistoryDto,
   LoanInput,
+  LoanRepayInput,
   ManualBalanceDto,
   ManualBalanceInput,
   RecipientLabelName,
@@ -69,6 +71,8 @@ export interface Api {
   markPaid(id: number): Promise<void>;
   createLoan(input: LoanInput): Promise<void>;
   deleteLoan(id: number): Promise<void>;
+  repayLoan(id: number, input: LoanRepayInput): Promise<void>;
+  loanHistory(): Promise<LoanHistoryDto>;
   registerPushToken(token: string): Promise<void>;
   goals(): Promise<GoalDto[]>;
   createGoal(input: GoalInput): Promise<GoalDto>;
@@ -146,6 +150,8 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     markPaid: async (id) => void (await request("POST", `/plan/payments/${id}/mark-paid`)),
     createLoan: async (input) => void (await request("POST", "/plan/loans", input)),
     deleteLoan: async (id) => void (await request("DELETE", `/plan/loans/${id}`)),
+    repayLoan: async (id, input) => void (await request("POST", `/plan/loans/${id}/repay`, input)),
+    loanHistory: () => request("GET", "/plan/loans/history"),
     registerPushToken: async (token) => void (await request("POST", "/devices/push-token", { token })),
   };
 }

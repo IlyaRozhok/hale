@@ -15,6 +15,7 @@ import { Icon } from "../components/Icon";
 import { LAYOUT } from "../components/layout";
 import { QuestionCard, eventIdOf } from "../components/QuestionCard";
 import { RecipientLabelSheet } from "../components/RecipientLabelSheet";
+import { RepayLoanSheet } from "../components/RepayLoanSheet";
 import { Sheet } from "../components/Sheet";
 import { StaleBanner } from "../components/StaleBanner";
 import { TodaySkeleton } from "../components/TodaySkeleton";
@@ -63,6 +64,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
   const [sheet, setSheet] = useState<"bridge" | "questions" | "settings" | null>(null);
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
+  const [repaying, setRepaying] = useState<{ id: number; remaining: number; name: string } | null>(null);
 
   const hide = (id: string, on: boolean) =>
     setAnswered((prev) => {
@@ -190,7 +192,8 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
           <BadCaseCard
             key={b.id}
             text={b.text}
-            onRemove={b.removableLoanId === undefined ? undefined : () => deleteLoan.mutate(b.removableLoanId!, { onError: () => Alert.alert("Не удалось убрать займ", "Проверьте связь и попробуйте ещё раз.") })}
+            onRepay={b.repayLoan && (() => setRepaying({ ...b.repayLoan!, name: b.text }))}
+            onDelete={b.removableLoanId === undefined ? undefined : () => deleteLoan.mutate(b.removableLoanId!, { onError: () => Alert.alert("Не удалось удалить займ", "Проверьте связь и попробуйте ещё раз.") })}
           />
         ))}
 
@@ -241,6 +244,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
           )}
         </Sheet>
       )}
+      {repaying && <RepayLoanSheet loanId={repaying.id} remaining={repaying.remaining} name={repaying.name} onClose={() => setRepaying(null)} />}
       {settingsModal}
     </View>
   );

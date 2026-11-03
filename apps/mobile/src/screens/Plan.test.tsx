@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Alert, StyleSheet } from "react-native";
 import { Plan } from "./Plan";
 import { Today } from "./Today";
-import { balanceFixture, fakeApi, goalFixture, makeClient, renderWith, taxFixture, todayFixture } from "../testing";
+import { balanceFixture, fakeApi, goalFixture, loanFixture, loanHistoryFixture, makeClient, renderWith, taxFixture, todayFixture } from "../testing";
 import { NetworkError } from "../api/client";
 import { TODAY_KEY } from "../api/queries";
 
@@ -23,6 +23,66 @@ describe("Plan, money", () => {
     expect(screen.getByText("Кредитные")).toBeTruthy();
     expect(screen.getByText("₴30,000")).toBeTruthy();
     expect(screen.queryByText("₴40,325")).toBeNull();
+  });
+});
+
+describe("Plan, loans", () => {
+  const history = () =>
+    loanHistoryFixture({
+      stats: { borrowed: 2_000_000, repaid: 1_500_000, serviceCost: 120_000, stillOpen: 500_000 },
+      open: [loanFixture()],
+      old: [loanFixture({ id: 8, title: "Розстрочка на картку", manual: false, amount: 300_000, remaining: 300_000, receivedOn: "2026-03-01" })],
+      repaid: [loanFixture({ id: 9, title: "Кредит До завтра", manual: false, remaining: 0, repaidOn: "2026-10-20", repaidAmount: 500_000, serviceCost: 20_000, receivedOn: "2026-10-10" })],
+    });
+  const open = async (api: ReturnType<typeof fakeApi>) => {
+    await renderWith(<Plan />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Займы" }));
+  };
+
+  it("shows how much was borrowed, returned and spent on servicing, with open and repaid loans", async () => {
+    await open(fakeApi({ loanHistory: jest.fn(async () => history()) }));
+    expect(await screen.findByText("Взято")).toBeTruthy();
+    expect(screen.getByText("₴20,000")).toBeTruthy();
+    expect(screen.getByText("Возвращено")).toBeTruthy();
+    expect(screen.getByText("₴15,000")).toBeTruthy();
+    expect(screen.getByText("На обслуживание")).toBeTruthy();
+    expect(screen.getByText("₴1,200")).toBeTruthy();
+    expect(screen.getByText("Открытые")).toBeTruthy();
+    expect(screen.getByText("Друг")).toBeTruthy();
+    expect(screen.getByText("До начала учёта")).toBeTruthy();
+    expect(screen.getByText("Погашенные")).toBeTruthy();
+    expect(screen.getByText("₴5,000 от 10.10, погашен 20.10, ещё ₴200 на обслуживание")).toBeTruthy();
+  });
+
+  it("only a loan entered by hand can be deleted; only an unpaid one can be repaid", async () => {
+    await open(fakeApi({ loanHistory: jest.fn(async () => history()) }));
+    await screen.findByText("Взято");
+    expect(screen.getByRole("button", { name: "Погасил: Друг" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Удалить: Друг" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Погасил: Розстрочка на картку" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Удалить: Розстрочка на картку" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Погасил: Кредит До завтра" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Удалить: Кредит До завтра" })).toBeNull();
+  });
+
+  it("repaying from the list refreshes it", async () => {
+    const api = fakeApi({ loanHistory: jest.fn(async () => history()) });
+    await open(api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Друг" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(api.repayLoan).toHaveBeenCalledWith(7, expect.objectContaining({ amount: 500_000 })));
+    await waitFor(() => expect(api.loanHistory).toHaveBeenCalledTimes(2));
+  });
+
+  it("offers a retry when the history does not load, and says when there are no loans", async () => {
+    const loanHistory = jest.fn(async (): Promise<ReturnType<typeof history>> => {
+      throw new NetworkError();
+    });
+    const api = fakeApi({ loanHistory });
+    await open(api);
+    loanHistory.mockImplementation(async () => loanHistoryFixture());
+    await fireEvent.press(await screen.findByRole("button", { name: "Повторить" }));
+    expect(await screen.findByText("Займов пока нет.")).toBeTruthy();
   });
 });
 

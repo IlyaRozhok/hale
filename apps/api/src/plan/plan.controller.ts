@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   Body,
-  ConflictException,
   Controller,
   Delete,
   Get,
@@ -21,6 +20,7 @@ import {
   incomeDateInput,
   loanInput,
   loanPatch,
+  loanRepayInput,
   manualBalanceInput,
   manualBalancePatch,
   matchTransactionInput,
@@ -33,6 +33,7 @@ import {
 import { DataSource, type ObjectLiteral, type Repository } from "typeorm";
 import type { z } from "zod";
 import { ExpectedIncome, Goal, Loan, ManualBalance, RecurringPayment, ScheduledPayment, Settings } from "../db/entities";
+import { LoansService } from "./loans.service";
 import { PlanService } from "./plan.service";
 
 function parse<S extends z.ZodType>(schema: S, body: unknown): z.infer<S> {
@@ -63,6 +64,7 @@ export class PlanController {
   constructor(
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(PlanService) private readonly plan: PlanService,
+    @Inject(LoansService) private readonly loans: LoansService,
   ) {}
 
   // --- expected incomes -----------------------------------------------------
@@ -218,13 +220,19 @@ export class PlanController {
     return badCase(await patchRow(this.ds.getRepository(Loan), id, patch));
   }
 
+  @Get("loans/history")
+  loanHistory() {
+    return this.loans.history();
+  }
+
+  @Post("loans/:id/repay")
+  repayLoan(@Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
+    return this.loans.repay(id, parse(loanRepayInput, body));
+  }
+
   @Delete("loans/:id")
-  async deleteLoan(@Param("id", ParseIntPipe) id: number) {
-    const repo = this.ds.getRepository(Loan);
-    const loan = await repo.findOneBy({ id });
-    // A loan from a bank row would come back with the next sync.
-    if (loan?.source_transaction_id != null) throw new ConflictException("loan comes from a bank operation");
-    return removeRow(repo, id);
+  deleteLoan(@Param("id", ParseIntPipe) id: number) {
+    return this.loans.remove(id);
   }
 
   // --- manual balances ------------------------------------------------------
