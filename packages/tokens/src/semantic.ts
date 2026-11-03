@@ -70,8 +70,8 @@ export const type = {
   display: { fontSize: 34, lineHeight: 40, fontWeight: "700" },
 } as const;
 
-/** The liquid metal: a quarter of the pixels (it is soft), how fast the level moves, the pose when motion is reduced. */
-export const metal = { renderScale: 2, levelTau: 0.35, stillTime: 4 } as const;
+/** The liquid metal: a quarter of the pixels (it is soft), how fast the level moves, the pose when motion is reduced, widths of thin metal edges. */
+export const metal = { renderScale: 2, levelTau: 0.35, stillTime: 4, edge: 1.5, edgeToday: 2.5 } as const;
 
 /** Minimum touch target in points (Apple HIG). */
 export const touchMin = 44;

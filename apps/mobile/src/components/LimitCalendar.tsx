@@ -3,12 +3,17 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { CalendarDayDto } from "@hale/contracts";
 import { useCalendar } from "../api/queries";
+import { dayEdges } from "../calendarLayout";
+import { MetalEdges } from "../metal/MetalEdges";
 import { dateLabel, formatMoney, monthGrid, monthTitle, streakLabel } from "../format";
 import { ErrorText } from "./ErrorText";
 import { PrimaryButton } from "./PrimaryButton";
 import { Sheet } from "./Sheet";
 
 const { color, radius, space, touchMin, type } = tokens;
+
+/** Half the gap between days. */
+const INSET = 2;
 
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
@@ -46,8 +51,10 @@ export function LimitCalendar({ today, streak, onClose }: { today: string; strea
   const thisMonth = today.slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
   const [picked, setPicked] = useState<CalendarDayDto | null>(null);
+  const [gridWidth, setGridWidth] = useState(0);
   const calendar = useCalendar(month);
   const byDate = new Map((calendar.data?.month === month ? calendar.data.days : []).map((d) => [d.date, d]));
+  const grid = monthGrid(Number(month.slice(0, 4)), Number(month.slice(5, 7)));
   const go = (by: number) => {
     setPicked(null);
     setMonth(shiftMonth(month, by));
@@ -66,22 +73,32 @@ export function LimitCalendar({ today, streak, onClose }: { today: string; strea
           <PrimaryButton label="Повторить" onPress={() => void calendar.refetch()} />
         </>
       ) : (
-        <View style={styles.grid}>
-          {WEEKDAYS.map((d) => (
-            <Text key={d} style={styles.weekday}>{d}</Text>
-          ))}
-          {monthGrid(Number(month.slice(0, 4)), Number(month.slice(5, 7))).map((date, i) => {
-            const day = date ? byDate.get(date) : undefined;
-            if (!date || !day) {
-              return (
-                <View key={date ?? `blank-${i}`} style={styles.slot}>
-                  {date ? <Text style={styles.future}>{Number(date.slice(8))}</Text> : null}
-                </View>
-              );
-            }
-            return <Day key={date} day={day} onPress={() => setPicked(day)} />;
-          })}
-        </View>
+        <>
+          <View style={styles.row}>
+            {WEEKDAYS.map((d) => (
+              <Text key={d} style={styles.weekday}>{d}</Text>
+            ))}
+          </View>
+          <View style={styles.row} onLayout={(e) => setGridWidth(e.nativeEvent.layout.width)}>
+            {grid.map((date, i) => {
+              const day = date ? byDate.get(date) : undefined;
+              if (!date || !day) {
+                return (
+                  <View key={date ?? `blank-${i}`} style={styles.slot}>
+                    {date ? <Text style={styles.future}>{Number(date.slice(8))}</Text> : null}
+                  </View>
+                );
+              }
+              return <Day key={date} day={day} onPress={() => setPicked(day)} />;
+            })}
+            <MetalEdges
+              edges={dayEdges(grid, (date) => byDate.get(date)?.status, gridWidth, touchMin, INSET)}
+              width={gridWidth}
+              height={(Math.ceil(grid.length / 7) * touchMin)}
+              radius={radius.md}
+            />
+          </View>
+        </>
       )}
       {picked && <Text style={styles.detail}>{figures(picked)}</Text>}
       <View style={styles.legend}>
@@ -100,14 +117,17 @@ function Day({ day, onPress }: { day: CalendarDayDto; onPress: () => void }) {
   const fill = FILLS[day.status];
   const label = `${dateLabel(day.date).replace(/ \d{4}$/, "")}: ${WORDS[day.status]}`;
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={[styles.slot, styles.day, fill ? { backgroundColor: fill } : null, day.status === "today" ? styles.today : null]}
-    >
-      <Text style={[styles.number, fill ? styles.numberOnFill : day.status === "no_limit" ? styles.numberQuiet : null]}>{Number(day.date.slice(8))}</Text>
-    </Pressable>
+    <View style={styles.slot}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        hitSlop={INSET}
+        onPress={onPress}
+        style={[styles.day, fill ? { backgroundColor: fill } : null]}
+      >
+        <Text style={[styles.number, fill ? styles.numberOnFill : day.status === "no_limit" ? styles.numberQuiet : null]}>{Number(day.date.slice(8))}</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -124,11 +144,10 @@ const styles = StyleSheet.create({
   title: { ...type.label, color: color.fg.default },
   off: { opacity: 0.3 },
   arrow: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
-  grid: { flexDirection: "row", flexWrap: "wrap" },
+  row: { flexDirection: "row", flexWrap: "wrap" },
   weekday: { width: "14.28%", textAlign: "center", ...type.caption, color: color.fg.subtle, paddingBottom: space.xs },
-  slot: { width: "14.28%", minHeight: touchMin, alignItems: "center", justifyContent: "center" },
-  day: { borderRadius: radius.md, borderWidth: 2, borderColor: "transparent" },
-  today: { borderColor: color.fg.default },
+  slot: { width: "14.28%", height: touchMin, alignItems: "center", justifyContent: "center" },
+  day: { alignSelf: "stretch", flex: 1, margin: INSET, alignItems: "center", justifyContent: "center", borderRadius: radius.md },
   number: { ...type.body, color: color.fg.default, fontVariant: ["tabular-nums"] },
   numberOnFill: { color: color.fg.inverse },
   numberQuiet: { color: color.fg.subtle },

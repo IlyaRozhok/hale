@@ -320,7 +320,6 @@ describe("Today, normal mode", () => {
       expect(flat("3 ноября").backgroundColor).toBe(tokens.color.calendar.farOver);
       expect(flat("4 ноября").backgroundColor).toBeUndefined();
       expect(flat("5 ноября").backgroundColor).toBeUndefined();
-      expect(flat("5 ноября").borderColor).toBe(tokens.color.fg.default);
       expect(screen.getByRole("button", { name: "1 ноября: в лимите" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "3 ноября: сильно сверх лимита" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "4 ноября: лимита не было" })).toBeTruthy();
