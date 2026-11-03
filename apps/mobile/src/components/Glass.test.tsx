@@ -33,6 +33,11 @@ describe("Glass", () => {
     expect(screen.getByText("Текст")).toBeTruthy();
   });
 
+  it("the menu is the most see-through", async () => {
+    await render(<Glass kind="menu"><Text>Текст</Text></Glass>);
+    expect(screen.getByTestId("native-glass").props.tintColor).toBe(tokens.color.glass.menu.tint);
+  });
+
   it("falls back to an opaque fill where the system has no such glass", async () => {
     jest.mocked(isLiquidGlassAvailable).mockReturnValue(false);
     await render(<Glass kind="floating" testID="panel"><Text>Текст</Text></Glass>);

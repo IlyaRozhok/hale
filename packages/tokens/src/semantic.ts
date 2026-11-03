@@ -1,4 +1,4 @@
-import { palette as p, blackAlpha, whiteAlpha } from "./palette";
+import { palette as p, blackAlpha } from "./palette";
 
 /** Semantic Silver tokens. Surfaces are opaque; what is translucent is the scrim and the glass. */
 export const color = {
@@ -20,13 +20,15 @@ export const color = {
   glass: {
     /** The menu and windows: the system's glass, dark enough for text over the brightest metal. */
     floating: { tint: blackAlpha(0.55), fallback: p.graphite[800] },
-    /** Cards: the same glass, a little darker, as they carry the most text. */
-    surface: { tint: blackAlpha(0.6), fallback: p.graphite[900] },
+    /** Cards: the same glass, lighter, as what is behind them is only the blurred backdrop. */
+    surface: { tint: blackAlpha(0.18), fallback: p.graphite[900] },
+    /** The menu: only icons on it, so it can be the most see-through. */
+    menu: { tint: blackAlpha(0.3), fallback: p.graphite[800] },
     /** List rows: too many for real glass, so a see-through fill. */
     row: blackAlpha(0.6),
   },
-  /** The app's backdrop of metal folds; `peak` caps its brightest ridge. */
-  backdrop: { peak: p.silver[400] },
+  /** The app's backdrop of metal folds: `peak` caps its thin crests, `sheet` the wide light that survives the glass's blur. */
+  backdrop: { peak: p.silver[400], sheet: p.graphite[500] },
   // Statuses differ by lightness, and danger (errors) by a calm red. Each also carries a text label.
   status: {
     success: p.silver[400],

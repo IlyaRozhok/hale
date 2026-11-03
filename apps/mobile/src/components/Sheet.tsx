@@ -1,16 +1,16 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
+import { type ReactNode, useCallback, useEffect, useRef } from "react";
 import {
   AccessibilityInfo,
   Animated,
   Easing,
   KeyboardAvoidingView,
   Modal,
-  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  type GestureResponderEvent,
   useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -62,19 +62,42 @@ export function Sheet({ title, subtitle, onClose, children }: Props) {
     animate(0, CLOSE_MS, onClose);
   }, [animate, onClose]);
 
-  const pan = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponderCapture: (_, g) => shouldDragSheet(g, scrollTop.current),
-        onPanResponderMove: (_, g) => drag.setValue(Math.max(0, g.dy)),
-        onPanResponderRelease: (_, g) => {
-          if (shouldCloseSheet(g)) close();
-          else Animated.spring(drag, { toValue: 0, useNativeDriver: true, bounciness: 0 }).start();
-        },
-        onPanResponderTerminate: () => Animated.spring(drag, { toValue: 0, useNativeDriver: true, bounciness: 0 }).start(),
-      }),
-    [close, drag],
-  );
+  // Plain touch events: they reach the panel in every case. A press under a long drag cancels itself,
+  // as the finger leaves the button.
+  const touch = useRef({ x: 0, y: 0, lastY: 0, lastT: 0, speed: 0, dragging: false });
+
+  const onTouchStart = (e: GestureResponderEvent) => {
+    const { pageX, pageY, timestamp } = e.nativeEvent;
+    touch.current = { x: pageX, y: pageY, lastY: pageY, lastT: timestamp, speed: 0, dragging: false };
+  };
+
+  const onTouchMove = (e: GestureResponderEvent) => {
+    const t = touch.current;
+    const { pageX, pageY, timestamp } = e.nativeEvent;
+    const dy = pageY - t.y;
+    if (!t.dragging && !shouldDragSheet({ dx: pageX - t.x, dy }, scrollTop.current)) return;
+    t.dragging = true;
+    if (timestamp > t.lastT) t.speed = (pageY - t.lastY) / (timestamp - t.lastT);
+    t.lastY = pageY;
+    t.lastT = timestamp;
+    drag.setValue(Math.max(0, dy));
+  };
+
+  const goBack = () => Animated.spring(drag, { toValue: 0, useNativeDriver: true, bounciness: 0 }).start();
+
+  const onTouchEnd = () => {
+    const t = touch.current;
+    if (!t.dragging) return;
+    t.dragging = false;
+    if (shouldCloseSheet({ dy: t.lastY - t.y, vy: t.speed })) close();
+    else goBack();
+  };
+
+  const onTouchCancel = () => {
+    if (!touch.current.dragging) return;
+    touch.current.dragging = false;
+    goBack();
+  };
 
   const translateY = Animated.add(shown.interpolate({ inputRange: [0, 1], outputRange: [height, 0] }), drag);
 
@@ -84,7 +107,14 @@ export function Sheet({ title, subtitle, onClose, children }: Props) {
         <Animated.View style={[styles.scrim, { opacity: shown }]}>
           <Pressable accessible={false} onPress={close} style={styles.fill} />
         </Animated.View>
-        <Animated.View {...pan.panHandlers} style={[styles.slider, { transform: [{ translateY }] }]}>
+        <Animated.View
+          testID="sheet-panel"
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
+          onTouchCancel={onTouchCancel}
+          style={[styles.slider, { transform: [{ translateY }] }]}
+        >
           <Glass kind="floating" style={[styles.panel, { paddingBottom: insets.bottom + space.lg }]}>
             <View style={styles.grabber} />
             <View style={styles.head}>

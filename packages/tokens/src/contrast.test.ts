@@ -63,13 +63,12 @@ describe("floating glass, in the worst case", () => {
     expect(contrastRatio(color.fg.muted, backing)).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(color.status.danger, backing)).toBeGreaterThanOrEqual(4.5);
   });
-  it("keeps the menu's icons readable over the brightest metal, with no scrim", () => {
-    const backing = over(color.glass.floating.tint, brightest);
+  it("keeps the menu's icons readable over the backdrop's brightest crest", () => {
+    const backing = over(color.glass.menu.tint, color.backdrop.peak);
     expect(contrastRatio(color.fg.default, backing)).toBeGreaterThanOrEqual(3);
   });
-  it("keeps text readable on cards and list rows over the backdrop's brightest ridge", () => {
-    for (const tint of [color.glass.surface.tint, color.glass.row]) {
-      const backing = over(tint, color.backdrop.peak);
+  it("keeps text readable on cards over the blurred backdrop, and on see-through rows over its brightest crest", () => {
+    for (const backing of [over(color.glass.surface.tint, color.backdrop.sheet), over(color.glass.row, color.backdrop.peak)]) {
       expect(contrastRatio(color.fg.default, backing)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(color.fg.muted, backing)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(color.fg.subtle, backing)).toBeGreaterThanOrEqual(3);

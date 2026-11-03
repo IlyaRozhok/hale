@@ -273,6 +273,40 @@ describe("Today, normal mode", () => {
     expect(node?.props.keyboardShouldPersistTaps).toBe("handled");
   });
 
+  describe("the repayment window", () => {
+    const open = async () => {
+      const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })) });
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+      await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
+      return screen.getByTestId("sheet-panel");
+    };
+    const touch = (y: number, timestamp: number) => ({ nativeEvent: { pageX: 100, pageY: y, timestamp, touches: [{}] } });
+    const swipe = async (panel: ReturnType<typeof screen.getByTestId>, to: number, ms: number) => {
+      await fireEvent(panel, "touchStart", touch(400, 0));
+      await fireEvent(panel, "touchMove", touch(410, ms / 2));
+      await fireEvent(panel, "touchMove", touch(to, ms));
+      await fireEvent(panel, "touchEnd", touch(to, ms));
+    };
+
+    it("closes when swiped down far enough", async () => {
+      await swipe(await open(), 600, 400);
+      await waitFor(() => expect(screen.queryByLabelText("Сумма")).toBeNull());
+    });
+
+    it("stays open after a short, slow drag", async () => {
+      await swipe(await open(), 450, 1000);
+      await act(async () => new Promise((r) => setTimeout(r, 300)));
+      expect(screen.getByLabelText("Сумма")).toBeTruthy();
+    });
+
+    it("closes with the button too", async () => {
+      await open();
+      const closes = screen.getAllByRole("button", { name: "Закрыть" });
+      await fireEvent.press(closes[closes.length - 1]!);
+      await waitFor(() => expect(screen.queryByLabelText("Сумма")).toBeNull());
+    });
+  });
+
   it("says what is wrong when the repayment date does not fit the loan", async () => {
     const api = fakeApi({
       today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })),

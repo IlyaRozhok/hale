@@ -18,7 +18,7 @@ export function TabBar({ state, navigation }: Pick<BottomTabBarProps, "state" | 
   const insets = useSafeAreaInsets();
   return (
     <View testID="tab-bar" pointerEvents="box-none" style={[styles.root, { paddingBottom: insets.bottom + space.xs }]}>
-      <Glass kind="floating" style={styles.pill}>
+      <Glass kind="menu" style={styles.pill}>
         {state.routes.map((route, i) => {
           const tab = TABS[route.name];
           if (!tab) return null;
