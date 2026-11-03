@@ -5,44 +5,21 @@ import { ErrorText } from "./ErrorText";
 import { useCreatePayment, useMarkPaid, useTaxPayments } from "../api/queries";
 import { formatMoney, isIsoDate, parseHryvnias, shortDate, taxQuarterOfDue } from "../format";
 import { Chip } from "./Chip";
+import { DateField } from "./DateField";
 import { Field } from "./Field";
-import { Glass } from "./Glass";
+import { PrimaryButton } from "./PrimaryButton";
+import { Sheet } from "./Sheet";
 
 const { color, space, type } = tokens;
 
-/** Tax payments: amount, due date, a paid mark, and a form for the next quarter's payment. */
-export function TaxPayments() {
+/** Tax payments: amount, due date and a paid mark. */
+export function TaxSheet({ onClose }: { onClose: () => void }) {
   const payments = useTaxPayments();
   const markPaid = useMarkPaid();
-  const create = useCreatePayment();
-  const [name, setName] = useState("");
-  const [amount, setAmount] = useState("");
-  const [due, setDue] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-
-  const add = () => {
-    const kopecks = parseHryvnias(amount);
-    if (name.trim() === "" || kopecks === null || !isIsoDate(due)) {
-      setMessage("Проверьте название, сумму и срок.");
-      return;
-    }
-    setMessage(null);
-    create.mutate(
-      { kind: "tax", name: name.trim(), amount: kopecks, currency: "UAH", due_on: due, tax_quarter: taxQuarterOfDue(due) },
-      {
-        onSuccess: () => {
-          setName("");
-          setAmount("");
-          setDue("");
-        },
-        onError: () => setMessage("Не удалось сохранить. Попробуйте ещё раз."),
-      },
-    );
-  };
+  const [adding, setAdding] = useState(false);
 
   return (
-    <Glass style={styles.stack}>
-      <Text style={styles.heading}>Налоговые платежи</Text>
+    <Sheet title="Налоги" onClose={onClose}>
       {payments.isError && <ErrorText>Не получилось загрузить платежи.</ErrorText>}
       {payments.data?.map((p) => (
         <View key={p.id} style={styles.row}>
@@ -61,24 +38,47 @@ export function TaxPayments() {
         </View>
       ))}
       {markPaid.isError && <ErrorText>Не удалось отметить. Попробуйте ещё раз.</ErrorText>}
-      <Text style={styles.label}>Новый платёж</Text>
+      <PrimaryButton label="Новый налог" onPress={() => setAdding(true)} />
+      {adding && <TaxForm onClose={() => setAdding(false)} />}
+    </Sheet>
+  );
+}
+
+function TaxForm({ onClose }: { onClose: () => void }) {
+  const create = useCreatePayment();
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState("");
+  const [due, setDue] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+
+  const add = () => {
+    const kopecks = parseHryvnias(amount);
+    if (name.trim() === "" || kopecks === null || !isIsoDate(due)) {
+      setMessage("Проверьте название, сумму и срок.");
+      return;
+    }
+    setMessage(null);
+    create.mutate(
+      { kind: "tax", name: name.trim(), amount: kopecks, currency: "UAH", due_on: due, tax_quarter: taxQuarterOfDue(due) },
+      { onSuccess: onClose, onError: () => setMessage("Не удалось сохранить. Попробуйте ещё раз.") },
+    );
+  };
+
+  return (
+    <Sheet title="Новый налог" onClose={onClose}>
       <Field label="Название платежа" value={name} onChangeText={setName} />
       <Field label="Сумма платежа" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
-      <Field label="Срок оплаты, ГГГГ-ММ-ДД" value={due} onChangeText={setDue} keyboardType="numbers-and-punctuation" autoCapitalize="none" />
+      <DateField label="Срок оплаты" value={due} onChange={setDue} />
       {message && <ErrorText>{message}</ErrorText>}
-      <Chip label="Добавить платёж" selected disabled={create.isPending} onPress={add} />
-    </Glass>
+      <PrimaryButton label="Добавить налог" disabled={create.isPending} onPress={add} />
+    </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
-  stack: { gap: space.md },
-  heading: { ...type.title, color: color.fg.default },
-  label: { ...type.label, color: color.fg.muted },
   row: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
   left: { flex: 1 },
   right: { alignItems: "flex-end", gap: space.xs },
   text: { ...type.body, color: color.fg.default, fontVariant: ["tabular-nums"] },
-  muted: { ...type.body, color: color.fg.muted },
   note: { ...type.caption, color: color.fg.subtle },
 });

@@ -158,3 +158,24 @@ export function isIsoDate(text: string): boolean {
   const d = new Date(`${text}T00:00:00Z`);
   return !Number.isNaN(d.getTime()) && d.toISOString().startsWith(text);
 }
+
+/** "2026-11-03" as "3 ноября 2026". */
+export function dateLabel(iso: string): string {
+  return `${dayOf(iso)} ${MONTHS_FULL[monthOf(iso)]} ${iso.slice(0, 4)}`;
+}
+
+const MONTH_NAMES = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+
+/** month is 1..12. */
+export const monthTitle = (year: number, month: number): string => `${MONTH_NAMES[month - 1]} ${year}`;
+
+/** A month's dates for a calendar, Monday first, with blanks before the first day. month is 1..12. */
+export function monthGrid(year: number, month: number): (string | null)[] {
+  const first = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const ym = `${year}-${String(month).padStart(2, "0")}`;
+  return [
+    ...Array.from({ length: (first + 6) % 7 }, () => null),
+    ...Array.from({ length: days }, (_, i) => `${ym}-${String(i + 1).padStart(2, "0")}`),
+  ];
+}

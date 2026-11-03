@@ -83,6 +83,7 @@ const paymentOptionals = {
 export const scheduledPaymentInput = z.object({ ...paymentShape, ...paymentOptionals }).strict();
 export const scheduledPaymentPatch = partial(z.object(paymentShape));
 export type ScheduledPaymentInput = z.infer<typeof scheduledPaymentInput>;
+export type ScheduledPaymentPatch = z.infer<typeof scheduledPaymentPatch>;
 
 // --- recurring payments -----------------------------------------------------
 const recurringShape = {
@@ -342,7 +343,7 @@ export interface TodayDto {
     /** Set on a loan entered by hand, which the owner may remove; a loan from the bank has none. */
     removableLoanId?: number;
     /** Set on an open loan: it can be marked repaid. */
-    repayLoan?: { id: number; remaining: number };
+    repayLoan?: { id: number; remaining: number; receivedOn?: string };
   }[];
   runOutOn: string | null;
   /** Last successful contact with the bank (webhook item, reconcile or balance refresh), null if there was none yet. */

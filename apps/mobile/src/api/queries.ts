@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LoanInput, LoanRepayInput, RecipientLabelName, ScheduledPaymentInput, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
+import type { ExpectedIncomeInput, ExpectedIncomePatch, InstallmentInput, InstallmentPatch, LoanInput, LoanRepayInput, RecipientLabelName, RecurringInput, RecurringPatch, ScheduledPaymentInput, ScheduledPaymentPatch, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
 import type { GoalInput, GoalPatch } from "@hale/contracts";
 import type { TransactionsFilter } from "./client";
 import { useApi } from "./context";
@@ -14,6 +14,9 @@ export const CAP_PREVIEW_KEY = ["cap-preview"] as const;
 export const MANUAL_BALANCES_KEY = ["manual-balances"] as const;
 export const LOANS_KEY = ["loans"] as const;
 export const RECIPIENTS_KEY = ["recipients"] as const;
+export const EXPECTED_INCOMES_KEY = ["expected-incomes"] as const;
+export const INCOME_EVENTS_KEY = ["income-events"] as const;
+export const RECURRING_KEY = ["recurring"] as const;
 /** Debounce between the last slider move and the preview request. */
 export const PREVIEW_DELAY_MS = 300;
 
@@ -117,7 +120,7 @@ export function useSetIncomeDate() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ eventId, date }: { eventId: number; date: string }) => api.setIncomeDate(eventId, date),
-    onSuccess: () => client.invalidateQueries({ queryKey: TODAY_KEY }),
+    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: TODAY_KEY }), client.invalidateQueries({ queryKey: INCOME_EVENTS_KEY })]),
   });
 }
 
@@ -219,13 +222,96 @@ export function useTaxPayments() {
   return useQuery({ queryKey: PAYMENTS_KEY, queryFn: () => api.payments(), select: (all) => all.filter((p) => p.kind === "tax") });
 }
 
-export function useCreatePayment() {
-  const api = useApi();
+/** A change to the plan shows on its lists, on Today and in what the limit preview leaves. */
+function usePlanMutation<V>(mutationFn: (vars: V) => Promise<unknown>) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: ScheduledPaymentInput) => api.createPayment(input),
-    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: PAYMENTS_KEY }), client.invalidateQueries({ queryKey: TODAY_KEY }), client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY })]),
+    mutationFn,
+    onSuccess: () =>
+      Promise.all(
+        [TODAY_KEY, PAYMENTS_KEY, RECURRING_KEY, EXPECTED_INCOMES_KEY, INCOME_EVENTS_KEY, CAP_PREVIEW_KEY].map((queryKey) => client.invalidateQueries({ queryKey })),
+      ),
   });
+}
+
+export function usePayments() {
+  const api = useApi();
+  return useQuery({ queryKey: PAYMENTS_KEY, queryFn: () => api.payments() });
+}
+
+export function useRecurring() {
+  const api = useApi();
+  return useQuery({ queryKey: RECURRING_KEY, queryFn: () => api.recurring() });
+}
+
+export function useExpectedIncomes() {
+  const api = useApi();
+  return useQuery({ queryKey: EXPECTED_INCOMES_KEY, queryFn: () => api.expectedIncomes() });
+}
+
+export function useIncomeEvents() {
+  const api = useApi();
+  return useQuery({ queryKey: INCOME_EVENTS_KEY, queryFn: () => api.incomeEvents() });
+}
+
+export function useCreateIncome() {
+  const api = useApi();
+  return usePlanMutation((input: ExpectedIncomeInput) => api.createExpectedIncome(input));
+}
+
+export function usePatchIncome() {
+  const api = useApi();
+  return usePlanMutation(({ id, patch }: { id: number; patch: ExpectedIncomePatch }) => api.patchExpectedIncome(id, patch));
+}
+
+export function useDeleteIncome() {
+  const api = useApi();
+  return usePlanMutation((id: number) => api.deleteExpectedIncome(id));
+}
+
+export function useCreateRecurring() {
+  const api = useApi();
+  return usePlanMutation((input: RecurringInput) => api.createRecurring(input));
+}
+
+export function usePatchRecurring() {
+  const api = useApi();
+  return usePlanMutation(({ id, patch }: { id: number; patch: RecurringPatch }) => api.patchRecurring(id, patch));
+}
+
+export function useDeleteRecurring() {
+  const api = useApi();
+  return usePlanMutation((id: number) => api.deleteRecurring(id));
+}
+
+export function usePatchPayment() {
+  const api = useApi();
+  return usePlanMutation(({ id, patch }: { id: number; patch: ScheduledPaymentPatch }) => api.patchPayment(id, patch));
+}
+
+export function useDeletePayment() {
+  const api = useApi();
+  return usePlanMutation((id: number) => api.deletePayment(id));
+}
+
+export function useCreateInstallment() {
+  const api = useApi();
+  return usePlanMutation((input: InstallmentInput) => api.createInstallment(input));
+}
+
+export function usePatchInstallment() {
+  const api = useApi();
+  return usePlanMutation(({ name, patch }: { name: string; patch: InstallmentPatch }) => api.patchInstallment(name, patch));
+}
+
+export function useDeleteInstallment() {
+  const api = useApi();
+  return usePlanMutation((name: string) => api.deleteInstallment(name));
+}
+
+export function useCreatePayment() {
+  const api = useApi();
+  return usePlanMutation((input: ScheduledPaymentInput) => api.createPayment(input));
 }
 
 export function useMarkPaid() {

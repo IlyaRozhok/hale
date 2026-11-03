@@ -540,7 +540,7 @@ export class TodayService {
     const runOutOn = runOutDate({ free: state.free, avgDailySpend: f.avgDailySpend, today: f.date });
     for (const l of f.loans) {
       const fact = `Займ ${fmt(l.amount)} от ${fmtDay(l.received_on)}${l.remaining < l.amount ? `, осталось ${fmt(l.remaining)}` : ""}`;
-      const repayLoan = { id: l.id, remaining: l.remaining };
+      const repayLoan = { id: l.id, remaining: l.remaining, receivedOn: l.received_on };
       badCases.push(
         l.manual
           ? { id: `loan:${l.id}`, text: fact, removableLoanId: l.id, repayLoan }

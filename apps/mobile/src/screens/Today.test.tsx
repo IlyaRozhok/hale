@@ -3,7 +3,8 @@ import { Alert, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { BridgeStateDto, DailyStateDto } from "@hale/contracts";
 import { Today } from "./Today";
-import { fakeApi, makeClient, renderWith, todayFixture } from "../testing";
+import { fakeApi, makeClient, pickDate, renderWith, todayFixture } from "../testing";
+import { kyivDate, shiftDate } from "../format";
 import { ApiError, NetworkError } from "../api/client";
 
 jest.mock("../metal", () => {
@@ -230,12 +231,13 @@ describe("Today, normal mode", () => {
 
   it("repaying a loan asks for the amount and date, with what is owed filled in", async () => {
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ date: "2026-11-03", badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} now={() => new Date("2026-11-03T10:00:00Z")} />, api);
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
     expect(screen.getByLabelText("Сумма").props.value).toBe("5000");
-    await fireEvent.changeText(screen.getByLabelText("Дата, ГГГГ-ММ-ДД"), "2026-11-02");
+    const yesterday = shiftDate(kyivDate(), -1);
+    await pickDate("Дата", yesterday);
     await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
-    await waitFor(() => expect(api.repayLoan).toHaveBeenCalledWith(7, { amount: 500_000, date: "2026-11-02" }));
+    await waitFor(() => expect(api.repayLoan).toHaveBeenCalledWith(7, { amount: 500_000, date: yesterday }));
     await waitFor(() => expect(screen.queryByLabelText("Сумма")).toBeNull());
     await waitFor(() => expect(api.today).toHaveBeenCalledTimes(2));
   });

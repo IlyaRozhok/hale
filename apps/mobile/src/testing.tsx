@@ -1,10 +1,11 @@
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { render } from "@testing-library/react-native";
+import { fireEvent, render, screen } from "@testing-library/react-native";
 import type { GoalDto, LoanHistoryDto, LoanRowDto, ManualBalanceDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@hale/contracts";
 import { ApiProvider } from "./api/context";
 import type { Api } from "./api/client";
+import { dateLabel, kyivDate } from "./format";
 
 /** Anonymised normal-mode response: ₴10,325 own money, a ₴30,000 credit limit, rent in four days. */
 export function todayFixture(over: Partial<TodayDto> = {}): TodayDto {
@@ -67,7 +68,7 @@ export function settingsFixture(over: Partial<SettingsDto> = {}): SettingsDto {
 }
 
 export function taxFixture(over: Partial<ScheduledPaymentDto> = {}): ScheduledPaymentDto {
-  return { id: 1, kind: "tax", name: "Налог за 3 кв.", amount: 1_200_000, currency: "UAH", due_on: "2026-11-20", paid_at: null, tax_quarter: "2026-Q3", is_estimate: false, ...over };
+  return { id: 1, kind: "tax", name: "Налог за 3 кв.", amount: 1_200_000, currency: "UAH", due_on: "2026-11-20", paid_at: null, recurring_id: null, tax_quarter: "2026-Q3", is_estimate: false, ...over };
 }
 
 export function balanceFixture(over: Partial<ManualBalanceDto> = {}): ManualBalanceDto {
@@ -80,6 +81,16 @@ export function loanFixture(over: Partial<LoanRowDto> = {}): LoanRowDto {
 
 export function loanHistoryFixture(over: Partial<LoanHistoryDto> = {}): LoanHistoryDto {
   return { stats: { borrowed: 0, repaid: 0, serviceCost: 0, stillOpen: 0 }, open: [], old: [], repaid: [], ...over };
+}
+
+/** Opens a date field's calendar and picks the date, walking to its month. */
+export async function pickDate(field: string, iso: string): Promise<void> {
+  await fireEvent.press(screen.getByRole("button", { name: new RegExp(`^${field}:`) }));
+  const step = iso < kyivDate() ? "Предыдущий месяц" : "Следующий месяц";
+  for (let i = 0; i < 48 && !screen.queryByRole("button", { name: dateLabel(iso) }); i++) {
+    await fireEvent.press(screen.getByRole("button", { name: step }));
+  }
+  await fireEvent.press(screen.getByRole("button", { name: dateLabel(iso) }));
 }
 
 export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock } {
@@ -111,6 +122,20 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     repayLoan: jest.fn(async () => undefined),
     loanHistory: jest.fn(async () => loanHistoryFixture()),
     repayOldLoans: jest.fn(async () => undefined),
+    expectedIncomes: jest.fn(async () => []),
+    createExpectedIncome: jest.fn(async () => undefined),
+    patchExpectedIncome: jest.fn(async () => undefined),
+    deleteExpectedIncome: jest.fn(async () => undefined),
+    incomeEvents: jest.fn(async () => []),
+    recurring: jest.fn(async () => []),
+    createRecurring: jest.fn(async () => undefined),
+    patchRecurring: jest.fn(async () => undefined),
+    deleteRecurring: jest.fn(async () => undefined),
+    patchPayment: jest.fn(async () => undefined),
+    deletePayment: jest.fn(async () => undefined),
+    createInstallment: jest.fn(async () => undefined),
+    patchInstallment: jest.fn(async () => undefined),
+    deleteInstallment: jest.fn(async () => undefined),
     registerPushToken: jest.fn(async () => undefined),
     goals: jest.fn(async () => []),
     createGoal: jest.fn(async () => goalFixture()),

@@ -131,6 +131,20 @@ describe("api client", () => {
     await api.loanHistory();
     await api.recipient("0123456789abcdef");
     await api.repayOldLoans();
+    await api.expectedIncomes();
+    await api.createExpectedIncome({ source: "fop", amount: 1, currency: "UAH", window_start_day: 1, window_end_day: 2 });
+    await api.patchExpectedIncome(1, { amount: 2 });
+    await api.deleteExpectedIncome(1);
+    await api.incomeEvents();
+    await api.recurring();
+    await api.createRecurring({ name: "a", amount: 1, currency: "UAH", day_of_month: 1 });
+    await api.patchRecurring(1, { amount: 2 });
+    await api.deleteRecurring(1);
+    await api.patchPayment(1, { amount: 2 });
+    await api.deletePayment(1);
+    await api.createInstallment({ name: "a b", amount: 1, currency: "UAH", remaining: 2, first_due: "2026-12-01" });
+    await api.patchInstallment("a b", { amount: 2 });
+    await api.deleteInstallment("a b");
     const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
     expect(calls.map(([u, i]) => `${i.method} ${u.replace("https://api.example.test", "")}`)).toEqual([
       "POST /recipients/label",
@@ -145,6 +159,20 @@ describe("api client", () => {
       "GET /plan/loans/history",
       "GET /recipients/0123456789abcdef",
       "POST /plan/loans/old/repaid",
+      "GET /plan/expected-incomes",
+      "POST /plan/expected-incomes",
+      "PATCH /plan/expected-incomes/1",
+      "DELETE /plan/expected-incomes/1",
+      "GET /plan/incomes",
+      "GET /plan/recurring",
+      "POST /plan/recurring",
+      "PATCH /plan/recurring/1",
+      "DELETE /plan/recurring/1",
+      "PATCH /plan/payments/1",
+      "DELETE /plan/payments/1",
+      "POST /plan/installments",
+      "PATCH /plan/installments/a%20b",
+      "DELETE /plan/installments/a%20b",
     ]);
     expect(calls[2]![1].body).toBe(JSON.stringify({ lifestyleCap: 10_000_000 }));
     expect(calls[7]![1].body).toBe(JSON.stringify({ token: "ExponentPushToken[abc]" }));

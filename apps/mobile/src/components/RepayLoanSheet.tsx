@@ -1,19 +1,21 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text } from "react-native";
+import { StyleSheet, Text } from "react-native";
 import { tokens } from "@hale/tokens";
 import { ApiError } from "../api/client";
 import { useRepayLoan } from "../api/queries";
 import { formatMoney, isIsoDate, kyivDate, parseHryvnias } from "../format";
+import { DateField } from "./DateField";
 import { ErrorText } from "./ErrorText";
 import { Field } from "./Field";
+import { PrimaryButton } from "./PrimaryButton";
 import { Sheet } from "./Sheet";
 
-const { color, radius, touchMin, type } = tokens;
+const { color, type } = tokens;
 
-type Props = { loanId: number; remaining: number; name: string; onClose: () => void };
+type Props = { loanId: number; remaining: number; /** The earliest date it could be repaid. */ receivedOn?: string; name: string; onClose: () => void };
 
 /** "Погасил": how much and when. What is owed is filled in, so the usual case is one tap. */
-export function RepayLoanSheet({ loanId, remaining, name, onClose }: Props) {
+export function RepayLoanSheet({ loanId, remaining, receivedOn, name, onClose }: Props) {
   const repay = useRepayLoan();
   const [amount, setAmount] = useState(String(remaining / 100));
   const [date, setDate] = useState(() => kyivDate());
@@ -46,31 +48,14 @@ export function RepayLoanSheet({ loanId, remaining, name, onClose }: Props) {
   return (
     <Sheet title="Погасил" subtitle={name} onClose={onClose}>
       <Field label="Сумма" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
-      <Field label="Дата, ГГГГ-ММ-ДД" value={date} onChangeText={setDate} keyboardType="numbers-and-punctuation" autoCapitalize="none" />
+      <DateField label="Дата" value={date} onChange={setDate} min={receivedOn} max={kyivDate()} />
       {effect && <Text style={styles.text}>{effect}</Text>}
       {message && <ErrorText>{message}</ErrorText>}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled: repay.isPending }}
-        disabled={repay.isPending}
-        onPress={save}
-        style={[styles.save, repay.isPending && styles.pending]}
-      >
-        <Text style={styles.saveText}>Сохранить</Text>
-      </Pressable>
+      <PrimaryButton label="Сохранить" disabled={repay.isPending} onPress={save} />
     </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
   text: { ...type.body, color: color.fg.default },
-  save: {
-    minHeight: touchMin,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: radius.full,
-    backgroundColor: color.accent.default,
-  },
-  saveText: { ...type.label, color: color.accent.fgOnAccent },
-  pending: { opacity: 0.6 },
 });

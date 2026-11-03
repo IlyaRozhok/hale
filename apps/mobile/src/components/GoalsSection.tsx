@@ -7,8 +7,9 @@ import { useCreateGoal, useDeleteGoal, useGoals, usePatchGoal } from "../api/que
 import { formatDollars, goalPercent, parseBalance } from "../format";
 import { Chip } from "./Chip";
 import { Field } from "./Field";
-import { Glass } from "./Glass";
+import { PrimaryButton } from "./PrimaryButton";
 import { ProgressBar } from "./ProgressBar";
+import { Sheet } from "./Sheet";
 
 const { color, space, touchMin, type } = tokens;
 
@@ -82,13 +83,25 @@ function TextButton({ label, a11y, onPress }: { label: string; a11y: string; onP
 }
 
 /** Savings goals kept by hand: a name, a target in dollars and how much is saved. */
-export function GoalsSection() {
+export function GoalsSheet({ onClose }: { onClose: () => void }) {
   const goals = useGoals();
+  const [adding, setAdding] = useState(false);
+
+  return (
+    <Sheet title="Цели" onClose={onClose}>
+      {goals.isError && !goals.data ? <ErrorText>Не получилось загрузить цели.</ErrorText> : null}
+      {goals.data?.map((g) => <GoalItem key={g.id} goal={g} />)}
+      <PrimaryButton label="Новая цель" onPress={() => setAdding(true)} />
+      {adding && <GoalForm onClose={() => setAdding(false)} />}
+    </Sheet>
+  );
+}
+
+function GoalForm({ onClose }: { onClose: () => void }) {
   const create = useCreateGoal();
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
   const [message, setMessage] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   const add = () => {
     const cents = parseBalance(target);
@@ -98,38 +111,21 @@ export function GoalsSection() {
       return;
     }
     setMessage(null);
-    setNotice(null);
-    create.mutate(
-      { name: title, target_cents: cents },
-      {
-        onSuccess: () => {
-          setName("");
-          setTarget("");
-          setNotice("Цель добавлена.");
-        },
-        onError: () => setMessage(SAVE_FAILED),
-      },
-    );
+    create.mutate({ name: title, target_cents: cents }, { onSuccess: onClose, onError: () => setMessage(SAVE_FAILED) });
   };
 
   return (
-    <Glass style={styles.stack}>
-      <Text style={styles.heading}>Цели</Text>
-      {goals.isError && !goals.data ? <ErrorText>Не получилось загрузить цели.</ErrorText> : null}
-      {goals.data?.map((g) => <GoalItem key={g.id} goal={g} />)}
+    <Sheet title="Новая цель" onClose={onClose}>
       <Field label="Название цели" value={name} onChangeText={setName} />
       <Field label="Сумма цели, $" keyboardType="decimal-pad" value={target} onChangeText={setTarget} />
-      <Chip label="Добавить цель" onPress={add} disabled={create.isPending} />
       {message ? <ErrorText>{message}</ErrorText> : null}
-      {notice ? <Text style={styles.muted}>{notice}</Text> : null}
-    </Glass>
+      <PrimaryButton label="Добавить цель" onPress={add} disabled={create.isPending} />
+    </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
-  stack: { gap: space.md },
   item: { gap: space.xs, paddingBottom: space.sm },
-  heading: { ...type.title, color: color.fg.default },
   name: { ...type.body, color: color.fg.default },
   muted: { ...type.body, color: color.fg.muted },
   actions: { flexDirection: "row", gap: space.lg, alignItems: "center" },

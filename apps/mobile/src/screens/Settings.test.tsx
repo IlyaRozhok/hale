@@ -87,10 +87,15 @@ describe("Settings, preview accuracy", () => {
       api,
     );
     await waitFor(() => expect(api.previewSettings).toHaveBeenCalledTimes(1));
+    await fireEvent.press(await screen.findByRole("button", { name: "Займы" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Новый займ" }));
     await fireEvent.changeText(await screen.findByLabelText("Сумма займа"), "100");
-    await fireEvent.changeText(screen.getByLabelText("Дата займа, ГГГГ-ММ-ДД"), "2026-11-02");
     await fireEvent.press(screen.getByRole("button", { name: "Добавить займ" }));
     await waitFor(() => expect(api.previewSettings).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByLabelText("Сумма займа")).toBeNull());
+    const closes = screen.getAllByRole("button", { name: "Закрыть" });
+    await fireEvent.press(closes[closes.length - 1]!);
+    await fireEvent.press(await screen.findByRole("button", { name: "Налоги" }));
     await fireEvent.press(await screen.findByRole("button", { name: "Отметить оплаченным" }));
     await waitFor(() => expect(api.previewSettings).toHaveBeenCalledTimes(3));
   });

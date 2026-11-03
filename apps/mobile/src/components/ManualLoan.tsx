@@ -1,23 +1,20 @@
 import { useState } from "react";
-import { StyleSheet, Text } from "react-native";
-import { tokens } from "@hale/tokens";
-import { ErrorText } from "./ErrorText";
 import { useCreateLoan } from "../api/queries";
 import { isIsoDate, kyivDate, parseHryvnias } from "../format";
-import { Chip } from "./Chip";
+import { DateField } from "./DateField";
+import { ErrorText } from "./ErrorText";
 import { Field } from "./Field";
-import { Glass } from "./Glass";
+import { PrimaryButton } from "./PrimaryButton";
+import { Sheet } from "./Sheet";
 
-const { color, space, type } = tokens;
 
 /** A loan the bank did not show (a friend, a lender). Today then counts it as a bad case. */
-export function ManualLoan() {
+export function ManualLoanSheet({ onClose }: { onClose: () => void }) {
   const create = useCreateLoan();
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(() => kyivDate());
   const [note, setNote] = useState("");
   const [message, setMessage] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   const add = () => {
     const kopecks = parseHryvnias(amount);
@@ -26,36 +23,20 @@ export function ManualLoan() {
       return;
     }
     setMessage(null);
-    setNotice(null);
     const text = note.trim();
     create.mutate(
       { amount: kopecks, received_on: date, ...(text ? { note: text } : {}) },
-      {
-        onSuccess: () => {
-          setAmount("");
-          setNote("");
-          setNotice("Займ добавлен.");
-        },
-        onError: () => setMessage("Не удалось сохранить. Попробуйте ещё раз."),
-      },
+      { onSuccess: onClose, onError: () => setMessage("Не удалось сохранить. Попробуйте ещё раз.") },
     );
   };
 
   return (
-    <Glass style={styles.stack}>
-      <Text style={styles.heading}>Займ вручную</Text>
+    <Sheet title="Новый займ" onClose={onClose}>
       <Field label="Сумма займа" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
-      <Field label="Дата займа, ГГГГ-ММ-ДД" value={date} onChangeText={setDate} keyboardType="numbers-and-punctuation" autoCapitalize="none" />
+      <DateField label="Дата займа" value={date} onChange={setDate} max={kyivDate()} />
       <Field label="Заметка к займу" value={note} onChangeText={setNote} />
       {message && <ErrorText>{message}</ErrorText>}
-      {notice && <Text style={styles.text}>{notice}</Text>}
-      <Chip label="Добавить займ" selected disabled={create.isPending} onPress={add} />
-    </Glass>
+      <PrimaryButton label="Добавить займ" disabled={create.isPending} onPress={add} />
+    </Sheet>
   );
 }
-
-const styles = StyleSheet.create({
-  stack: { gap: space.md },
-  heading: { ...type.title, color: color.fg.default },
-  text: { ...type.body, color: color.fg.default },
-});

@@ -1,8 +1,14 @@
 import type {
   BridgePreviewDto,
+  ExpectedIncomeDto,
+  ExpectedIncomeInput,
+  ExpectedIncomePatch,
   GoalDto,
   GoalInput,
   GoalPatch,
+  IncomeEventDto,
+  InstallmentInput,
+  InstallmentPatch,
   LoanHistoryDto,
   LoanInput,
   LoanRepayInput,
@@ -11,8 +17,12 @@ import type {
   RecipientLabelName,
   RecipientLabelResultDto,
   RecipientSummaryDto,
+  RecurringDto,
+  RecurringInput,
+  RecurringPatch,
   ScheduledPaymentDto,
   ScheduledPaymentInput,
+  ScheduledPaymentPatch,
   SettingsDto,
   SettingsPatch,
   SettingsPreviewDto,
@@ -76,6 +86,20 @@ export interface Api {
   repayLoan(id: number, input: LoanRepayInput): Promise<void>;
   loanHistory(): Promise<LoanHistoryDto>;
   repayOldLoans(): Promise<void>;
+  expectedIncomes(): Promise<ExpectedIncomeDto[]>;
+  createExpectedIncome(input: ExpectedIncomeInput): Promise<void>;
+  patchExpectedIncome(id: number, patch: ExpectedIncomePatch): Promise<void>;
+  deleteExpectedIncome(id: number): Promise<void>;
+  incomeEvents(): Promise<IncomeEventDto[]>;
+  recurring(): Promise<RecurringDto[]>;
+  createRecurring(input: RecurringInput): Promise<void>;
+  patchRecurring(id: number, patch: RecurringPatch): Promise<void>;
+  deleteRecurring(id: number): Promise<void>;
+  patchPayment(id: number, patch: ScheduledPaymentPatch): Promise<void>;
+  deletePayment(id: number): Promise<void>;
+  createInstallment(input: InstallmentInput): Promise<void>;
+  patchInstallment(name: string, patch: InstallmentPatch): Promise<void>;
+  deleteInstallment(name: string): Promise<void>;
   registerPushToken(token: string): Promise<void>;
   goals(): Promise<GoalDto[]>;
   createGoal(input: GoalInput): Promise<GoalDto>;
@@ -157,6 +181,20 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     repayLoan: async (id, input) => void (await request("POST", `/plan/loans/${id}/repay`, input)),
     loanHistory: () => request("GET", "/plan/loans/history"),
     repayOldLoans: async () => void (await request("POST", "/plan/loans/old/repaid")),
+    expectedIncomes: () => request("GET", "/plan/expected-incomes"),
+    createExpectedIncome: async (input) => void (await request("POST", "/plan/expected-incomes", input)),
+    patchExpectedIncome: async (id, patch) => void (await request("PATCH", `/plan/expected-incomes/${id}`, patch)),
+    deleteExpectedIncome: async (id) => void (await request("DELETE", `/plan/expected-incomes/${id}`)),
+    incomeEvents: () => request("GET", "/plan/incomes"),
+    recurring: () => request("GET", "/plan/recurring"),
+    createRecurring: async (input) => void (await request("POST", "/plan/recurring", input)),
+    patchRecurring: async (id, patch) => void (await request("PATCH", `/plan/recurring/${id}`, patch)),
+    deleteRecurring: async (id) => void (await request("DELETE", `/plan/recurring/${id}`)),
+    patchPayment: async (id, patch) => void (await request("PATCH", `/plan/payments/${id}`, patch)),
+    deletePayment: async (id) => void (await request("DELETE", `/plan/payments/${id}`)),
+    createInstallment: async (input) => void (await request("POST", "/plan/installments", input)),
+    patchInstallment: async (name, patch) => void (await request("PATCH", `/plan/installments/${encodeURIComponent(name)}`, patch)),
+    deleteInstallment: async (name) => void (await request("DELETE", `/plan/installments/${encodeURIComponent(name)}`)),
     registerPushToken: async (token) => void (await request("POST", "/devices/push-token", { token })),
   };
 }

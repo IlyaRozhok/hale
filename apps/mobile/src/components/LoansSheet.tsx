@@ -6,6 +6,8 @@ import { useDeleteLoan, useLoanHistory, useRepayOldLoans } from "../api/queries"
 import { formatMoney, shortDate } from "../format";
 import { askDeleteLoan } from "./BadCaseCard";
 import { ErrorText } from "./ErrorText";
+import { ManualLoanSheet } from "./ManualLoan";
+import { PrimaryButton } from "./PrimaryButton";
 import { RepayLoanSheet } from "./RepayLoanSheet";
 import { Sheet } from "./Sheet";
 
@@ -27,6 +29,7 @@ export function LoansSheet({ onClose }: { onClose: () => void }) {
   const remove = useDeleteLoan();
   const repayOld = useRepayOldLoans();
   const [repaying, setRepaying] = useState<LoanRowDto | null>(null);
+  const [adding, setAdding] = useState(false);
   const data = history.data;
   const total = data ? data.open.length + data.old.length + data.repaid.length : 0;
 
@@ -102,15 +105,17 @@ export function LoansSheet({ onClose }: { onClose: () => void }) {
             "До начала учёта",
             data.old,
             "Не входят в лимит. Банк не показывает, что они погашены.",
-            <Pressable accessibilityRole="button" onPress={askRepayOld} disabled={repayOld.isPending} style={styles.retry}>
-              <Text style={styles.retryText}>Все уже погашены</Text>
+            <Pressable accessibilityRole="button" onPress={askRepayOld} disabled={repayOld.isPending} style={styles.quiet}>
+              <Text style={styles.actionText}>Все уже погашены</Text>
             </Pressable>,
           )}
           {section("Погашенные", data.repaid)}
         </>
       )}
-      {/* Inside the list's modal: iOS presents it on top, and closing it returns to the list. */}
-      {repaying && <RepayLoanSheet loanId={repaying.id} remaining={repaying.remaining} name={nameOf(repaying)} onClose={() => setRepaying(null)} />}
+      <PrimaryButton label="Новый займ" onPress={() => setAdding(true)} />
+      {/* Inside the list's modal: iOS presents them on top, and closing returns to the list. */}
+      {repaying && <RepayLoanSheet loanId={repaying.id} remaining={repaying.remaining} receivedOn={repaying.receivedOn} name={nameOf(repaying)} onClose={() => setRepaying(null)} />}
+      {adding && <ManualLoanSheet onClose={() => setAdding(false)} />}
     </Sheet>
   );
 }
@@ -135,6 +140,7 @@ const styles = StyleSheet.create({
   action: { minHeight: touchMin, justifyContent: "center" },
   actionText: { ...type.label, color: color.fg.default },
   deleteText: { ...type.label, color: color.fg.muted },
+  quiet: { minHeight: touchMin, justifyContent: "center" },
   retry: {
     minHeight: touchMin,
     alignItems: "center",
