@@ -139,6 +139,6 @@ describe("api client", () => {
       "POST /devices/push-token",
     ]);
     expect(calls[2]![1].body).toBe(JSON.stringify({ lifestyleCap: 10_000_000 }));
-    expect(calls[5]![1].body).toBe(JSON.stringify({ token: "ExponentPushToken[abc]" }));
+    expect(calls[7]![1].body).toBe(JSON.stringify({ token: "ExponentPushToken[abc]" }));
   });
 });
