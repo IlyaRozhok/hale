@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { dueLabel, formatMoney, formatOriginal, kyivDate, formatMoneyWithUsd, formatStamp, formatUsd, isIsoDate, parseBalance, parseHryvnias, shiftDate, shortDate, taxQuarterOfDue } from "./format";
+import {
+  amountTone,
+  dayHeader,
+  dayMonth,
+  formatDollars,
+  formatSignedMoney,
+  formatSignedOriginal,
+  goalPercent,
+  longDate,
+  dueLabel, formatMoney, formatOriginal, kyivDate, formatMoneyWithUsd, formatStamp, formatUsd, isIsoDate, parseBalance, parseHryvnias, shiftDate, shortDate, taxQuarterOfDue,
+} from "./format";
 
 describe("formatMoney", () => {
   it("groups thousands with commas and rounds to whole hryvnias", () => {
@@ -113,5 +123,59 @@ describe("isIsoDate", () => {
     expect(isIsoDate("2026-02-30")).toBe(false);
     expect(isIsoDate("02.11.2026")).toBe(false);
     expect(isIsoDate("")).toBe(false);
+  });
+});
+
+describe("signed money", () => {
+  it("adds a plus to incoming amounts and keeps a real minus on outgoing", () => {
+    expect(formatSignedMoney(1032500)).toBe("+₴10,325");
+    expect(formatSignedMoney(-8500)).toBe("−₴85");
+    expect(formatSignedMoney(0)).toBe("₴0");
+    expect(formatSignedMoney(40)).toBe("₴0");
+    expect(formatSignedOriginal(1000, "USD")).toBe("+$10.00");
+    expect(formatSignedOriginal(-1000, "USD")).toBe("−$10.00");
+  });
+});
+
+describe("amountTone", () => {
+  it("is neutral for transfers between own accounts, whatever the sign", () => {
+    expect(amountTone("own_transfer", -100)).toBe("neutral");
+    expect(amountTone("own_transfer", 100)).toBe("neutral");
+  });
+  it("follows the sign otherwise", () => {
+    expect(amountTone("spend", -100)).toBe("expense");
+    expect(amountTone("income", 100)).toBe("income");
+    expect(amountTone(null, -100)).toBe("expense");
+    expect(amountTone("spend", 0)).toBe("neutral");
+  });
+});
+
+describe("calendar labels", () => {
+  it("spells a date with its weekday", () => {
+    expect(longDate("2026-11-03")).toBe("Вторник, 3 ноября");
+    expect(longDate("2027-01-01")).toBe("Пятница, 1 января");
+  });
+  it("names today and yesterday in a day header, and only the date before that", () => {
+    expect(dayHeader("2026-11-03", "2026-11-03")).toBe("Сегодня, 3 ноя");
+    expect(dayHeader("2026-11-02", "2026-11-03")).toBe("Вчера, 2 ноя");
+    expect(dayHeader("2026-10-31", "2026-11-03")).toBe("31 окт");
+    expect(dayHeader("2026-12-31", "2027-01-01")).toBe("Вчера, 31 дек");
+  });
+  it("splits a date for a date tile", () => {
+    expect(dayMonth("2026-11-06")).toEqual({ day: "6", month: "ноя" });
+  });
+});
+
+describe("goal progress", () => {
+  it("rounds down, caps at 100 and survives a bad target", () => {
+    expect(goalPercent(50000, 500000)).toBe(10);
+    expect(goalPercent(1, 3)).toBe(33);
+    expect(goalPercent(0, 1000000)).toBe(0);
+    expect(goalPercent(700000, 500000)).toBe(100);
+    expect(goalPercent(100, 0)).toBe(0);
+  });
+  it("formats whole dollars from cents", () => {
+    expect(formatDollars(50000)).toBe("$500");
+    expect(formatDollars(1000000)).toBe("$10,000");
   });
 });

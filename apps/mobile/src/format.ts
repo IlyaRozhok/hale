@@ -12,6 +12,22 @@ export function formatMoney(kopecks: number): string {
   return signed(kopecks, "₴");
 }
 
+/** Like formatMoney, with a plus on money coming in. */
+export function formatSignedMoney(kopecks: number): string {
+  return `${Math.round(kopecks / 100) > 0 ? "+" : ""}${formatMoney(kopecks)}`;
+}
+
+/** Whole dollars from cents: 50000 -> "$500". */
+export function formatDollars(cents: number): string {
+  return signed(cents, "$");
+}
+
+/** Share of a goal reached, 0..100, rounded down so a goal only shows 100 when it is met. */
+export function goalPercent(saved: number, target: number): number {
+  if (!(target > 0)) return 0;
+  return Math.min(100, Math.floor((saved / target) * 100));
+}
+
 /** The same amount in dollars at a UAH-per-USD rate; null when no rate is known. */
 export function formatUsd(kopecks: number, usdRate: number): string | null {
   if (!(usdRate > 0)) return null;
@@ -92,6 +108,43 @@ export function formatOriginal(minor: number, currency: string): string {
   const sign = minor < 0 ? "−" : "";
   const symbol = SYMBOLS[currency];
   return symbol ? `${sign}${symbol}${text}` : `${sign}${text} ${currency}`;
+}
+
+/** Like formatOriginal, with a plus on money coming in. */
+export function formatSignedOriginal(minor: number, currency: string): string {
+  return `${minor > 0 ? "+" : ""}${formatOriginal(minor, currency)}`;
+}
+
+/** What colour an amount carries: transfers between own accounts are neither spending nor income. */
+export function amountTone(type: string | null, amount: number): "neutral" | "expense" | "income" {
+  if (type === "own_transfer" || amount === 0) return "neutral";
+  return amount < 0 ? "expense" : "income";
+}
+
+const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
+const MONTHS_FULL = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+
+const dayOf = (iso: string) => String(Number(iso.slice(8, 10)));
+const monthOf = (iso: string) => Number(iso.slice(5, 7)) - 1;
+
+/** "2026-11-03" as "Вторник, 3 ноября". */
+export function longDate(iso: string): string {
+  return `${WEEKDAYS[new Date(toUtc(iso)).getUTCDay()]}, ${dayOf(iso)} ${MONTHS_FULL[monthOf(iso)]}`;
+}
+
+/** The parts of a date tile: day and short month. */
+export function dayMonth(iso: string): { day: string; month: string } {
+  return { day: dayOf(iso), month: MONTHS_SHORT[monthOf(iso)]! };
+}
+
+/** A section header: "Сегодня, 3 ноя", "Вчера, 2 ноя" or "31 окт". */
+export function dayHeader(iso: string, today: string): string {
+  const { day, month } = dayMonth(iso);
+  const date = `${day} ${month}`;
+  if (iso === today) return `Сегодня, ${date}`;
+  if (iso === shiftDate(today, -1)) return `Вчера, ${date}`;
+  return date;
 }
 
 /** "2026-11-02" as "02.11". */
