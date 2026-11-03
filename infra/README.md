@@ -103,7 +103,8 @@ https://api.monobank.ua/ (log in with the monobank app).
   fewer rows than the baseline. It needs the age PRIVATE key, which the server
   does not have, so run it from your machine, at least monthly:
   `AGE_IDENTITY_FILE=~/hale-backup.key RCLONE_REMOTE=... RCLONE_CONFIG_HZ_*=... infra/restore-check.sh`
-  (needs docker, or `RESTORE_ADMIN_URL` pointing at a scratch Postgres).
+  (needs docker, or `RESTORE_ADMIN_URL` pointing at a scratch Postgres). A local `psql` older
+  than 16 fails on `\restrict` in the dump; add `PSQL="docker run --rm -i --network=host postgres:16 psql"`.
 - Full mode without a key fails; it never silently downgrades. Only an explicit
   `--shallow` skips the restore.
 - The server's weekly cron (Sunday 04:00 UTC) runs `restore-check.sh --shallow`:
