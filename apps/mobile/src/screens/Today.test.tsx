@@ -3,7 +3,7 @@ import { Alert, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { BridgeStateDto, DailyStateDto } from "@hale/contracts";
 import { Today } from "./Today";
-import { fakeApi, makeClient, pickDate, renderWith, todayFixture } from "../testing";
+import { calendarFixture, fakeApi, makeClient, pickDate, renderWith, todayFixture } from "../testing";
 import { kyivDate, shiftDate } from "../format";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -271,6 +271,92 @@ describe("Today, normal mode", () => {
     let node = screen.getByText("Сохранить").parent;
     while (node && node.props.keyboardShouldPersistTaps === undefined) node = node.parent;
     expect(node?.props.keyboardShouldPersistTaps).toBe("handled");
+  });
+
+  describe("the limit calendar", () => {
+    const november = () => ({
+      calendar: jest.fn(async (month: string) =>
+        calendarFixture({
+          month,
+          today: "2026-11-05",
+          streak: 2,
+          days:
+            month !== "2026-11"
+              ? []
+              : [
+                  { date: "2026-11-01", limit: 100_000, spent: 80_000, status: "within" as const },
+                  { date: "2026-11-02", limit: 100_000, spent: 120_000, status: "over" as const },
+                  { date: "2026-11-03", limit: 100_000, spent: 160_000, status: "far_over" as const },
+                  { date: "2026-11-04", limit: null, spent: 5_000, status: "no_limit" as const },
+                  { date: "2026-11-05", limit: 100_000, spent: 10_000, status: "today" as const },
+                ],
+        }),
+      ),
+    });
+    const flat = (name: string) => StyleSheet.flatten(screen.getByRole("button", { name: new RegExp(`^${name}`) }).props.style);
+    const openIt = async (over = {}) => {
+      const api = fakeApi({ today: jest.fn(async () => todayFixture({ date: "2026-11-05", streak: 2 })), ...november(), ...over });
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+      await fireEvent.press(await screen.findByRole("button", { name: "Серия: 2 дня в лимите" }));
+      await screen.findByText("Ноябрь 2026");
+      await screen.findByRole("button", { name: /^1 ноября/ });
+      return api;
+    };
+
+    it("names the streak in the right word form", async () => {
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ streak: 5 })) }));
+      expect(await screen.findByRole("button", { name: "Серия: 5 дней в лимите" })).toBeTruthy();
+    });
+
+    it("offers the calendar by name while there is no streak", async () => {
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi());
+      expect(await screen.findByRole("button", { name: "Календарь лимитов" })).toBeTruthy();
+    });
+
+    it("colours days by status and says the status in words too", async () => {
+      await openIt();
+      expect(flat("1 ноября").backgroundColor).toBe(tokens.color.calendar.within);
+      expect(flat("2 ноября").backgroundColor).toBe(tokens.color.calendar.over);
+      expect(flat("3 ноября").backgroundColor).toBe(tokens.color.calendar.farOver);
+      expect(flat("4 ноября").backgroundColor).toBeUndefined();
+      expect(flat("5 ноября").backgroundColor).toBeUndefined();
+      expect(flat("5 ноября").borderColor).toBe(tokens.color.fg.default);
+      expect(screen.getByRole("button", { name: "1 ноября: в лимите" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "3 ноября: сильно сверх лимита" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "4 ноября: лимита не было" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "5 ноября: сегодня" })).toBeTruthy();
+    });
+
+    it("tells a day's figures when it is tapped", async () => {
+      await openIt();
+      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: сверх лимита" }));
+      expect(screen.getByText("2 ноября: потрачено ₴1,200 из ₴1,000")).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "4 ноября: лимита не было" }));
+      expect(screen.getByText("4 ноября: потрачено ₴50, лимита не было")).toBeTruthy();
+    });
+
+    it("walks to the previous month and does not go past the current one", async () => {
+      const api = await openIt();
+      expect(screen.getByRole("button", { name: "Следующий месяц" }).props.accessibilityState.disabled).toBe(true);
+      await fireEvent.press(screen.getByRole("button", { name: "Предыдущий месяц" }));
+      expect(await screen.findByText("Октябрь 2026")).toBeTruthy();
+      await waitFor(() => expect(api.calendar).toHaveBeenCalledWith("2026-10"));
+      await fireEvent.press(screen.getByRole("button", { name: "Следующий месяц" }));
+      expect(await screen.findByText("Ноябрь 2026")).toBeTruthy();
+    });
+
+    it("offers a retry when the month does not load", async () => {
+      const calendar = jest.fn(async (): Promise<ReturnType<typeof calendarFixture>> => {
+        throw new NetworkError();
+      });
+      const api = fakeApi({ today: jest.fn(async () => todayFixture({ streak: 2 })), calendar });
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+      await fireEvent.press(await screen.findByRole("button", { name: "Серия: 2 дня в лимите" }));
+      expect(await screen.findByText("Не получилось загрузить месяц.", {}, { timeout: 4000 })).toBeTruthy();
+      calendar.mockImplementation(november().calendar as never);
+      await fireEvent.press(screen.getByRole("button", { name: "Повторить" }));
+      expect(await screen.findByRole("button", { name: /^1 ноября/ })).toBeTruthy();
+    });
   });
 
   describe("the repayment window", () => {

@@ -27,6 +27,8 @@ export const color = {
     /** List rows: too many for real glass, so a see-through fill. */
     row: blackAlpha(0.6),
   },
+  /** How a day went against the limit; dark numbers on them. */
+  calendar: { within: p.sage, over: p.rose, farOver: p.crimson },
   /** The app's backdrop of metal folds: `peak` caps its thin crests, `sheet` the wide light that survives the glass's blur. */
   backdrop: { peak: p.silver[400], sheet: p.graphite[500] },
   // Statuses differ by lightness, and danger (errors) by a calm red. Each also carries a text label.

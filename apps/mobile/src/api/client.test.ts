@@ -145,6 +145,7 @@ describe("api client", () => {
     await api.createInstallment({ name: "a b", amount: 1, currency: "UAH", remaining: 2, first_due: "2026-12-01" });
     await api.patchInstallment("a b", { amount: 2 });
     await api.deleteInstallment("a b");
+    await api.calendar("2026-11");
     const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
     expect(calls.map(([u, i]) => `${i.method} ${u.replace("https://api.example.test", "")}`)).toEqual([
       "POST /recipients/label",
@@ -173,6 +174,7 @@ describe("api client", () => {
       "POST /plan/installments",
       "PATCH /plan/installments/a%20b",
       "DELETE /plan/installments/a%20b",
+      "GET /today/calendar?month=2026-11",
     ]);
     expect(calls[2]![1].body).toBe(JSON.stringify({ lifestyleCap: 10_000_000 }));
     expect(calls[7]![1].body).toBe(JSON.stringify({ token: "ExponentPushToken[abc]" }));

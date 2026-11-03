@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { fireEvent, render, screen } from "@testing-library/react-native";
-import type { GoalDto, LoanHistoryDto, LoanRowDto, ManualBalanceDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@hale/contracts";
+import type { CalendarDto, GoalDto, LoanHistoryDto, LoanRowDto, ManualBalanceDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@hale/contracts";
 import { ApiProvider } from "./api/context";
 import type { Api } from "./api/client";
 import { dateLabel, kyivDate } from "./format";
@@ -32,6 +32,7 @@ export function todayFixture(over: Partial<TodayDto> = {}): TodayDto {
     syncStale: false,
     limitVisual: "mercury",
     goals: [],
+    streak: 0,
     ...over,
   };
 }
@@ -73,6 +74,10 @@ export function taxFixture(over: Partial<ScheduledPaymentDto> = {}): ScheduledPa
 
 export function balanceFixture(over: Partial<ManualBalanceDto> = {}): ManualBalanceDto {
   return { id: 7, name: "Binance", amount: 270_000, currency: "USD", counts_as_own: true, ...over };
+}
+
+export function calendarFixture(over: Partial<CalendarDto> = {}): CalendarDto {
+  return { month: "2026-11", today: "2026-11-05", streak: 0, days: [], ...over };
 }
 
 export function loanFixture(over: Partial<LoanRowDto> = {}): LoanRowDto {
@@ -122,6 +127,7 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     repayLoan: jest.fn(async () => undefined),
     loanHistory: jest.fn(async () => loanHistoryFixture()),
     repayOldLoans: jest.fn(async () => undefined),
+    calendar: jest.fn(async (month: string) => calendarFixture({ month })),
     expectedIncomes: jest.fn(async () => []),
     createExpectedIncome: jest.fn(async () => undefined),
     patchExpectedIncome: jest.fn(async () => undefined),

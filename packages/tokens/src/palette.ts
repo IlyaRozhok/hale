@@ -17,6 +17,7 @@ export const palette = {
   coral: "#E39A8F",
   sage: "#8CC7A1",
   rose: "#F08585",
+  crimson: "#E25C5C",
   graphite: {
     500: "#54585F",
     700: "#2C2F34",

@@ -13,6 +13,7 @@ export const PAYMENTS_KEY = ["payments"] as const;
 export const CAP_PREVIEW_KEY = ["cap-preview"] as const;
 export const MANUAL_BALANCES_KEY = ["manual-balances"] as const;
 export const LOANS_KEY = ["loans"] as const;
+export const CALENDAR_KEY = ["calendar"] as const;
 export const RECIPIENTS_KEY = ["recipients"] as const;
 export const EXPECTED_INCOMES_KEY = ["expected-incomes"] as const;
 export const INCOME_EVENTS_KEY = ["income-events"] as const;
@@ -23,6 +24,11 @@ export const PREVIEW_DELAY_MS = 300;
 export function useToday() {
   const api = useApi();
   return useQuery({ queryKey: TODAY_KEY, queryFn: () => api.today() });
+}
+
+export function useCalendar(month: string) {
+  const api = useApi();
+  return useQuery({ queryKey: [...CALENDAR_KEY, month], queryFn: () => api.calendar(month) });
 }
 
 /** Preview for a slider value, requested only after the value has stopped changing. */

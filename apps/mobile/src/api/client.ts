@@ -1,5 +1,6 @@
 import type {
   BridgePreviewDto,
+  CalendarDto,
   ExpectedIncomeDto,
   ExpectedIncomeInput,
   ExpectedIncomePatch,
@@ -61,6 +62,7 @@ export class NetworkError extends Error {
 export interface Api {
   login(password: string, deviceName: string): Promise<string>;
   today(): Promise<TodayDto>;
+  calendar(month: string): Promise<CalendarDto>;
   previewBridge(dailyAmount: number): Promise<BridgePreviewDto>;
   chooseBridge(dailyAmount: number): Promise<TodayDto>;
   cancelBridge(): Promise<TodayDto>;
@@ -144,6 +146,7 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
   return {
     login: async (password, deviceName) => (await request<{ token: string }>("POST", "/auth/login", { password, deviceName })).token,
     today: () => request("GET", "/today"),
+    calendar: (month) => request("GET", `/today/calendar?month=${month}`),
     previewBridge: (dailyAmount) => request("POST", "/bridge/preview", { dailyAmount }),
     chooseBridge: (dailyAmount) => request("POST", "/bridge", { dailyAmount }),
     cancelBridge: () => request("DELETE", "/bridge"),

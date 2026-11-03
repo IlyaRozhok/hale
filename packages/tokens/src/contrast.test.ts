@@ -83,6 +83,15 @@ describe("floating glass, in the worst case", () => {
   });
 });
 
+describe("limit calendar colours", () => {
+  it("carry a dark number, and differ from one another", () => {
+    const { within, over, farOver } = color.calendar;
+    for (const c of [within, over, farOver]) expect(contrastRatio(color.fg.inverse, c)).toBeGreaterThanOrEqual(4.5);
+    expect(new Set([within, over, farOver]).size).toBe(3);
+    expect(contrastRatio(over, farOver)).toBeGreaterThanOrEqual(1.2);
+  });
+});
+
 describe("metal settings", () => {
   it("are in the tokens", () => {
     expect(tokens.metal).toEqual({ renderScale: 2, levelTau: 0.35, stillTime: 4 });

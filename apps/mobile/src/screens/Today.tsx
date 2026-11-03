@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 import type { DailyStateDto, TodayDto } from "@hale/contracts";
 import { LimitVisual } from "../metal";
-import { formatMoney, formatStamp, formatUsd, kyivDate, longDate } from "../format";
+import { formatMoney, formatStamp, formatUsd, kyivDate, longDate, streakLabel } from "../format";
 import { useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
 import { ErrorText } from "../components/ErrorText";
 import { ActionRow } from "../components/ActionRow";
@@ -14,6 +14,7 @@ import { Glass } from "../components/Glass";
 import { GoalCards } from "../components/GoalCards";
 import { Icon } from "../components/Icon";
 import { LAYOUT } from "../components/layout";
+import { LimitCalendar } from "../components/LimitCalendar";
 import { QuestionCard, eventIdOf } from "../components/QuestionCard";
 import { RecipientLabelSheet } from "../components/RecipientLabelSheet";
 import { RepayLoanSheet } from "../components/RepayLoanSheet";
@@ -63,7 +64,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
   const deleteLoan = useDeleteLoan();
   const pull = usePullRefresh(today.refetch);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
-  const [sheet, setSheet] = useState<"bridge" | "questions" | "settings" | null>(null);
+  const [sheet, setSheet] = useState<"bridge" | "questions" | "settings" | "calendar" | null>(null);
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
   const [repaying, setRepaying] = useState<{ id: number; remaining: number; receivedOn?: string; name: string } | null>(null);
 
@@ -182,6 +183,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
           )}
         </Glass>
 
+        <ActionRow label={streakLabel(data.streak ?? 0)} onPress={() => setSheet("calendar")} />
         {state.mode === "bridge" && state.bridge && (
           <ActionRow
             label={state.bridge.confirmed ? `План до зарплаты: ${formatMoney(state.dailyLimit)} в день` : "Нужен план до зарплаты"}
@@ -202,6 +204,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
         <Upcoming items={data.upcoming} />
       </ScrollView>
 
+      {sheet === "calendar" && <LimitCalendar today={data.date} streak={data.streak ?? 0} onClose={closeSheet} />}
       {sheet === "bridge" && state.bridge && (
         <Sheet title="План до зарплаты" onClose={closeSheet}>
           <BridgePlan

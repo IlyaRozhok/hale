@@ -1,7 +1,8 @@
 import { ConflictException, Inject, Injectable, Logger, UnprocessableEntityException } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
-import type { BridgePreviewDto, SettingsPreviewDto, TodayDto } from "@hale/contracts";
+import type { BridgePreviewDto, CalendarDto, SettingsPreviewDto, TodayDto } from "@hale/contracts";
 import { DataSource, type EntityManager } from "typeorm";
+import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
 import { type DailyInput, type DailyState, computeDaily, sumDue } from "../domain/daily";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
@@ -25,6 +26,9 @@ const DEFAULT_FOOD_FLOOR = 45_000;
 const MAX_RECIPIENT_QUESTIONS = 3;
 /** Older transfers are history: asking about them now changes nothing. */
 const QUESTION_WINDOW_DAYS = 30;
+
+/** What counts against the limit: spend (refunds reduce it), cash out and person transfers. */
+const COUNTS_AGAINST_LIMIT = `a.kind <> 'jar' AND t.amount_uah IS NOT NULL AND t.type IN ('spend','cash_out','person_transfer')`;
 
 const CODE_BY_ALPHA = new Map(Object.entries(CURRENCY_ALPHA).map(([code, alpha]) => [alpha, Number(code)]));
 
@@ -189,6 +193,45 @@ export class TodayService {
       }),
       rateStale,
     };
+  }
+
+  /** The month's days up to today, against the limits fixed for them. */
+  async calendar(month: string): Promise<CalendarDto> {
+    const today = kyivDate(this.clock.now());
+    const m = this.ds.manager;
+    const first = `${month}-01`;
+    const [y, mo] = month.split("-").map(Number) as [number, number];
+    const last = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
+    const limits = new Map(
+      ((await m.query(`SELECT local_date::text AS date, daily_limit::float8 AS "limit" FROM daily_snapshots WHERE local_date BETWEEN $1 AND $2`, [first, last])) as { date: string; limit: number }[]).map(
+        (r) => [r.date, r.limit],
+      ),
+    );
+    const spent = await this.spentByDay(m, first, last);
+    const days: CalendarDto["days"] = [];
+    for (let date = first; date <= last && date <= today; date = addDays(date, 1)) {
+      const limit = limits.get(date) ?? null;
+      const amount = spent.get(date) ?? 0;
+      days.push({ date, limit, spent: amount, status: date === today ? "today" : dayStatus(limit, amount) });
+    }
+    return { month, today, streak: await this.streak(m, today), days };
+  }
+
+  /** Every fixed day is read: a streak can reach back any distance, and there is one row a day. */
+  private async streak(m: EntityManager, today: string): Promise<number> {
+    const rows = (await m.query(`SELECT local_date::text AS date, daily_limit::float8 AS "limit" FROM daily_snapshots WHERE local_date < $1`, [today])) as { date: string; limit: number }[];
+    if (rows.length === 0) return 0;
+    const spent = await this.spentByDay(m, rows.reduce((a, r) => (r.date < a ? r.date : a), today), today);
+    return currentStreak(rows.map((r) => ({ ...r, spent: spent.get(r.date) ?? 0 })), today);
+  }
+
+  private async spentByDay(m: EntityManager, from: string, to: string): Promise<Map<string, number>> {
+    const rows = (await m.query(
+      `SELECT t.local_date::text AS date, SUM(-t.amount_uah)::float8 AS spent FROM transactions t JOIN accounts a ON a.id=t.account_id
+        WHERE ${COUNTS_AGAINST_LIMIT} AND t.local_date BETWEEN $1 AND $2 GROUP BY t.local_date`,
+      [from, to],
+    )) as { date: string; spent: number }[];
+    return new Map(rows.map((r) => [r.date, r.spent]));
   }
 
   private async rates(m: EntityManager): Promise<Rates> {
@@ -450,8 +493,7 @@ export class TodayService {
   private async spent(m: EntityManager, from: string, to: string): Promise<number> {
     const r = await m.query(
       `SELECT COALESCE(SUM(-t.amount_uah),0)::float8 AS s FROM transactions t JOIN accounts a ON a.id=t.account_id
-        WHERE a.kind <> 'jar' AND t.amount_uah IS NOT NULL AND t.local_date BETWEEN $1 AND $2
-          AND t.type IN ('spend','cash_out','person_transfer')`,
+        WHERE ${COUNTS_AGAINST_LIMIT} AND t.local_date BETWEEN $1 AND $2`,
       [from, to],
     );
     return r[0].s;
@@ -569,6 +611,7 @@ export class TodayService {
       syncStale: !f.syncedAt || f.now.getTime() - f.syncedAt.getTime() > STALE_SYNC_MS,
       limitVisual: f.limitVisual,
       goals: f.goals,
+      streak: await this.streak(m, f.date),
     };
   }
 }

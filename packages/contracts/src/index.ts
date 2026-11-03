@@ -352,6 +352,27 @@ export interface TodayDto {
   limitVisual: "mercury" | "ring";
   /** Savings goals in US cents, in display order. */
   goals: { id: number; name: string; saved: number; target: number }[];
+  /** Days within the limit in a row, back from yesterday. */
+  streak: number;
+}
+
+// --- limit calendar ---------------------------------------------------------
+export const calendarQuery = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/) }).strict();
+
+export interface CalendarDayDto {
+  date: string;
+  /** The day's fixed limit; null when none was fixed. */
+  limit: number | null;
+  spent: number;
+  status: "within" | "over" | "far_over" | "no_limit" | "today";
+}
+
+export interface CalendarDto {
+  month: string;
+  today: string;
+  streak: number;
+  /** The month's days up to today. */
+  days: CalendarDayDto[];
 }
 
 export interface BridgePreviewDto {

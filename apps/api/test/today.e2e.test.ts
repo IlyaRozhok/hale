@@ -103,6 +103,62 @@ describe("auth", () => {
   });
 });
 
+describe("limit calendar", () => {
+  const limit = (date: string, amount: number) => ds.query(`INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,'normal')`, [date, amount]);
+  const month = async (m: string) => (await api.get(`/today/calendar?month=${m}`).expect(200)).body;
+
+  it("rejects a bad month and requires a token", async () => {
+    await api.get("/today/calendar?month=2026-13").expect(400);
+    await api.get("/today/calendar").expect(400);
+    await request(http()).get("/today/calendar?month=2026-11").expect(401);
+  });
+
+  it("colours each past day from its fixed limit and what counted against it, with today apart", async () => {
+    const card = await account("black", 1_000_000);
+    at("2026-11-05T10:00:00Z");
+    await limit("2026-11-01", 100_000);
+    await tx(card, -80_000, "spend", { date: "2026-11-01" });
+    await limit("2026-11-02", 100_000);
+    await tx(card, -90_000, "person_transfer", { date: "2026-11-02" });
+    await tx(card, -30_000, "cash_out", { date: "2026-11-02" });
+    await limit("2026-11-03", 100_000);
+    await tx(card, -160_000, "spend", { date: "2026-11-03" });
+    await tx(card, -5_000, "spend", { date: "2026-11-04" }); // no limit that day
+    await tx(card, -900_000, "own_transfer", { date: "2026-11-01" }); // does not count
+    await tx(card, -900_000, "loan_out", { date: "2026-11-01" });
+    await limit("2026-11-05", 100_000);
+    await tx(card, -999_000, "spend", { date: "2026-11-05" });
+    const body = await month("2026-11");
+    expect(body).toMatchObject({ month: "2026-11", today: "2026-11-05" });
+    expect(body.days).toEqual([
+      { date: "2026-11-01", limit: 100_000, spent: 80_000, status: "within" },
+      { date: "2026-11-02", limit: 100_000, spent: 120_000, status: "over" },
+      { date: "2026-11-03", limit: 100_000, spent: 160_000, status: "far_over" },
+      { date: "2026-11-04", limit: null, spent: 5_000, status: "no_limit" },
+      { date: "2026-11-05", limit: 100_000, spent: 999_000, status: "today" },
+    ]);
+  });
+
+  it("has only the days of that month, none from the future", async () => {
+    at("2026-11-02T10:00:00Z");
+    expect((await month("2026-11")).days.map((d: { date: string }) => d.date)).toEqual(["2026-11-01", "2026-11-02"]);
+    expect((await month("2026-12")).days).toEqual([]);
+    expect((await month("2026-02")).days).toHaveLength(28);
+  });
+
+  it("gives the current streak, on the calendar and on Today", async () => {
+    const card = await account("black", 1_000_000);
+    at("2026-11-05T10:00:00Z");
+    await limit("2026-11-01", 100_000);
+    await tx(card, -200_000, "spend", { date: "2026-11-01" });
+    await limit("2026-11-02", 100_000);
+    await limit("2026-11-04", 100_000);
+    await tx(card, -100_000, "spend", { date: "2026-11-04" });
+    expect((await month("2026-11")).streak).toBe(2);
+    expect((await today()).streak).toBe(2);
+  });
+});
+
 describe("goals on the home screen", () => {
   it("lists goals in sort order, in USD cents", async () => {
     await ds.query(`INSERT INTO goals (name, target_cents, saved_cents, sort) VALUES ('Машина',1000000,0,2),('Подушка',500000,50000,1)`);

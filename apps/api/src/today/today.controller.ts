@@ -1,5 +1,5 @@
-import { BadRequestException, Body, Controller, Get, Inject, Post, Delete } from "@nestjs/common";
-import { bridgeInput, settingsPreviewInput, type BridgePreviewDto, type SettingsPreviewDto, type TodayDto } from "@hale/contracts";
+import { BadRequestException, Body, Controller, Get, Inject, Post, Delete, Query } from "@nestjs/common";
+import { bridgeInput, calendarQuery, settingsPreviewInput, type CalendarDto, type BridgePreviewDto, type SettingsPreviewDto, type TodayDto } from "@hale/contracts";
 import { TodayService } from "./today.service";
 
 function parseBridge(body: unknown): number {
@@ -25,6 +25,13 @@ export class TodayController {
   @Get("today")
   get(): Promise<TodayDto> {
     return this.today.getToday();
+  }
+
+  @Get("today/calendar")
+  calendar(@Query() query: unknown): Promise<CalendarDto> {
+    const r = calendarQuery.safeParse(query);
+    if (!r.success) throw new BadRequestException("month: expected YYYY-MM");
+    return this.today.calendar(r.data.month);
   }
 
   @Post("bridge")

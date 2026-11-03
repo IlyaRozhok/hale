@@ -179,3 +179,15 @@ export function monthGrid(year: number, month: number): (string | null)[] {
     ...Array.from({ length: days }, (_, i) => `${ym}-${String(i + 1).padStart(2, "0")}`),
   ];
 }
+
+/** "дня" and so on, in the form that follows the number n. */
+function daysWord(n: number): string {
+  const tens = n % 100;
+  const ones = n % 10;
+  if (tens >= 11 && tens <= 14) return "дней";
+  if (ones === 1) return "день";
+  return ones >= 2 && ones <= 4 ? "дня" : "дней";
+}
+
+/** The current streak in words, or the calendar's name while there is none. */
+export const streakLabel = (streak: number): string => (streak > 0 ? `Серия: ${streak} ${daysWord(streak)} в лимите` : "Календарь лимитов");
