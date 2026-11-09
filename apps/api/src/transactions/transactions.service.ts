@@ -22,7 +22,7 @@ const COLUMNS = `
   t.id, t.occurred_at, to_char(t.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS ts,
   t.local_date::text AS local_date, t.description, t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah,
   t.fx_rate::float8 AS fx_rate, a.currency, t.type, t.category, t.hold, t.needs_label,
-  ${KEY} AS counter_key, t.counter_iban, t.counter_name, a.kind AS account_kind`;
+  ${KEY} AS counter_key, t.counter_iban, t.counter_name, a.kind AS account_kind, (a.kind = 'cash') AS manual`;
 const FROM = `FROM transactions t JOIN accounts a ON a.id = t.account_id`;
 
 interface Row {
@@ -43,6 +43,7 @@ interface Row {
   counter_iban: string | null;
   counter_name: string | null;
   account_kind: string;
+  manual: boolean;
 }
 
 /** A stored answer about a recipient. */
@@ -75,6 +76,7 @@ const view = (r: Row, rules: readonly AnswerRule[]): TransactionDto => ({
   counterKey: r.counter_key,
   counterName: r.counter_name,
   accountKind: r.account_kind,
+  manual: r.manual,
   recipientLabel: answerFor(rules, r),
 });
 
@@ -334,7 +336,7 @@ export class TransactionsService {
     );
   }
 
-  private async one(id: number): Promise<TransactionDto> {
+  async one(id: number): Promise<TransactionDto> {
     const r = (await this.ds.query(`SELECT ${COLUMNS} ${FROM} WHERE t.id=$1`, [id]))[0] as Row;
     return view(r, await this.answerRules());
   }

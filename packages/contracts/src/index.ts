@@ -328,11 +328,12 @@ export interface TodayDto {
   /** UAH per USD; 0 when no rate is known. */
   usdRate: number;
   rateStale: boolean;
-  accounts: { own: number; credit: number; fop: number; binance: number };
+  /** `cash` is the wallet, already inside `own`; 0 until the wallet is started. */
+  accounts: { own: number; credit: number; fop: number; binance: number; cash: number };
   upcoming: { id: string; name: string; amount: number; dueOn: string; kind: string }[];
   questions: {
     id: string;
-    kind: "usdc_arrived" | "usdc_match" | "income_date" | "recipient_label";
+    kind: "usdc_arrived" | "usdc_match" | "income_date" | "recipient_label" | "cash_source";
     text: string;
     /** Who a recipient question is about. */
     subject?: string;
@@ -469,6 +470,8 @@ export interface TransactionDto {
   counterKey: string;
   counterName: string | null;
   accountKind: string;
+  /** Entered by hand on the cash wallet: it can be changed and deleted. */
+  manual: boolean;
   /** The owner's answer about this recipient, if any. */
   recipientLabel: RecipientLabelName | null;
 }
@@ -488,4 +491,39 @@ export interface TransactionEditDto {
 
 export interface RecipientLabelResultDto {
   updated: number;
+}
+
+// --- cash wallet -------------------------------------------------------------------
+/** Categories a cash purchase can have. */
+export const cashCategory = z.enum([
+  "groceries", "cafe", "transport", "subscriptions", "leisure", "health", "utilities", "telecom", "shopping", "uncategorized",
+]);
+export type CashCategory = z.infer<typeof cashCategory>;
+/** spend: a purchase, against the limit; received: cash came in; own_out: cash went to one's own other money. */
+export const cashOperationKind = z.enum(["spend", "received", "own_out"]);
+export type CashOperationKind = z.infer<typeof cashOperationKind>;
+const cashAmount = z.number().int().positive().max(100_000_000_00);
+const cashNote = z.string().trim().max(200);
+
+export const cashStartInput = z.object({ amount: z.number().int().min(0).max(100_000_000_00), date: isoDate.optional() }).strict();
+export type CashStartInput = z.infer<typeof cashStartInput>;
+export const cashOperationInput = z
+  .object({ kind: cashOperationKind, amount: cashAmount, category: cashCategory.optional(), date: isoDate.optional(), note: cashNote.optional() })
+  .strict()
+  .refine((v) => v.kind !== "spend" || v.category !== undefined, { message: "a purchase needs a category", path: ["category"] });
+export type CashOperationInput = z.infer<typeof cashOperationInput>;
+export const cashOperationPatch = z
+  .object({ kind: cashOperationKind, amount: cashAmount, category: cashCategory, date: isoDate, note: cashNote })
+  .partial()
+  .strict();
+export type CashOperationPatch = z.infer<typeof cashOperationPatch>;
+export const cashCountInput = z.object({ amount: z.number().int().min(0).max(100_000_000_00) }).strict();
+export type CashCountInput = z.infer<typeof cashCountInput>;
+
+export interface CashWalletDto {
+  started: boolean;
+  /** The first day the wallet keeps records; null until started. */
+  start: string | null;
+  /** Kopecks in the pocket, as recorded. */
+  balance: number;
 }

@@ -56,6 +56,13 @@ function make(
 }
 
 describe("ReconcileService.runDaily", () => {
+  it("never asks the bank for the cash wallet's statement: it has none", async () => {
+    await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ('manual:cash','cash','UAH',0)`);
+    const { client, service } = make();
+    await service.runDaily();
+    expect(client.statement.mock.calls.map((c) => c[0])).toEqual(["acc-1"]);
+  });
+
   it("inserts a transaction missed by the webhook, asks for the last 7 days", async () => {
     const { client, service } = make({ statement: async () => [stmt("missed")] });
     await service.runDaily();

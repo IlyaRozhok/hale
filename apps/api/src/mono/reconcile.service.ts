@@ -68,7 +68,8 @@ export class ReconcileService implements OnApplicationBootstrap {
 
     const toSec = Math.floor(this.clock.now() / 1000);
     const fromSec = toSec - RECONCILE_DAYS * DAY_S;
-    const accounts = await this.ds.getRepository(Account).find({ order: { id: "ASC" } });
+    // The cash wallet has no bank statement.
+    const accounts = (await this.ds.getRepository(Account).find({ order: { id: "ASC" } })).filter((a) => a.kind !== "cash");
     const failures: string[] = [];
     for (const account of accounts) {
       try {

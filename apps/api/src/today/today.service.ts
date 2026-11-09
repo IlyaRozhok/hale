@@ -13,6 +13,7 @@ import { usdcMatchRows } from "../domain/usdc-match";
 import { BINANCE } from "../plan/plan.service";
 import { isCounterpartyName, transfersWord } from "../domain/counterparty";
 import { counterKeySql } from "../transactions/counter-key";
+import { walletBalance } from "../cash/wallet";
 import { Clock } from "./clock";
 import { quarterTaxFacts } from "./tax-facts";
 
@@ -27,8 +28,12 @@ const MAX_RECIPIENT_QUESTIONS = 3;
 /** Older transfers are history: asking about them now changes nothing. */
 const QUESTION_WINDOW_DAYS = 30;
 
-/** What counts against the limit: spend (refunds reduce it), cash out and person transfers. */
-const COUNTS_AGAINST_LIMIT = `a.kind <> 'jar' AND t.amount_uah IS NOT NULL AND t.type IN ('spend','cash_out','person_transfer')`;
+/**
+ * What counts against the limit: spend (refunds reduce it), person transfers, and cash out until the
+ * cash wallet starts. From then a withdrawal only moves money into the wallet; purchases in cash spend.
+ */
+const COUNTS_AGAINST_LIMIT = `a.kind <> 'jar' AND t.amount_uah IS NOT NULL AND (t.type IN ('spend','person_transfer')
+  OR (t.type = 'cash_out' AND NOT COALESCE(t.local_date >= (SELECT cash_start FROM settings WHERE id=1), false)))`;
 
 const CODE_BY_ALPHA = new Map(Object.entries(CURRENCY_ALPHA).map(([code, alpha]) => [alpha, Number(code)]));
 
@@ -56,12 +61,13 @@ interface Facts {
   credit: number;
   usdRate: number;
   rateStale: boolean;
-  slots: { own: number; fop: number; binance: number };
+  slots: { own: number; fop: number; binance: number; cash: number };
   upcoming: TodayDto["upcoming"];
   loans: Loan[];
   basis: string;
   plan: Plan | null;
   trackingStart: string;
+  cashStart: string | null;
   syncedAt: Date | null;
   limitVisual: "mercury" | "ring";
   goals: TodayDto["goals"];
@@ -368,6 +374,9 @@ export class TodayService {
       `SELECT name, amount::float8 AS amount, currency FROM manual_balances WHERE counts_as_own ORDER BY id`,
     );
     const binance = manual.reduce((s, b) => s + uah(b.amount, b.currency), 0);
+    // The cash wallet is spendable own money, like the cards.
+    const wallet = await walletBalance(m);
+    cards += wallet.balance;
 
     // income dates and loans
     const next = (await m.query(`SELECT min(expected_on)::text AS d FROM income_events WHERE status <> 'received'`))[0].d as string | null;
@@ -473,7 +482,8 @@ export class TodayService {
       credit,
       usdRate: usd?.rate ?? 0,
       rateStale: stale || usdStale,
-      slots: { own: cards + fop + binance, fop, binance },
+      slots: { own: cards + fop + binance, fop, binance, cash: wallet.balance },
+      cashStart: wallet.start,
       loans,
       basis,
       upcoming,
@@ -517,8 +527,9 @@ export class TodayService {
         `SELECT t.id, t.type, a.kind AS account_kind, t.amount_uah::float8 AS amount_uah, t.local_date::text AS local_date, t.usdc_checked
            FROM transactions t JOIN accounts a ON a.id = t.account_id
           WHERE t.amount > 0 AND NOT t.usdc_checked AND t.type IN ('person_in','cash_in') AND t.local_date >= GREATEST($1::date, $2::date)
+            AND NOT (t.type = 'cash_in' AND $3::date IS NOT NULL AND t.local_date >= $3::date)
           ORDER BY t.occurred_at, t.id`,
-        [`${event.period}-01`, f.trackingStart],
+        [`${event.period}-01`, f.trackingStart, f.cashStart],
       );
     return usdcMatchRows({
       rows: rows.map((r) => ({
@@ -534,6 +545,35 @@ export class TodayService {
     }));
   }
 
+  /**
+   * A cash deposit at a terminal once the wallet keeps records: the cash came from the wallet, from
+   * Binance, or from elsewhere. The id carries the USDC event Binance would be matched to, 0 if none.
+   */
+  private async cashSourceQuestions(m: EntityManager, f: Facts): Promise<TodayDto["questions"]> {
+    if (f.cashStart === null) return [];
+    const event = f.usdRate > 0
+      ? ((
+          await m.query(
+            `SELECT e.id FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id
+              WHERE x.source='usdc' AND e.status='received' ORDER BY e.received_at DESC NULLS LAST, e.id DESC LIMIT 1`,
+          )
+        )[0] as { id: number } | undefined)
+      : undefined;
+    const rows: { id: number; amount_uah: number; local_date: string }[] = await m.query(
+      `SELECT t.id, t.amount_uah::float8 AS amount_uah, t.local_date::text AS local_date
+         FROM transactions t JOIN accounts a ON a.id = t.account_id
+        WHERE t.type = 'cash_in' AND t.amount > 0 AND NOT t.usdc_checked AND a.kind NOT IN ('jar','cash')
+          AND t.local_date >= $1::date AND t.local_date > $2::date - ${QUESTION_WINDOW_DAYS}
+        ORDER BY t.occurred_at, t.id`,
+      [f.cashStart, f.date],
+    );
+    return rows.map((r) => ({
+      id: `cash_source:${r.id}:${event?.id ?? 0}`,
+      kind: "cash_source" as const,
+      text: `Внесено ${fmt(r.amount_uah)} (${fmtDay(r.local_date)}). Откуда наличные?`,
+    }));
+  }
+
   // --- the response -------------------------------------------------------------
   private async dto(f: Facts, state: DailyState, plan: Plan | null): Promise<TodayDto> {
     const m = this.ds.manager;
@@ -546,6 +586,7 @@ export class TodayService {
     );
     for (const e of usdc) questions.push({ id: `usdc_arrived:${e.id}`, kind: "usdc_arrived", text: "Пришло на Binance?" });
     for (const q of await this.usdcMatchQuestions(m, f)) questions.push(q);
+    for (const q of await this.cashSourceQuestions(m, f)) questions.push(q);
     if (state.needsIncomeDate) {
       const ev = (await m.query(`SELECT id FROM income_events WHERE status <> 'received' ORDER BY expected_on, id LIMIT 1`))[0] as
         | { id: number }
@@ -602,7 +643,7 @@ export class TodayService {
       state: { ...state, bridge: state.bridge ? { ...state.bridge, confirmed: plan !== null } : null },
       usdRate: f.usdRate,
       rateStale: f.rateStale,
-      accounts: { own: f.slots.own, credit: f.credit, fop: f.slots.fop, binance: f.slots.binance },
+      accounts: { own: f.slots.own, credit: f.credit, fop: f.slots.fop, binance: f.slots.binance, cash: f.slots.cash },
       upcoming: f.upcoming,
       questions,
       badCases,

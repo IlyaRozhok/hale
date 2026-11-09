@@ -16,6 +16,7 @@ import { TransactionsUsdcChecked1794528000000 } from "./migrations/0012-transact
 import { Goals1794614400000 } from "./migrations/0013-goals";
 import { LoanServiceCost1794700800000 } from "./migrations/0014-loan-service-cost";
 import { LoanRepaidDateUnknown1794787200000 } from "./migrations/0015-loan-repaid-date-unknown";
+import { CashWallet1794873600000 } from "./migrations/0016-cash-wallet";
 
 export const migrations = [
   Init1793577600000,
@@ -33,6 +34,7 @@ export const migrations = [
   Goals1794614400000,
   LoanServiceCost1794700800000,
   LoanRepaidDateUnknown1794787200000,
+  CashWallet1794873600000,
 ];
 
 export function createDataSource(url: string): DataSource {

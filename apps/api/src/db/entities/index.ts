@@ -9,7 +9,7 @@ const money = (extra: { nullable?: boolean; name?: string } = {}) =>
 export class Account {
   @id() id!: number;
   @Column({ type: "text", unique: true }) external_id!: string;
-  @Column({ type: "text" }) kind!: "black" | "white" | "fop" | "jar" | "other";
+  @Column({ type: "text" }) kind!: "black" | "white" | "fop" | "jar" | "other" | "cash";
   @Column({ type: "text" }) currency!: string;
   @money() balance!: number;
   @Column({ type: "bigint", transformer: bt, default: 0 }) credit_limit!: number;
@@ -40,6 +40,7 @@ export class Transaction {
   @Column({ type: "text", nullable: true }) type_source!: "rule" | "owner" | "auto" | null;
   @Column({ type: "boolean", default: false }) needs_label!: boolean;
   @Column({ type: "boolean", default: false }) usdc_checked!: boolean;
+  @Column({ type: "boolean", default: false }) from_wallet!: boolean;
   @Column({ type: "jsonb" }) raw!: unknown;
 }
 
@@ -139,6 +140,7 @@ export class Settings {
   @Column({ type: "timestamptz", nullable: true }) last_sync_at!: Date | null;
   @Column({ type: "timestamptz", nullable: true }) last_contact_at!: Date | null;
   @Column({ type: "date", default: () => "CURRENT_DATE" }) tracking_start!: string;
+  @Column({ type: "date", nullable: true }) cash_start!: string | null;
 }
 
 @Entity("bridge_plans")

@@ -218,10 +218,10 @@ describe("GET /transactions", () => {
     expect(Object.keys(x).sort()).toEqual(
       [
         "accountKind", "amount", "amountUah", "category", "counterKey", "counterName", "currency", "description",
-        "fxRate", "hold", "id", "localDate", "needsLabel", "occurredAt", "recipientLabel", "type",
+        "fxRate", "hold", "id", "localDate", "manual", "needsLabel", "occurredAt", "recipientLabel", "type",
       ].sort(),
     );
-    expect(x).toMatchObject({ accountKind: "fop", currency: "UAH", counterName: "Ivan P", hold: false });
+    expect(x).toMatchObject({ accountKind: "fop", currency: "UAH", counterName: "Ivan P", hold: false, manual: false });
     expect(x.counterKey).toMatch(/^[0-9a-f]{16}$/);
     expect(x.counterKey).toBe(y.counterKey);
     expect(x.occurredAt).toBe("2026-11-18T10:00:00.000Z");

@@ -583,7 +583,7 @@ describe("tax reserve and own money", () => {
     const r = await today();
     expect(r.usdRate).toBe(41.5);
     expect(r.rateStale).toBe(false);
-    expect(r.accounts).toEqual({ own: 1_000_000 + 200_000 + 300_000 + 415_000 + 50_000, credit: 3_000_000, fop: 300_000, binance: 465_000 });
+    expect(r.accounts).toEqual({ own: 1_000_000 + 200_000 + 300_000 + 415_000 + 50_000, credit: 3_000_000, fop: 300_000, binance: 465_000, cash: 0 });
 
     await ds.query(`UPDATE fx_rates SET fetched_at='2026-10-20T08:00:00Z'`);
     expect((await today()).rateStale).toBe(true);
