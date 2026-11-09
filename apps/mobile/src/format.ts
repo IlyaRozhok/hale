@@ -202,3 +202,12 @@ export function pluralIndex(n: number): 0 | 1 | 2 {
 }
 
 export const operationsText = (n: number): string => `${n} ${["операция", "операции", "операций"][pluralIndex(n)]}`;
+
+/** A chosen period, short: "9 ноя", "3–9 ноя", "28 окт – 3 ноя". */
+export function periodLabel(from: string, to: string): string {
+  const a = dayMonth(from);
+  const b = dayMonth(to);
+  if (from === to) return `${a.day} ${a.month}`;
+  if (from.slice(0, 7) === to.slice(0, 7)) return `${a.day}–${b.day} ${b.month}`;
+  return `${a.day} ${a.month} – ${b.day} ${b.month}`;
+}

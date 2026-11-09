@@ -494,8 +494,8 @@ export interface TransactionPageDto {
   nextCursor: string | null;
   /** Sum of amountUah per local date of this page, over the whole day and under the same filters. */
   dayTotals: Record<string, number>;
-  /** With a category or a period chosen: the sum and the count of everything found. Otherwise null. */
-  summary: { total: number; count: number } | null;
+  /** With a category or a period chosen: the sum and the count of everything found. Otherwise null; absent from an older server. */
+  summary?: { total: number; count: number } | null;
 }
 
 export interface TransactionEditDto {

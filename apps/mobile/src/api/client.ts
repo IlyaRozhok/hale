@@ -134,7 +134,15 @@ export interface Api {
   deleteRule(id: number): Promise<void>;
 }
 
-export type TransactionsFilter = { needsLabel?: boolean; group?: "spend" | "income" | "all"; q?: string };
+export type TransactionsFilter = {
+  needsLabel?: boolean;
+  group?: "spend" | "income" | "all";
+  q?: string;
+  category?: string;
+  /** Kyiv days, both inclusive. */
+  from?: string;
+  to?: string;
+};
 
 export interface ApiOptions {
   baseUrl: string;
@@ -202,9 +210,12 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     createGoal: (input) => request("POST", "/plan/goals", input),
     patchGoal: (id, patch) => request("PATCH", `/plan/goals/${id}`, patch),
     deleteGoal: async (id) => void (await request("DELETE", `/plan/goals/${id}`)),
-    transactions: ({ cursor, needsLabel, group, q: search }) => {
+    transactions: ({ cursor, needsLabel, group, q: search, category, from, to }) => {
       const q = [
         group !== undefined && `group=${group}`,
+        category !== undefined && `category=${encodeURIComponent(category)}`,
+        from !== undefined && `from=${from}`,
+        to !== undefined && `to=${to}`,
         search !== undefined && `q=${encodeURIComponent(search)}`,
         cursor !== undefined && `cursor=${encodeURIComponent(cursor)}`,
         needsLabel !== undefined && `needsLabel=${needsLabel}`,

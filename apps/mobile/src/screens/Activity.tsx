@@ -5,7 +5,10 @@ import { tokens } from "@hale/tokens";
 import type { TransactionDto } from "@hale/contracts";
 import { useTransactions } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
-import { dayHeader, formatSignedMoney, kyivDate } from "../format";
+import { dayHeader, formatSignedMoney, kyivDate, operationsText, periodLabel } from "../format";
+import { categoryLabel } from "../labels";
+import { CategorySheet } from "../components/CategorySheet";
+import { PeriodSheet, type Period } from "../components/PeriodSheet";
 import { ErrorText } from "../components/ErrorText";
 import { Chip } from "../components/Chip";
 import { Field } from "../components/Field";
@@ -19,13 +22,13 @@ import { TxRow } from "../components/TxRow";
 
 const { color, radius, space, touchMin, type } = tokens;
 
-type Tab = "spend" | "income" | "all" | "ask";
+type Tab = "spend" | "income" | "all";
 
+// Questions live in the bell on Today, one card per person; the list is only for looking.
 const TABS: { tab: Tab; label: string; empty: string }[] = [
   { tab: "spend", label: "Траты", empty: "Трат пока нет." },
   { tab: "income", label: "Доходы", empty: "Доходов пока нет." },
   { tab: "all", label: "Все", empty: "Операций пока нет." },
-  { tab: "ask", label: "Вопросы", empty: "Ответов никто не ждёт." },
 ];
 
 const SEARCH_DELAY_MS = 300;
@@ -41,6 +44,9 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
   const [text, setText] = useState("");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState<TransactionDto | null>(null);
+  const [category, setCategory] = useState<string | null>(null);
+  const [period, setPeriod] = useState<Period | null>(null);
+  const [picking, setPicking] = useState<"period" | "category" | null>(null);
   // A row waiting for an answer opens the label sheet; "Изменить тип" there switches to the full editor,
   // and the editor of an answered transfer leads back to the label sheet, to change the answer.
   const [sheet, setSheet] = useState<"edit" | "answer" | null>(null);
@@ -63,7 +69,13 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
     setSearching(!searching);
   };
 
-  const list = useTransactions({ ...(tab === "ask" ? { needsLabel: true } : { group: tab }), ...(search ? { q: search } : {}) });
+  const chosenCategory = tab === "spend" ? category : null;
+  const list = useTransactions({
+    group: tab,
+    ...(chosenCategory ? { category: chosenCategory } : {}),
+    ...(period ? { from: period.from, to: period.to } : {}),
+    ...(search ? { q: search } : {}),
+  });
   const pull = usePullRefresh(list.refetch);
   const pages = list.data?.pages ?? [];
   const items = pages.flatMap((p) => p.items);
@@ -75,7 +87,10 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
     else acc.push({ date: tx.localDate, data: [tx] });
     return acc;
   }, []);
-  const emptyText = search ? "Ничего не нашлось." : TABS.find((t) => t.tab === tab)!.empty;
+  const filtered = chosenCategory !== null || period !== null;
+  const emptyText = search || filtered ? "Ничего не нашлось." : TABS.find((t) => t.tab === tab)!.empty;
+  const summary = pages[0]?.summary ?? null;
+  const summaryTitle = [chosenCategory ? categoryLabel(chosenCategory) : null, period ? periodLabel(period.from, period.to) : null].filter(Boolean).join(" · ");
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + space.lg }]}>
@@ -91,6 +106,27 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
           <Chip key={t.tab} label={t.label} selected={tab === t.tab} onPress={() => setTab(t.tab)} />
         ))}
       </View>
+      <View style={styles.filters}>
+        <FilterChip
+          label={period ? periodLabel(period.from, period.to) : "Период"}
+          openLabel={period ? `Период: ${periodLabel(period.from, period.to)}` : "Период"}
+          clearLabel={period ? `Убрать период «${periodLabel(period.from, period.to)}»` : null}
+          onOpen={() => setPicking("period")}
+          onClear={() => setPeriod(null)}
+        />
+        {tab === "spend" && (
+          <FilterChip
+            label={chosenCategory ? categoryLabel(chosenCategory) : "Категория"}
+            openLabel={chosenCategory ? `Категория: ${categoryLabel(chosenCategory)}` : "Категория"}
+            clearLabel={chosenCategory ? `Убрать категорию «${categoryLabel(chosenCategory)}»` : null}
+            onOpen={() => setPicking("category")}
+            onClear={() => setCategory(null)}
+          />
+        )}
+      </View>
+      {filtered && summary && (
+        <Text style={styles.summary}>{`${summaryTitle}: ${formatSignedMoney(summary.total)} · ${operationsText(summary.count)}`}</Text>
+      )}
       {list.isError && items.length === 0 ? (
         <Glass style={styles.stack}>
           <ErrorText>Не получилось загрузить операции. Проверьте связь и попробуйте ещё раз.</ErrorText>
@@ -137,6 +173,8 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
         />
       )}
       {open?.manual && <CashOperationSheet tx={open} onClose={close} />}
+      {picking === "period" && <PeriodSheet today={kyivDate(now())} value={period} onPick={setPeriod} onClose={() => setPicking(null)} />}
+      {picking === "category" && <CategorySheet onPick={setCategory} onClose={() => setPicking(null)} />}
       {open && !open.manual && !showAnswer && (
         <TxEditSheet tx={open} onClose={close} onAnswer={isTransferToSomeone(open) ? () => setSheet("answer") : undefined} />
       )}
@@ -144,7 +182,31 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
   );
 }
 
+/** A filter: names what it holds and opens its window; once something is chosen, a cross clears it. */
+function FilterChip(p: { label: string; openLabel: string; clearLabel: string | null; onOpen: () => void; onClear: () => void }) {
+  const on = p.clearLabel !== null;
+  return (
+    <View style={[styles.filter, on && styles.filterOn]}>
+      <Pressable accessibilityRole="button" accessibilityLabel={p.openLabel} onPress={p.onOpen} style={styles.filterPress}>
+        <Text style={[styles.filterText, on && styles.filterTextOn]}>{p.label}</Text>
+      </Pressable>
+      {on && (
+        <Pressable accessibilityRole="button" accessibilityLabel={p.clearLabel!} onPress={p.onClear} style={styles.filterClear}>
+          <Icon name="close" color={color.accent.fgOnAccent} size={14} />
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  filter: { minHeight: touchMin, flexDirection: "row", alignItems: "center", borderRadius: radius.full, backgroundColor: color.surface.overlay },
+  filterOn: { backgroundColor: color.accent.default },
+  filterPress: { minHeight: touchMin, justifyContent: "center", paddingHorizontal: space.lg },
+  filterText: { ...type.label, color: color.fg.default },
+  filterTextOn: { color: color.accent.fgOnAccent },
+  filterClear: { minHeight: touchMin, minWidth: touchMin - space.sm, alignItems: "center", justifyContent: "center", paddingRight: space.sm },
+  summary: { ...type.caption, color: color.fg.muted, fontVariant: ["tabular-nums"] },
   root: { flex: 1, paddingHorizontal: space.xl, gap: space.md },
   title: { ...type.title, color: color.fg.default },
   filters: { flexDirection: "row", gap: space.sm },

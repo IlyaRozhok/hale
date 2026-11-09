@@ -179,3 +179,12 @@ describe("goal progress", () => {
     expect(formatDollars(1000000)).toBe("$10,000");
   });
 });
+
+describe("periodLabel", () => {
+  it("names a day, a span within a month, and a span across months", async () => {
+    const { periodLabel } = await import("./format");
+    expect(periodLabel("2026-11-09", "2026-11-09")).toBe("9 ноя");
+    expect(periodLabel("2026-11-03", "2026-11-09")).toBe("3–9 ноя");
+    expect(periodLabel("2026-10-28", "2026-11-03")).toBe("28 окт – 3 ноя");
+  });
+});

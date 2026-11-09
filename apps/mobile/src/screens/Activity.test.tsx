@@ -127,9 +127,8 @@ describe("Activity list", () => {
     expect(await screen.findByText("Группа income")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Все" }));
     expect(await screen.findByText("Группа all")).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button", { name: "Вопросы" }));
-    expect(await screen.findByText("Вопрос")).toBeTruthy();
-    expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, needsLabel: true });
+    // Questions live in the bell on Today now.
+    expect(screen.queryByRole("button", { name: "Вопросы" })).toBeNull();
   });
 
   it("limits the search field to what the server accepts", async () => {
@@ -183,8 +182,45 @@ describe("Activity list", () => {
     expect(await screen.findByText("Доходов пока нет.")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Все" }));
     expect(await screen.findByText("Операций пока нет.")).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button", { name: "Вопросы" }));
-    expect(await screen.findByText("Ответов никто не ждёт.")).toBeTruthy();
+  });
+});
+
+describe("Activity filters", () => {
+  const summaryPage = (summary: { total: number; count: number } | null) =>
+    jest.fn(async () => ({ items: [txFixture()], nextCursor: null, dayTotals: {}, summary }));
+
+  it("a category from the list narrows spending; its chip clears it", async () => {
+    const transactions = summaryPage({ total: -342000, count: 11 });
+    await renderWith(<Activity />, fakeApi({ transactions }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Категория" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Кафе и рестораны" }));
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", category: "cafe" }));
+    expect(await screen.findByText("Кафе и рестораны: −₴3,420 · 11 операций")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Убрать категорию «Кафе и рестораны»" }));
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" }));
+  });
+
+  it("a period: a whole day, or from and to; its chip names it and clears it", async () => {
+    const transactions = summaryPage({ total: -2500, count: 2 });
+    const now = () => new Date("2026-11-09T10:00:00Z");
+    await renderWith(<Activity now={now} />, fakeApi({ transactions }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Период" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Сегодня" }));
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", from: "2026-11-09", to: "2026-11-09" }));
+    expect(await screen.findByText("9 ноя: −₴25 · 2 операции")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Период: 9 ноя" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Неделя" }));
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", from: "2026-11-03", to: "2026-11-09" }));
+    expect(await screen.findByRole("button", { name: "Убрать период «3–9 ноя»" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Убрать период «3–9 ноя»" }));
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" }));
+  });
+
+  it("no category filter for income", async () => {
+    await renderWith(<Activity />, fakeApi({ transactions: summaryPage(null) }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Доходы" }));
+    expect(screen.queryByRole("button", { name: "Категория" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Период" })).toBeTruthy();
   });
 });
 
