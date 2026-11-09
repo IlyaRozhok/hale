@@ -26,15 +26,15 @@ type Props = {
 
 /**
  * The limit as a thin silver strip over a dark track, shorter as the day is spent, with a small
- * spark at its end: green while plenty is left, sand when little, red once nothing is. Overspent,
- * the strip fills and deepens to red. Only the spark glows, and it breathes slowly; still in the
- * background and under reduce-motion.
+ * spark at its end: green while plenty is left, sand when little, red once nothing is (then the
+ * strip is empty and only the spark says so). Only the spark glows, and it breathes slowly; still
+ * in the background and under reduce-motion.
  */
 export function LimitBar({ level, state }: Props) {
   const [width, setWidth] = useState(0);
   const reduced = useReduceMotion();
   const active = useAppActive();
-  const { time, shown } = useMetalClock(state === "over" ? 1 : level, active && !reduced, reduced);
+  const { time, shown } = useMetalClock(state === "over" ? 0 : level, active && !reduced, reduced);
   const onLayout = (e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width));
   return (
     <View style={styles.box} onLayout={onLayout} pointerEvents="none">
@@ -58,11 +58,7 @@ function Strip({ width, state, time, level }: { width: number; state: LimitState
     <Group>
       <RoundedRect x={GLOW} y={y} width={inner} height={STRIP} r={STRIP / 2} color={color.data.track} />
       <RoundedRect x={GLOW} y={y} width={filled} height={STRIP} r={STRIP / 2}>
-        {state === "over" ? (
-          <LinearGradient start={vec(GLOW, 0)} end={vec(GLOW + inner, 0)} colors={[color.limit.overDeep, color.limit.over]} />
-        ) : (
-          <LinearGradient start={vec(GLOW, 0)} end={vec(GLOW + inner, 0)} colors={[color.limit.strip, color.limit.strip]} />
-        )}
+        <LinearGradient start={vec(GLOW, 0)} end={vec(GLOW + inner, 0)} colors={[color.limit.strip, color.limit.strip]} />
       </RoundedRect>
       <Group opacity={glow}>
         <Circle cx={tipX} cy={y + STRIP / 2} r={SPARK + 3} color={spark}>

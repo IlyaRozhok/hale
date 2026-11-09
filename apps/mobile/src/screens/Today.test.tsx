@@ -134,7 +134,7 @@ describe("Today, normal mode", () => {
   it("states an overspent day calmly, in the ordinary colour", async () => {
     const state = { ...todayFixture().state, leftToday: -12000, level: 0 };
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })) }));
-    const amount = await screen.findByText("+₴120");
+    const amount = await screen.findByText("₴0");
     expect(StyleSheet.flatten(amount.props.style).color).toBe(tokens.color.fg.default);
     expect(screen.queryByText(/превыш|перерасход|красн/i)).toBeNull();
   });
@@ -159,15 +159,16 @@ describe("Today, normal mode", () => {
       expect(screen.getByText("Потрачено ₴601")).toBeTruthy();
     });
 
-    it("overspent: calmly says by how much, and that tomorrow brings the limit again", async () => {
+    it("overspent looks like any day: nothing left today, the spending quietly below, tomorrow again", async () => {
       await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 95000, leftToday: -60100, level: 0 }));
-      expect(await screen.findByText("Сегодня больше лимита")).toBeTruthy();
-      expect(screen.getByText("+₴601")).toBeTruthy();
+      const heading = await screen.findByText("Сегодня можно");
+      expect(StyleSheet.flatten(heading.props.style).color).not.toBe(tokens.color.status.danger);
+      expect(screen.getByText("₴0")).toBeTruthy();
       expect(screen.getByText("₴1,551 из ₴950 · завтра снова ₴950")).toBeTruthy();
-      expect(screen.queryByText(/Завтра будет новый лимит/)).toBeNull();
-      expect(screen.queryByText("Сегодня можно")).toBeNull();
+      expect(screen.queryByText(/больше лимита|Сверх/)).toBeNull();
+      expect(screen.queryByText(/^\+/)).toBeNull();
       expect(screen.queryByText(/−/)).toBeNull();
-      expect(screen.getByLabelText("Сегодня больше лимита на ₴601, лимит ₴950 на день")).toBeTruthy();
+      expect(screen.getByLabelText("Сегодня можно ₴0, потрачено ₴1,551 из ₴950 на день")).toBeTruthy();
     });
 
     it("exactly used up: the limit is used, nothing over it", async () => {
@@ -179,9 +180,9 @@ describe("Today, normal mode", () => {
 
     it("the metal bar is empty when nothing is left, and absent with no limit", async () => {
       await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 95000, leftToday: -100, level: 0.4 }));
-      const heading = await screen.findByText("Сегодня больше лимита");
+      await screen.findByText("Сегодня можно");
+      // Empty strip; only its small spark turns red.
       expect(levelOf()).toBe("bar:over:0");
-      expect(StyleSheet.flatten(heading.props.style).color).toBe(tokens.color.status.danger);
     });
 
     it("used up exactly: the strip says nothing is left, the words stay calm and white", async () => {

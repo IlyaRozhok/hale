@@ -109,7 +109,8 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const over = hasLimit && state.leftToday < 0;
   const spent = Math.max(0, state.dailyLimit - state.leftToday);
   const shownLeft = over ? -state.leftToday : Math.max(0, state.leftToday);
-  const heading = over ? "Сегодня больше лимита" : "Сегодня можно";
+  // Owner's choice: an overspent day looks like any day; only the strip's spark turns red.
+  const heading = "Сегодня можно";
   const dayState = limitState(state);
   const offlineSince = today.isError ? today.dataUpdatedAt : null;
   // A date question with no income event cannot be answered; an older cached answer may still hold one.
@@ -165,14 +166,14 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
             accessible
             accessibilityLabel={
               over
-                ? `${heading} на ${formatMoney(shownLeft)}, лимит ${formatMoney(state.dailyLimit)} на день`
+                ? `${heading} ₴0, потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)} на день`
                 : hasLimit
                   ? `${heading} ${formatMoney(shownLeft)}, из ${formatMoney(state.dailyLimit)} на день`
                   : `${heading} ${formatMoney(shownLeft)}. ${noLimitNote}`
             }
           >
-            <Text style={[styles.eyebrow, over && styles.overHeading]}>{heading}</Text>
-            <Text style={styles.amount}>{over ? `+${formatMoney(shownLeft)}` : formatMoney(shownLeft)}</Text>
+            <Text style={styles.eyebrow}>{heading}</Text>
+            <Text style={styles.amount}>{over ? formatMoney(0) : formatMoney(shownLeft)}</Text>
             {!hasLimit && <Text style={styles.note}>{noLimitNote}</Text>}
             {!hasLimit && spent > 0 && <Text style={styles.subtle}>Потрачено {formatMoney(spent)}</Text>}
           </View>
@@ -300,7 +301,6 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: space.xl, gap: space.md },
   stack: { gap: space.md },
   eyebrow: { ...type.body, color: color.fg.muted, height: LAYOUT.eyebrow + 4 },
-  overHeading: { color: color.status.danger },
   planRow: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.md, paddingHorizontal: space.xs },
   planText: { ...type.body, color: color.fg.default, flex: 1 },
   planAmount: { ...type.body, color: color.fg.muted, fontVariant: ["tabular-nums"] },
