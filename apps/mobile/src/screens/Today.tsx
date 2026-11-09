@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 import type { DailyStateDto, TodayDto } from "@hale/contracts";
@@ -25,7 +25,6 @@ import { StaleBanner } from "../components/StaleBanner";
 import { TodaySkeleton } from "../components/TodaySkeleton";
 import { Upcoming } from "../components/Upcoming";
 import { usePullRefresh } from "../usePullRefresh";
-import { Settings } from "./Settings";
 
 const { color, radius, space, touchMin, type } = tokens;
 
@@ -68,7 +67,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
   const deleteLoan = useDeleteLoan();
   const pull = usePullRefresh(today.refetch);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
-  const [sheet, setSheet] = useState<"bridge" | "questions" | "settings" | "calendar" | "cash" | null>(null);
+  const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | "cash" | null>(null);
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
   const [paying, setPaying] = useState<TodayDto["upcoming"][number] | null>(null);
   const [repaying, setRepaying] = useState<{ id: number; remaining: number; receivedOn?: string; name: string } | null>(null);
@@ -86,22 +85,11 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
   const closeSheet = () => setSheet(null);
   /** Closes the sheet only if it is still the one open: a late answer must not close another. */
   const closeIfOpen = (name: "bridge" | "questions") => setSheet((s) => (s === name ? null : s));
-  const settingsButton = (
-    <Pressable accessibilityRole="button" accessibilityLabel="Настройки" onPress={() => setSheet("settings")} style={styles.profile}>
-      <Icon name="user" color={color.fg.muted} size={20} />
-    </Pressable>
-  );
-  const settingsModal = sheet === "settings" && (
-    <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={closeSheet}>
-      <Settings onClose={closeSheet} />
-    </Modal>
-  );
 
   if (!data) {
     return (
       <View style={styles.root}>
         <View style={[styles.content, { paddingTop: top }]}>
-          <View style={styles.headerEnd}>{settingsButton}</View>
           {today.isError ? (
             <Glass style={styles.stack}>
               <ErrorText>Не получилось загрузить данные. Проверьте связь и попробуйте ещё раз.</ErrorText>
@@ -113,7 +101,6 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
             <TodaySkeleton />
           )}
         </View>
-        {settingsModal}
       </View>
     );
   }
@@ -158,7 +145,6 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
             <Pressable accessibilityRole="button" accessibilityLabel="Добавить операцию" onPress={() => setSheet("cash")} style={styles.profile}>
               <Icon name="plus" color={color.fg.muted} size={20} />
             </Pressable>
-            {settingsButton}
           </View>
         </View>
         <StaleBanner lines={freshnessLines(data, offlineSince, now())} />
@@ -263,14 +249,12 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
       )}
       {paying && <PaymentPaidSheet payment={paying} today={data.date} onClose={() => setPaying(null)} />}
       {repaying && <RepayLoanSheet loanId={repaying.id} remaining={repaying.remaining} receivedOn={repaying.receivedOn} name={repaying.name} onClose={() => setRepaying(null)} />}
-      {settingsModal}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  headerEnd: { alignItems: "flex-end" },
   headerButtons: { flexDirection: "row", gap: space.sm },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md },
   date: { ...type.label, color: color.fg.default, flexShrink: 1 },

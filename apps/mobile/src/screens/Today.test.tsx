@@ -103,14 +103,10 @@ describe("Today, normal mode", () => {
     expect(onOpenPlan).toHaveBeenCalled();
   });
 
-  it("opens settings from the profile button and closes them", async () => {
+  it("has no settings button: settings live in Plan", async () => {
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi());
     await screen.findByText("Сегодня можно");
-    expect(screen.queryByText("Потолок трат")).toBeNull();
-    await fireEvent.press(screen.getByRole("button", { name: "Настройки" }));
-    expect(await screen.findByText("Потолок трат")).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
-    await waitFor(() => expect(screen.queryByText("Потолок трат")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Настройки" })).toBeNull();
   });
 
   it("states an overspent day calmly, in the ordinary colour", async () => {
@@ -790,11 +786,11 @@ describe("Today, accessibility and old data", () => {
     expect(await screen.findByText("Показаны данные за 01.11, не за сегодня.")).toBeTruthy();
   });
 
-  it("settings stay reachable when the first load fails", async () => {
+  it("a failed first load offers a retry", async () => {
     const api = fakeApi({ today: jest.fn(async () => { throw new Error("offline"); }) });
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
     await screen.findByText(/Не получилось загрузить данные/);
-    expect(screen.getByRole("button", { name: "Настройки" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Повторить" })).toBeTruthy();
   });
 
   it("shows no earlier-day note for today's data", async () => {

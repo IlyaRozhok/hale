@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { RefreshControl, ScrollView, StyleSheet, Text } from "react-native";
+import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePullRefresh } from "../usePullRefresh";
 import { tokens } from "@hale/tokens";
@@ -8,6 +8,8 @@ import { AccountsList } from "../components/AccountsList";
 import { BinanceSheet } from "../components/BinanceBalance";
 import { CashSheet } from "../components/CashSheet";
 import { Glass } from "../components/Glass";
+import { Icon } from "../components/Icon";
+import { Settings } from "./Settings";
 import { GoalsSheet } from "../components/GoalsSection";
 import { LAYOUT } from "../components/layout";
 import { IncomesSheet } from "../components/IncomesSheet";
@@ -19,9 +21,9 @@ import { TaxSheet } from "../components/TaxPayments";
 import { formatDollars, formatMoney } from "../format";
 import { goalsLine, incomesLine, installmentsLine, paymentsLine, taxLine } from "../planSummary";
 
-const { color, space, type } = tokens;
+const { color, radius, space, touchMin, type } = tokens;
 
-type Part = "incomes" | "payments" | "installments" | "tax" | "loans" | "goals" | "binance" | "cash";
+type Part = "incomes" | "payments" | "installments" | "tax" | "loans" | "goals" | "binance" | "cash" | "settings";
 
 /** Where the money stands, then one line per part of the plan; the details and forms open in windows. */
 export function Plan() {
@@ -47,7 +49,12 @@ export function Plan() {
       contentContainerStyle={[styles.content, { paddingBottom: LAYOUT.tabBar + insets.bottom }]}
       refreshControl={<RefreshControl {...pull} />}
     >
-      <Text style={styles.title}>План</Text>
+      <View style={styles.head}>
+        <Text style={styles.title}>План</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Настройки" onPress={() => setOpen("settings")} style={styles.profile}>
+          <Icon name="user" color={color.fg.muted} size={20} />
+        </Pressable>
+      </View>
       {today.data ? <AccountsList title="Деньги" accounts={today.data.accounts} usdRate={today.data.usdRate} /> : null}
       <Glass>
         <SummaryRow label="Доходы" detail={incomes.data && events.data ? incomesLine(incomes.data, events.data) : undefined} onPress={() => setOpen("incomes")} />
@@ -67,6 +74,11 @@ export function Plan() {
       {open === "goals" && <GoalsSheet onClose={close} />}
       {open === "binance" && <BinanceSheet onClose={close} />}
       {open === "cash" && <CashSheet onClose={close} />}
+      {open === "settings" && (
+        <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={close}>
+          <Settings onClose={close} />
+        </Modal>
+      )}
     </ScrollView>
   );
 }
@@ -76,4 +88,6 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: space.xl, paddingTop: space.lg, gap: space.lg },
   // Lines up with the text inside the panels below it.
   title: { ...type.title, color: color.fg.default, paddingHorizontal: space.lg },
+  head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  profile: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: color.glass.row },
 });

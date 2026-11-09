@@ -24,12 +24,14 @@ describe("TabBar", () => {
     expect(StyleSheet.flatten(bar.props.style)).toMatchObject({ position: "absolute", left: 0, right: 0, bottom: 0 });
   });
 
-  it("is icons only, with a Russian name for assistive tech and the current tab selected", async () => {
+  it("the current tab opens up with its name, the others stay icons", async () => {
     await render(setup(1).ui);
     expect(screen.getByRole("tab", { name: "Сегодня" }).props.accessibilityState.selected).toBe(false);
     expect(screen.getByRole("tab", { name: "Операции" }).props.accessibilityState.selected).toBe(true);
     expect(screen.getByRole("tab", { name: "План" })).toBeTruthy();
-    expect(screen.queryByText("Операции")).toBeNull();
+    expect(screen.getByText("Операции")).toBeTruthy();
+    expect(screen.queryByText("Сегодня")).toBeNull();
+    expect(screen.queryByText("План")).toBeNull();
     expect(screen.getByTestId("icon-home")).toBeTruthy();
     expect(screen.getByTestId("icon-list")).toBeTruthy();
     expect(screen.getByTestId("icon-target")).toBeTruthy();
@@ -51,5 +53,7 @@ describe("TabBar", () => {
     expect(on.backgroundColor).toBe(tokens.color.accent.default);
     expect(on.minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
     expect(StyleSheet.flatten(screen.getByRole("tab", { name: "План" }).props.style).backgroundColor).toBeUndefined();
+    // The open tab is wider than an icon.
+    expect(on.flex).toBeGreaterThan(StyleSheet.flatten(screen.getByRole("tab", { name: "План" }).props.style).flex);
   });
 });

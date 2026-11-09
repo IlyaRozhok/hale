@@ -8,6 +8,10 @@ import { LAYOUT } from "../components/layout";
 import { NetworkError } from "../api/client";
 import { TODAY_KEY } from "../api/queries";
 
+jest.mock("@react-native-community/slider", () => {
+  const React = require("react");
+  return { __esModule: true, default: (props: object) => React.createElement("Slider", props) };
+});
 jest.mock("../metal", () => {
   const { View } = require("react-native");
   return { LimitVisual: ({ mode, level }: { mode: string; level: number }) => <View testID="limit-visual" accessibilityHint={`${mode}:${level}`} /> };
@@ -109,6 +113,23 @@ describe("Plan, loans", () => {
     await fireEvent.press(await screen.findByRole("button", { name: "Повторить" }));
     expect(await screen.findByText("Займов пока нет.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Новый займ" })).toBeTruthy();
+  });
+});
+
+describe("Plan, settings", () => {
+  it("opens settings from the profile button and closes them", async () => {
+    await renderWith(<Plan />, fakeApi());
+    expect(screen.queryByText("Потолок трат")).toBeNull();
+    await fireEvent.press(await screen.findByRole("button", { name: "Настройки" }));
+    expect(await screen.findByText("Потолок трат")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
+    await waitFor(() => expect(screen.queryByText("Потолок трат")).toBeNull());
+  });
+
+  it("settings stay reachable when the data does not load", async () => {
+    const api = fakeApi({ today: jest.fn(async () => { throw new Error("offline"); }) });
+    await renderWith(<Plan />, api);
+    expect(await screen.findByRole("button", { name: "Настройки" })).toBeTruthy();
   });
 });
 
