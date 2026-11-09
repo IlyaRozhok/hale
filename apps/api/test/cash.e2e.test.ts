@@ -384,6 +384,18 @@ describe("a planned payment paid with chosen operations", () => {
     expect((await wallet()).balance).toBe(100_000);
   });
 
+  it("apply to similar leaves rows that pay a payment alone", async () => {
+    const c = await card();
+    const id = await plan(1_700_000);
+    const paid = await bankTx(c, -1_560_000, "own_transfer", "2026-11-08", { description: "545708****4563" });
+    await api.post(`/cash/payments/${id}/links`, { transactionIds: [paid] }).expect(201);
+    const later = await bankTx(c, -500_000, "obligation", "2026-11-09", { description: "545708****4563" });
+    expect((await api.get(`/transactions/${later}/similar?type=own_transfer`).expect(200)).body).toEqual({ count: 1 });
+    await api.patch(`/transactions/${later}`, { type: "own_transfer", applyToSimilar: true }).expect(200);
+    expect((await row(`SELECT type FROM transactions WHERE id=$1`, [paid])).type).toBe("obligation");
+    expect((await ds.query(`SELECT 1 FROM payment_links`)).length).toBe(1);
+  });
+
   it("retyping a linked row away from the payment unlinks it", async () => {
     const c = await card();
     const id = await plan(1_700_000);

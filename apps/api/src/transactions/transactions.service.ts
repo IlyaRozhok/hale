@@ -415,8 +415,11 @@ function scopeWhere(scope: Scope, first: number): { where: string; args: unknown
   const parts = [`${KEY} = ${arg(scope.key)}`];
   if (scope.sign) parts.push(`sign(t.amount) = ${arg(scope.sign)}`);
   if (scope.relabel) parts.push(`t.amount < 0 AND t.type = ANY('{${ANSWERED_TYPES.join(",")}}'::text[])`);
-  if (scope.type && scope.type !== "cash_out") {
-    parts.push(`(t.id = ${arg(scope.keepId ?? 0)} OR t.type IS DISTINCT FROM 'cash_out')`);
+  if (scope.keepId !== undefined) {
+    const keep = arg(scope.keepId);
+    // Rows that pay a planned payment stay with it; the owner changes them one by one.
+    parts.push(`(t.id = ${keep} OR NOT EXISTS (SELECT 1 FROM payment_links l WHERE l.transaction_id = t.id))`);
+    if (scope.type && scope.type !== "cash_out") parts.push(`(t.id = ${keep} OR t.type IS DISTINCT FROM 'cash_out')`);
   }
   return { where: parts.join(" AND "), args };
 }
