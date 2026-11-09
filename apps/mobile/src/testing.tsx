@@ -61,6 +61,7 @@ export function txFixture(over: Partial<TransactionDto> = {}): TransactionDto {
     counterName: null,
     accountKind: "black",
     manual: false,
+    cashOut: null,
     ...over,
   };
 }
@@ -156,6 +157,13 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     countCash: jest.fn(async () => ({ started: true, start: kyivDate(), balance: 0 })),
     depositFromWallet: jest.fn(async () => undefined),
     payFromWallet: jest.fn(async () => ({ started: true, start: kyivDate(), balance: 0 })),
+    paymentCandidates: jest.fn(async () => []),
+    payWith: jest.fn(async () => undefined),
+    answerCashCard: jest.fn(async () => ({ started: true, start: kyivDate(), balance: 0 })),
+    setCardCash: jest.fn(async () => ({ started: true, start: kyivDate(), balance: 0 })),
+    similarCount: jest.fn(async () => 1),
+    rules: jest.fn(async () => []),
+    deleteRule: jest.fn(async () => undefined),
     ...over,
   } as never;
 }

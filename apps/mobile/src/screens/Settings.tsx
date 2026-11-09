@@ -7,6 +7,8 @@ import { formatMoney } from "../format";
 import { useCapPreview, useSaveSettings, useSettings } from "../api/queries";
 import { Glass } from "../components/Glass";
 import { Icon } from "../components/Icon";
+import { ActionRow } from "../components/ActionRow";
+import { RulesSheet } from "../components/RulesSheet";
 
 const { color, space, touchMin, type } = tokens;
 
@@ -23,6 +25,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const save = useSaveSettings();
   const [draft, setDraft] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   const saved = settings.data;
   const savedCap = saved ? (saved.lifestyle_cap > 0 ? saved.lifestyle_cap : DEFAULT_CAP_KOPECKS) / 100 : null;
@@ -90,6 +93,8 @@ export function Settings({ onClose }: { onClose: () => void }) {
           </Glass>
         </>
       )}
+      <ActionRow label="Мои правила" onPress={() => setRulesOpen(true)} />
+      {rulesOpen && <RulesSheet onClose={() => setRulesOpen(false)} />}
     </ScrollView>
   );
 }

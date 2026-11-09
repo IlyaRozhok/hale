@@ -191,3 +191,14 @@ function daysWord(n: number): string {
 
 /** The current streak in words, or the calendar's name while there is none. */
 export const streakLabel = (streak: number): string => (streak > 0 ? `Серия: ${streak} ${daysWord(streak)} в лимите` : "Календарь лимитов");
+
+/** Which of the three Russian plural forms a count takes: 1 операция, 3 операции, 12 операций. */
+export function pluralIndex(n: number): 0 | 1 | 2 {
+  const d = Math.abs(n) % 100;
+  if (d >= 11 && d <= 14) return 2;
+  const u = d % 10;
+  if (u === 1) return 0;
+  return u >= 2 && u <= 4 ? 1 : 2;
+}
+
+export const operationsText = (n: number): string => `${n} ${["операция", "операции", "операций"][pluralIndex(n)]}`;

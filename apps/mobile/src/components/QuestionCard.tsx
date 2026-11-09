@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
-import type { TodayDto } from "@hale/contracts";
+import type { CashCardAnswer, TodayDto } from "@hale/contracts";
 import { shiftDate } from "../format";
+import { AmountForm } from "./AmountForm";
 import { Glass } from "./Glass";
 
 const { color, radius, space, touchMin, type } = tokens;
@@ -27,12 +29,13 @@ type Props = {
   onMatchUsdc: (eventId: number, transactionId: number) => void;
   onDismissUsdc: (transactionId: number) => void;
   onCashFromWallet: (transactionId: number) => void;
+  onCashCard: (transactionId: number, answer: CashCardAnswer) => void;
   onSetDate: (eventId: number, date: string) => void;
   onOpenActivity: () => void;
   onLabelRecipient: (counterKey: string) => void;
 };
 
-export function QuestionCard({ question, today, onConfirmUsdc, onMatchUsdc, onDismissUsdc, onCashFromWallet, onSetDate, onOpenActivity, onLabelRecipient }: Props) {
+export function QuestionCard({ question, today, onConfirmUsdc, onMatchUsdc, onDismissUsdc, onCashFromWallet, onCashCard, onSetDate, onOpenActivity, onLabelRecipient }: Props) {
   const eventId = eventIdOf(question.id);
   const text = <Text style={styles.text}>{question.text}</Text>;
 
@@ -76,6 +79,9 @@ export function QuestionCard({ question, today, onConfirmUsdc, onMatchUsdc, onDi
       );
     }
   }
+  if (question.kind === "cash_card" && eventId !== null) {
+    return <CashCardQuestion text={question.text} onAnswer={(a) => onCashCard(eventId, a)} />;
+  }
   if (question.kind === "income_date" && eventId !== null) {
     return (
       <Glass style={styles.stack}>
@@ -105,6 +111,25 @@ export function QuestionCard({ question, today, onConfirmUsdc, onMatchUsdc, onDi
     <Pressable accessibilityRole="button" onPress={onOpenActivity} style={styles.whole}>
       <Glass>{text}</Glass>
     </Pressable>
+  );
+}
+
+/** "Снял наличными?" about a transfer to the owner's card at another bank: yes, part of it (how much), no. */
+function CashCardQuestion({ text, onAnswer }: { text: string; onAnswer: (a: CashCardAnswer) => void }) {
+  const [part, setPart] = useState(false);
+  return (
+    <Glass style={styles.stack}>
+      <Text style={styles.text}>{text}</Text>
+      {part ? (
+        <AmountForm label="Сколько снял" onSave={(amount) => onAnswer({ answer: "part", amount })} />
+      ) : (
+        <View style={styles.choices}>
+          <Choice label="Да" onPress={() => onAnswer({ answer: "yes" })} />
+          <Choice label="Да, часть" onPress={() => setPart(true)} />
+          <Choice label="Нет" onPress={() => onAnswer({ answer: "no" })} />
+        </View>
+      )}
+    </Glass>
   );
 }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CashOperationInput, CashOperationPatch, CashStartInput, ExpectedIncomeInput, ExpectedIncomePatch, InstallmentInput, InstallmentPatch, LoanInput, LoanRepayInput, RecipientLabelName, RecurringInput, RecurringPatch, ScheduledPaymentInput, ScheduledPaymentPatch, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
-import type { GoalInput, GoalPatch } from "@hale/contracts";
+import type { CashCardAnswer, GoalInput, GoalPatch, TxTypeDto } from "@hale/contracts";
 import type { TransactionsFilter } from "./client";
 import { useApi } from "./context";
 
@@ -463,5 +463,60 @@ export function usePayFromWallet() {
         client.invalidateQueries({ queryKey: TRANSACTIONS_KEY }),
         client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY }),
       ]),
+  });
+}
+
+// --- paying with operations, the card at another bank, rules -----------------------------
+export function usePaymentCandidates(paymentId: number) {
+  const api = useApi();
+  return useQuery({ queryKey: [...PAYMENTS_KEY, paymentId, "candidates"], queryFn: () => api.paymentCandidates(paymentId) });
+}
+
+/** The chosen operations become the payment: the day's spending, the list and the wallet change. */
+export function usePayWith() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ paymentId, transactionIds }: { paymentId: number; transactionIds: number[] }) => api.payWith(paymentId, transactionIds),
+    onSuccess: () =>
+      Promise.all(
+        [CASH_KEY, TODAY_KEY, PAYMENTS_KEY, TRANSACTIONS_KEY, CALENDAR_KEY, CAP_PREVIEW_KEY].map((queryKey) => client.invalidateQueries({ queryKey })),
+      ),
+  });
+}
+
+export function useAnswerCashCard() {
+  const api = useApi();
+  return useCashMutation(({ id, answer }: { id: number; answer: CashCardAnswer }) => api.answerCashCard(id, answer));
+}
+
+export function useSetCardCash() {
+  const api = useApi();
+  return useCashMutation(({ id, amount }: { id: number; amount: number }) => api.setCardCash(id, amount));
+}
+
+export const RULES_KEY = ["rules"] as const;
+
+/** How many rows "apply to similar" would change for this type (or the row's own). */
+export function useSimilarCount(id: number, type: TxTypeDto | undefined, enabled: boolean) {
+  const api = useApi();
+  return useQuery({ queryKey: [...TRANSACTIONS_KEY, id, "similar", type ?? null], queryFn: () => api.similarCount(id, type), enabled });
+}
+
+export function useRules() {
+  const api = useApi();
+  return useQuery({ queryKey: RULES_KEY, queryFn: () => api.rules() });
+}
+
+/** A deleted rule gives its rows back to automatic recognition: the list, the day and the questions change. */
+export function useDeleteRule() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteRule(id),
+    onSuccess: () =>
+      Promise.all(
+        [RULES_KEY, TODAY_KEY, TRANSACTIONS_KEY, CALENDAR_KEY, CASH_KEY, PAYMENTS_KEY].map((queryKey) => client.invalidateQueries({ queryKey })),
+      ),
   });
 }

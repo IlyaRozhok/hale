@@ -1,6 +1,7 @@
 import type {
   BridgePreviewDto,
   CalendarDto,
+  CashCardAnswer,
   CashOperationInput,
   CashOperationPatch,
   CashStartInput,
@@ -25,6 +26,7 @@ import type {
   RecurringDto,
   RecurringInput,
   RecurringPatch,
+  RuleDto,
   ScheduledPaymentDto,
   ScheduledPaymentInput,
   ScheduledPaymentPatch,
@@ -36,6 +38,7 @@ import type {
   TransactionPageDto,
   TransactionDto,
   TransactionPatch,
+  TxTypeDto,
 } from "@hale/contracts";
 
 export class ApiError extends Error {
@@ -120,6 +123,15 @@ export interface Api {
   countCash(amount: number): Promise<CashWalletDto>;
   depositFromWallet(transactionId: number): Promise<void>;
   payFromWallet(paymentId: number): Promise<CashWalletDto>;
+  /** Operations that could have paid a planned payment. */
+  paymentCandidates(paymentId: number): Promise<TransactionDto[]>;
+  payWith(paymentId: number, transactionIds: number[]): Promise<void>;
+  answerCashCard(transactionId: number, answer: CashCardAnswer): Promise<CashWalletDto>;
+  setCardCash(transactionId: number, amount: number): Promise<CashWalletDto>;
+  /** Rows an edit with "apply to similar" would change. */
+  similarCount(transactionId: number, type?: TxTypeDto): Promise<number>;
+  rules(): Promise<RuleDto[]>;
+  deleteRule(id: number): Promise<void>;
 }
 
 export type TransactionsFilter = { needsLabel?: boolean; group?: "spend" | "income" | "all"; q?: string };
@@ -175,6 +187,14 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     countCash: (amount) => request("POST", "/cash/count", { amount }),
     payFromWallet: (paymentId) => request("POST", `/cash/payments/${paymentId}`),
     depositFromWallet: async (transactionId) => void (await request("POST", `/cash/deposits/${transactionId}/from-wallet`)),
+    paymentCandidates: (paymentId) => request("GET", `/cash/payments/${paymentId}/candidates`),
+    payWith: async (paymentId, transactionIds) => void (await request("POST", `/cash/payments/${paymentId}/links`, { transactionIds })),
+    answerCashCard: (transactionId, answer) => request("POST", `/cash/cards/${transactionId}`, answer),
+    setCardCash: (transactionId, amount) => request("PATCH", `/cash/cards/${transactionId}`, { amount }),
+    similarCount: async (transactionId, type) =>
+      (await request<{ count: number }>("GET", `/transactions/${transactionId}/similar${type ? `?type=${type}` : ""}`)).count,
+    rules: () => request("GET", "/rules"),
+    deleteRule: async (id) => void (await request("DELETE", `/rules/${id}`)),
     manualBalances: () => request("GET", "/plan/manual-balances"),
     createManualBalance: (input) => request("POST", "/plan/manual-balances", input),
     patchManualBalance: (id, amount) => request("PATCH", `/plan/manual-balances/${id}`, { amount }),

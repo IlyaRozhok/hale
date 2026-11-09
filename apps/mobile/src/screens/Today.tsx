@@ -5,7 +5,7 @@ import { tokens } from "@hale/tokens";
 import type { DailyStateDto, TodayDto } from "@hale/contracts";
 import { LimitVisual } from "../metal";
 import { formatMoney, formatStamp, formatUsd, kyivDate, longDate, streakLabel } from "../format";
-import { useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useDepositFromWallet, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
+import { useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useAnswerCashCard, useDepositFromWallet, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
 import { CashOperationSheet } from "../components/CashOperationSheet";
 import { PaymentPaidSheet } from "../components/PaymentPaidSheet";
 import { ErrorText } from "../components/ErrorText";
@@ -62,6 +62,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
   const matchUsdc = useMatchUsdc();
   const dismissUsdc = useDismissUsdcMatch();
   const fromWallet = useDepositFromWallet();
+  const cashCard = useAnswerCashCard();
   const chooseBridge = useChooseBridge();
   const cancelBridge = useCancelBridge();
   const deleteLoan = useDeleteLoan();
@@ -245,6 +246,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
               onMatchUsdc={(eventId, transactionId) => answer(q.id, () => matchUsdc.mutateAsync({ eventId, transactionId }))}
               onDismissUsdc={(transactionId) => answer(q.id, () => dismissUsdc.mutateAsync(transactionId))}
               onCashFromWallet={(transactionId) => answer(q.id, () => fromWallet.mutateAsync(transactionId))}
+              onCashCard={(transactionId, reply) => answer(q.id, () => cashCard.mutateAsync({ id: transactionId, answer: reply }))}
               onSetDate={(eventId, date) => answer(q.id, () => setIncomeDate.mutateAsync({ eventId, date }))}
             />
           ))}
