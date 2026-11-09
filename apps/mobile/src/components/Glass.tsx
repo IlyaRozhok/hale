@@ -7,23 +7,40 @@ const { color, radius, space } = tokens;
 
 type Props = ViewProps & { children: ReactNode; /** "surface": cards; "floating": windows; "menu": the bottom menu. */ kind?: "surface" | "floating" | "menu" };
 
-/** A panel of the system's Liquid Glass over the backdrop; an opaque fill where the system has none. */
+/**
+ * A panel. Cards are solid with a hairline edge: on the dark background there is nothing for glass
+ * to blur. Windows and the menu float over content, so they are the system's Liquid Glass (an opaque
+ * fill where the system has none).
+ */
 export function Glass({ children, style, kind = "surface", ...rest }: Props) {
-  const look = kind === "surface" ? styles.surface : null;
+  if (kind === "surface") {
+    return (
+      <View {...rest} style={[styles.surface, style]}>
+        {children}
+      </View>
+    );
+  }
   if (!isLiquidGlassAvailable()) {
     return (
-      <View {...rest} style={[look, { backgroundColor: color.glass[kind].fallback }, style]}>
+      <View {...rest} style={[{ backgroundColor: color.glass[kind].fallback }, style]}>
         {children}
       </View>
     );
   }
   return (
-    <GlassView {...rest} glassEffectStyle="regular" tintColor={color.glass[kind].tint} style={[look, style]}>
+    <GlassView {...rest} glassEffectStyle="regular" tintColor={color.glass[kind].tint} style={style}>
       {children}
     </GlassView>
   );
 }
 
 const styles = StyleSheet.create({
-  surface: { borderRadius: radius.xl, paddingHorizontal: space.lg, paddingVertical: space.md },
+  surface: {
+    borderRadius: radius.xl,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    backgroundColor: color.card.fill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.card.edge,
+  },
 });

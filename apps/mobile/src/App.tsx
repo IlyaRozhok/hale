@@ -16,7 +16,7 @@ import { Login } from "./screens/Login";
 import { Activity } from "./screens/Activity";
 import { Plan } from "./screens/Plan";
 import { TabBar } from "./components/TabBar";
-import { Backdrop } from "./metal/Backdrop";
+import { Background } from "./components/Background";
 import { createPushDeps } from "./pushNative";
 import { registerPush } from "./push";
 import { useApi } from "./api/context";
@@ -98,7 +98,7 @@ export default function App() {
     <SafeAreaProvider>
       <StatusBar style="light" />
       <View style={styles.backdrop}>
-        <Backdrop />
+        <Background />
       </View>
       <PersistQueryClientProvider
         client={client}
