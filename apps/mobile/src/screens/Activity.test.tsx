@@ -31,15 +31,15 @@ describe("Activity list", () => {
     expect(screen.getByText("Между своими")).toBeTruthy();
   });
 
-  it("colours amounts by direction, and transfers between own accounts stay neutral", async () => {
+  it("spending is plain white, money in is the green accent, own transfers neutral", async () => {
     const items = [
       txFixture({ id: 1, description: "Трата", amount: -8500, amountUah: -8500 }),
       txFixture({ id: 2, description: "Доход", amount: 8600, amountUah: 8600, type: "income", category: "income" }),
       txFixture({ id: 3, description: "Перевод", amount: -8700, amountUah: -8700, type: "own_transfer", category: "own" }),
     ];
     await renderWith(<Activity />, fakeApi({ transactions: page(items) }));
-    expect(flat((await screen.findByText("−₴85")).props.style).color).toBe(tokens.color.money.expense);
-    expect(flat(screen.getByText("+₴86").props.style).color).toBe(tokens.color.money.income);
+    expect(flat((await screen.findByText("−₴85")).props.style).color).toBe(tokens.color.money.neutral);
+    expect(flat(screen.getByText("+₴86").props.style).color).toBe(tokens.color.accent.signal);
     expect(flat(screen.getByText("−₴87").props.style).color).toBe(tokens.color.money.neutral);
   });
 
@@ -72,9 +72,32 @@ describe("Activity list", () => {
     expect(screen.getByText("−₴30")).toBeTruthy();
   });
 
-  it("marks operations still on hold", async () => {
+  it("marks operations still on hold quietly under the amount, not in the category line", async () => {
     await renderWith(<Activity />, fakeApi({ transactions: page([txFixture({ hold: true })]) }));
-    expect(await screen.findByText("Кафе и рестораны · в обработке")).toBeTruthy();
+    expect(await screen.findByText("Кафе и рестораны")).toBeTruthy();
+    expect(screen.getByText("в обработке")).toBeTruthy();
+    expect(screen.queryByText(/· в обработке/)).toBeNull();
+  });
+
+  it("each row has a round badge of its category; unknown ones a plain circle", async () => {
+    const items = [
+      txFixture({ id: 1, category: "groceries" }),
+      txFixture({ id: 2, category: "who-knows" }),
+      txFixture({ id: 3, type: "income", category: "income", amount: 100, amountUah: 100 }),
+      txFixture({ id: 4, type: null, category: null }),
+    ];
+    await renderWith(<Activity />, fakeApi({ transactions: page(items) }));
+    expect(await screen.findByTestId("tx-icon-cart")).toBeTruthy();
+    expect(screen.getAllByTestId("tx-icon-circle")).toHaveLength(2);
+    expect(screen.getByTestId("tx-icon-arrowIn")).toBeTruthy();
+  });
+
+  it("an operation that paid a planned payment is named after it", async () => {
+    const items = [txFixture({ id: 1, description: "545708****4563", type: "obligation", category: "transfer", paymentName: "Квартплата" })];
+    await renderWith(<Activity />, fakeApi({ transactions: page(items) }));
+    expect(await screen.findByText("545708****4563")).toBeTruthy();
+    expect(screen.getByText("Квартплата")).toBeTruthy();
+    expect(screen.queryByText("Обязательный платёж")).toBeNull();
   });
 
   it("loads the next page by cursor when the end is reached", async () => {
