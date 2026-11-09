@@ -52,6 +52,11 @@ export class CashController {
     return this.cash.count(parse(cashCountInput, body));
   }
 
+  @Post("payments/:id")
+  payPlanned(@Param("id", ParseIntPipe) id: number): Promise<CashWalletDto> {
+    return this.cash.payPlanned(id);
+  }
+
   @Post("deposits/:id/from-wallet")
   fromWallet(@Param("id", ParseIntPipe) id: number): Promise<CashWalletDto> {
     return this.cash.fromWallet(id);

@@ -967,7 +967,7 @@ describe("questions, upcoming and run-out", () => {
     for (let d = 26; d <= 31; d++) await tx(card, -10_000, "spend", { date: `2026-10-${d}` });
     await tx(card, -10_000, "spend", { date: "2026-11-01" });
     const r = await today();
-    expect(r.upcoming).toEqual([{ id: expect.any(String), name: "Rent", amount: 100_000, dueOn: "2026-11-06", kind: "obligation" }]);
+    expect(r.upcoming).toEqual([{ id: expect.any(String), name: "Rent", amount: 100_000, dueOn: "2026-11-06", kind: "obligation", currency: "UAH" }]);
     // free = 900,000 / avg 10,000 per day = 90 days after today
     expect(r.runOutOn).toBe("2027-01-31");
   });

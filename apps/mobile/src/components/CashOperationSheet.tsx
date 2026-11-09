@@ -58,6 +58,18 @@ export function CashOperationSheet({ tx, onClose }: Props) {
       { text: "Удалить", style: "destructive", onPress: () => remove.mutate(tx!.id, { onSuccess: onClose, onError: () => setMessage("Не удалось удалить. Попробуйте ещё раз.") }) },
     ]);
 
+  if (tx?.type === "obligation") {
+    return (
+      <Sheet title={tx.description} subtitle="Наличные" onClose={onClose}>
+        <Text style={styles.muted}>Платёж из плана, оплачен наличными. Если удалить, платёж снова станет неоплаченным.</Text>
+        {message && <ErrorText>{message}</ErrorText>}
+        <Pressable accessibilityRole="button" accessibilityLabel="Удалить" disabled={busy} onPress={confirmDelete} style={styles.delete}>
+          <Text style={styles.deleteText}>Удалить</Text>
+        </Pressable>
+      </Sheet>
+    );
+  }
+
   if (!tx && cash.data && !cash.data.started) {
     return (
       <Sheet title="Наличные" onClose={onClose}>

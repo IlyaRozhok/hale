@@ -448,3 +448,20 @@ export function useDepositFromWallet() {
   const api = useApi();
   return useCashMutation((transactionId: number) => api.depositFromWallet(transactionId));
 }
+
+/** A planned payment paid in cash: the payment closes and the wallet goes down. */
+export function usePayFromWallet() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (paymentId: number) => api.payFromWallet(paymentId),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: CASH_KEY }),
+        client.invalidateQueries({ queryKey: TODAY_KEY }),
+        client.invalidateQueries({ queryKey: PAYMENTS_KEY }),
+        client.invalidateQueries({ queryKey: TRANSACTIONS_KEY }),
+        client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY }),
+      ]),
+  });
+}

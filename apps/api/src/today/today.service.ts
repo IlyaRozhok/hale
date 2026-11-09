@@ -420,7 +420,7 @@ export class TodayService {
         .join(",") + `|${next ?? ""}`;
     const upcoming = unpaid
       .filter((p) => p.due_on < end)
-      .map((p) => ({ id: String(p.id), name: p.name, amount: uah(p.amount, p.currency), dueOn: p.due_on, kind: p.kind }));
+      .map((p) => ({ id: String(p.id), name: p.name, amount: uah(p.amount, p.currency), dueOn: p.due_on, kind: p.kind, currency: p.currency }));
 
     // tax reserve
     const { fopIncome, paidUnmatched: paidTax } = await quarterTaxFacts(m, q.start, q.end);

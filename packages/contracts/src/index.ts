@@ -330,7 +330,8 @@ export interface TodayDto {
   rateStale: boolean;
   /** `cash` is the wallet, already inside `own`; 0 until the wallet is started. */
   accounts: { own: number; credit: number; fop: number; binance: number; cash: number };
-  upcoming: { id: string; name: string; amount: number; dueOn: string; kind: string }[];
+  /** `amount` in hryvnias; `currency` is the payment's own. */
+  upcoming: { id: string; name: string; amount: number; dueOn: string; kind: string; currency: string }[];
   questions: {
     id: string;
     kind: "usdc_arrived" | "usdc_match" | "income_date" | "recipient_label" | "cash_source";

@@ -7,6 +7,7 @@ import { LimitVisual } from "../metal";
 import { formatMoney, formatStamp, formatUsd, kyivDate, longDate, streakLabel } from "../format";
 import { useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useDepositFromWallet, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
 import { CashOperationSheet } from "../components/CashOperationSheet";
+import { PaymentPaidSheet } from "../components/PaymentPaidSheet";
 import { ErrorText } from "../components/ErrorText";
 import { ActionRow } from "../components/ActionRow";
 import { BadCaseCard } from "../components/BadCaseCard";
@@ -68,6 +69,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
   const [sheet, setSheet] = useState<"bridge" | "questions" | "settings" | "calendar" | "cash" | null>(null);
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
+  const [paying, setPaying] = useState<TodayDto["upcoming"][number] | null>(null);
   const [repaying, setRepaying] = useState<{ id: number; remaining: number; receivedOn?: string; name: string } | null>(null);
 
   const hide = (id: string, on: boolean) =>
@@ -208,7 +210,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
         ))}
 
         {goals.length > 0 ? <GoalCards goals={goals} /> : <ActionRow label="Добавить цель" onPress={onOpenPlan} />}
-        <Upcoming items={data.upcoming} />
+        <Upcoming items={data.upcoming} today={data.date} onPress={setPaying} />
       </ScrollView>
 
       {sheet === "cash" && <CashOperationSheet onClose={closeSheet} />}
@@ -257,6 +259,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
           )}
         </Sheet>
       )}
+      {paying && <PaymentPaidSheet payment={paying} today={data.date} onClose={() => setPaying(null)} />}
       {repaying && <RepayLoanSheet loanId={repaying.id} remaining={repaying.remaining} receivedOn={repaying.receivedOn} name={repaying.name} onClose={() => setRepaying(null)} />}
       {settingsModal}
     </View>

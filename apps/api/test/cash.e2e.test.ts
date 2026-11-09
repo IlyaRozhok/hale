@@ -258,3 +258,45 @@ describe("cash paid in at a terminal", () => {
     await api.post(`/cash/deposits/99999/from-wallet`).expect(404);
   });
 });
+
+describe("a planned payment paid in cash", () => {
+  const plan = async (amount: number, over: { currency?: string; due?: string } = {}) =>
+    (await ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Квартплата',$1,$2,$3) RETURNING id`, [
+      amount, over.currency ?? "UAH", over.due ?? "2026-11-06",
+    ]))[0].id as number;
+
+  it("closes the payment, takes it from the wallet and leaves the limit alone", async () => {
+    await start(2_000_000).expect(201);
+    const id = await plan(1_700_000);
+    const before = (await today()).state.leftToday;
+    expect((await api.post(`/cash/payments/${id}`).expect(201)).body.balance).toBe(300_000);
+    expect((await today()).state.leftToday).toBe(before);
+    const p = await row(`SELECT paid_at IS NOT NULL AS paid, transaction_id FROM scheduled_payments WHERE id=$1`, [id]);
+    expect(p.paid).toBe(true);
+    expect(await row(`SELECT description, type, amount::int AS amount FROM transactions WHERE id=$1`, [p.transaction_id])).toEqual({
+      description: "Квартплата", type: "obligation", amount: -1_700_000,
+    });
+    await api.post(`/cash/payments/${id}`).expect(409);
+  });
+
+  it("is refused when the wallet has less than the payment, or is not started, or in another currency", async () => {
+    const id = await plan(1_700_000);
+    await api.post(`/cash/payments/${id}`).expect(409);
+    await start(1_000_000).expect(201);
+    await api.post(`/cash/payments/${id}`).expect(422);
+    await api.post(`/cash/payments/${await plan(100, { currency: "USD" })}`).expect(422);
+    await api.post(`/cash/payments/99999`).expect(404);
+    expect((await wallet()).balance).toBe(1_000_000);
+  });
+
+  it("deleting the cash row opens the payment again; it cannot be changed", async () => {
+    await start(2_000_000).expect(201);
+    const id = await plan(1_700_000);
+    await api.post(`/cash/payments/${id}`).expect(201);
+    const tx = (await row(`SELECT transaction_id FROM scheduled_payments WHERE id=$1`, [id])).transaction_id as number;
+    await api.patch(`/cash/operations/${tx}`, { amount: 1 }).expect(409);
+    await api.del(`/cash/operations/${tx}`).expect(200);
+    expect(await row(`SELECT paid_at, transaction_id FROM scheduled_payments WHERE id=$1`, [id])).toEqual({ paid_at: null, transaction_id: null });
+    expect((await wallet()).balance).toBe(2_000_000);
+  });
+});

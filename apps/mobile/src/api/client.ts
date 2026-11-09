@@ -119,6 +119,7 @@ export interface Api {
   deleteCashOperation(id: number): Promise<void>;
   countCash(amount: number): Promise<CashWalletDto>;
   depositFromWallet(transactionId: number): Promise<void>;
+  payFromWallet(paymentId: number): Promise<CashWalletDto>;
 }
 
 export type TransactionsFilter = { needsLabel?: boolean; group?: "spend" | "income" | "all"; q?: string };
@@ -172,6 +173,7 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     patchCashOperation: (id, patch) => request("PATCH", `/cash/operations/${id}`, patch),
     deleteCashOperation: async (id) => void (await request("DELETE", `/cash/operations/${id}`)),
     countCash: (amount) => request("POST", "/cash/count", { amount }),
+    payFromWallet: (paymentId) => request("POST", `/cash/payments/${paymentId}`),
     depositFromWallet: async (transactionId) => void (await request("POST", `/cash/deposits/${transactionId}/from-wallet`)),
     manualBalances: () => request("GET", "/plan/manual-balances"),
     createManualBalance: (input) => request("POST", "/plan/manual-balances", input),

@@ -84,6 +84,7 @@ export class CashService {
   async change(id: number, p: CashOperationPatch): Promise<TransactionDto> {
     await this.ds.transaction(async (m) => {
       const row = await this.manualRow(m, id);
+      if (row.type === "obligation") throw new ConflictException("a planned payment is deleted, not changed");
       const kind = p.kind ?? KIND_OF_TYPE[row.type] ?? "own_out";
       const category = kind === "spend" ? (p.category ?? (row.type === "spend" ? row.category : null)) : CATEGORY_OF[kind];
       if (!category) throw new UnprocessableEntityException("a purchase needs a category");
@@ -107,6 +108,8 @@ export class CashService {
   async remove(id: number): Promise<{ deleted: true }> {
     await this.ds.transaction(async (m) => {
       await this.manualRow(m, id);
+      // A planned payment paid with this row is unpaid again.
+      await m.query(`UPDATE scheduled_payments SET paid_at=NULL WHERE transaction_id=$1`, [id]);
       await m.query(`DELETE FROM transactions WHERE id=$1`, [id]);
     });
     return { deleted: true };
@@ -121,6 +124,27 @@ export class CashService {
       const date = this.today();
       if (diff < 0) await this.insert(m, account, { type: "spend", amount: diff, category: "uncategorized", date, note: "Не записано" });
       if (diff > 0) await this.insert(m, account, { type: "own_transfer", amount: diff, category: "own", date, note: "Сверка: больше, чем записано" });
+      return this.wallet(m);
+    });
+  }
+
+  /**
+   * A planned payment paid in cash: closed and linked to a wallet row of its own type, which is not
+   * spending against the limit. Only when the recorded cash covers it: the wallet never goes below zero.
+   */
+  async payPlanned(id: number): Promise<CashWalletDto> {
+    return this.ds.transaction(async (m) => {
+      const p = (
+        await m.query(`SELECT name, amount::float8 AS amount, currency, paid_at FROM scheduled_payments WHERE id=$1 FOR UPDATE`, [id])
+      )[0] as { name: string; amount: number; currency: string; paid_at: Date | null } | undefined;
+      if (!p) throw new NotFoundException("payment not found");
+      if (p.paid_at !== null) throw new ConflictException("the payment is already paid");
+      const account = await this.startedAccount(m);
+      if (p.currency !== "UAH") throw new UnprocessableEntityException("only a payment in hryvnias can be paid in cash");
+      const { balance } = await walletBalance(m);
+      if (balance < p.amount) throw new UnprocessableEntityException("the wallet has less cash than the payment");
+      const tx = await this.insert(m, account, { type: "obligation", amount: -p.amount, category: "transfer", date: this.today(), note: p.name });
+      await m.query(`UPDATE scheduled_payments SET paid_at=now(), transaction_id=$2 WHERE id=$1`, [id, tx]);
       return this.wallet(m);
     });
   }

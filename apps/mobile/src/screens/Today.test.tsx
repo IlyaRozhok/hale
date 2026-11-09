@@ -67,7 +67,7 @@ describe("Today, normal mode", () => {
   });
 
   it("lists three upcoming payments and totals all of them", async () => {
-    const upcoming = ["1", "2", "3", "4"].map((id, i) => ({ id, name: `Платёж ${id}`, amount: 100000 * (i + 1), dueOn: `2026-11-1${i}`, kind: "obligation" }));
+    const upcoming = ["1", "2", "3", "4"].map((id, i) => ({ id, name: `Платёж ${id}`, amount: 100000 * (i + 1), dueOn: `2026-11-1${i}`, kind: "obligation", currency: "UAH" }));
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ upcoming })) }));
     expect(await screen.findByText("₴10,000")).toBeTruthy();
     expect(screen.getByText("Платёж 3")).toBeTruthy();

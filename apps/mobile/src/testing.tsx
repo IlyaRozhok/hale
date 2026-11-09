@@ -24,7 +24,7 @@ export function todayFixture(over: Partial<TodayDto> = {}): TodayDto {
     usdRate: 41.25,
     rateStale: false,
     accounts: { own: 1032500, credit: 3000000, fop: 0, binance: 0, cash: 0 },
-    upcoming: [{ id: "1", name: "Квартплата", amount: 1700000, dueOn: "2026-11-06", kind: "obligation" }],
+    upcoming: [{ id: "1", name: "Квартплата", amount: 1700000, dueOn: "2026-11-06", kind: "obligation", currency: "UAH" }],
     questions: [],
     badCases: [],
     runOutOn: null,
@@ -155,6 +155,7 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     deleteCashOperation: jest.fn(async () => undefined),
     countCash: jest.fn(async () => ({ started: true, start: kyivDate(), balance: 0 })),
     depositFromWallet: jest.fn(async () => undefined),
+    payFromWallet: jest.fn(async () => ({ started: true, start: kyivDate(), balance: 0 })),
     ...over,
   } as never;
 }

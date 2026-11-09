@@ -163,3 +163,59 @@ describe("an operation entered by hand, in Activity", () => {
     expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
   });
 });
+
+describe("a payment in «Скоро платить»", () => {
+  const overdue = () => todayFixture({ date: "2026-11-09", upcoming: [{ id: "3", name: "Квартплата", amount: 1_700_000, dueOn: "2026-11-06", kind: "obligation", currency: "UAH" }] });
+  const wallet = (balance: number, isStarted = true) => ({ cash: jest.fn(async () => ({ started: isStarted, start: isStarted ? "2026-11-01" : null, balance })) });
+
+  it("marks an overdue payment calmly", async () => {
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => overdue()) }));
+    expect(await screen.findByText("просрочен")).toBeTruthy();
+  });
+
+  it("an upcoming one is not marked", async () => {
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi());
+    await screen.findByText("Квартплата");
+    expect(screen.queryByText("просрочен")).toBeNull();
+  });
+
+  it("is marked paid in one tap, without cash when the wallet is not started", async () => {
+    const api = fakeApi({ today: jest.fn(async () => overdue()), ...wallet(0, false) });
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await press(/^Квартплата/);
+    expect(screen.queryByLabelText("Наличными из кошелька")).toBeNull();
+    await press("Оплачено");
+    await waitFor(() => expect(api.markPaid).toHaveBeenCalledWith(3));
+    expect(api.payFromWallet).not.toHaveBeenCalled();
+  });
+
+  it("is paid from the wallet when it covers the payment", async () => {
+    const api = fakeApi({ today: jest.fn(async () => overdue()), ...wallet(2_000_000) });
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await press(/^Квартплата/);
+    await fireEvent(await screen.findByLabelText("Наличными из кошелька"), "valueChange", true);
+    expect(screen.getByText("Наличные уменьшатся на ₴17,000, лимит не изменится.")).toBeTruthy();
+    await press("Оплачено");
+    await waitFor(() => expect(api.payFromWallet).toHaveBeenCalledWith(3));
+    expect(api.markPaid).not.toHaveBeenCalled();
+  });
+
+  it("cannot be paid from a wallet that has less", async () => {
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => overdue()), ...wallet(1_000_000) }));
+    await press(/^Квартплата/);
+    expect((await screen.findByLabelText("Наличными из кошелька")).props.disabled).toBe(true);
+    expect(screen.getByText("В кошельке по записям ₴10,000. Если наличные были до начала учёта, просто отметьте оплату.")).toBeTruthy();
+  });
+});
+
+describe("a planned payment paid from the wallet, in Activity", () => {
+  it("can only be deleted, which opens the payment again", async () => {
+    const paid = txFixture({ id: 9, manual: true, accountKind: "cash", type: "obligation", description: "Квартплата", amount: -1_700_000, amountUah: -1_700_000, category: "transfer" });
+    const api = fakeApi({ transactions: jest.fn(async () => ({ items: [paid], nextCursor: null, dayTotals: {} })), ...started() });
+    await renderWith(<Activity />, api);
+    await fireEvent.press(await screen.findByText("Квартплата"));
+    expect(await screen.findByText("Платёж из плана, оплачен наличными. Если удалить, платёж снова станет неоплаченным.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Сохранить" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Удалить" })).toBeTruthy();
+  });
+});
