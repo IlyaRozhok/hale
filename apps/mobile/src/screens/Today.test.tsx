@@ -181,7 +181,7 @@ describe("Today, normal mode", () => {
     it("the metal bar is empty when nothing is left, and absent with no limit", async () => {
       await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 95000, leftToday: -100, level: 0.4 }));
       await screen.findByText("Сегодня можно");
-      // Empty strip; only its small spark turns red.
+      // Nothing left: the strip fills and turns red; the words stay calm.
       expect(levelOf()).toBe("bar:over:0");
     });
 
