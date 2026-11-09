@@ -9,7 +9,7 @@ import type { RuleDto } from "@hale/contracts";
 
 jest.mock("../metal", () => {
   const { View } = require("react-native");
-  return { LimitVisual: () => <View testID="limit-visual" /> };
+  return { LimitVisual: () => <View testID="limit-visual" />, MetalBar: () => <View testID="limit-visual" /> };
 });
 jest.mock("@react-native-community/slider", () => {
   const React = require("react");
@@ -119,7 +119,7 @@ describe("cash taken from the owner's card at another bank", () => {
   });
   const open = async (api: ReturnType<typeof fakeApi>) => {
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
-    await fireEvent.press(await screen.findByText(/^Осталось разобрать: /));
+    await fireEvent.press(await screen.findByRole("button", { name: /^Вопросы: / }));
   };
 
   it("yes", async () => {

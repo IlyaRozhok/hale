@@ -3,7 +3,7 @@ import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 import type { DailyStateDto, TodayDto } from "@hale/contracts";
-import { LimitVisual } from "../metal";
+import { MetalBar } from "../metal";
 import { formatMoney, formatStamp, formatUsd, kyivDate, longDate, streakLabel } from "../format";
 import { useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useAnswerCashCard, useDepositFromWallet, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
 import { CashOperationSheet } from "../components/CashOperationSheet";
@@ -53,7 +53,7 @@ function limitNote(state: DailyStateDto): string {
   return !state.needsIncomeDate && state.daysLeft > 0 ? `из ${limit} · до зарплаты ${state.daysLeft} дн` : `из ${limit} на день`;
 }
 
-export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Props) {
+export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const insets = useSafeAreaInsets();
   const today = useToday();
   const confirmIncome = useConfirmIncome();
@@ -142,6 +142,19 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
         <View style={styles.header}>
           <Text style={styles.date}>{longDate(data.date)}</Text>
           <View style={styles.headerButtons}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={questions.length > 0 ? `Вопросы: ${questions.length}` : "Вопросы"}
+              onPress={() => setSheet("questions")}
+              style={styles.profile}
+            >
+              <Icon name="bell" color={color.fg.muted} size={20} />
+              {questions.length > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{questions.length}</Text>
+                </View>
+              )}
+            </Pressable>
             <Pressable accessibilityRole="button" accessibilityLabel="Добавить операцию" onPress={() => setSheet("cash")} style={styles.profile}>
               <Icon name="plus" color={color.fg.muted} size={20} />
             </Pressable>
@@ -161,32 +174,35 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
             <Text style={styles.eyebrow}>{heading}</Text>
             <Text style={styles.amount}>{formatMoney(shownLeft)}</Text>
             {hasLimit && <Text style={styles.note}>{limitNote(state)}</Text>}
-            {hasLimit && (
-              <View style={styles.spentLine}>
-                <Text style={styles.subtle}>Потрачено {formatMoney(spent)}</Text>
-                {usd ? <Text style={styles.subtle}>{usd} сейчас</Text> : null}
-              </View>
-            )}
+            {hasLimit && usd ? <Text style={styles.subtle}>{usd} сейчас</Text> : null}
             {over && <Text style={styles.note}>Завтра будет новый лимит.</Text>}
             {hasLimit && state.leftToday === 0 && <Text style={styles.note}>Лимит на сегодня использован. Завтра будет новый.</Text>}
             {!hasLimit && <Text style={styles.note}>{noLimitNote}</Text>}
-            {!hasLimit && spent > 0 && <Text style={styles.subtle}>Потрачено {formatMoney(spent)}</Text>}
           </View>
-          {level > 0 && (
-            <View style={styles.metal} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <LimitVisual mode="mercury" level={level} />
+          {hasLimit && (
+            <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+              <MetalBar level={level} />
             </View>
           )}
+          <View style={styles.quiet}>
+            {hasLimit || spent > 0 ? <Text style={styles.subtle}>Потрачено {formatMoney(spent)}</Text> : <View />}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={streakLabel(data.streak ?? 0)}
+              onPress={() => setSheet("calendar")}
+              style={styles.streak}
+            >
+              <Text style={styles.subtle}>{(data.streak ?? 0) > 0 ? streakLabel(data.streak ?? 0).replace(/^Серия: /, "") : "Календарь"}</Text>
+            </Pressable>
+          </View>
         </Glass>
 
-        <ActionRow label={streakLabel(data.streak ?? 0)} onPress={() => setSheet("calendar")} />
         {state.mode === "bridge" && state.bridge && (
           <ActionRow
             label={state.bridge.confirmed ? `План до зарплаты: ${formatMoney(state.dailyLimit)} в день` : "Нужен план до зарплаты"}
             onPress={() => setSheet("bridge")}
           />
         )}
-        {questions.length > 0 && <ActionRow label={`Осталось разобрать: ${questions.length}`} onPress={() => setSheet("questions")} />}
         {data.badCases.map((b) => (
           <BadCaseCard
             key={b.id}
@@ -196,7 +212,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
           />
         ))}
 
-        {goals.length > 0 ? <GoalCards goals={goals} /> : <ActionRow label="Добавить цель" onPress={onOpenPlan} />}
+        {goals.length > 0 && <GoalCards goals={goals} />}
         <Upcoming items={data.upcoming} today={data.date} onPress={setPaying} />
       </ScrollView>
 
@@ -216,8 +232,9 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
           />
         </Sheet>
       )}
-      {sheet === "questions" && questions.length > 0 && (
+      {sheet === "questions" && (
         <Sheet title="Осталось разобрать" onClose={closeSheet}>
+          {questions.length === 0 && <Text style={styles.note}>Вопросов нет</Text>}
           {questions.map((q) => (
             <QuestionCard
               key={q.id}
@@ -260,9 +277,23 @@ const styles = StyleSheet.create({
   date: { ...type.label, color: color.fg.default, flexShrink: 1 },
   profile: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: color.glass.row },
   hero: { overflow: "hidden", paddingHorizontal: 0, paddingVertical: 0 },
-  heroText: { paddingHorizontal: space.lg, paddingVertical: space.lg, gap: 2 },
-  spentLine: { flexDirection: "row", justifyContent: "space-between", gap: space.md, marginTop: space.xs },
-  metal: { height: LAYOUT.pool },
+  heroText: { paddingHorizontal: space.lg, paddingTop: space.lg, gap: 2 },
+  bar: { paddingHorizontal: space.lg, marginTop: space.md },
+  quiet: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md, paddingHorizontal: space.lg, paddingBottom: space.xs },
+  streak: { minHeight: touchMin, justifyContent: "center" },
+  badge: {
+    position: "absolute",
+    top: space.xs,
+    right: space.xs,
+    minWidth: space.lg,
+    height: space.lg,
+    paddingHorizontal: space.xs,
+    borderRadius: radius.full,
+    backgroundColor: color.accent.signal,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeText: { ...type.caption, fontWeight: "500", color: color.accent.fgOnSignal },
   content: { paddingHorizontal: space.xl, gap: space.md },
   stack: { gap: space.md },
   eyebrow: { ...type.body, color: color.fg.muted, height: LAYOUT.eyebrow + 4 },

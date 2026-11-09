@@ -9,7 +9,7 @@ import { ApiError } from "../api/client";
 
 jest.mock("../metal", () => {
   const { View } = require("react-native");
-  return { LimitVisual: () => <View testID="limit-visual" /> };
+  return { LimitVisual: () => <View testID="limit-visual" />, MetalBar: () => <View testID="limit-visual" /> };
 });
 
 const noop = () => undefined;
@@ -70,7 +70,7 @@ describe("the cash question", () => {
   it("from the wallet, from Binance, or other", async () => {
     const api = fakeApi({ today: jest.fn(async () => question("cash_source:42:7")) });
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
-    await fireEvent.press(await screen.findByText(/^Осталось разобрать: /));
+    await fireEvent.press(await screen.findByRole("button", { name: /^Вопросы: / }));
     expect(screen.getByRole("button", { name: "Вывод с Binance" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Другое" })).toBeTruthy();
     await press("Из кошелька");
@@ -80,7 +80,7 @@ describe("the cash question", () => {
   it("offers Binance only with a USDC income to match", async () => {
     const api = fakeApi({ today: jest.fn(async () => question("cash_source:42:0")) });
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
-    await fireEvent.press(await screen.findByText(/^Осталось разобрать: /));
+    await fireEvent.press(await screen.findByRole("button", { name: /^Вопросы: / }));
     expect(screen.queryByRole("button", { name: "Вывод с Binance" })).toBeNull();
     await press("Другое");
     await waitFor(() => expect(api.dismissUsdcMatch).toHaveBeenCalledWith(42));
