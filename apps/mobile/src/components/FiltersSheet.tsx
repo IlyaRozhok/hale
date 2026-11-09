@@ -1,0 +1,94 @@
+import { useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { tokens } from "@hale/tokens";
+import { categoryIcon } from "../categoryIcon";
+import { shiftDate } from "../format";
+import { SPEND_CATEGORIES, categoryLabel } from "../labels";
+import { Chip } from "./Chip";
+import { DateField } from "./DateField";
+import { Icon } from "./Icon";
+import { PrimaryButton } from "./PrimaryButton";
+import { Sheet } from "./Sheet";
+
+const { color, radius, space, touchMin, type } = tokens;
+
+export type Period = { from: string; to: string };
+export type Filters = { period: Period | null; category: string | null };
+
+type Props = {
+  today: string;
+  value: Filters;
+  /** Categories are for spending only. */
+  withCategories: boolean;
+  onApply: (f: Filters) => void;
+  onClose: () => void;
+};
+
+const same = (a: Period | null, b: Period) => a !== null && a.from === b.from && a.to === b.to;
+
+/** Everything that narrows the list, in one window: a period, and for spending a category. */
+export function FiltersSheet({ today, value, withCategories, onApply, onClose }: Props) {
+  const [period, setPeriod] = useState<Period | null>(value.period);
+  const [category, setCategory] = useState<string | null>(value.category);
+  const quick: { label: string; period: Period }[] = [
+    { label: "Сегодня", period: { from: today, to: today } },
+    { label: "Неделя", period: { from: shiftDate(today, -6), to: today } },
+    { label: "Месяц", period: { from: `${today.slice(0, 7)}-01`, to: today } },
+  ];
+  const apply = (f: Filters) => {
+    onApply(f);
+    onClose();
+  };
+  const from = period?.from ?? today;
+  const to = period?.to ?? today;
+  return (
+    <Sheet title="Фильтры" onClose={onClose}>
+      <Text style={styles.heading}>Период</Text>
+      <View style={styles.chips}>
+        {quick.map((q) => (
+          <Chip key={q.label} label={q.label} selected={same(period, q.period)} onPress={() => setPeriod(same(period, q.period) ? null : q.period)} />
+        ))}
+      </View>
+      <DateField label="С" value={from} onChange={(d) => setPeriod({ from: d, to: d > to ? d : to })} max={today} />
+      <DateField label="По" value={to} onChange={(d) => setPeriod({ from: d < from ? d : from, to: d })} max={today} />
+      {withCategories && (
+        <>
+          <Text style={styles.heading}>Категория</Text>
+          {SPEND_CATEGORIES.map((c) => {
+            const on = category === c;
+            return (
+              <Pressable
+                key={c}
+                accessibilityRole="button"
+                accessibilityLabel={categoryLabel(c)}
+                accessibilityState={{ selected: on }}
+                onPress={() => setCategory(on ? null : c)}
+                style={styles.row}
+              >
+                <View style={[styles.badge, on && styles.badgeOn]}>
+                  <Icon name={categoryIcon({ type: "spend", category: c })} color={on ? color.accent.fgOnAccent : color.fg.muted} size={18} />
+                </View>
+                <Text style={styles.text}>{categoryLabel(c)}</Text>
+              </Pressable>
+            );
+          })}
+        </>
+      )}
+      <PrimaryButton label="Показать" onPress={() => apply({ period, category: withCategories ? category : null })} />
+      <Pressable accessibilityRole="button" accessibilityLabel="Сбросить" onPress={() => apply({ period: null, category: null })} style={styles.reset}>
+        <Text style={styles.resetText}>Сбросить</Text>
+      </Pressable>
+    </Sheet>
+  );
+}
+
+const styles = StyleSheet.create({
+  heading: { ...type.label, color: color.fg.subtle },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  row: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.md },
+  badge: { width: 36, height: 36, borderRadius: radius.full, backgroundColor: color.surface.raised, alignItems: "center", justifyContent: "center" },
+  badgeOn: { backgroundColor: color.accent.default },
+  text: { ...type.body, color: color.fg.default },
+  reset: { minHeight: touchMin, alignItems: "center", justifyContent: "center" },
+  resetText: { ...type.label, color: color.fg.muted },
+});
