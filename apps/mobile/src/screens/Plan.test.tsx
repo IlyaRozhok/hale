@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Alert, StyleSheet } from "react-native";
 import { Plan } from "./Plan";
 import { Today } from "./Today";
-import { balanceFixture, fakeApi, goalFixture, loanFixture, loanHistoryFixture, makeClient, pickDate, renderWith, taxFixture, todayFixture } from "../testing";
+import { balanceFixture, fakeApi, goalFixture, loanFixture, loanHistoryFixture, makeClient, openPlanPart, pickDate, renderWith, taxFixture, todayFixture } from "../testing";
 import { dateLabel, kyivDate, shiftDate } from "../format";
 import { LAYOUT } from "../components/layout";
 import { NetworkError } from "../api/client";
@@ -20,14 +20,37 @@ jest.mock("../metal", () => {
 });
 
 const noop = () => undefined;
-const press = async (name: string) => fireEvent.press(await screen.findByRole("button", { name }));
+const press = async (name: string) =>
+  ["Доходы", "Платежи", "Рассрочки", "Налоги", "Займы", "Цели", "Наличные", "Binance"].includes(name)
+    ? openPlanPart(name)
+    : fireEvent.press(await screen.findByRole("button", { name }));
+
+describe("Plan, calm groups", () => {
+  it("groups the plan into money, coming in, going out and saving up", async () => {
+    await renderWith(<Plan />, fakeApi());
+    for (const g of ["Деньги", "Приходит", "Уходит", "Копится"]) expect(await screen.findByText(g)).toBeTruthy();
+  });
+
+  it("folds empty parts into one quiet row per group, which unfolds them", async () => {
+    await renderWith(<Plan />, fakeApi());
+    const more = await screen.findByRole("button", { name: /^Ещё: .*рассрочки/ });
+    expect(screen.queryByRole("button", { name: "Рассрочки" })).toBeNull();
+    await fireEvent.press(more);
+    expect(await screen.findByRole("button", { name: "Рассрочки" })).toBeTruthy();
+  });
+
+  it("a part with something in it stays in view", async () => {
+    await renderWith(<Plan />, fakeApi({ payments: jest.fn(async () => [taxFixture()]) }));
+    expect(await screen.findByRole("button", { name: "Налоги" })).toBeTruthy();
+  });
+});
 
 describe("Plan, money", () => {
   it("shows own and credit money separately, with the title", async () => {
     await renderWith(<Plan />, fakeApi());
     expect(screen.getByText("План")).toBeTruthy();
-    expect(await screen.findByText("Деньги")).toBeTruthy();
-    expect(screen.getByText("Свои")).toBeTruthy();
+    expect(await screen.findByText("Свои")).toBeTruthy();
+    expect(screen.getByText("Деньги")).toBeTruthy();
     expect(screen.getByText("₴10,325")).toBeTruthy();
     expect(screen.getByText("Кредитные")).toBeTruthy();
     expect(screen.getByText("₴30,000")).toBeTruthy();
@@ -45,7 +68,7 @@ describe("Plan, loans", () => {
     });
   const open = async (api: ReturnType<typeof fakeApi>) => {
     await renderWith(<Plan />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Займы" }));
+    await openPlanPart("Займы");
   };
 
   it("shows how much was borrowed, returned and spent on servicing, with open and repaid loans", async () => {

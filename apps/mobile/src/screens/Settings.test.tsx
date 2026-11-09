@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Settings } from "./Settings";
 import { Plan } from "./Plan";
-import { fakeApi, makeClient, renderWith, taxFixture, todayFixture } from "../testing";
+import { fakeApi, makeClient, openPlanPart, renderWith, taxFixture, todayFixture } from "../testing";
 import { NetworkError } from "../api/client";
 import { TODAY_KEY } from "../api/queries";
 
@@ -89,7 +89,7 @@ describe("Settings, preview accuracy", () => {
       api,
     );
     await waitFor(() => expect(api.previewSettings).toHaveBeenCalledTimes(1));
-    await fireEvent.press(await screen.findByRole("button", { name: "Займы" }));
+    await openPlanPart("Займы");
     await fireEvent.press(await screen.findByRole("button", { name: "Новый займ" }));
     await fireEvent.changeText(await screen.findByLabelText("Сумма займа"), "100");
     await fireEvent.press(screen.getByRole("button", { name: "Добавить займ" }));
@@ -98,7 +98,7 @@ describe("Settings, preview accuracy", () => {
     const closes = screen.getAllByRole("button", { name: "Закрыть" });
     await fireEvent.press(closes[closes.length - 1]!);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Новый займ" })).toBeNull());
-    await fireEvent.press(await screen.findByRole("button", { name: "Налоги" }));
+    await openPlanPart("Налоги");
     await fireEvent.press(await screen.findByRole("button", { name: "Отметить оплаченным" }));
     await waitFor(() => expect(api.previewSettings).toHaveBeenCalledTimes(3));
   });

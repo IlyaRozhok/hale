@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import type { CalendarDto, GoalDto, LoanHistoryDto, LoanRowDto, ManualBalanceDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@hale/contracts";
 import { ApiProvider } from "./api/context";
 import type { Api } from "./api/client";
@@ -184,4 +184,25 @@ export async function renderWith(ui: ReactElement, api: Api, client: QueryClient
     </SafeAreaProvider>,
   );
   return { ...view, client };
+}
+
+/** Opens a part of Plan by its row, unfolding "Ещё" first when an empty part is folded away there. */
+export async function openPlanPart(name: string | RegExp): Promise<void> {
+  // Wait until the row has its data (a loading row has no detail yet) or has been folded into "Ещё".
+  const folded = () =>
+    typeof name === "string" &&
+    screen.queryAllByRole("button", { name: /^Ещё/ }).some((b) => String(b.props.accessibilityLabel).includes(name.toLowerCase()));
+  // A part that fails to load never gets a detail: then go on with the row as it is.
+  await waitFor(
+    () => {
+      const row = screen.queryByRole("button", { name });
+      if (!(row && row.props.accessibilityHint !== undefined) && !folded()) throw new Error(`no ${String(name)} yet`);
+    },
+    { timeout: 700 },
+  ).catch(() => undefined);
+  if (!screen.queryByRole("button", { name }) && typeof name === "string") {
+    const more = screen.queryAllByRole("button", { name: /^Ещё/ }).find((b) => String(b.props.accessibilityLabel).includes(name.toLowerCase()));
+    if (more) await fireEvent.press(more);
+  }
+  await fireEvent.press(await screen.findByRole("button", { name }));
 }

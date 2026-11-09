@@ -4,10 +4,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePullRefresh } from "../usePullRefresh";
 import { tokens } from "@hale/tokens";
 import { useCash, useExpectedIncomes, useGoals, useIncomeEvents, useLoanHistory, useManualBalances, usePayments, useToday } from "../api/queries";
-import { AccountsList } from "../components/AccountsList";
+import { AccountLines } from "../components/AccountsList";
 import { BinanceSheet } from "../components/BinanceBalance";
 import { CashSheet } from "../components/CashSheet";
-import { Glass } from "../components/Glass";
 import { Icon } from "../components/Icon";
 import { Settings } from "./Settings";
 import { GoalsSheet } from "../components/GoalsSection";
@@ -16,7 +15,7 @@ import { IncomesSheet } from "../components/IncomesSheet";
 import { InstallmentsSheet } from "../components/InstallmentsSheet";
 import { LoansSheet } from "../components/LoansSheet";
 import { PaymentsSheet } from "../components/PaymentsSheet";
-import { SummaryRow } from "../components/SummaryRow";
+import { PlanGroup } from "../components/PlanGroup";
 import { TaxSheet } from "../components/TaxPayments";
 import { formatDollars, formatMoney } from "../format";
 import { goalsLine, incomesLine, installmentsLine, paymentsLine, taxLine } from "../planSummary";
@@ -55,17 +54,29 @@ export function Plan() {
           <Icon name="user" color={color.fg.muted} size={20} />
         </Pressable>
       </View>
-      {today.data ? <AccountsList title="Деньги" accounts={today.data.accounts} usdRate={today.data.usdRate} /> : null}
-      <Glass>
-        <SummaryRow label="Доходы" detail={incomes.data && events.data ? incomesLine(incomes.data, events.data) : undefined} onPress={() => setOpen("incomes")} />
-        <SummaryRow label="Платежи" detail={payments.data ? paymentsLine(payments.data) : undefined} onPress={() => setOpen("payments")} />
-        <SummaryRow label="Рассрочки" detail={payments.data ? installmentsLine(payments.data, today.data?.usdRate ?? 0) : undefined} onPress={() => setOpen("installments")} />
-        <SummaryRow label="Налоги" detail={payments.data ? taxLine(payments.data) : undefined} onPress={() => setOpen("tax")} />
-        <SummaryRow label="Займы" detail={stillOpen === undefined ? undefined : stillOpen > 0 ? `открыто ${formatMoney(stillOpen)}` : "открытых нет"} onPress={() => setOpen("loans")} />
-        <SummaryRow label="Цели" detail={goals.data ? goalsLine(goals.data) : undefined} onPress={() => setOpen("goals")} />
-        <SummaryRow label="Наличные" detail={cash.data ? (cash.data.started ? formatMoney(cash.data.balance) : "не начат") : undefined} onPress={() => setOpen("cash")} />
-        <SummaryRow label="Binance" detail={balances.data ? (binance ? formatDollars(binance.amount) : "не задан") : undefined} onPress={() => setOpen("binance")} />
-      </Glass>
+      <PlanGroup
+        title="Деньги"
+        rows={[
+          { label: "Наличные", detail: cash.data ? (cash.data.started ? formatMoney(cash.data.balance) : "не начат") : undefined, onPress: () => setOpen("cash") },
+          { label: "Binance", detail: balances.data ? (binance ? formatDollars(binance.amount) : "не задан") : undefined, onPress: () => setOpen("binance") },
+        ]}
+      >
+        {today.data ? <AccountLines accounts={today.data.accounts} usdRate={today.data.usdRate} /> : null}
+      </PlanGroup>
+      <PlanGroup
+        title="Приходит"
+        rows={[{ label: "Доходы", detail: incomes.data && events.data ? incomesLine(incomes.data, events.data) : undefined, onPress: () => setOpen("incomes") }]}
+      />
+      <PlanGroup
+        title="Уходит"
+        rows={[
+          { label: "Платежи", detail: payments.data ? paymentsLine(payments.data) : undefined, onPress: () => setOpen("payments") },
+          { label: "Рассрочки", detail: payments.data ? installmentsLine(payments.data, today.data?.usdRate ?? 0) : undefined, onPress: () => setOpen("installments") },
+          { label: "Налоги", detail: payments.data ? taxLine(payments.data) : undefined, onPress: () => setOpen("tax") },
+          { label: "Займы", detail: stillOpen === undefined ? undefined : stillOpen > 0 ? `открыто ${formatMoney(stillOpen)}` : "открытых нет", onPress: () => setOpen("loans") },
+        ]}
+      />
+      <PlanGroup title="Копится" rows={[{ label: "Цели", detail: goals.data ? goalsLine(goals.data) : undefined, onPress: () => setOpen("goals") }]} />
       {open === "incomes" && <IncomesSheet onClose={close} />}
       {open === "payments" && <PaymentsSheet onClose={close} />}
       {open === "installments" && <InstallmentsSheet onClose={close} />}
