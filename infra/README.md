@@ -52,6 +52,8 @@ Then run, in order:
    It ships the committed tree (`git archive HEAD`) over SSH, builds the image
    on the server, runs migrations, starts the stack and polls
    `https://<domain>/health`; any failing step exits non-zero.
+   На самом первом деплое схемы ещё нет, поэтому бэкап перед миграциями
+   пропускаем: `SKIP_BACKUP=1`. Подробнее в разделе «Деплой, откат, логи».
 6. Verify: `curl -i https://<domain>/health` returns 200, and from your machine
    `nc -vz <ip> 5432` fails (closed).
 7. Run one backup by hand and prove you can restore it (see below) before
@@ -112,6 +114,54 @@ https://api.monobank.ua/ (log in with the monobank app).
 - Failures of either cron job are appended to `/var/log/hale-jobs.log` and
   inserted into the `jobs` table (`kind` = `backup.failed` /
   `restore_check.failed`, `status` = `failed`, `last_error`).
+
+## Деплой, откат, логи
+
+- `/health` выполняет `SELECT 1` в Postgres (таймаут 2 с). Ответ `200 {"status":"ok","db":"ok"}`,
+  а если база не отвечает, то `503 {"status":"error","db":"down"}`. На это опираются
+  `deploy.sh`, `rollback.sh`, healthcheck контейнера `api` в compose и внешний мониторинг (ниже).
+- Порядок `deploy.sh`: синхронизация, сборка образа, **бэкап базы** (та же команда, что
+  в ночном cron, через `cron-run.sh pre_deploy_backup`), миграции, запуск, проверка
+  `/health`, удаление старых образов. Если бэкап упал, деплой останавливается до миграций.
+  Вывод бэкапа пишется в `/var/log/hale-jobs.log` на сервере, ошибка также попадает в
+  таблицу `jobs` (`pre_deploy_backup.failed`). Флаг `SKIP_BACKUP=1` нужен только для первой установки.
+- В конце деплой печатает предыдущий образ и команду отката. Откат:
+  `DEPLOY_HOST=<ip> DOMAIN=<domain> infra/rollback.sh <tag>`, где `<tag>` — короткий sha
+  (можно и `hale-api:<tag>`). Скрипт проверяет, что образ есть на сервере, переключает
+  `API_IMAGE` в `.env`, перезапускает стек и ждёт `/health`. Список доступных образов:
+  `ssh root@<ip> docker image ls hale-api`.
+- **Откат не отменяет миграции.** Откатываться можно на образ, код которого работает с
+  текущей схемой (миграции в Hale только добавляют). Если новая миграция сломала
+  данные, нужно восстанавливать бэкап, сделанный перед деплоем (раздел Backups).
+- После успешного деплоя `prune-images.sh` оставляет 3 последних образа `hale-api`
+  (плюс текущий) и удаляет висящие слои сборки. Сбой очистки не валит деплой.
+- Логи контейнеров ротируются (`x-logging` в `compose.yml`): json-file, до 5 файлов по
+  10 МБ на контейнер. Применяется при пересоздании контейнеров, то есть при ближайшем деплое.
+
+## Внешние алерты (предложение, не подключено)
+
+Сейчас о сбоях никто не узнаёт: падение бэкапа видно только в `jobs` и в логе, а
+лежащий API заметен, только когда не открывается приложение. Предлагаю два бесплатных
+внешних сигнала, оба без кода на сервере сверх пары строк. Регистрироваться и
+подключать будет владелец.
+
+1. **Пинг `/health`.** UptimeRobot (бесплатно: 50 мониторов, проверка раз в 5 минут;
+   Healthchecks.io сам ничего не опрашивает, он только принимает пинги):
+   монитор HTTP(s) на `https://api.halemoney.com/health`, ожидается код 200,
+   уведомление на почту и в Telegram. Так как `/health` теперь трогает базу, монитор
+   ловит и упавший API, и упавший Postgres, и истёкший сертификат.
+2. **Heartbeat бэкапа.** Healthchecks.io (бесплатно: 20 проверок). Завести проверку
+   «backup» с периодом 1 день и grace 6 часов, положить её URL в `.env` как
+   `HEALTHCHECK_BACKUP_URL='https://hc-ping.com/<uuid>'`. В `cron-run.sh` после
+   выполнения задания добавить (и разрешить `HEALTHCHECK_*` в `load_env`):
+   `curl -fsS -m 10 --retry 3 "$HEALTHCHECK_BACKUP_URL/$code" >/dev/null || true`,
+   где `/0` означает успех, а ненулевой код — сбой. Healthchecks пришлёт письмо и
+   при явной ошибке, и если пинг не пришёл вовсе (сервер выключен, cron сломан).
+   Ту же схему можно повесить на еженедельный `restore_check`.
+
+Что нужно от владельца: аккаунты в UptimeRobot и Healthchecks.io, каналы уведомлений
+(почта и/или Telegram), согласие на правку `.env` на сервере. После этого изменение в
+`cron-run.sh` делается отдельной задачей с тестом.
 
 ## Local verification
 

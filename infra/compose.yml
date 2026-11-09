@@ -2,9 +2,19 @@
 # are reachable on the internal network only.
 # Required in infra/.env (never committed): DOMAIN, POSTGRES_PASSWORD,
 # JWT_SECRET, OWNER_PASSWORD_HASH, API_IMAGE, plus the backup variables.
+
+# Docker keeps container logs forever by default and fills the disk; rotate
+# them: at most 5 files x 10 MB per container (`docker compose logs` still works).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16
+    logging: *logging
     restart: unless-stopped
     environment:
       POSTGRES_USER: hale
@@ -22,6 +32,7 @@ services:
 
   api:
     image: ${API_IMAGE:?set in .env}
+    logging: *logging
     restart: unless-stopped
     depends_on:
       postgres:
@@ -44,6 +55,7 @@ services:
 
   caddy:
     image: caddy:2
+    logging: *logging
     restart: unless-stopped
     depends_on:
       - api
