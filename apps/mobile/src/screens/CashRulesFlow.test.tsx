@@ -9,7 +9,7 @@ import type { RuleDto } from "@hale/contracts";
 
 jest.mock("../metal", () => {
   const { View } = require("react-native");
-  return { LimitVisual: () => <View testID="limit-visual" />, MetalBar: () => <View testID="limit-visual" /> };
+  return { LimitVisual: () => <View testID="limit-visual" />, LimitBar: () => <View testID="limit-visual" /> };
 });
 jest.mock("@react-native-community/slider", () => {
   const React = require("react");

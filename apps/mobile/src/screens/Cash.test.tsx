@@ -9,7 +9,7 @@ import { ApiError } from "../api/client";
 
 jest.mock("../metal", () => {
   const { View } = require("react-native");
-  return { LimitVisual: () => <View testID="limit-visual" />, MetalBar: () => <View testID="limit-visual" /> };
+  return { LimitVisual: () => <View testID="limit-visual" />, LimitBar: () => <View testID="limit-visual" /> };
 });
 
 const noop = () => undefined;

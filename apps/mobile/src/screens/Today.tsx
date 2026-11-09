@@ -3,7 +3,8 @@ import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 import type { DailyStateDto, TodayDto } from "@hale/contracts";
-import { MetalBar } from "../metal";
+import { LimitBar } from "../metal";
+import { limitState } from "../limitState";
 import { formatMoney, formatStamp, formatUsd, kyivDate, longDate, streakLabel } from "../format";
 import { useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useAnswerCashCard, useDepositFromWallet, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
 import { CashOperationSheet } from "../components/CashOperationSheet";
@@ -171,7 +172,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
                 : `${heading} ${formatMoney(shownLeft)}. ${noLimitNote}`
             }
           >
-            <Text style={styles.eyebrow}>{heading}</Text>
+            <Text style={[styles.eyebrow, over && styles.overHeading]}>{heading}</Text>
             <Text style={styles.amount}>{formatMoney(shownLeft)}</Text>
             {hasLimit && <Text style={styles.note}>{limitNote(state)}</Text>}
             {hasLimit && usd ? <Text style={styles.subtle}>{usd} сейчас</Text> : null}
@@ -181,7 +182,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
           </View>
           {hasLimit && (
             <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <MetalBar level={level} />
+              <LimitBar level={level} state={limitState(state)} />
             </View>
           )}
           <View style={styles.quiet}>
@@ -297,7 +298,8 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: space.xl, gap: space.md },
   stack: { gap: space.md },
   eyebrow: { ...type.body, color: color.fg.muted, height: LAYOUT.eyebrow + 4 },
-  amount: { fontSize: 52, lineHeight: LAYOUT.amount, fontWeight: "500", color: color.fg.default, fontVariant: ["tabular-nums"] },
+  overHeading: { color: color.status.danger },
+  amount: { ...type.amount, lineHeight: LAYOUT.amount, color: color.fg.default, fontVariant: ["tabular-nums"] },
   note: { ...type.body, color: color.fg.muted },
   subtle: { ...type.caption, color: color.fg.subtle },
   body: { ...type.body, color: color.fg.default },

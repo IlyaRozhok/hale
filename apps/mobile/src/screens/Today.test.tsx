@@ -11,7 +11,7 @@ jest.mock("../metal", () => {
   const { View } = require("react-native");
   return {
     LimitVisual: ({ mode, level }: { mode: string; level: number }) => <View testID="limit-visual" accessibilityHint={`${mode}:${level}`} />,
-    MetalBar: ({ level }: { level: number }) => <View testID="limit-visual" accessibilityHint={`bar:${level}`} />,
+    LimitBar: ({ level, state }: { level: number; state: string }) => <View testID="limit-visual" accessibilityHint={`bar:${state}:${level}`} />,
   };
 });
 jest.mock("@react-native-community/slider", () => {
@@ -53,7 +53,7 @@ describe("Today, normal mode", () => {
     expect(screen.getByText("6")).toBeTruthy();
     expect(screen.getByText("ноя")).toBeTruthy();
     expect(screen.getByText("₴17,000")).toBeTruthy();
-    expect(levelOf()).toBe("bar:0.72");
+    expect(levelOf()).toBe("bar:ok:0.72");
   });
 
   it("leaves out days to income while no income date is known", async () => {
@@ -122,7 +122,7 @@ describe("Today, normal mode", () => {
   it("always shows the metal bar, even if the server still has the ring saved", async () => {
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ limitVisual: "ring" })) }));
     await screen.findByText("Сегодня можно");
-    expect(levelOf()).toBe("bar:0.72");
+    expect(levelOf()).toBe("bar:ok:0.72");
   });
 
   describe("limit states", () => {
@@ -159,8 +159,22 @@ describe("Today, normal mode", () => {
 
     it("the metal bar is empty when nothing is left, and absent with no limit", async () => {
       await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 95000, leftToday: -100, level: 0.4 }));
-      await screen.findByText("Сверх лимита");
-      expect(levelOf()).toBe("bar:0");
+      const heading = await screen.findByText("Сверх лимита");
+      expect(levelOf()).toBe("bar:over:0");
+      expect(StyleSheet.flatten(heading.props.style).color).toBe(tokens.color.status.danger);
+    });
+
+    it("used up exactly: the strip says nothing is left, the words stay calm and white", async () => {
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 95000, leftToday: 0, level: 0 }));
+      const heading = await screen.findByText("Сегодня можно");
+      expect(levelOf()).toBe("bar:over:0");
+      expect(StyleSheet.flatten(heading.props.style).color).not.toBe(tokens.color.status.danger);
+    });
+
+    it("a quarter or less left turns the spark to low", async () => {
+      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 200000, leftToday: 30000, level: 0.15 }));
+      await screen.findByText("Сегодня можно");
+      expect(levelOf()).toBe("bar:low:0.15");
     });
 
     it("no limit, no bar", async () => {
@@ -172,7 +186,7 @@ describe("Today, normal mode", () => {
     it("shows what was spent today", async () => {
       await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 200000, leftToday: 124000, level: 0.62 }));
       expect(await screen.findByText(/Потрачено ₴760/)).toBeTruthy();
-      expect(levelOf()).toBe("bar:0.62");
+      expect(levelOf()).toBe("bar:ok:0.62");
     });
 
     it("the quiet line under the bar shows the streak and opens the calendar", async () => {
@@ -867,7 +881,7 @@ describe("Today, loading and offline", () => {
     expect(await screen.findByText(/Нет связи/)).toBeTruthy();
     expect(screen.getByText(/08:30/)).toBeTruthy();
     expect(screen.getByText("₴720")).toBeTruthy();
-    expect(levelOf()).toBe("bar:0.72");
+    expect(levelOf()).toBe("bar:ok:0.72");
   });
 
   it("a stale bank sync keeps the limit and shows when it last updated", async () => {
@@ -875,7 +889,7 @@ describe("Today, loading and offline", () => {
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => stale) }));
     expect(await screen.findByText(/01\.11 21:10/)).toBeTruthy();
     expect(screen.getByText("₴720")).toBeTruthy();
-    expect(levelOf()).toBe("bar:0.72");
+    expect(levelOf()).toBe("bar:ok:0.72");
   });
 
   it("a stale sync with no sync yet says so", async () => {

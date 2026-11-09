@@ -16,7 +16,7 @@ jest.mock("../metal", () => {
   const { View } = require("react-native");
   return {
     LimitVisual: ({ mode, level }: { mode: string; level: number }) => <View testID="limit-visual" accessibilityHint={`${mode}:${level}`} />,
-    MetalBar: ({ level }: { level: number }) => <View testID="limit-visual" accessibilityHint={`bar:${level}`} />,
+    LimitBar: ({ level, state }: { level: number; state: string }) => <View testID="limit-visual" accessibilityHint={`bar:${state}:${level}`} />,
   };
 });
 

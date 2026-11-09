@@ -1,3 +1,3 @@
 export { LimitVisual, type LimitMode } from "./LimitVisual";
-export { MetalBar } from "./MetalBar";
+export { LimitBar } from "./LimitBar";
 export { waveLevel, clampLevel } from "./level";
