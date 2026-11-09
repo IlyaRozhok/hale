@@ -30,7 +30,11 @@ export const color = {
   /** How a day went against the limit; dark numbers on them. */
   calendar: { within: p.sage, over: p.rose, farOver: p.crimson },
   /** The app's backdrop of metal folds: `peak` caps its thin crests, `sheet` the wide light that survives the glass's blur. */
-  backdrop: { peak: p.silver[400], sheet: p.graphite[500] },
+  backdrop: { peak: p.silver[400], sheet: p.graphite[500], glow: p.dusk, mid: p.dusk2 },
+  /** Solid cards on the dark background: there is nothing behind them for glass to blur. */
+  card: { fill: p.graphite[900], edge: p.graphite[800] },
+  /** The limit strip: silver, with a small spark at its end that says how the day stands. */
+  limit: { ok: p.sage, low: p.sand, over: p.ember, overDeep: p.wine, strip: p.silver[100] },
   /** The thin limit strip: brushed silver whose highlight glides slowly along it. */
   metalBar: { shade: p.silver[400], body: p.silver[200], glint: p.white },
   // Statuses differ by lightness, and danger (errors) by a calm red. Each also carries a text label.
@@ -73,6 +77,8 @@ export const type = {
   label: { fontSize: 14, lineHeight: 20, fontWeight: "500" },
   title: { fontSize: 20, lineHeight: 28, fontWeight: "600" },
   display: { fontSize: 34, lineHeight: 40, fontWeight: "700" },
+  /** The day's sum on Today: dense, tabular figures. */
+  amount: { fontSize: 52, lineHeight: 60, fontWeight: "600", letterSpacing: -1.5 },
 } as const;
 
 /** The liquid metal: a quarter of the pixels (it is soft), how fast the level moves, the pose when motion is reduced, widths of thin metal edges. */

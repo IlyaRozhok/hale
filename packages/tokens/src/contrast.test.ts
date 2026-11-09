@@ -43,6 +43,17 @@ describe("silver tokens contrast (WCAG AA 4.5:1)", () => {
     expect(contrastRatio(color.accent.signal, color.surface.base)).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(color.accent.fgOnSignal, color.accent.signal)).toBeGreaterThanOrEqual(4.5);
   });
+  it("the limit's spark colours are muted, and the overspent words read on the base", () => {
+    expect(color.limit).toEqual({ ok: "#8CC7A1", low: "#D6B26E", over: "#E07A7A", overDeep: "#3A2224", strip: "#E9EBEE" });
+    expect(contrastRatio(color.status.danger, color.surface.base)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(color.limit.low, color.surface.base)).toBeGreaterThanOrEqual(4.5);
+  });
+  it("cards are solid and a step above the background, with a hairline edge", () => {
+    expect(contrastRatio(color.fg.default, color.card.fill)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(color.fg.muted, color.card.fill)).toBeGreaterThanOrEqual(4.5);
+    expect(color.card.fill).not.toBe(color.surface.base);
+    expect(color.backdrop.glow).not.toBe(color.surface.base);
+  });
   it("accent.fgOnAccent on accent.default", () => {
     expect(contrastRatio(color.accent.fgOnAccent, color.accent.default)).toBeGreaterThanOrEqual(4.5);
   });

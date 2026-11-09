@@ -18,6 +18,13 @@ export const palette = {
   sage: "#8CC7A1",
   rose: "#F08585",
   crimson: "#E25C5C",
+  /** Muted sand for "almost used up", and a deep wine the overspent strip starts from. */
+  sand: "#D6B26E",
+  ember: "#E07A7A",
+  wine: "#3A2224",
+  /** The soft light at the top of the background. */
+  dusk: "#24272D",
+  dusk2: "#111317",
   graphite: {
     500: "#54585F",
     700: "#2C2F34",
