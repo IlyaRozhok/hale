@@ -30,7 +30,8 @@ export function PlanRows({ rows }: { rows: PlanRow[] }) {
   const [unfolded, setUnfolded] = useState(false);
   const empty = rows.filter((r) => r.detail !== undefined && EMPTY.has(r.detail));
   const shown = unfolded ? rows : rows.filter((r) => !empty.includes(r));
-  const more = `Ещё: ${empty.map((r) => r.label.toLowerCase()).join(", ")}`;
+  // Ordinary words go lower case inside the phrase; a name such as Binance stays as it is.
+  const more = `Ещё: ${empty.map((r) => (/^[А-ЯЁ]/.test(r.label) ? r.label.toLowerCase() : r.label)).join(", ")}`;
   return (
     <>
       {shown.map((r) => (

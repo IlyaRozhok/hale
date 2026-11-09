@@ -39,6 +39,13 @@ describe("Plan, calm groups", () => {
     expect(await screen.findByRole("button", { name: "Рассрочки" })).toBeTruthy();
   });
 
+  it("names a folded brand as it is, and shows the cash once, as its own row", async () => {
+    await renderWith(<Plan />, fakeApi({ cash: jest.fn(async () => ({ started: true, start: "2026-11-01", balance: 100_000 })) }));
+    expect(await screen.findByRole("button", { name: /^Ещё: Binance/ })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Наличные" })).toBeTruthy();
+    expect(screen.queryByText("в том числе наличные")).toBeNull();
+  });
+
   it("a part with something in it stays in view", async () => {
     await renderWith(<Plan />, fakeApi({ payments: jest.fn(async () => [taxFixture()]) }));
     expect(await screen.findByRole("button", { name: "Налоги" })).toBeTruthy();

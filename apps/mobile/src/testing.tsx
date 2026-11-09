@@ -191,7 +191,7 @@ export async function openPlanPart(name: string | RegExp): Promise<void> {
   // Wait until the row has its data (a loading row has no detail yet) or has been folded into "Ещё".
   const folded = () =>
     typeof name === "string" &&
-    screen.queryAllByRole("button", { name: /^Ещё/ }).some((b) => String(b.props.accessibilityLabel).includes(name.toLowerCase()));
+    screen.queryAllByRole("button", { name: /^Ещё/ }).some((b) => String(b.props.accessibilityLabel).toLowerCase().includes(name.toLowerCase()));
   // A part that fails to load never gets a detail: then go on with the row as it is.
   await waitFor(
     () => {
@@ -201,7 +201,7 @@ export async function openPlanPart(name: string | RegExp): Promise<void> {
     { timeout: 700 },
   ).catch(() => undefined);
   if (!screen.queryByRole("button", { name }) && typeof name === "string") {
-    const more = screen.queryAllByRole("button", { name: /^Ещё/ }).find((b) => String(b.props.accessibilityLabel).includes(name.toLowerCase()));
+    const more = screen.queryAllByRole("button", { name: /^Ещё/ }).find((b) => String(b.props.accessibilityLabel).toLowerCase().includes(name.toLowerCase()));
     if (more) await fireEvent.press(more);
   }
   await fireEvent.press(await screen.findByRole("button", { name }));

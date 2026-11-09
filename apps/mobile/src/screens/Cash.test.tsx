@@ -116,9 +116,11 @@ describe("the wallet in Plan", () => {
     await waitFor(() => expect(api.startCash).toHaveBeenCalledWith({ amount: 0 }));
   });
 
-  it("lists cash inside own money", async () => {
-    await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => todayFixture({ accounts: { own: 1_282_500, credit: 3_000_000, fop: 0, binance: 0, cash: 250_000 } })) }));
-    expect(await screen.findByText("в том числе наличные")).toBeTruthy();
+  it("shows cash once, as its own row under money, with the wallet's balance", async () => {
+    await renderWith(<Plan />, fakeApi({ ...started(), today: jest.fn(async () => todayFixture({ accounts: { own: 1_282_500, credit: 3_000_000, fop: 0, binance: 0, cash: 250_000 } })) }));
+    expect(await screen.findByRole("button", { name: "Наличные" })).toBeTruthy();
+    expect(await screen.findByText("₴2,500")).toBeTruthy();
+    expect(screen.queryByText("в том числе наличные")).toBeNull();
   });
 });
 
