@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ExpectedIncomeInput, ExpectedIncomePatch, InstallmentInput, InstallmentPatch, LoanInput, LoanRepayInput, RecipientLabelName, RecurringInput, RecurringPatch, ScheduledPaymentInput, ScheduledPaymentPatch, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
+import type { CashOperationInput, CashOperationPatch, CashStartInput, ExpectedIncomeInput, ExpectedIncomePatch, InstallmentInput, InstallmentPatch, LoanInput, LoanRepayInput, RecipientLabelName, RecurringInput, RecurringPatch, ScheduledPaymentInput, ScheduledPaymentPatch, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
 import type { GoalInput, GoalPatch } from "@hale/contracts";
 import type { TransactionsFilter } from "./client";
 import { useApi } from "./context";
@@ -18,6 +18,7 @@ export const RECIPIENTS_KEY = ["recipients"] as const;
 export const EXPECTED_INCOMES_KEY = ["expected-incomes"] as const;
 export const INCOME_EVENTS_KEY = ["income-events"] as const;
 export const RECURRING_KEY = ["recurring"] as const;
+export const CASH_KEY = ["cash"] as const;
 /** Debounce between the last slider move and the preview request. */
 export const PREVIEW_DELAY_MS = 300;
 
@@ -395,4 +396,55 @@ export function usePatchGoal() {
 export function useDeleteGoal() {
   const api = useApi();
   return useGoalMutation((id: number) => api.deleteGoal(id));
+}
+
+// --- cash wallet ---------------------------------------------------------------------
+export function useCash() {
+  const api = useApi();
+  return useQuery({ queryKey: CASH_KEY, queryFn: () => api.cash() });
+}
+
+/** Cash moves the wallet, the day's spending and the list. */
+function useCashMutation<V>(mutationFn: (vars: V) => Promise<unknown>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: CASH_KEY }),
+        client.invalidateQueries({ queryKey: TODAY_KEY }),
+        client.invalidateQueries({ queryKey: TRANSACTIONS_KEY }),
+        client.invalidateQueries({ queryKey: CALENDAR_KEY }),
+      ]),
+  });
+}
+
+export function useStartCash() {
+  const api = useApi();
+  return useCashMutation((input: CashStartInput) => api.startCash(input));
+}
+
+export function useAddCashOperation() {
+  const api = useApi();
+  return useCashMutation((input: CashOperationInput) => api.addCashOperation(input));
+}
+
+export function usePatchCashOperation() {
+  const api = useApi();
+  return useCashMutation(({ id, patch }: { id: number; patch: CashOperationPatch }) => api.patchCashOperation(id, patch));
+}
+
+export function useDeleteCashOperation() {
+  const api = useApi();
+  return useCashMutation((id: number) => api.deleteCashOperation(id));
+}
+
+export function useCountCash() {
+  const api = useApi();
+  return useCashMutation((amount: number) => api.countCash(amount));
+}
+
+export function useDepositFromWallet() {
+  const api = useApi();
+  return useCashMutation((transactionId: number) => api.depositFromWallet(transactionId));
 }

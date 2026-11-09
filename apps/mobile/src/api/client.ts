@@ -1,6 +1,10 @@
 import type {
   BridgePreviewDto,
   CalendarDto,
+  CashOperationInput,
+  CashOperationPatch,
+  CashStartInput,
+  CashWalletDto,
   ExpectedIncomeDto,
   ExpectedIncomeInput,
   ExpectedIncomePatch,
@@ -30,6 +34,7 @@ import type {
   TodayDto,
   TransactionEditDto,
   TransactionPageDto,
+  TransactionDto,
   TransactionPatch,
 } from "@hale/contracts";
 
@@ -107,6 +112,13 @@ export interface Api {
   createGoal(input: GoalInput): Promise<GoalDto>;
   patchGoal(id: number, patch: GoalPatch): Promise<GoalDto>;
   deleteGoal(id: number): Promise<void>;
+  cash(): Promise<CashWalletDto>;
+  startCash(input: CashStartInput): Promise<CashWalletDto>;
+  addCashOperation(input: CashOperationInput): Promise<TransactionDto>;
+  patchCashOperation(id: number, patch: CashOperationPatch): Promise<TransactionDto>;
+  deleteCashOperation(id: number): Promise<void>;
+  countCash(amount: number): Promise<CashWalletDto>;
+  depositFromWallet(transactionId: number): Promise<void>;
 }
 
 export type TransactionsFilter = { needsLabel?: boolean; group?: "spend" | "income" | "all"; q?: string };
@@ -154,6 +166,13 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     setIncomeDate: async (eventId, date) => void (await request("POST", `/plan/incomes/${eventId}/date`, { date })),
     matchUsdc: async (eventId, transactionId) => void (await request("POST", `/plan/incomes/${eventId}/match-transaction`, { transactionId })),
     dismissUsdcMatch: async (transactionId) => void (await request("POST", `/plan/transactions/${transactionId}/not-usdc`)),
+    cash: () => request("GET", "/cash"),
+    startCash: (input) => request("POST", "/cash/start", input),
+    addCashOperation: (input) => request("POST", "/cash/operations", input),
+    patchCashOperation: (id, patch) => request("PATCH", `/cash/operations/${id}`, patch),
+    deleteCashOperation: async (id) => void (await request("DELETE", `/cash/operations/${id}`)),
+    countCash: (amount) => request("POST", "/cash/count", { amount }),
+    depositFromWallet: async (transactionId) => void (await request("POST", `/cash/deposits/${transactionId}/from-wallet`)),
     manualBalances: () => request("GET", "/plan/manual-balances"),
     createManualBalance: (input) => request("POST", "/plan/manual-balances", input),
     patchManualBalance: (id, amount) => request("PATCH", `/plan/manual-balances/${id}`, { amount }),

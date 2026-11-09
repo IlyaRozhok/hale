@@ -23,7 +23,7 @@ export function todayFixture(over: Partial<TodayDto> = {}): TodayDto {
     },
     usdRate: 41.25,
     rateStale: false,
-    accounts: { own: 1032500, credit: 3000000, fop: 0, binance: 0 },
+    accounts: { own: 1032500, credit: 3000000, fop: 0, binance: 0, cash: 0 },
     upcoming: [{ id: "1", name: "Квартплата", amount: 1700000, dueOn: "2026-11-06", kind: "obligation" }],
     questions: [],
     badCases: [],
@@ -60,6 +60,7 @@ export function txFixture(over: Partial<TransactionDto> = {}): TransactionDto {
     counterKey: "0123456789abcdef",
     counterName: null,
     accountKind: "black",
+    manual: false,
     ...over,
   };
 }
@@ -147,6 +148,13 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     createGoal: jest.fn(async () => goalFixture()),
     patchGoal: jest.fn(async () => goalFixture()),
     deleteGoal: jest.fn(async () => undefined),
+    cash: jest.fn(async () => ({ started: false, start: null, balance: 0 })),
+    startCash: jest.fn(async () => ({ started: true, start: kyivDate(), balance: 0 })),
+    addCashOperation: jest.fn(async () => txFixture({ manual: true, accountKind: "cash" })),
+    patchCashOperation: jest.fn(async () => txFixture({ manual: true, accountKind: "cash" })),
+    deleteCashOperation: jest.fn(async () => undefined),
+    countCash: jest.fn(async () => ({ started: true, start: kyivDate(), balance: 0 })),
+    depositFromWallet: jest.fn(async () => undefined),
     ...over,
   } as never;
 }

@@ -5,7 +5,8 @@ import { tokens } from "@hale/tokens";
 import type { DailyStateDto, TodayDto } from "@hale/contracts";
 import { LimitVisual } from "../metal";
 import { formatMoney, formatStamp, formatUsd, kyivDate, longDate, streakLabel } from "../format";
-import { useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
+import { useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useDepositFromWallet, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
+import { CashOperationSheet } from "../components/CashOperationSheet";
 import { ErrorText } from "../components/ErrorText";
 import { ActionRow } from "../components/ActionRow";
 import { BadCaseCard } from "../components/BadCaseCard";
@@ -59,12 +60,13 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
   const setIncomeDate = useSetIncomeDate();
   const matchUsdc = useMatchUsdc();
   const dismissUsdc = useDismissUsdcMatch();
+  const fromWallet = useDepositFromWallet();
   const chooseBridge = useChooseBridge();
   const cancelBridge = useCancelBridge();
   const deleteLoan = useDeleteLoan();
   const pull = usePullRefresh(today.refetch);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
-  const [sheet, setSheet] = useState<"bridge" | "questions" | "settings" | "calendar" | null>(null);
+  const [sheet, setSheet] = useState<"bridge" | "questions" | "settings" | "calendar" | "cash" | null>(null);
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
   const [repaying, setRepaying] = useState<{ id: number; remaining: number; receivedOn?: string; name: string } | null>(null);
 
@@ -149,7 +151,12 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
       >
         <View style={styles.header}>
           <Text style={styles.date}>{longDate(data.date)}</Text>
-          {settingsButton}
+          <View style={styles.headerButtons}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Добавить операцию" onPress={() => setSheet("cash")} style={styles.profile}>
+              <Icon name="plus" color={color.fg.muted} size={20} />
+            </Pressable>
+            {settingsButton}
+          </View>
         </View>
         <StaleBanner lines={freshnessLines(data, offlineSince, now())} />
         <Glass style={styles.hero}>
@@ -204,6 +211,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
         <Upcoming items={data.upcoming} />
       </ScrollView>
 
+      {sheet === "cash" && <CashOperationSheet onClose={closeSheet} />}
       {sheet === "calendar" && <LimitCalendar today={data.date} streak={data.streak ?? 0} onClose={closeSheet} />}
       {sheet === "bridge" && state.bridge && (
         <Sheet title="План до зарплаты" onClose={closeSheet}>
@@ -234,6 +242,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
               onConfirmUsdc={(eventId) => answer(q.id, () => confirmIncome.mutateAsync(eventId))}
               onMatchUsdc={(eventId, transactionId) => answer(q.id, () => matchUsdc.mutateAsync({ eventId, transactionId }))}
               onDismissUsdc={(transactionId) => answer(q.id, () => dismissUsdc.mutateAsync(transactionId))}
+              onCashFromWallet={(transactionId) => answer(q.id, () => fromWallet.mutateAsync(transactionId))}
               onSetDate={(eventId, date) => answer(q.id, () => setIncomeDate.mutateAsync({ eventId, date }))}
             />
           ))}
@@ -257,6 +266,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
 const styles = StyleSheet.create({
   root: { flex: 1 },
   headerEnd: { alignItems: "flex-end" },
+  headerButtons: { flexDirection: "row", gap: space.sm },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md },
   date: { ...type.label, color: color.fg.default, flexShrink: 1 },
   profile: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: color.glass.row },

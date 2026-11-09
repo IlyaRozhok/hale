@@ -15,6 +15,7 @@ export function AccountsList({ title, accounts, usdRate }: Props) {
       <Text style={styles.heading}>{title}</Text>
       <Line label="Свои" kopecks={accounts.own} usdRate={usdRate} />
       {accounts.fop !== 0 && <Line subtle label="в том числе ФОП" kopecks={accounts.fop} usdRate={usdRate} />}
+      {accounts.cash !== 0 && <Line subtle label="в том числе наличные" kopecks={accounts.cash} usdRate={usdRate} />}
       {accounts.binance !== 0 && <Line subtle label="в том числе Binance" kopecks={accounts.binance} usdRate={usdRate} />}
       <Line label="Кредитные" kopecks={accounts.credit} usdRate={usdRate} />
     </Glass>

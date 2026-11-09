@@ -26,12 +26,13 @@ type Props = {
   onConfirmUsdc: (eventId: number) => void;
   onMatchUsdc: (eventId: number, transactionId: number) => void;
   onDismissUsdc: (transactionId: number) => void;
+  onCashFromWallet: (transactionId: number) => void;
   onSetDate: (eventId: number, date: string) => void;
   onOpenActivity: () => void;
   onLabelRecipient: (counterKey: string) => void;
 };
 
-export function QuestionCard({ question, today, onConfirmUsdc, onMatchUsdc, onDismissUsdc, onSetDate, onOpenActivity, onLabelRecipient }: Props) {
+export function QuestionCard({ question, today, onConfirmUsdc, onMatchUsdc, onDismissUsdc, onCashFromWallet, onSetDate, onOpenActivity, onLabelRecipient }: Props) {
   const eventId = eventIdOf(question.id);
   const text = <Text style={styles.text}>{question.text}</Text>;
 
@@ -52,6 +53,24 @@ export function QuestionCard({ question, today, onConfirmUsdc, onMatchUsdc, onDi
           <View style={styles.choices}>
             <Choice label="Да, вывод с Binance" onPress={() => onMatchUsdc(eventId, transactionId)} />
             <Choice label="Нет" onPress={() => onDismissUsdc(transactionId)} />
+          </View>
+        </Glass>
+      );
+    }
+  }
+  if (question.kind === "cash_source") {
+    // "cash_source:<deposit>:<USDC event, 0 when there is none to match>"
+    const [, txPart, eventPart] = question.id.split(":");
+    const transactionId = Number(txPart);
+    const usdcEvent = Number(eventPart);
+    if (Number.isInteger(transactionId) && transactionId > 0) {
+      return (
+        <Glass style={styles.stack}>
+          {text}
+          <View style={styles.choices}>
+            <Choice label="Из кошелька" onPress={() => onCashFromWallet(transactionId)} />
+            {Number.isInteger(usdcEvent) && usdcEvent > 0 && <Choice label="Вывод с Binance" onPress={() => onMatchUsdc(usdcEvent, transactionId)} />}
+            <Choice label="Другое" onPress={() => onDismissUsdc(transactionId)} />
           </View>
         </Glass>
       );

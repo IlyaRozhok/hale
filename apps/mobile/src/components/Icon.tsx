@@ -9,6 +9,7 @@ const PATHS = {
   user: "M8 7a4 4 0 1 0 8 0a4 4 0 0 0-8 0M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2",
   search: "M3 10a7 7 0 1 0 14 0a7 7 0 1 0-14 0M21 21l-6-6",
   close: "M18 6L6 18M6 6l12 12",
+  plus: "M12 5v14M5 12h14",
 } as const;
 
 export type IconName = keyof typeof PATHS;

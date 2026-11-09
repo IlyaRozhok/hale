@@ -13,6 +13,7 @@ import { Glass } from "../components/Glass";
 import { Icon } from "../components/Icon";
 import { LAYOUT } from "../components/layout";
 import { RecipientLabelSheet } from "../components/RecipientLabelSheet";
+import { CashOperationSheet } from "../components/CashOperationSheet";
 import { TxEditSheet } from "../components/TxEditSheet";
 import { TxRow } from "../components/TxRow";
 
@@ -47,7 +48,7 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
     setOpen(null);
     setSheet(null);
   };
-  const showAnswer = open !== null && (sheet === "answer" || (sheet === null && open.needsLabel));
+  const showAnswer = open !== null && !open.manual && (sheet === "answer" || (sheet === null && open.needsLabel));
 
   useEffect(() => {
     const id = setTimeout(() => setSearch(text.trim()), SEARCH_DELAY_MS);
@@ -135,7 +136,8 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
           onEditType={() => setSheet("edit")}
         />
       )}
-      {open && !showAnswer && (
+      {open?.manual && <CashOperationSheet tx={open} onClose={close} />}
+      {open && !open.manual && !showAnswer && (
         <TxEditSheet tx={open} onClose={close} onAnswer={isTransferToSomeone(open) ? () => setSheet("answer") : undefined} />
       )}
     </View>

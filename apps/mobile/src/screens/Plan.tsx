@@ -3,9 +3,10 @@ import { RefreshControl, ScrollView, StyleSheet, Text } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePullRefresh } from "../usePullRefresh";
 import { tokens } from "@hale/tokens";
-import { useExpectedIncomes, useGoals, useIncomeEvents, useLoanHistory, useManualBalances, usePayments, useToday } from "../api/queries";
+import { useCash, useExpectedIncomes, useGoals, useIncomeEvents, useLoanHistory, useManualBalances, usePayments, useToday } from "../api/queries";
 import { AccountsList } from "../components/AccountsList";
 import { BinanceSheet } from "../components/BinanceBalance";
+import { CashSheet } from "../components/CashSheet";
 import { Glass } from "../components/Glass";
 import { GoalsSheet } from "../components/GoalsSection";
 import { LAYOUT } from "../components/layout";
@@ -20,7 +21,7 @@ import { goalsLine, incomesLine, installmentsLine, paymentsLine, taxLine } from 
 
 const { color, space, type } = tokens;
 
-type Part = "incomes" | "payments" | "installments" | "tax" | "loans" | "goals" | "binance";
+type Part = "incomes" | "payments" | "installments" | "tax" | "loans" | "goals" | "binance" | "cash";
 
 /** Where the money stands, then one line per part of the plan; the details and forms open in windows. */
 export function Plan() {
@@ -33,6 +34,7 @@ export function Plan() {
   const history = useLoanHistory();
   const goals = useGoals();
   const balances = useManualBalances();
+  const cash = useCash();
   const [open, setOpen] = useState<Part | null>(null);
   const close = () => setOpen(null);
 
@@ -54,6 +56,7 @@ export function Plan() {
         <SummaryRow label="Налоги" detail={payments.data ? taxLine(payments.data) : undefined} onPress={() => setOpen("tax")} />
         <SummaryRow label="Займы" detail={stillOpen === undefined ? undefined : stillOpen > 0 ? `открыто ${formatMoney(stillOpen)}` : "открытых нет"} onPress={() => setOpen("loans")} />
         <SummaryRow label="Цели" detail={goals.data ? goalsLine(goals.data) : undefined} onPress={() => setOpen("goals")} />
+        <SummaryRow label="Наличные" detail={cash.data ? (cash.data.started ? formatMoney(cash.data.balance) : "не начат") : undefined} onPress={() => setOpen("cash")} />
         <SummaryRow label="Binance" detail={balances.data ? (binance ? formatDollars(binance.amount) : "не задан") : undefined} onPress={() => setOpen("binance")} />
       </Glass>
       {open === "incomes" && <IncomesSheet onClose={close} />}
@@ -63,6 +66,7 @@ export function Plan() {
       {open === "loans" && <LoansSheet onClose={close} />}
       {open === "goals" && <GoalsSheet onClose={close} />}
       {open === "binance" && <BinanceSheet onClose={close} />}
+      {open === "cash" && <CashSheet onClose={close} />}
     </ScrollView>
   );
 }
