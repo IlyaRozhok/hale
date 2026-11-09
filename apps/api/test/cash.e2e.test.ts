@@ -385,3 +385,87 @@ describe("a planned payment paid with chosen operations", () => {
     expect(await ds.query(`SELECT 1 FROM payment_links`)).toEqual([]);
   });
 });
+
+describe("the owner's card at another bank", () => {
+  const send = (c: number, amount: number, date: string, card = "545708****4563", time = "10:00:00") =>
+    bankTx(c, -amount, "own_transfer", date, { description: card, time });
+  const questions = async () => ((await today()).questions as { id: string; kind: string; text: string }[]).filter((q) => q.kind === "cash_card");
+  const answer = (id: number, body: object) => api.post(`/cash/cards/${id}`, body);
+
+  it("asks about a transfer since the start that has no other leg at monobank; the wallet waits for the answer", async () => {
+    const c = await card();
+    await send(c, 500_000, "2026-11-08");
+    await start(100_000, "2026-11-09").expect(201);
+    const t = await send(c, 1_560_000, "2026-11-09");
+    expect(await questions()).toEqual([
+      { id: `cash_card:${t}`, kind: "cash_card", text: "Перевод ₴15,600 на 545708****4563 (09.11). Снял наличными?" },
+    ]);
+    expect((await wallet()).balance).toBe(100_000);
+  });
+
+  it("does not ask about a transfer between monobank accounts", async () => {
+    const c = await card();
+    const other = await card();
+    await start(0, "2026-11-09").expect(201);
+    await send(c, 300_000, "2026-11-09", "На чорну картку");
+    await bankTx(other, 300_000, "own_transfer", "2026-11-09", { time: "10:01:00" });
+    expect(await questions()).toEqual([]);
+  });
+
+  it("yes: the whole sum goes to the wallet, and later transfers to that card follow without a question", async () => {
+    const c = await card();
+    await start(100_000, "2026-11-09").expect(201);
+    const t = await send(c, 1_560_000, "2026-11-09");
+    await answer(t, { answer: "yes" }).expect(201);
+    expect((await wallet()).balance).toBe(1_660_000);
+    await send(c, 200_000, "2026-11-10");
+    expect(await questions()).toEqual([]);
+    expect((await wallet()).balance).toBe(1_860_000);
+    expect((await api.get(`/transactions?q=545708`).expect(200)).body.items.map((i: { cashOut: number }) => i.cashOut)).toEqual([200_000, 1_560_000]);
+  });
+
+  it("part: only what was taken goes to the wallet, the card is remembered as yes", async () => {
+    const c = await card();
+    await start(0, "2026-11-09").expect(201);
+    const t = await send(c, 1_560_000, "2026-11-09");
+    await answer(t, { answer: "part" }).expect(422);
+    await answer(t, { answer: "part", amount: 1_600_000 }).expect(422);
+    await answer(t, { answer: "part", amount: 1_500_000 }).expect(201);
+    expect((await wallet()).balance).toBe(1_500_000);
+    await send(c, 100_000, "2026-11-10");
+    expect((await wallet()).balance).toBe(1_600_000);
+  });
+
+  it("no: the wallet is left alone and the card is not asked about again", async () => {
+    const c = await card();
+    await start(0, "2026-11-09").expect(201);
+    const t = await send(c, 1_560_000, "2026-11-09");
+    await answer(t, { answer: "no" }).expect(201);
+    await send(c, 100_000, "2026-11-10");
+    expect(await questions()).toEqual([]);
+    expect((await wallet()).balance).toBe(0);
+    expect((await api.get(`/transactions?q=545708`).expect(200)).body.items.map((i: { cashOut: number }) => i.cashOut)).toEqual([0, 0]);
+  });
+
+  it("the amount of one transfer can be changed afterwards, down to nothing taken", async () => {
+    const c = await card();
+    await start(0, "2026-11-09").expect(201);
+    const t = await send(c, 1_560_000, "2026-11-09");
+    await answer(t, { answer: "yes" }).expect(201);
+    await api.patch(`/cash/cards/${t}`, { amount: 0 }).expect(200);
+    expect((await wallet()).balance).toBe(0);
+    await api.patch(`/cash/cards/${t}`, { amount: 1_000_000 }).expect(200);
+    expect((await wallet()).balance).toBe(1_000_000);
+    await api.patch(`/cash/cards/${t}`, { amount: 2_000_000 }).expect(422);
+    const buy = await bankTx(c, -100, "spend", "2026-11-09");
+    await api.patch(`/cash/cards/${buy}`, { amount: 0 }).expect(422);
+    await answer(buy, { answer: "yes" }).expect(422);
+    await answer(99999, { answer: "yes" }).expect(404);
+  });
+
+  it("other rows say nothing about cash taken", async () => {
+    const c = await card();
+    await bankTx(c, -100, "spend", "2026-11-09", { description: "Shop" });
+    expect((await api.get(`/transactions`).expect(200)).body.items[0].cashOut).toBeNull();
+  });
+});

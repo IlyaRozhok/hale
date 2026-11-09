@@ -334,7 +334,7 @@ export interface TodayDto {
   upcoming: { id: string; name: string; amount: number; dueOn: string; kind: string; currency: string }[];
   questions: {
     id: string;
-    kind: "usdc_arrived" | "usdc_match" | "income_date" | "recipient_label" | "cash_source";
+    kind: "usdc_arrived" | "usdc_match" | "income_date" | "recipient_label" | "cash_source" | "cash_card";
     text: string;
     /** Who a recipient question is about. */
     subject?: string;
@@ -475,6 +475,11 @@ export interface TransactionDto {
   manual: boolean;
   /** The owner's answer about this recipient, if any. */
   recipientLabel: RecipientLabelName | null;
+  /**
+   * Set on a transfer to the owner's card at another bank since the wallet start: kopecks of it taken
+   * out as cash there (0 when none or not answered yet). null on every other row.
+   */
+  cashOut: number | null;
 }
 
 export interface TransactionPageDto {
@@ -544,6 +549,14 @@ export type CashCountInput = z.infer<typeof cashCountInput>;
 /** Operations that paid a planned payment, chosen by the owner. */
 export const paymentLinksInput = z.object({ transactionIds: z.array(z.number().int().positive()).min(1).max(20) }).strict();
 export type PaymentLinksInput = z.infer<typeof paymentLinksInput>;
+/** "Снял наличными?" about a transfer to the owner's card at another bank; `amount` only with part. */
+export const cashCardAnswer = z
+  .object({ answer: z.enum(["yes", "part", "no"]), amount: z.number().int().positive().max(100_000_000_00).optional() })
+  .strict();
+export type CashCardAnswer = z.infer<typeof cashCardAnswer>;
+/** How much of one such transfer was taken out as cash; 0 means none. */
+export const cashCardPatch = z.object({ amount: z.number().int().min(0).max(100_000_000_00) }).strict();
+export type CashCardPatch = z.infer<typeof cashCardPatch>;
 
 export interface CashWalletDto {
   started: boolean;

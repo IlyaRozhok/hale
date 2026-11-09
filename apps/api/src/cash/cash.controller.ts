@@ -1,5 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, ParseIntPipe, Patch, Post } from "@nestjs/common";
 import {
+  cashCardAnswer,
+  cashCardPatch,
   cashCountInput,
   cashOperationInput,
   cashOperationPatch,
@@ -26,6 +28,16 @@ export class CashController {
   @Get()
   wallet(): Promise<CashWalletDto> {
     return this.cash.wallet();
+  }
+
+  @Post("cards/:id")
+  answerCard(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<CashWalletDto> {
+    return this.cash.answerCard(id, parse(cashCardAnswer, body));
+  }
+
+  @Patch("cards/:id")
+  setCardCash(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<CashWalletDto> {
+    return this.cash.setCardCash(id, parse(cashCardPatch, body).amount);
   }
 
   @Get("payments/:id/candidates")

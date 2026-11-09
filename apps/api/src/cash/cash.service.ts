@@ -1,5 +1,6 @@
 import { ConflictException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import type {
+  CashCardAnswer,
   CashCountInput,
   CashOperationInput,
   CashOperationKind,
@@ -13,7 +14,8 @@ import { DataSource, type EntityManager } from "typeorm";
 import { kyivDate } from "../domain/money";
 import { Clock } from "../today/clock";
 import { TransactionsService } from "../transactions/transactions.service";
-import { CASH_ACCOUNT_ID, walletBalance } from "./wallet";
+import { counterKeySql } from "../transactions/counter-key";
+import { CASH_ACCOUNT_ID, cardTransferSql, walletBalance } from "./wallet";
 
 const DEFAULT_NOTE: Record<CashOperationKind, string> = {
   spend: "Покупка наличными",
@@ -164,6 +166,48 @@ export class CashService {
       );
       return this.wallet(m);
     });
+  }
+
+  /**
+   * "Снял наличными?" about a transfer to the owner's card at another bank. The answer is kept for
+   * the card: yes (also part) lets later transfers to it fill the wallet, no stops the question.
+   */
+  async answerCard(id: number, a: CashCardAnswer): Promise<CashWalletDto> {
+    return this.ds.transaction(async (m) => {
+      const t = await this.cardTransfer(m, id);
+      if (a.answer === "part" && (a.amount === undefined || a.amount > t.full)) {
+        throw new UnprocessableEntityException("part needs the amount taken, no more than the transfer");
+      }
+      await m.query(
+        `INSERT INTO cash_cards (counter_key, withdraws) VALUES ($1, $2) ON CONFLICT (counter_key) DO UPDATE SET withdraws = EXCLUDED.withdraws`,
+        [t.key, a.answer !== "no"],
+      );
+      await m.query(`UPDATE transactions SET cash_amount=$2 WHERE id=$1`, [id, a.answer === "part" ? a.amount : null]);
+      return this.wallet(m);
+    });
+  }
+
+  /** How much of this one transfer was taken out as cash; the card's answer stays. */
+  async setCardCash(id: number, amount: number): Promise<CashWalletDto> {
+    return this.ds.transaction(async (m) => {
+      const t = await this.cardTransfer(m, id);
+      if (amount > t.full) throw new UnprocessableEntityException("no more than the transfer");
+      await m.query(`UPDATE transactions SET cash_amount=$2 WHERE id=$1`, [id, amount]);
+      return this.wallet(m);
+    });
+  }
+
+  private async cardTransfer(m: EntityManager, id: number): Promise<{ key: string; full: number }> {
+    const r = (
+      await m.query(
+        `SELECT ${counterKeySql("t")} AS key, -t.amount_uah::float8 AS full, ${cardTransferSql()} AS ok
+           FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.id=$1`,
+        [id],
+      )
+    )[0] as { key: string; full: number | null; ok: boolean | null } | undefined;
+    if (!r) throw new NotFoundException("transaction not found");
+    if (!r.ok || r.full === null) throw new UnprocessableEntityException("only a transfer to the owner's card at another bank");
+    return { key: r.key, full: r.full };
   }
 
   /** Operations that could have paid this payment, newest first: see candidateIds. */

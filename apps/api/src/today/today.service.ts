@@ -13,7 +13,7 @@ import { usdcMatchRows } from "../domain/usdc-match";
 import { BINANCE } from "../plan/plan.service";
 import { isCounterpartyName, transfersWord } from "../domain/counterparty";
 import { counterKeySql } from "../transactions/counter-key";
-import { walletBalance } from "../cash/wallet";
+import { cardTransferSql, walletBalance } from "../cash/wallet";
 import { Clock } from "./clock";
 import { quarterTaxFacts } from "./tax-facts";
 
@@ -574,6 +574,29 @@ export class TodayService {
     }));
   }
 
+  /**
+   * A transfer to the owner's card at another bank since the wallet start, about a card with no
+   * answer yet: was it taken out there as cash?
+   */
+  private async cashCardQuestions(m: EntityManager, f: Facts): Promise<TodayDto["questions"]> {
+    if (f.cashStart === null) return [];
+    const rows: { id: number; amount_uah: number; local_date: string; target: string }[] = await m.query(
+      `SELECT t.id, t.amount_uah::float8 AS amount_uah, t.local_date::text AS local_date,
+              COALESCE(NULLIF(btrim(t.counter_name), ''), t.description) AS target
+         FROM transactions t JOIN accounts a ON a.id = t.account_id
+        WHERE ${cardTransferSql()} AND t.cash_amount IS NULL AND t.amount_uah IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM cash_cards c WHERE c.counter_key = ${counterKeySql("t")})
+          AND t.local_date > $1::date - ${QUESTION_WINDOW_DAYS}
+        ORDER BY t.occurred_at, t.id`,
+      [f.date],
+    );
+    return rows.map((r) => ({
+      id: `cash_card:${r.id}`,
+      kind: "cash_card" as const,
+      text: `Перевод ${fmt(-r.amount_uah)} на ${r.target} (${fmtDay(r.local_date)}). Снял наличными?`,
+    }));
+  }
+
   // --- the response -------------------------------------------------------------
   private async dto(f: Facts, state: DailyState, plan: Plan | null): Promise<TodayDto> {
     const m = this.ds.manager;
@@ -587,6 +610,7 @@ export class TodayService {
     for (const e of usdc) questions.push({ id: `usdc_arrived:${e.id}`, kind: "usdc_arrived", text: "Пришло на Binance?" });
     for (const q of await this.usdcMatchQuestions(m, f)) questions.push(q);
     for (const q of await this.cashSourceQuestions(m, f)) questions.push(q);
+    for (const q of await this.cashCardQuestions(m, f)) questions.push(q);
     if (state.needsIncomeDate) {
       const ev = (await m.query(`SELECT id FROM income_events WHERE status <> 'received' ORDER BY expected_on, id LIMIT 1`))[0] as
         | { id: number }

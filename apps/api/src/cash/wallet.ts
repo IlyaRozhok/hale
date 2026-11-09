@@ -1,12 +1,32 @@
 import type { EntityManager } from "typeorm";
+import { counterKeySql } from "../transactions/counter-key";
 
 /** The wallet account's external id: it has no bank statement. */
 export const CASH_ACCOUNT_ID = "manual:cash";
 
+/** Seconds within which the other leg of a transfer between monobank accounts arrives. */
+const PAIR_WINDOW_S = 600;
+
+/**
+ * SQL condition over `t` (transactions) and `a` (its account): money sent to the owner's own card at
+ * another bank since the wallet start. Its other leg is not at monobank, so it may have been taken
+ * out there as cash.
+ */
+export const cardTransferSql = (t = "t", a = "a"): string =>
+  `(${t}.type = 'own_transfer' AND ${t}.amount < 0 AND ${a}.kind NOT IN ('jar','cash') AND NOT ${t}.from_wallet
+    AND ${t}.local_date >= (SELECT cash_start FROM settings WHERE id=1)
+    AND NOT EXISTS (SELECT 1 FROM transactions o WHERE o.account_id <> ${t}.account_id AND o.amount = -${t}.amount
+                     AND abs(extract(epoch FROM (o.occurred_at - ${t}.occurred_at))) <= ${PAIR_WINDOW_S}))`;
+
+/** SQL for the cash such a transfer gave: the amount set for it, else all of it if the card's answer is yes, else 0. */
+export const cardCashSql = (t = "t"): string =>
+  `COALESCE(${t}.cash_amount, CASE WHEN (SELECT c.withdraws FROM cash_cards c WHERE c.counter_key = ${counterKeySql(t)})
+                                   THEN -${t}.amount_uah END, 0)`;
+
 /**
  * The recorded cash in the pocket, never stored: rows on the wallet (opening balance, operations
- * entered by hand, counts), plus cash withdrawn at ATMs since the start, less deposits the owner
- * said came from the wallet.
+ * entered by hand, counts), plus cash withdrawn at ATMs since the start and cash taken from the
+ * owner's card at another bank, less deposits the owner said came from the wallet.
  */
 export async function walletBalance(m: EntityManager): Promise<{ start: string | null; balance: number }> {
   const r = (
@@ -15,6 +35,7 @@ export async function walletBalance(m: EntityManager): Promise<{ start: string |
          COALESCE((SELECT SUM(t.amount) FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.kind='cash'), 0)
        + COALESCE((SELECT SUM(-t.amount_uah) FROM transactions t JOIN accounts a ON a.id=t.account_id
                     WHERE a.kind NOT IN ('jar','cash') AND t.type='cash_out' AND t.local_date >= s.cash_start), 0)
+       + COALESCE((SELECT SUM(${cardCashSql()}) FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE ${cardTransferSql()}), 0)
        - COALESCE((SELECT SUM(t.amount_uah) FROM transactions t WHERE t.from_wallet), 0)
        )::float8 AS balance FROM settings s WHERE s.id=1`,
     )

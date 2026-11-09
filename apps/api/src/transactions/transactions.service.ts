@@ -15,6 +15,7 @@ import { DataSource, type EntityManager } from "typeorm";
 import { isCounterpartyName } from "../domain/counterparty";
 import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
 import { PlanService } from "../plan/plan.service";
+import { cardCashSql, cardTransferSql } from "../cash/wallet";
 import { counterKeySql } from "./counter-key";
 import { PLAN_TYPES, ReclassifyService } from "./reclassify.service";
 
@@ -23,7 +24,8 @@ const COLUMNS = `
   t.id, t.occurred_at, to_char(t.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS ts,
   t.local_date::text AS local_date, t.description, t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah,
   t.fx_rate::float8 AS fx_rate, a.currency, t.type, t.category, t.hold, t.needs_label,
-  ${KEY} AS counter_key, t.counter_iban, t.counter_name, a.kind AS account_kind, (a.kind = 'cash') AS manual`;
+  ${KEY} AS counter_key, t.counter_iban, t.counter_name, a.kind AS account_kind, (a.kind = 'cash') AS manual,
+  CASE WHEN ${cardTransferSql()} THEN ${cardCashSql()}::float8 END AS card_cash`;
 const FROM = `FROM transactions t JOIN accounts a ON a.id = t.account_id`;
 
 interface Row {
@@ -45,6 +47,7 @@ interface Row {
   counter_name: string | null;
   account_kind: string;
   manual: boolean;
+  card_cash: number | null;
 }
 
 /** A stored answer about a recipient. */
@@ -79,6 +82,7 @@ const view = (r: Row, rules: readonly AnswerRule[]): TransactionDto => ({
   accountKind: r.account_kind,
   manual: r.manual,
   recipientLabel: answerFor(rules, r),
+  cashOut: r.card_cash,
 });
 
 const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6})\|(\d{1,10})$/;
