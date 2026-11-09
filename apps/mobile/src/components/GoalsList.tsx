@@ -7,34 +7,35 @@ import { ProgressBar } from "./ProgressBar";
 
 const { color, space, type } = tokens;
 
-/** Every goal in one card: the total on top, then each with its amount, percent and a thin bar. Opens Plan. */
-export function GoalsList({ goals, onPress }: { goals: TodayDto["goals"]; onPress: () => void }) {
+type Props = { goals: TodayDto["goals"]; onOpenGoal: (id: number) => void; onOpenAll: () => void };
+
+/** Every goal in one card: the total on top (opens all goals), then each goal (opens its own window). */
+export function GoalsList({ goals, onOpenGoal, onOpenAll }: Props) {
   const saved = goals.reduce((s, g) => s + g.saved, 0);
   const target = goals.reduce((s, g) => s + g.target, 0);
   const total = `${formatDollars(saved)} из ${formatDollars(target)}`;
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`Цели: ${total}`} onPress={onPress}>
-      <Glass style={styles.card}>
-        <View style={styles.line}>
-          <Text style={styles.caption}>Цели</Text>
-          <Text style={styles.caption}>{total}</Text>
-        </View>
-        {goals.map((g) => {
+    <Glass style={styles.card}>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Цели: ${total}`} onPress={onOpenAll} style={styles.line}>
+        <Text style={styles.caption}>Цели</Text>
+        <Text style={styles.caption}>{total}</Text>
+      </Pressable>
+      {goals.map((g) => {
           const percent = goalPercent(g.saved, g.target);
+          const amount = `${formatDollars(g.saved)} · ${percent}%`;
           return (
-            <View key={g.id} style={styles.goal}>
+            <Pressable key={g.id} accessibilityRole="button" accessibilityLabel={`${g.name}: ${amount}`} onPress={() => onOpenGoal(g.id)} style={styles.goal}>
               <View style={styles.line}>
                 <Text style={styles.name} numberOfLines={1}>
                   {g.name}
                 </Text>
-                <Text style={styles.amount}>{`${formatDollars(g.saved)} · ${percent}%`}</Text>
+                <Text style={styles.amount}>{amount}</Text>
               </View>
               <ProgressBar percent={percent} />
-            </View>
+            </Pressable>
           );
         })}
-      </Glass>
-    </Pressable>
+    </Glass>
   );
 }
 

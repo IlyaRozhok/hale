@@ -27,9 +27,9 @@ export function useToday() {
   return useQuery({ queryKey: TODAY_KEY, queryFn: () => api.today() });
 }
 
-export function useCalendar(month: string) {
+export function useCalendar(month: string, enabled = true) {
   const api = useApi();
-  return useQuery({ queryKey: [...CALENDAR_KEY, month], queryFn: () => api.calendar(month) });
+  return useQuery({ queryKey: [...CALENDAR_KEY, month], queryFn: () => api.calendar(month), enabled });
 }
 
 /** Preview for a slider value, requested only after the value has stopped changing. */

@@ -97,6 +97,18 @@ export function GoalsSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** One goal in its own window, opened from Today: progress, change the saved amount, delete. */
+export function GoalSheet({ goalId, onClose }: { goalId: number; onClose: () => void }) {
+  const goals = useGoals();
+  const goal = goals.data?.find((g) => g.id === goalId);
+  return (
+    <Sheet title={goal?.name ?? "Цель"} onClose={onClose}>
+      {goals.isError && !goals.data ? <ErrorText>Не получилось загрузить цель.</ErrorText> : null}
+      {goal ? <GoalItem goal={goal} /> : null}
+    </Sheet>
+  );
+}
+
 function GoalForm({ onClose }: { onClose: () => void }) {
   const create = useCreateGoal();
   const [name, setName] = useState("");

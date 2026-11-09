@@ -2,10 +2,10 @@ import { useState } from "react";
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
-import type { DailyStateDto, TodayDto } from "@hale/contracts";
+import type { TodayDto } from "@hale/contracts";
 import { LimitBar } from "../metal";
 import { limitState } from "../limitState";
-import { formatMoney, formatStamp, formatUsd, kyivDate, longDate, streakLabel } from "../format";
+import { formatMoney, formatStamp, kyivDate, longDate } from "../format";
 import { useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useAnswerCashCard, useDepositFromWallet, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
 import { CashOperationSheet } from "../components/CashOperationSheet";
 import { PaymentPaidSheet } from "../components/PaymentPaidSheet";
@@ -14,6 +14,8 @@ import { BadCaseCard } from "../components/BadCaseCard";
 import { BridgePlan } from "../components/BridgePlan";
 import { Glass } from "../components/Glass";
 import { GoalsList } from "../components/GoalsList";
+import { GoalSheet, GoalsSheet } from "../components/GoalsSection";
+import { WeekDots } from "../components/WeekDots";
 import { Icon } from "../components/Icon";
 import { LAYOUT } from "../components/layout";
 import { LimitCalendar } from "../components/LimitCalendar";
@@ -48,12 +50,7 @@ function freshnessLines(data: TodayDto, offlineSince: number | null, now: Date):
   return lines;
 }
 
-function limitNote(state: DailyStateDto): string {
-  const limit = formatMoney(state.dailyLimit);
-  return !state.needsIncomeDate && state.daysLeft > 0 ? `из ${limit} · до зарплаты ${state.daysLeft} дн` : `из ${limit} на день`;
-}
-
-export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Props) {
+export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const insets = useSafeAreaInsets();
   const today = useToday();
   const confirmIncome = useConfirmIncome();
@@ -67,9 +64,10 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
   const deleteLoan = useDeleteLoan();
   const pull = usePullRefresh(today.refetch);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
-  const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | "cash" | null>(null);
+  const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | "cash" | "goals" | null>(null);
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
   const [paying, setPaying] = useState<TodayDto["upcoming"][number] | null>(null);
+  const [goalOpen, setGoalOpen] = useState<number | null>(null);
   const [repaying, setRepaying] = useState<{ id: number; remaining: number; receivedOn?: string; name: string } | null>(null);
 
   const hide = (id: string, on: boolean) =>
@@ -111,8 +109,8 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
   const over = hasLimit && state.leftToday < 0;
   const spent = Math.max(0, state.dailyLimit - state.leftToday);
   const shownLeft = over ? -state.leftToday : Math.max(0, state.leftToday);
-  const usd = formatUsd(shownLeft, data.usdRate);
-  const heading = over ? "Сверх лимита" : "Сегодня можно";
+  const heading = over ? "Сегодня больше лимита" : "Сегодня можно";
+  const dayState = limitState(state);
   const offlineSince = today.isError ? today.dataUpdatedAt : null;
   // A date question with no income event cannot be answered; an older cached answer may still hold one.
   const questions = data.questions.filter((q) => !answered.has(q.id) && !(q.kind === "income_date" && eventIdOf(q.id) === null));
@@ -166,34 +164,30 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
             style={styles.heroText}
             accessible
             accessibilityLabel={
-              hasLimit
-                ? `${heading} ${formatMoney(shownLeft)}, из ${formatMoney(state.dailyLimit)} на день`
-                : `${heading} ${formatMoney(shownLeft)}. ${noLimitNote}`
+              over
+                ? `${heading} на ${formatMoney(shownLeft)}, лимит ${formatMoney(state.dailyLimit)} на день`
+                : hasLimit
+                  ? `${heading} ${formatMoney(shownLeft)}, из ${formatMoney(state.dailyLimit)} на день`
+                  : `${heading} ${formatMoney(shownLeft)}. ${noLimitNote}`
             }
           >
             <Text style={[styles.eyebrow, over && styles.overHeading]}>{heading}</Text>
-            <Text style={styles.amount}>{formatMoney(shownLeft)}</Text>
-            {hasLimit && <Text style={styles.note}>{limitNote(state)}</Text>}
-            {hasLimit && usd ? <Text style={styles.subtle}>{usd} сейчас</Text> : null}
-            {over && <Text style={styles.note}>Завтра будет новый лимит.</Text>}
-            {hasLimit && state.leftToday === 0 && <Text style={styles.note}>Лимит на сегодня использован. Завтра будет новый.</Text>}
+            <Text style={styles.amount}>{over ? `+${formatMoney(shownLeft)}` : formatMoney(shownLeft)}</Text>
             {!hasLimit && <Text style={styles.note}>{noLimitNote}</Text>}
+            {!hasLimit && spent > 0 && <Text style={styles.subtle}>Потрачено {formatMoney(spent)}</Text>}
           </View>
           {hasLimit && (
-            <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <LimitBar level={level} state={limitState(state)} />
-            </View>
+            <>
+              <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                <LimitBar level={level} state={dayState} />
+              </View>
+              <Text style={[styles.subtle, styles.spentLine]}>
+                {`${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}${state.leftToday <= 0 ? ` · завтра снова ${formatMoney(state.dailyLimit)}` : ""}`}
+              </Text>
+            </>
           )}
-          <View style={styles.quiet}>
-            {hasLimit || spent > 0 ? <Text style={styles.subtle}>Потрачено {formatMoney(spent)}</Text> : <View />}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={streakLabel(data.streak ?? 0)}
-              onPress={() => setSheet("calendar")}
-              style={styles.streak}
-            >
-              <Text style={styles.subtle}>{(data.streak ?? 0) > 0 ? streakLabel(data.streak ?? 0).replace(/^Серия: /, "") : "Календарь"}</Text>
-            </Pressable>
+          <View style={styles.week}>
+            <WeekDots today={data.date} streak={data.streak ?? 0} state={dayState} onPress={() => setSheet("calendar")} />
           </View>
         </Glass>
 
@@ -219,7 +213,7 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
           />
         ))}
 
-        {goals.length > 0 && <GoalsList goals={goals} onPress={onOpenPlan} />}
+        {goals.length > 0 && <GoalsList goals={goals} onOpenGoal={setGoalOpen} onOpenAll={() => setSheet("goals")} />}
         <Upcoming items={data.upcoming} today={data.date} onPress={setPaying} />
       </ScrollView>
 
@@ -271,6 +265,8 @@ export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Pr
           )}
         </Sheet>
       )}
+      {goalOpen !== null && <GoalSheet goalId={goalOpen} onClose={() => setGoalOpen(null)} />}
+      {sheet === "goals" && <GoalsSheet onClose={closeSheet} />}
       {paying && <PaymentPaidSheet payment={paying} today={data.date} onClose={() => setPaying(null)} />}
       {repaying && <RepayLoanSheet loanId={repaying.id} remaining={repaying.remaining} receivedOn={repaying.receivedOn} name={repaying.name} onClose={() => setRepaying(null)} />}
     </View>
@@ -286,8 +282,8 @@ const styles = StyleSheet.create({
   hero: { overflow: "hidden", paddingHorizontal: 0, paddingVertical: 0 },
   heroText: { paddingHorizontal: space.lg, paddingTop: space.lg, gap: 2 },
   bar: { paddingHorizontal: space.lg, marginTop: space.md },
-  quiet: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md, paddingHorizontal: space.lg, paddingBottom: space.xs },
-  streak: { minHeight: touchMin, justifyContent: "center" },
+  spentLine: { paddingHorizontal: space.lg, marginTop: space.xs },
+  week: { paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.xs, marginTop: space.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: color.card.edge },
   badge: {
     position: "absolute",
     top: space.xs,
