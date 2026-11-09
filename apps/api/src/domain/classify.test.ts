@@ -108,6 +108,18 @@ describe("debts and loans", () => {
   });
 });
 
+describe("refunds", () => {
+  it("a refund from an unknown shop is a refund, and asks nothing", () => {
+    for (const description of ["Повернення платежу skay.ua", "Скасування покупки Some Shop"]) {
+      expect(classify(tx({ description, amount: 52_950, mcc: null }), ctx())).toMatchObject({
+        type: "spend",
+        category: "refund",
+        needsLabel: false,
+      });
+    }
+  });
+});
+
 describe("cash", () => {
   it("atm withdrawal is cash_out, cash deposit is cash_in", () => {
     expect(classify(tx({ description: "Банкомат 12345", mcc: 6011 }), ctx()).type).toBe("cash_out");
@@ -144,9 +156,9 @@ describe("purchases and refunds", () => {
     });
   });
 
-  it("a bank refund text is a refund whatever the mcc, and is flagged when uncategorised", () => {
+  it("a bank refund text is a refund whatever the mcc; an unknown shop's is a plain refund", () => {
     const r = classify(tx({ description: "Повернення платежу skay.ua", amount: 90000, mcc: 4829 }), ctx());
-    expect(r).toMatchObject({ type: "spend", needsLabel: true });
+    expect(r).toMatchObject({ type: "spend", category: "refund", needsLabel: false });
     expect(classify(tx({ description: "Скасування. Uklon", amount: 9000, mcc: 4829 }), ctx())).toMatchObject({
       type: "spend",
       category: "transport",

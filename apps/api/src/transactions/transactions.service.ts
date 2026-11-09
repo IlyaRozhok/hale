@@ -148,6 +148,9 @@ export class TransactionsService {
     if (q.group === "spend") {
       where.push(`NOT (t.type = 'cash_out' AND COALESCE(t.local_date >= (SELECT cash_start FROM settings WHERE id=1), false))`);
     }
+    if (q.category) where.push(`t.category = ${arg(q.category)}`);
+    if (q.from) where.push(`t.local_date >= ${arg(q.from)}::date`);
+    if (q.to) where.push(`t.local_date <= ${arg(q.to)}::date`);
     if (q.q) {
       const like = arg(`%${q.q.replace(/[\\%_]/g, "\\$&")}%`);
       where.push(`(t.description ILIKE ${like} ESCAPE '\\' OR t.counter_name ILIKE ${like} ESCAPE '\\')`);
@@ -170,7 +173,19 @@ export class TransactionsService {
       items: page.map((r) => view(r, rules)),
       nextCursor: rows.length > q.limit ? encodeCursor(page[page.length - 1]!) : null,
       dayTotals: await this.dayTotals([...new Set(page.map((r) => r.local_date))], filters, filterArgs),
+      summary: q.category || q.from || q.to ? await this.summary(filters, filterArgs) : null,
     };
+  }
+
+  /** The sum and count of everything under the filters, ignoring the cursor. */
+  private async summary(filters: string[], args: unknown[]): Promise<{ total: number; count: number }> {
+    const r = (
+      await this.ds.query(
+        `SELECT COALESCE(SUM(t.amount_uah), 0)::float8 AS total, COUNT(*)::int AS count ${FROM} ${filters.length ? `WHERE ${filters.join(" AND ")}` : ""}`,
+        args,
+      )
+    )[0] as { total: number; count: number };
+    return { total: r.total, count: r.count };
   }
 
   /**

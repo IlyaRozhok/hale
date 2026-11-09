@@ -217,8 +217,9 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
   // A bank refund text is a refund whatever its MCC (transfer MCC 4829 included); a refund of a
   // transfer is not, and stays with the people rules below.
   if (incoming && REFUND.test(d) && !REFUND_OF_TRANSFER.test(d)) {
-    const category = categoryByMerchant(d) ?? categoryByMcc(mcc);
-    return done("spend", "auto", category, category === "uncategorized");
+    // A shop we do not know is still a refund: it lowers that day's spending and asks nothing.
+    const known = categoryByMerchant(d) ?? categoryByMcc(mcc);
+    return done("spend", "auto", known === "uncategorized" ? "refund" : known);
   }
 
   // 3. MCC and chains

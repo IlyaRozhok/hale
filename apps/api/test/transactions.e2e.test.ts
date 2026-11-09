@@ -740,3 +740,27 @@ describe("withdrawals and rules", () => {
     expect(await row("SELECT type, needs_label FROM transactions WHERE id=$1", [t])).toEqual({ type: "person_transfer", needs_label: true });
   });
 });
+
+describe("filters by category and period", () => {
+  it("narrows the list to a category and to dates (Kyiv days, inclusive), and sums what it found", async () => {
+    const a = await account();
+    await tx(a, { description: "Cafe A", amount: -10_000, category: "cafe", at: "2026-11-01T10:00:00.000Z" });
+    await tx(a, { description: "Cafe B", amount: -20_000, category: "cafe", at: "2026-11-05T10:00:00.000Z" });
+    await tx(a, { description: "Cafe C", amount: -40_000, category: "cafe", at: "2026-11-10T10:00:00.000Z" });
+    await tx(a, { description: "Shop", amount: -5_000, category: "groceries", at: "2026-11-05T11:00:00.000Z" });
+    const res = await api.get("/transactions?group=spend&category=cafe&from=2026-11-01&to=2026-11-05").expect(200);
+    expect(res.body.items.map((i: { description: string }) => i.description)).toEqual(["Cafe B", "Cafe A"]);
+    expect(res.body.summary).toEqual({ total: -30_000, count: 2 });
+    const day = await api.get("/transactions?from=2026-11-05&to=2026-11-05").expect(200);
+    expect(day.body.items.map((i: { description: string }) => i.description)).toEqual(["Shop", "Cafe B"]);
+    expect(day.body.summary).toEqual({ total: -25_000, count: 2 });
+  });
+
+  it("has no summary without a filter, and rejects a bad period", async () => {
+    const a = await account();
+    await tx(a, { description: "Cafe A", amount: -10_000, category: "cafe" });
+    expect((await api.get("/transactions").expect(200)).body.summary).toBeNull();
+    await api.get("/transactions?from=2026-11-10&to=2026-11-01").expect(400);
+    await api.get("/transactions?from=10.11.2026").expect(400);
+  });
+});

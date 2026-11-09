@@ -409,8 +409,13 @@ export const transactionsQuery = z
     needsLabel: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
     group: z.enum(["spend", "income", "all"]).optional(),
     q: z.string().trim().min(1).max(100).optional(),
+    category: z.string().trim().min(1).max(64).optional(),
+    /** Kyiv calendar days, both inclusive. */
+    from: isoDate.optional(),
+    to: isoDate.optional(),
   })
-  .strict();
+  .strict()
+  .refine((v) => !v.from || !v.to || v.from <= v.to, "from must not be after to");
 export type TransactionsQuery = z.infer<typeof transactionsQuery>;
 
 export const transactionPatch = z
@@ -489,6 +494,8 @@ export interface TransactionPageDto {
   nextCursor: string | null;
   /** Sum of amountUah per local date of this page, over the whole day and under the same filters. */
   dayTotals: Record<string, number>;
+  /** With a category or a period chosen: the sum and the count of everything found. Otherwise null. */
+  summary: { total: number; count: number } | null;
 }
 
 export interface TransactionEditDto {
