@@ -61,6 +61,14 @@ describe("the owner's rules in Settings", () => {
     await waitFor(() => expect(api.deleteRule).toHaveBeenCalledWith(4));
   });
 
+  it("a rule with no operations under it says so", async () => {
+    const alert = jest.spyOn(Alert, "alert");
+    await renderWith(<Settings onClose={noop} />, fakeApi({ rules: jest.fn(async () => [{ ...rules[0]!, count: 0 }]) }));
+    await press("Мои правила");
+    await press("Удалить правило «видача готівки сільпо»");
+    expect(alert.mock.calls.at(-1)![1]).toBe("Сейчас под ним нет операций.");
+  });
+
   it("says when there are none", async () => {
     await renderWith(<Settings onClose={noop} />, fakeApi());
     await press("Мои правила");

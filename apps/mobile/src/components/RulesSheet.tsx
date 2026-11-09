@@ -21,7 +21,12 @@ export function RulesSheet({ onClose }: { onClose: () => void }) {
   const remove = useDeleteRule();
 
   const confirm = (r: RuleDto) =>
-    Alert.alert("Удалить правило?", `${operationsText(r.count)} снова ${pluralIndex(r.count) === 0 ? "распознается" : "распознаются"} автоматически. Лимит пересчитается.`, [
+    Alert.alert(
+      "Удалить правило?",
+      r.count === 0
+        ? "Сейчас под ним нет операций."
+        : `${operationsText(r.count)} снова ${pluralIndex(r.count) === 0 ? "распознается" : "распознаются"} автоматически. Лимит пересчитается.`,
+      [
       { text: "Отмена", style: "cancel" },
       { text: "Удалить", style: "destructive", onPress: () => remove.mutate(r.id) },
     ]);
