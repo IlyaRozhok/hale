@@ -154,6 +154,8 @@ describe("cash taken from the owner's card at another bank", () => {
     await fireEvent.changeText(await screen.findByLabelText("Сколько снял"), "10000");
     await press("Сохранить");
     await waitFor(() => expect(api.setCardCash).toHaveBeenCalledWith(42, 1_000_000));
+    // The open card shows the new amount at once.
+    expect(await screen.findByText("Снял наличными: ₴10,000")).toBeTruthy();
   });
 
   it("not taken at all", async () => {

@@ -67,20 +67,31 @@ function CardCash({ tx, cashOut }: { tx: TransactionDto; cashOut: number }) {
   const set = useSetCardCash();
   const [editing, setEditing] = useState(false);
   const [failed, setFailed] = useState(false);
+  // The sheet was opened with a snapshot of the row: what was saved shows here at once.
+  const [shown, setShown] = useState(cashOut);
   const full = Math.abs(tx.amountUah ?? tx.amount);
   const save = (amount: number) => {
     setFailed(false);
-    set.mutate({ id: tx.id, amount }, { onSuccess: () => setEditing(false), onError: () => setFailed(true) });
+    set.mutate(
+      { id: tx.id, amount },
+      {
+        onSuccess: () => {
+          setShown(amount);
+          setEditing(false);
+        },
+        onError: () => setFailed(true),
+      },
+    );
   };
   return (
     <View style={styles.stack}>
-      <Text style={styles.text}>{cashOut > 0 ? `Снял наличными: ${formatMoney(cashOut)}` : "Наличными не снимал"}</Text>
+      <Text style={styles.text}>{shown > 0 ? `Снял наличными: ${formatMoney(shown)}` : "Наличными не снимал"}</Text>
       {editing ? (
         <AmountForm label="Сколько снял" max={full} disabled={set.isPending} onSave={save} />
       ) : (
         <View style={styles.chips}>
           <Link label="Изменить сумму" onPress={() => setEditing(true)} />
-          {cashOut > 0 && <Link label="Не снимал" onPress={() => save(0)} />}
+          {shown > 0 && <Link label="Не снимал" onPress={() => save(0)} />}
         </View>
       )}
       {failed && <ErrorText>Не удалось сохранить. Попробуйте ещё раз.</ErrorText>}
