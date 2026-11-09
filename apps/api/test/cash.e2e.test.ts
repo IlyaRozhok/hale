@@ -113,6 +113,20 @@ describe("cash withdrawals", () => {
   });
 });
 
+describe("the operations list", () => {
+  it("shows a withdrawal into the wallet under everything, not under spending", async () => {
+    const c = await card();
+    const before = await bankTx(c, -100_000, "cash_out", "2026-11-09");
+    await start(0, "2026-11-10").expect(201);
+    const after = await bankTx(c, -200_000, "cash_out", "2026-11-10");
+    const spend = (await api.get("/transactions?group=spend").expect(200)).body as { items: { id: number }[]; dayTotals: Record<string, number> };
+    expect(spend.items.map((i) => i.id)).toEqual([before]);
+    expect(spend.dayTotals).toEqual({ "2026-11-09": -100_000 });
+    const all = (await api.get("/transactions?group=all").expect(200)).body as { items: { id: number }[] };
+    expect(all.items.map((i) => i.id)).toContain(after);
+  });
+});
+
 describe("operations entered by hand", () => {
   beforeEach(async () => {
     await start(500_000).expect(201);

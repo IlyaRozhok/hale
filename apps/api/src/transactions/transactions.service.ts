@@ -132,6 +132,10 @@ export class TransactionsService {
     if (q.type) where.push(`t.type = ${arg(q.type)}`);
     if (q.needsLabel !== undefined) where.push(`t.needs_label = ${arg(q.needsLabel)}`);
     if (q.group && q.group !== "all") where.push(`t.type = ANY(${arg(GROUP_TYPES[q.group])}::text[])`);
+    // Once the cash wallet keeps records, a withdrawal only moves money into it: not spending.
+    if (q.group === "spend") {
+      where.push(`NOT (t.type = 'cash_out' AND COALESCE(t.local_date >= (SELECT cash_start FROM settings WHERE id=1), false))`);
+    }
     if (q.q) {
       const like = arg(`%${q.q.replace(/[\\%_]/g, "\\$&")}%`);
       where.push(`(t.description ILIKE ${like} ESCAPE '\\' OR t.counter_name ILIKE ${like} ESCAPE '\\')`);
