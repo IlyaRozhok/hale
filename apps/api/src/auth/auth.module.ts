@@ -16,7 +16,9 @@ import { AuthService } from "./auth.service";
       inject: [APP_CONFIG],
       useFactory: (config: AppConfig) => ({
         secret: config.JWT_SECRET,
-        signOptions: { expiresIn: "365d" },
+        // Owner's choice (9 Nov 2026): no refresh flow, so the app asks for the
+        // password once every 90 days after a login.
+        signOptions: { expiresIn: "90d" },
       }),
     }),
   ],

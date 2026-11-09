@@ -93,4 +93,15 @@ describe("auth (e2e, real Postgres)", () => {
     expect(rows[0].token_hash).not.toBe(login.body.token);
     expect(rows[0].token_hash).toMatch(/^[0-9a-f]{64}$/);
   });
+
+  it("issues device tokens that expire in 90 days", async () => {
+    const login = await request(app.getHttpServer())
+      .post("/auth/login")
+      .send({ password: TEST_PASSWORD, deviceName: "ttl-check" })
+      .expect(201);
+    const payload = JSON.parse(
+      Buffer.from((login.body.token as string).split(".")[1]!, "base64url").toString("utf8"),
+    ) as { iat: number; exp: number };
+    expect(payload.exp - payload.iat).toBe(90 * 24 * 60 * 60);
+  });
 });
