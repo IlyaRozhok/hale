@@ -41,6 +41,7 @@ export class Transaction {
   @Column({ type: "boolean", default: false }) needs_label!: boolean;
   @Column({ type: "boolean", default: false }) usdc_checked!: boolean;
   @Column({ type: "boolean", default: false }) from_wallet!: boolean;
+  @Column({ type: "bigint", nullable: true, transformer: bt }) cash_amount!: number | null;
   @Column({ type: "jsonb" }) raw!: unknown;
 }
 

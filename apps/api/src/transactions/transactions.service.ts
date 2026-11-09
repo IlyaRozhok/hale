@@ -259,7 +259,8 @@ export class TransactionsService {
       await m.query(`DELETE FROM rules WHERE id=$1`, [id]);
       const rows: RuleRow[] = await m.query(
         `SELECT t.id, t.type, t.amount::float8 AS amount, t.description, t.counter_iban, t.counter_name ${FROM}
-          WHERE t.type_source IN ('owner','rule') AND t.type = $1 AND a.kind <> 'cash'`,
+          WHERE t.type_source IN ('owner','rule') AND t.type = $1 AND a.kind <> 'cash'
+            AND NOT EXISTS (SELECT 1 FROM payment_links l WHERE l.transaction_id = t.id)`,
         [rule.type],
       );
       const under = rowsUnder(rule, rows).map((r) => r.id);
@@ -357,6 +358,7 @@ export class TransactionsService {
   private async settle(ids: readonly number[], type: string): Promise<void> {
     if (ids.length === 0) return;
     if (!SETTLING_TYPES.has(type)) {
+      await this.ds.query(`DELETE FROM payment_links WHERE transaction_id = ANY($1::int[])`, [ids]);
       await this.ds.query(
         `UPDATE scheduled_payments SET transaction_id = NULL, paid_at = NULL WHERE transaction_id = ANY($1::int[])`,
         [ids],

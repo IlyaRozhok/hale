@@ -541,6 +541,9 @@ export const cashOperationPatch = z
 export type CashOperationPatch = z.infer<typeof cashOperationPatch>;
 export const cashCountInput = z.object({ amount: z.number().int().min(0).max(100_000_000_00) }).strict();
 export type CashCountInput = z.infer<typeof cashCountInput>;
+/** Operations that paid a planned payment, chosen by the owner. */
+export const paymentLinksInput = z.object({ transactionIds: z.array(z.number().int().positive()).min(1).max(20) }).strict();
+export type PaymentLinksInput = z.infer<typeof paymentLinksInput>;
 
 export interface CashWalletDto {
   started: boolean;

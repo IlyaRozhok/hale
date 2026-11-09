@@ -166,6 +166,64 @@ export class CashService {
     });
   }
 
+  /** Operations that could have paid this payment, newest first: see candidateIds. */
+  async candidates(paymentId: number): Promise<TransactionDto[]> {
+    const ids = await this.candidateIds(this.ds.manager, paymentId);
+    return Promise.all(ids.map((id) => this.tx.one(id)));
+  }
+
+  /**
+   * The owner says these operations paid the payment. They become it: obligation, so the limit is
+   * not spent twice, and the owner's, so the classifier leaves them. A withdrawal after the wallet
+   * start then passes the wallet by: its cash went straight to the payment.
+   */
+  async payWith(paymentId: number, ids: readonly number[]): Promise<{ linked: number }> {
+    return this.ds.transaction(async (m) => {
+      const p = (await m.query(`SELECT paid_at FROM scheduled_payments WHERE id=$1 FOR UPDATE`, [paymentId]))[0] as
+        | { paid_at: Date | null }
+        | undefined;
+      if (!p) throw new NotFoundException("payment not found");
+      if (p.paid_at !== null) throw new ConflictException("the payment is already paid");
+      const offered = new Set(await this.candidateIds(m, paymentId));
+      const chosen = [...new Set(ids)];
+      if (chosen.some((id) => !offered.has(id))) throw new UnprocessableEntityException("only an offered operation can pay the payment");
+      await m.query(`INSERT INTO payment_links (payment_id, transaction_id) SELECT $1, unnest($2::int[])`, [paymentId, chosen]);
+      await m.query(
+        `UPDATE transactions SET type='obligation', category='transfer', type_source='owner', needs_label=false WHERE id = ANY($1::int[])`,
+        [chosen],
+      );
+      await m.query(
+        `UPDATE scheduled_payments SET paid_at = (SELECT max(occurred_at) FROM transactions WHERE id = ANY($2::int[])) WHERE id=$1`,
+        [paymentId, chosen],
+      );
+      return { linked: chosen.length };
+    });
+  }
+
+  /**
+   * Outgoing withdrawals, transfers and obligations on bank accounts, from a week before the due
+   * date to today, none larger than the payment and none already paying another one.
+   */
+  private async candidateIds(m: EntityManager, paymentId: number): Promise<number[]> {
+    const p = (await m.query(`SELECT amount::float8 AS amount, currency, due_on::text AS due_on FROM scheduled_payments WHERE id=$1`, [paymentId]))[0] as
+      | { amount: number; currency: string; due_on: string }
+      | undefined;
+    if (!p) throw new NotFoundException("payment not found");
+    if (p.currency !== "UAH") return [];
+    const rows: { id: number }[] = await m.query(
+      `SELECT t.id FROM transactions t JOIN accounts a ON a.id = t.account_id
+        WHERE t.amount < 0 AND a.kind <> 'cash'
+          AND t.type = ANY('{cash_out,person_transfer,own_transfer,obligation}'::text[])
+          AND t.local_date BETWEEN $2::date - 7 AND $3::date
+          AND t.amount_uah IS NOT NULL AND -t.amount_uah <= $1
+          AND NOT EXISTS (SELECT 1 FROM payment_links l WHERE l.transaction_id = t.id)
+          AND NOT EXISTS (SELECT 1 FROM scheduled_payments s WHERE s.transaction_id = t.id)
+        ORDER BY t.occurred_at DESC, t.id DESC`,
+      [p.amount, p.due_on, this.today()],
+    );
+    return rows.map((r) => r.id);
+  }
+
   // --- helpers -------------------------------------------------------------------
   private today(): string {
     return kyivDate(this.clock.now());

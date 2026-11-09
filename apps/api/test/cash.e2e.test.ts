@@ -39,7 +39,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await ds.query(
     `TRUNCATE jobs, rules, transactions, accounts, fx_rates, income_events, expected_incomes,
-              scheduled_payments, recurring_payments, manual_balances, loans, bridge_plans, daily_snapshots, goals
+              scheduled_payments, recurring_payments, manual_balances, loans, bridge_plans, daily_snapshots, goals, cash_cards
      RESTART IDENTITY CASCADE`,
   );
   await ds.query(`UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, cash_start=NULL, tracking_start='2026-01-01'`);
@@ -50,13 +50,19 @@ async function card(balance = 10_000_000): Promise<number> {
   seq++;
   return (await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ($1,'black','UAH',$2) RETURNING id`, [`acc-${seq}`, balance]))[0].id;
 }
-async function bankTx(accountId: number, amount: number, type: string, date: string, over: { usdcChecked?: boolean } = {}): Promise<number> {
+async function bankTx(
+  accountId: number,
+  amount: number,
+  type: string,
+  date: string,
+  over: { usdcChecked?: boolean; description?: string; time?: string; name?: string } = {},
+): Promise<number> {
   seq++;
   return (
     await ds.query(
-      `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, type_source, usdc_checked, raw)
-       VALUES ($1,$2,$3,$4,'Банкомат',$5,$5,$6,'rule',$7,'{}') RETURNING id`,
-      [`tx-${seq}`, accountId, `${date}T10:00:00Z`, date, amount, type, over.usdcChecked ?? false],
+      `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, type_source, usdc_checked, counter_name, raw)
+       VALUES ($1,$2,$3,$4,$8,$5,$5,$6,'rule',$7,$9,'{}') RETURNING id`,
+      [`tx-${seq}`, accountId, `${date}T${over.time ?? "10:00:00"}Z`, date, amount, type, over.usdcChecked ?? false, over.description ?? "Банкомат", over.name ?? null],
     )
   )[0].id;
 }
@@ -298,5 +304,84 @@ describe("a planned payment paid in cash", () => {
     await api.del(`/cash/operations/${tx}`).expect(200);
     expect(await row(`SELECT paid_at, transaction_id FROM scheduled_payments WHERE id=$1`, [id])).toEqual({ paid_at: null, transaction_id: null });
     expect((await wallet()).balance).toBe(2_000_000);
+  });
+});
+
+describe("a planned payment paid with chosen operations", () => {
+  const plan = async (amount: number, due = "2026-11-06") =>
+    (await ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Квартплата',$1,'UAH',$2) RETURNING id`, [
+      amount, due,
+    ]))[0].id as number;
+  const candidates = async (id: number) =>
+    ((await api.get(`/cash/payments/${id}/candidates`).expect(200)).body as { id: number }[]).map((t) => t.id);
+  const spentOn = async (date: string) =>
+    ((await api.get("/today/calendar?month=2026-11").expect(200)).body.days as { date: string; spent: number }[]).find((d) => d.date === date)!.spent;
+
+  it("offers outgoing withdrawals and transfers from a week before the due date, none larger than the payment", async () => {
+    const c = await card();
+    const id = await plan(1_700_000);
+    const silpo = await bankTx(c, -310_500, "cash_out", "2026-11-08", { description: "Видача готівки Сільпо" });
+    const ownCard = await bankTx(c, -1_560_000, "own_transfer", "2026-11-08", { description: "545708****4563", time: "11:00:00" });
+    const person = await bankTx(c, -50_000, "person_transfer", "2026-10-30");
+    const due = await bankTx(c, -60_000, "obligation", "2026-11-07");
+    await bankTx(c, -50_000, "person_transfer", "2026-10-29"); // too early
+    await bankTx(c, -10_000, "spend", "2026-11-08"); // a purchase
+    await bankTx(c, -2_000_000, "cash_out", "2026-11-08"); // larger than the payment
+    await bankTx(c, 50_000, "person_in", "2026-11-08"); // incoming
+    const other = await plan(60_000, "2026-11-07");
+    await ds.query(`UPDATE scheduled_payments SET paid_at=now(), transaction_id=$1 WHERE id=$2`, [due, other]);
+    expect(await candidates(id)).toEqual([ownCard, silpo, person]);
+    await api.get(`/cash/payments/99999/candidates`).expect(404);
+  });
+
+  it("closes the payment; the rows become this payment and stop spending the limit", async () => {
+    const c = await card();
+    const id = await plan(1_700_000);
+    const silpo = await bankTx(c, -310_500, "cash_out", "2026-11-08", { description: "Видача готівки Сільпо" });
+    const ownCard = await bankTx(c, -1_560_000, "own_transfer", "2026-11-08", { description: "545708****4563", time: "11:00:00" });
+    expect(await spentOn("2026-11-08")).toBe(310_500);
+    await api.post(`/cash/payments/${id}/links`, { transactionIds: [silpo, ownCard] }).expect(201);
+    expect(await spentOn("2026-11-08")).toBe(0);
+    expect(await row(`SELECT paid_at IS NOT NULL AS paid FROM scheduled_payments WHERE id=$1`, [id])).toEqual({ paid: true });
+    expect(await ds.query(`SELECT type, category, type_source FROM transactions WHERE id = ANY($1) ORDER BY id`, [[silpo, ownCard]])).toEqual([
+      { type: "obligation", category: "transfer", type_source: "owner" },
+      { type: "obligation", category: "transfer", type_source: "owner" },
+    ]);
+    expect((await ds.query(`SELECT transaction_id FROM payment_links WHERE payment_id=$1 ORDER BY transaction_id`, [id])).map((r: { transaction_id: number }) => r.transaction_id)).toEqual([silpo, ownCard]);
+    // Taken rows are not offered to another payment, and the paid one cannot be paid again.
+    expect(await candidates(await plan(1_700_000, "2026-11-08"))).toEqual([]);
+    await api.post(`/cash/payments/${id}/links`, { transactionIds: [silpo] }).expect(409);
+    // The classifier never takes them back.
+    await app.get(ReclassifyService).reclassifyPending();
+    expect((await row(`SELECT type FROM transactions WHERE id=$1`, [silpo])).type).toBe("obligation");
+  });
+
+  it("refuses rows that are not offered, and an empty choice", async () => {
+    const c = await card();
+    const id = await plan(1_700_000);
+    const buy = await bankTx(c, -10_000, "spend", "2026-11-08");
+    await api.post(`/cash/payments/${id}/links`, { transactionIds: [buy] }).expect(422);
+    await api.post(`/cash/payments/${id}/links`, { transactionIds: [] }).expect(400);
+    await api.post(`/cash/payments/99999/links`, { transactionIds: [buy] }).expect(404);
+    expect(await row(`SELECT paid_at FROM scheduled_payments WHERE id=$1`, [id])).toEqual({ paid_at: null });
+  });
+
+  it("a withdrawal after the wallet start passes the wallet by: the cash went straight to the payment", async () => {
+    const c = await card();
+    await start(100_000, "2026-11-01").expect(201);
+    const id = await plan(1_700_000);
+    const atm = await bankTx(c, -1_700_000, "cash_out", "2026-11-05");
+    expect((await wallet()).balance).toBe(1_800_000);
+    await api.post(`/cash/payments/${id}/links`, { transactionIds: [atm] }).expect(201);
+    expect((await wallet()).balance).toBe(100_000);
+  });
+
+  it("retyping a linked row away from the payment unlinks it", async () => {
+    const c = await card();
+    const id = await plan(1_700_000);
+    const silpo = await bankTx(c, -310_500, "cash_out", "2026-11-08");
+    await api.post(`/cash/payments/${id}/links`, { transactionIds: [silpo] }).expect(201);
+    await api.patch(`/transactions/${silpo}`, { type: "cash_out" }).expect(200);
+    expect(await ds.query(`SELECT 1 FROM payment_links`)).toEqual([]);
   });
 });

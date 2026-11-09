@@ -4,6 +4,7 @@ import {
   cashOperationInput,
   cashOperationPatch,
   cashStartInput,
+  paymentLinksInput,
   type CashWalletDto,
   type TransactionDto,
 } from "@hale/contracts";
@@ -25,6 +26,16 @@ export class CashController {
   @Get()
   wallet(): Promise<CashWalletDto> {
     return this.cash.wallet();
+  }
+
+  @Get("payments/:id/candidates")
+  candidates(@Param("id", ParseIntPipe) id: number): Promise<TransactionDto[]> {
+    return this.cash.candidates(id);
+  }
+
+  @Post("payments/:id/links")
+  async link(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<{ linked: number }> {
+    return this.cash.payWith(id, parse(paymentLinksInput, body).transactionIds);
   }
 
   @Post("start")
