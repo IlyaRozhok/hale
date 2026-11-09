@@ -494,6 +494,27 @@ export interface RecipientLabelResultDto {
   updated: number;
 }
 
+export const similarQuery = z.object({ type: txType.optional() }).strict();
+export type SimilarQuery = z.infer<typeof similarQuery>;
+/** Rows an edit with applyToSimilar would change, the edited one included. */
+export interface SimilarCountDto {
+  count: number;
+}
+
+/** A stored owner rule: an edit applied to similar rows, or an answer about a recipient. */
+export interface RuleDto {
+  id: number;
+  matchKind: "merchant" | "iban" | "recipient";
+  /** What it matches, readable: the bank text or the person's name; never an account number. */
+  title: string;
+  direction: "in" | "out" | null;
+  type: TxTypeDto;
+  category: string | null;
+  label: RecipientLabelName | null;
+  /** Rows that match it and have its type. */
+  count: number;
+}
+
 // --- cash wallet -------------------------------------------------------------------
 /** Categories a cash purchase can have. */
 export const cashCategory = z.enum([

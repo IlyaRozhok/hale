@@ -674,3 +674,69 @@ describe("rule safety", () => {
     expect((await row("SELECT paid_at FROM scheduled_payments WHERE name='Manual'")).paid_at).not.toBeNull();
   });
 });
+
+describe("withdrawals and rules", () => {
+  const api2 = { del: (p: string) => request(http()).delete(p).set("Authorization", auth) };
+
+  it("applyToSimilar leaves the counterparty's withdrawals alone and says how many rows change", async () => {
+    const a = await account();
+    const buy = await tx(a, { description: "Сільпо", mcc: 5411, type: "spend", category: "groceries" });
+    const buy2 = await tx(a, { description: "Сільпо", mcc: 5411, type: "spend", category: "groceries" });
+    const cash = await tx(a, { description: "Сільпо", mcc: 5411, type: "cash_out", category: "cash" });
+    expect((await api.get(`/transactions/${buy}/similar?type=spend`).expect(200)).body).toEqual({ count: 2 });
+    expect((await api.get(`/transactions/${buy}/similar?type=cash_out`).expect(200)).body).toEqual({ count: 3 });
+    // The edited row itself always counts, even if it is a withdrawal.
+    expect((await api.get(`/transactions/${cash}/similar?type=spend`).expect(200)).body).toEqual({ count: 3 });
+    const res = await api.patch(`/transactions/${buy}`, { type: "spend", category: "cafe", applyToSimilar: true }).expect(200);
+    expect(res.body.updated).toBe(2);
+    expect((await row("SELECT type FROM transactions WHERE id=$1", [cash])).type).toBe("cash_out");
+    expect((await row("SELECT category FROM transactions WHERE id=$1", [buy2])).category).toBe("cafe");
+  });
+
+  it("similar without a type counts the rows a category change would reach", async () => {
+    const a = await account();
+    const buy = await tx(a, { description: "Сільпо", mcc: 5411, type: "spend" });
+    await tx(a, { description: "Сільпо", mcc: 5411, type: "cash_out" });
+    expect((await api.get(`/transactions/${buy}/similar`).expect(200)).body).toEqual({ count: 1 });
+    await api.get(`/transactions/999999/similar`).expect(404);
+  });
+
+  it("lists the owner's rules with how many rows follow each", async () => {
+    const a = await account();
+    const t = await tx(a, { description: "Видача готівки Сільпо", mcc: 5411, type: "cash_out" });
+    await api.patch(`/transactions/${t}`, { type: "spend", applyToSimilar: true }).expect(200);
+    await tx(a, { iban: IBAN, name: "Olena K", description: "Переказ", type: "person_transfer", needsLabel: true });
+    const key = (await api.get("/transactions?q=Olena").expect(200)).body.items[0].counterKey as string;
+    await api.post("/recipients/label", { counterKey: key, label: "help" }).expect(201);
+    const res = await api.get("/rules").expect(200);
+    expect(res.body).toEqual([
+      { id: expect.any(Number), matchKind: "merchant", title: "видача готівки сільпо", type: "spend", category: null, label: null, direction: "out", count: 1 },
+      // An account number is never sent: the rule is named after the person.
+      { id: expect.any(Number), matchKind: "iban", title: "Olena K", type: "person_transfer", category: null, label: "help", direction: "out", count: 1 },
+    ]);
+    expect(JSON.stringify(res.body)).not.toContain(IBAN);
+  });
+
+  it("deleting a rule returns its rows to automatic recognition", async () => {
+    const a = await account();
+    const t = await tx(a, { description: "Видача готівки Сільпо", mcc: 5411, type: "cash_out" });
+    await api.patch(`/transactions/${t}`, { type: "spend", applyToSimilar: true }).expect(200);
+    const other = await tx(a, { description: "Shop", type: "spend", source: "owner" });
+    const [rule] = (await api.get("/rules").expect(200)).body as { id: number }[];
+    await api2.del(`/rules/${rule!.id}`).expect(200);
+    expect((await api.get("/rules").expect(200)).body).toEqual([]);
+    expect(await row("SELECT type, type_source FROM transactions WHERE id=$1", [t])).toEqual({ type: "cash_out", type_source: "rule" });
+    expect((await row("SELECT type_source FROM transactions WHERE id=$1", [other])).type_source).toBe("owner");
+    await api2.del(`/rules/${rule!.id}`).expect(404);
+  });
+
+  it("deleting a recipient answer makes the transfers ask again", async () => {
+    const a = await account();
+    const t = await tx(a, { iban: IBAN, name: "Olena K", description: "Переказ", mcc: 4829, type: "person_transfer", needsLabel: true });
+    const key = (await api.get("/transactions").expect(200)).body.items[0].counterKey as string;
+    await api.post("/recipients/label", { counterKey: key, label: "obligation" }).expect(201);
+    const [rule] = (await api.get("/rules").expect(200)).body as { id: number }[];
+    await api2.del(`/rules/${rule!.id}`).expect(200);
+    expect(await row("SELECT type, needs_label FROM transactions WHERE id=$1", [t])).toEqual({ type: "person_transfer", needs_label: true });
+  });
+});

@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import type {
+  RuleDto,
   RecipientLabelName,
   RecipientLabelResultDto,
   RecipientSummaryDto,
@@ -15,7 +16,7 @@ import { isCounterpartyName } from "../domain/counterparty";
 import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
 import { PlanService } from "../plan/plan.service";
 import { counterKeySql } from "./counter-key";
-import { PLAN_TYPES } from "./reclassify.service";
+import { PLAN_TYPES, ReclassifyService } from "./reclassify.service";
 
 const KEY = counterKeySql("t");
 const COLUMNS = `
@@ -123,6 +124,7 @@ export class TransactionsService {
   constructor(
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(PlanService) private readonly plan: PlanService,
+    @Inject(ReclassifyService) private readonly reclassify: ReclassifyService,
   ) {}
 
   async list(q: TransactionsQuery): Promise<TransactionPageDto> {
@@ -204,12 +206,68 @@ export class TransactionsService {
           await this.saveRule(m, rule.kind, rule.value, ruleType, p.category ?? null, null, base.amount < 0 ? "out" : "in");
         }
       }
-      const scope = p.applyToSimilar ? { key: base.counter_key, sign: Math.sign(base.amount) } : { id };
+      const scope = p.applyToSimilar ? similarScope(id, base, ruleType!) : { id };
       return this.apply(m, scope, p.type ?? null, p.category ?? null);
     });
     if (p.type) await this.settle(changed, p.type);
     const row = await this.one(id);
     return { transaction: row, updated: changed.length };
+  }
+
+  /** How many rows an edit with applyToSimilar to `type` (or the row's own type) would change. */
+  async similar(id: number, type?: TxType): Promise<number> {
+    const base = (await this.ds.query(`SELECT t.type, t.amount::float8 AS amount, ${KEY} AS counter_key ${FROM} WHERE t.id=$1`, [id]))[0] as
+      | { type: string | null; amount: number; counter_key: string }
+      | undefined;
+    if (!base) throw new NotFoundException("transaction not found");
+    const effective = type ?? base.type;
+    if (!effective) return 1;
+    const { where, args } = scopeWhere(similarScope(id, base, effective), 1);
+    return (await this.ds.query(`SELECT count(*)::int AS n ${FROM} WHERE ${where}`, args))[0].n as number;
+  }
+
+  /** The owner's rules, oldest first, each with how many rows follow it. */
+  async rules(): Promise<RuleDto[]> {
+    const rules: StoredRule[] = await this.ds.query(`SELECT ${RULE_COLUMNS} FROM rules ORDER BY id`);
+    if (rules.length === 0) return [];
+    const rows: RuleRow[] = await this.ds.query(
+      `SELECT id, type, amount::float8 AS amount, description, counter_iban, counter_name FROM transactions ORDER BY occurred_at DESC, id DESC`,
+    );
+    return rules.map((r) => {
+      const named = rows.find((x) => matches(r, x) && x.counter_name?.trim())?.counter_name?.trim();
+      return {
+        id: r.id,
+        matchKind: r.matchKind,
+        title: r.matchKind === "iban" ? (named ?? `Счёт •${r.matchValue.slice(-4)}`) : r.matchValue,
+        direction: r.direction,
+        type: r.type,
+        category: r.category,
+        label: r.label,
+        count: rowsUnder(r, rows).length,
+      };
+    });
+  }
+
+  /**
+   * Deletes a rule. Its rows, the one the owner edited included, go back to automatic recognition
+   * right away; the limit follows by itself, it is computed from types.
+   */
+  async deleteRule(id: number): Promise<{ updated: number }> {
+    const ids = await this.ds.transaction(async (m) => {
+      const rule = (await m.query(`SELECT ${RULE_COLUMNS} FROM rules WHERE id=$1 FOR UPDATE`, [id]))[0] as StoredRule | undefined;
+      if (!rule) throw new NotFoundException("rule not found");
+      await m.query(`DELETE FROM rules WHERE id=$1`, [id]);
+      const rows: RuleRow[] = await m.query(
+        `SELECT t.id, t.type, t.amount::float8 AS amount, t.description, t.counter_iban, t.counter_name ${FROM}
+          WHERE t.type_source IN ('owner','rule') AND t.type = $1 AND a.kind <> 'cash'`,
+        [rule.type],
+      );
+      const under = rowsUnder(rule, rows).map((r) => r.id);
+      if (under.length > 0) await m.query(`UPDATE transactions SET type_source = NULL WHERE id = ANY($1::int[])`, [under]);
+      return under;
+    });
+    await this.reclassify.reclassifyIds(ids);
+    return { updated: ids.length };
   }
 
   /**
@@ -273,22 +331,9 @@ export class TransactionsService {
     );
   }
 
-  private async apply(
-    m: EntityManager,
-    scope: { id: number } | { key: string; relabel?: boolean; sign?: number },
-    type: TxType | null,
-    category: string | null,
-  ): Promise<number[]> {
-    const args: unknown[] = [type, category, type ? typeCategory(type) : null];
-    let where: string;
-    if ("id" in scope) {
-      args.push(scope.id);
-      where = `t.id = $4`;
-    } else {
-      args.push(scope.key);
-      if (scope.sign) args.push(scope.sign);
-      where = `${KEY} = $4${scope.sign ? " AND sign(t.amount) = $5" : ""}${scope.relabel ? ` AND t.amount < 0 AND t.type = ANY('{${ANSWERED_TYPES.join(",")}}'::text[])` : ""}`;
-    }
+  private async apply(m: EntityManager, scope: Scope, type: TxType | null, category: string | null): Promise<number[]> {
+    const { where, args: scopeArgs } = scopeWhere(scope, 4);
+    const args: unknown[] = [type, category, type ? typeCategory(type) : null, ...scopeArgs];
     const rows: { id: number }[] = await m.query(
       `WITH u AS (UPDATE transactions SET
          category = CASE
@@ -345,6 +390,53 @@ export class TransactionsService {
     return view(r, await this.answerRules());
   }
 }
+
+type Scope = { id: number } | { key: string; relabel?: boolean; sign?: number; keepId?: number; type?: string };
+
+/** Rows of the same counterparty and direction; their withdrawals only if the new type is a withdrawal. */
+const similarScope = (id: number, base: { amount: number; counter_key: string }, type: string): Scope => ({
+  key: base.counter_key,
+  sign: Math.sign(base.amount),
+  keepId: id,
+  type,
+});
+
+/** WHERE over `t` for a scope, with parameters numbered from `first`. */
+function scopeWhere(scope: Scope, first: number): { where: string; args: unknown[] } {
+  const args: unknown[] = [];
+  const arg = (v: unknown) => `$${first + args.push(v) - 1}`;
+  if ("id" in scope) return { where: `t.id = ${arg(scope.id)}`, args };
+  const parts = [`${KEY} = ${arg(scope.key)}`];
+  if (scope.sign) parts.push(`sign(t.amount) = ${arg(scope.sign)}`);
+  if (scope.relabel) parts.push(`t.amount < 0 AND t.type = ANY('{${ANSWERED_TYPES.join(",")}}'::text[])`);
+  if (scope.type && scope.type !== "cash_out") {
+    parts.push(`(t.id = ${arg(scope.keepId ?? 0)} OR t.type IS DISTINCT FROM 'cash_out')`);
+  }
+  return { where: parts.join(" AND "), args };
+}
+
+const RULE_COLUMNS = `id, match_kind AS "matchKind", match_value AS "matchValue", direction, type, category, label`;
+interface StoredRule {
+  id: number;
+  matchKind: "merchant" | "iban" | "recipient";
+  matchValue: string;
+  direction: "in" | "out" | null;
+  type: TxTypeDto;
+  category: string | null;
+  label: RecipientLabelName | null;
+}
+interface RuleRow {
+  id: number;
+  type: string | null;
+  amount: number;
+  description: string;
+  counter_iban: string | null;
+  counter_name: string | null;
+}
+const matches = (r: StoredRule, x: RuleRow) =>
+  ruleMatches(r, { amount: x.amount, description: x.description, counterIban: x.counter_iban, counterName: x.counter_name });
+/** Rows a rule stands for: they match it and have its type. */
+const rowsUnder = (r: StoredRule, rows: readonly RuleRow[]) => rows.filter((x) => x.type === r.type && matches(r, x));
 
 /** The narrowest rule that still catches the row's counterparty. */
 function ruleFor(r: { counter_iban: string | null; counter_name: string | null; description: string }): {

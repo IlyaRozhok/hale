@@ -114,6 +114,20 @@ describe("cash", () => {
     expect(classify(tx({ description: "Видача готівки Сільпо", mcc: 5499 }), ctx()).type).toBe("cash_out");
     expect(classify(tx({ description: "Термінал EasyPay", amount: 100000, mcc: 4829 }), ctx()).type).toBe("cash_in");
   });
+
+  it("a rule of another type does not turn a withdrawal into something else", () => {
+    const rules = [{ matchKind: "merchant" as const, matchValue: "видача готівки сільпо", type: "spend" as const, direction: "out" as const }];
+    const out = classify(tx({ description: "Видача готівки Сільпо", mcc: 5411 }), ctx({ rules }));
+    expect(out).toMatchObject({ type: "cash_out", source: "rule" });
+    // The same rule still applies to a purchase in that shop.
+    const buy = classify(tx({ description: "Сільпо", mcc: 5411 }), ctx({ rules: [{ ...rules[0]!, matchValue: "сільпо" }] }));
+    expect(buy).toMatchObject({ type: "spend", source: "owner" });
+  });
+
+  it("a cash_out rule still applies to a withdrawal", () => {
+    const rules = [{ matchKind: "merchant" as const, matchValue: "банкомат", type: "cash_out" as const, category: "cash" }];
+    expect(classify(tx({ description: "Банкомат 1", mcc: 6011 }), ctx({ rules }))).toMatchObject({ type: "cash_out", source: "owner" });
+  });
 });
 
 describe("purchases and refunds", () => {

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
   Param,
@@ -15,6 +16,9 @@ import {
   recipientLabelInput,
   type RecipientLabelResultDto,
   type RecipientSummaryDto,
+  type RuleDto,
+  type SimilarCountDto,
+  similarQuery,
   transactionPatch,
   type TransactionEditDto,
   type TransactionPageDto,
@@ -48,6 +52,21 @@ export class TransactionsController {
   @Patch("transactions/:id")
   edit(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<TransactionEditDto> {
     return this.tx.edit(id, parse(transactionPatch, body));
+  }
+
+  @Get("transactions/:id/similar")
+  async similar(@Param("id", ParseIntPipe) id: number, @Query() query: unknown): Promise<SimilarCountDto> {
+    return { count: await this.tx.similar(id, parse(similarQuery, query).type) };
+  }
+
+  @Get("rules")
+  rules(): Promise<RuleDto[]> {
+    return this.tx.rules();
+  }
+
+  @Delete("rules/:id")
+  deleteRule(@Param("id", ParseIntPipe) id: number): Promise<{ updated: number }> {
+    return this.tx.deleteRule(id);
   }
 
   @Post("recipients/label")

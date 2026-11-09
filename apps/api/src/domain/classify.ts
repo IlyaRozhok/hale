@@ -91,6 +91,10 @@ const REFUND = /^(скасування|повернення платежу)/i;
 const REFUND_OF_TRANSFER = /переказ/i;
 const FROM_PREFIX = /^від:/i;
 
+/** Money taken out as cash, by the bank text or the MCC. */
+export const isWithdrawal = (tx: Pick<ClassifyInput, "amount" | "description" | "mcc">): boolean =>
+  tx.amount < 0 && (ATM.test(tx.description.trim()) || (tx.mcc !== null && CASH_MCCS.has(tx.mcc)));
+
 /** Trimmed, lower-cased, whitespace collapsed: the form recipient rules compare in. */
 export const normaliseText = (s: string): string => lc(s).trim().replace(/\s+/g, " ");
 
@@ -168,8 +172,11 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
   // A question needs someone to ask about: a bank template stays a plain transfer.
   const hasName = isCounterpartyName(tx.counterName?.trim() || d);
 
-  // 1. Owner rules
+  // 1. Owner rules. A withdrawal stays a withdrawal unless the rule itself says cash_out: a rule
+  // made from a purchase in a shop must not swallow the cash taken at its till.
+  const withdrawal = isWithdrawal(tx);
   for (const rule of ctx.rules) {
+    if (withdrawal && rule.type !== "cash_out") continue;
     if (ruleMatches(rule, tx)) return done(rule.type, "owner", rule.category ?? typeCategory(rule.type));
   }
 
@@ -198,7 +205,7 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
   if (LOAN_TEXT.test(d) && !INSTALLMENT_PAYMENT.test(d)) return done(incoming ? "loan_in" : "debt_payment");
   if (!incoming && (INSTALLMENT_PAYMENT.test(d) || INTEREST.test(d) || PENALTY.test(d))) return done("debt_payment");
   if (!incoming && mcc === 4829 && STORE_INSTALLMENT.test(d)) return done("spend", "rule", "shopping");
-  if (!incoming && (ATM.test(d) || (mcc !== null && CASH_MCCS.has(mcc)))) return done("cash_out");
+  if (withdrawal) return done("cash_out");
   if (incoming && mcc === 4829 && CASH_DEPOSIT.test(d)) return done("cash_in");
   if (incoming && CASHBACK.test(d)) return done("income", "rule", "refund");
 
