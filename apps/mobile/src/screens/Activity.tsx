@@ -142,6 +142,8 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
       ) : (
         <SectionList
           testID="activity-list"
+          // Edge to edge, so the scroll bar runs along the screen's edge, not over the amounts.
+          style={styles.list}
           sections={sections}
           keyExtractor={(t) => String(t.id)}
           stickySectionHeadersEnabled={false}
@@ -158,7 +160,7 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
           renderItem={({ item, index, section }) => (
             <TxRow tx={item} onPress={() => setOpen(item)} first={index === 0} last={index === section.data.length - 1} />
           )}
-          contentContainerStyle={{ paddingBottom: LAYOUT.tabBar + insets.bottom }}
+          contentContainerStyle={{ paddingHorizontal: space.xl, paddingBottom: LAYOUT.tabBar + insets.bottom }}
           onEndReachedThreshold={0.5}
           onEndReached={() => {
             if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage();
@@ -218,6 +220,7 @@ const styles = StyleSheet.create({
   segmentText: { ...type.label, color: color.fg.muted },
   segmentTextOn: { color: color.fg.default },
   root: { flex: 1, paddingHorizontal: space.xl, gap: space.md },
+  list: { marginHorizontal: -space.xl },
   title: { ...type.title, color: color.fg.default },
   filters: { flexDirection: "row", gap: space.sm },
   head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
