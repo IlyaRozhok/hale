@@ -10,7 +10,6 @@ import { ApiError, NetworkError } from "../api/client";
 jest.mock("../metal", () => {
   const { View } = require("react-native");
   return {
-    LimitVisual: ({ mode, level }: { mode: string; level: number }) => <View testID="limit-visual" accessibilityHint={`${mode}:${level}`} />,
     LimitBar: ({ level, state }: { level: number; state: string }) => <View testID="limit-visual" accessibilityHint={`bar:${state}:${level}`} />,
   };
 });
@@ -83,18 +82,23 @@ describe("Today, normal mode", () => {
     expect(screen.queryByText("Скоро платить")).toBeNull();
   });
 
-  it("shows goals as cards with amount and percent", async () => {
+  it("shows goals as one list with the total, each with its amount and percent, and opens Plan", async () => {
     const goals = [
       { id: 1, name: "Подушка", saved: 50000, target: 500000 },
       { id: 2, name: "Машина", saved: 0, target: 1000000 },
+      { id: 3, name: "Отпуск", saved: 10000, target: 100000 },
     ];
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ goals })) }));
+    const onOpenPlan = jest.fn();
+    await renderWith(<Today onOpenActivity={noop} onOpenPlan={onOpenPlan} />, fakeApi({ today: jest.fn(async () => todayFixture({ goals })) }));
     expect(await screen.findByText("Подушка")).toBeTruthy();
-    expect(screen.getByText("$500")).toBeTruthy();
-    expect(screen.getByText("10% из $5,000")).toBeTruthy();
-    expect(screen.getByText("Машина")).toBeTruthy();
-    expect(screen.getByText("0% из $10,000")).toBeTruthy();
+    expect(screen.getByText("Цели")).toBeTruthy();
+    expect(screen.getByText("$600 из $16,000")).toBeTruthy();
+    expect(screen.getByText("$500 · 10%")).toBeTruthy();
+    expect(screen.getByText("$0 · 0%")).toBeTruthy();
+    expect(screen.getByText("Отпуск")).toBeTruthy();
     expect(screen.queryByText("Добавить цель")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Цели: $600 из $16,000" }));
+    expect(onOpenPlan).toHaveBeenCalled();
   });
 
   it("keeps Today for today: no goal invitation, also with cached data from before goals existed", async () => {
@@ -646,7 +650,8 @@ describe("Today, decision rows", () => {
 
   it("names the daily amount once a plan is confirmed", async () => {
     await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state: bridgeState({ confirmed: true }) })) }));
-    expect(await screen.findByText("План до зарплаты: ₴450 в день")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "План до зарплаты: ₴450 в день" })).toBeTruthy();
+    expect(screen.getByText("₴450 в день")).toBeTruthy();
   });
 
   it("keeps the other questions under a recipient's label sheet", async () => {

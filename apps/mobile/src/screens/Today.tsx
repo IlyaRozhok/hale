@@ -10,11 +10,10 @@ import { useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useA
 import { CashOperationSheet } from "../components/CashOperationSheet";
 import { PaymentPaidSheet } from "../components/PaymentPaidSheet";
 import { ErrorText } from "../components/ErrorText";
-import { ActionRow } from "../components/ActionRow";
 import { BadCaseCard } from "../components/BadCaseCard";
 import { BridgePlan } from "../components/BridgePlan";
 import { Glass } from "../components/Glass";
-import { GoalCards } from "../components/GoalCards";
+import { GoalsList } from "../components/GoalsList";
 import { Icon } from "../components/Icon";
 import { LAYOUT } from "../components/layout";
 import { LimitCalendar } from "../components/LimitCalendar";
@@ -54,7 +53,7 @@ function limitNote(state: DailyStateDto): string {
   return !state.needsIncomeDate && state.daysLeft > 0 ? `из ${limit} · до зарплаты ${state.daysLeft} дн` : `из ${limit} на день`;
 }
 
-export function Today({ onOpenActivity, now = () => new Date() }: Props) {
+export function Today({ onOpenActivity, onOpenPlan, now = () => new Date() }: Props) {
   const insets = useSafeAreaInsets();
   const today = useToday();
   const confirmIncome = useConfirmIncome();
@@ -199,10 +198,17 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
         </Glass>
 
         {state.mode === "bridge" && state.bridge && (
-          <ActionRow
-            label={state.bridge.confirmed ? `План до зарплаты: ${formatMoney(state.dailyLimit)} в день` : "Нужен план до зарплаты"}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={state.bridge.confirmed ? `План до зарплаты: ${formatMoney(state.dailyLimit)} в день` : "Нужен план до зарплаты"}
             onPress={() => setSheet("bridge")}
-          />
+            style={styles.planRow}
+          >
+            <Icon name="route" color={color.fg.muted} size={18} />
+            <Text style={styles.planText}>{state.bridge.confirmed ? "План до зарплаты" : "Нужен план до зарплаты"}</Text>
+            {state.bridge.confirmed && <Text style={styles.planAmount}>{`${formatMoney(state.dailyLimit)} в день`}</Text>}
+            <Icon name="chevron" color={color.fg.subtle} size={16} />
+          </Pressable>
         )}
         {data.badCases.map((b) => (
           <BadCaseCard
@@ -213,7 +219,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
           />
         ))}
 
-        {goals.length > 0 && <GoalCards goals={goals} />}
+        {goals.length > 0 && <GoalsList goals={goals} onPress={onOpenPlan} />}
         <Upcoming items={data.upcoming} today={data.date} onPress={setPaying} />
       </ScrollView>
 
@@ -299,6 +305,9 @@ const styles = StyleSheet.create({
   stack: { gap: space.md },
   eyebrow: { ...type.body, color: color.fg.muted, height: LAYOUT.eyebrow + 4 },
   overHeading: { color: color.status.danger },
+  planRow: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.md, paddingHorizontal: space.xs },
+  planText: { ...type.body, color: color.fg.default, flex: 1 },
+  planAmount: { ...type.body, color: color.fg.muted, fontVariant: ["tabular-nums"] },
   amount: { ...type.amount, lineHeight: LAYOUT.amount, color: color.fg.default, fontVariant: ["tabular-nums"] },
   note: { ...type.body, color: color.fg.muted },
   subtle: { ...type.caption, color: color.fg.subtle },

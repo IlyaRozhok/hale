@@ -2,7 +2,6 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { TodayDto } from "@hale/contracts";
 import { dayMonth, formatMoney } from "../format";
-import { Glass } from "./Glass";
 
 const { color, radius, space, touchMin, type } = tokens;
 
@@ -16,7 +15,7 @@ export function Upcoming({ items, today, onPress }: Props) {
   if (items.length === 0) return null;
   const total = items.reduce((sum, p) => sum + p.amount, 0);
   return (
-    <Glass style={styles.card}>
+    <View style={styles.card}>
       <View style={styles.head}>
         <Text style={styles.caption}>Скоро платить</Text>
         {items.length > 1 ? <Text style={styles.caption}>{formatMoney(total)}</Text> : null}
@@ -46,12 +45,12 @@ export function Upcoming({ items, today, onPress }: Props) {
           </Pressable>
         );
       })}
-    </Glass>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { gap: space.md },
+  card: { gap: space.sm, paddingHorizontal: space.xs },
   head: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
   caption: { ...type.caption, color: color.fg.subtle, fontVariant: ["tabular-nums"] },
   row: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.md },

@@ -13,6 +13,6 @@ export function ProgressBar({ percent }: { percent: number }) {
 }
 
 const styles = StyleSheet.create({
-  track: { height: 6, borderRadius: radius.full, backgroundColor: color.data.grid, overflow: "hidden" },
+  track: { height: 4, borderRadius: radius.full, backgroundColor: color.data.grid, overflow: "hidden" },
   fill: { height: "100%", borderRadius: radius.full, backgroundColor: color.data.actual },
 });

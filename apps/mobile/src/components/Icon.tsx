@@ -26,6 +26,8 @@ const PATHS = {
   transfer: "M21 7h-18M18 10l3-3l-3-3M6 20l-3-3l3-3M3 17h18",
   arrowIn: "M17 7l-10 10M16 17h-9v-9",
   circle: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0",
+  route: "M3 19a2 2 0 1 0 4 0a2 2 0 0 0-4 0M19 7a2 2 0 1 0 0-4a2 2 0 0 0 0 4M11 19h5.5a3.5 3.5 0 0 0 0-7h-8a3.5 3.5 0 0 1 0-7h4.5",
+  chevron: "M9 6l6 6l-6 6",
 } as const;
 
 export type IconName = keyof typeof PATHS;
