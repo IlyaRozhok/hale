@@ -31,6 +31,8 @@ export const color = {
   calendar: { within: p.sage, over: p.rose, farOver: p.crimson },
   /** The app's backdrop of metal folds: `peak` caps its thin crests, `sheet` the wide light that survives the glass's blur. */
   backdrop: { peak: p.silver[400], sheet: p.graphite[500] },
+  /** The thin limit strip: brushed silver whose highlight glides slowly along it. */
+  metalBar: { shade: p.silver[400], body: p.silver[200], glint: p.white },
   // Statuses differ by lightness, and danger (errors) by a calm red. Each also carries a text label.
   status: {
     success: p.silver[400],

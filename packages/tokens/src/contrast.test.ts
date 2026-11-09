@@ -99,7 +99,7 @@ describe("limit calendar colours", () => {
 
 describe("metal settings", () => {
   it("are in the tokens", () => {
-    expect(tokens.metal).toEqual({ renderScale: 2, levelTau: 0.35, stillTime: 4, edge: 1.5, edgeToday: 2.5 });
+    expect(tokens.metal).toEqual({ renderScale: 2, levelTau: 0.35, stillTime: 4, edge: 1.5, edgeToday: 2.5, barHeight: 6, barSpeed: 0.25 });
   });
 });
 
