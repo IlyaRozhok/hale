@@ -480,6 +480,8 @@ export interface TransactionDto {
    * out as cash there (0 when none or not answered yet). null on every other row.
    */
   cashOut: number | null;
+  /** The planned payment this operation paid, if any: the list shows its name. */
+  paymentName: string | null;
 }
 
 export interface TransactionPageDto {

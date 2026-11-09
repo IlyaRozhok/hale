@@ -396,6 +396,21 @@ describe("a planned payment paid with chosen operations", () => {
     expect((await ds.query(`SELECT 1 FROM payment_links`)).length).toBe(1);
   });
 
+  it("operations that paid a payment carry its name; others none", async () => {
+    const c = await card();
+    await start(2_000_000, "2026-11-01").expect(201);
+    const id = await plan(1_700_000);
+    const silpo = await bankTx(c, -310_500, "cash_out", "2026-11-08", { description: "Видача готівки Сільпо" });
+    const other = await bankTx(c, -10_000, "spend", "2026-11-08", { description: "Shop" });
+    await api.post(`/cash/payments/${id}/links`, { transactionIds: [silpo] }).expect(201);
+    const wallet = await plan(100_000, "2026-11-09");
+    await api.post(`/cash/payments/${wallet}`).expect(201);
+    const items = (await api.get("/transactions?limit=50").expect(200)).body.items as { id: number; description: string; paymentName: string | null }[];
+    expect(items.find((i) => i.id === silpo)!.paymentName).toBe("Квартплата");
+    expect(items.find((i) => i.id === other)!.paymentName).toBeNull();
+    expect(items.find((i) => i.description === "Квартплата" && i.id !== silpo)!.paymentName).toBe("Квартплата");
+  });
+
   it("retyping a linked row away from the payment unlinks it", async () => {
     const c = await card();
     const id = await plan(1_700_000);

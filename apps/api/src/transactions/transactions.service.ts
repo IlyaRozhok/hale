@@ -25,7 +25,11 @@ const COLUMNS = `
   t.local_date::text AS local_date, t.description, t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah,
   t.fx_rate::float8 AS fx_rate, a.currency, t.type, t.category, t.hold, t.needs_label,
   ${KEY} AS counter_key, t.counter_iban, t.counter_name, a.kind AS account_kind, (a.kind = 'cash') AS manual,
-  CASE WHEN ${cardTransferSql()} THEN ${cardCashSql()}::float8 END AS card_cash`;
+  CASE WHEN ${cardTransferSql()} THEN ${cardCashSql()}::float8 END AS card_cash,
+  COALESCE(
+    (SELECT s.name FROM payment_links l JOIN scheduled_payments s ON s.id = l.payment_id WHERE l.transaction_id = t.id),
+    (SELECT s.name FROM scheduled_payments s WHERE s.transaction_id = t.id ORDER BY s.id LIMIT 1)
+  ) AS payment_name`;
 const FROM = `FROM transactions t JOIN accounts a ON a.id = t.account_id`;
 
 interface Row {
@@ -48,6 +52,7 @@ interface Row {
   account_kind: string;
   manual: boolean;
   card_cash: number | null;
+  payment_name: string | null;
 }
 
 /** A stored answer about a recipient. */
@@ -83,6 +88,7 @@ const view = (r: Row, rules: readonly AnswerRule[]): TransactionDto => ({
   manual: r.manual,
   recipientLabel: answerFor(rules, r),
   cashOut: r.card_cash,
+  paymentName: r.payment_name,
 });
 
 const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6})\|(\d{1,10})$/;

@@ -218,7 +218,7 @@ describe("GET /transactions", () => {
     expect(Object.keys(x).sort()).toEqual(
       [
         "accountKind", "amount", "cashOut", "amountUah", "category", "counterKey", "counterName", "currency", "description",
-        "fxRate", "hold", "id", "localDate", "manual", "needsLabel", "occurredAt", "recipientLabel", "type",
+        "fxRate", "hold", "id", "localDate", "manual", "needsLabel", "occurredAt", "paymentName", "recipientLabel", "type",
       ].sort(),
     );
     expect(x).toMatchObject({ accountKind: "fop", currency: "UAH", counterName: "Ivan P", hold: false, manual: false });

@@ -62,6 +62,7 @@ export function txFixture(over: Partial<TransactionDto> = {}): TransactionDto {
     accountKind: "black",
     manual: false,
     cashOut: null,
+    paymentName: null,
     ...over,
   };
 }
