@@ -11,6 +11,7 @@ import type {
 } from "@hale/contracts";
 import { randomUUID } from "node:crypto";
 import { DataSource, type EntityManager } from "typeorm";
+import { isWithdrawal } from "../domain/classify";
 import { kyivDate } from "../domain/money";
 import { Clock } from "../today/clock";
 import { TransactionsService } from "../transactions/transactions.service";
@@ -254,10 +255,10 @@ export class CashService {
       | undefined;
     if (!p) throw new NotFoundException("payment not found");
     if (p.currency !== "UAH") return [];
-    const rows: { id: number }[] = await m.query(
-      `SELECT t.id FROM transactions t JOIN accounts a ON a.id = t.account_id
+    const rows: { id: number; type: string; amount: number; description: string; mcc: number | null }[] = await m.query(
+      `SELECT t.id, t.type, t.amount::float8 AS amount, t.description, t.mcc FROM transactions t JOIN accounts a ON a.id = t.account_id
         WHERE t.amount < 0 AND a.kind <> 'cash'
-          AND t.type = ANY('{cash_out,person_transfer,own_transfer,obligation}'::text[])
+          AND t.type = ANY('{cash_out,person_transfer,own_transfer,obligation,spend}'::text[])
           AND t.local_date BETWEEN $2::date - 7 AND $3::date
           AND t.amount_uah IS NOT NULL AND -t.amount_uah <= $1
           AND NOT EXISTS (SELECT 1 FROM payment_links l WHERE l.transaction_id = t.id)
@@ -265,7 +266,8 @@ export class CashService {
         ORDER BY t.occurred_at DESC, t.id DESC`,
       [p.amount, p.due_on, this.today()],
     );
-    return rows.map((r) => r.id);
+    // A purchase only when it is really a withdrawal that an old rule made a purchase.
+    return rows.filter((r) => r.type !== "spend" || isWithdrawal(r)).map((r) => r.id);
   }
 
   // --- helpers -------------------------------------------------------------------

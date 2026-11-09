@@ -325,7 +325,7 @@ describe("a planned payment paid with chosen operations", () => {
     const person = await bankTx(c, -50_000, "person_transfer", "2026-10-30");
     const due = await bankTx(c, -60_000, "obligation", "2026-11-07");
     await bankTx(c, -50_000, "person_transfer", "2026-10-29"); // too early
-    await bankTx(c, -10_000, "spend", "2026-11-08"); // a purchase
+    await bankTx(c, -10_000, "spend", "2026-11-08", { description: "Shop" }); // a purchase
     await bankTx(c, -2_000_000, "cash_out", "2026-11-08"); // larger than the payment
     await bankTx(c, 50_000, "person_in", "2026-11-08"); // incoming
     const other = await plan(60_000, "2026-11-07");
@@ -356,10 +356,18 @@ describe("a planned payment paid with chosen operations", () => {
     expect((await row(`SELECT type FROM transactions WHERE id=$1`, [silpo])).type).toBe("obligation");
   });
 
+  it("offers a withdrawal that an old rule turned into a purchase", async () => {
+    const c = await card();
+    const id = await plan(1_700_000);
+    const silpo = await bankTx(c, -310_500, "spend", "2026-11-08", { description: "Видача готівки Сільпо" });
+    await bankTx(c, -10_000, "spend", "2026-11-08", { description: "Сільпо" });
+    expect(await candidates(id)).toEqual([silpo]);
+  });
+
   it("refuses rows that are not offered, and an empty choice", async () => {
     const c = await card();
     const id = await plan(1_700_000);
-    const buy = await bankTx(c, -10_000, "spend", "2026-11-08");
+    const buy = await bankTx(c, -10_000, "spend", "2026-11-08", { description: "Shop" });
     await api.post(`/cash/payments/${id}/links`, { transactionIds: [buy] }).expect(422);
     await api.post(`/cash/payments/${id}/links`, { transactionIds: [] }).expect(400);
     await api.post(`/cash/payments/99999/links`, { transactionIds: [buy] }).expect(404);
