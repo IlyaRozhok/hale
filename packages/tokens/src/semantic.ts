@@ -41,6 +41,9 @@ export const color = {
     default: p.silver[100],
     soft: p.silver[200],
     fgOnAccent: p.black,
+    /** The one colour accent, used sparingly: money in and the count on the bell. */
+    signal: p.sage,
+    fgOnSignal: p.black,
   },
   // Hue only on amounts, and always with a sign, so colour is never the only signal.
   money: {

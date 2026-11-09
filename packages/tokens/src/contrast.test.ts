@@ -38,6 +38,11 @@ describe("silver tokens contrast (WCAG AA 4.5:1)", () => {
     expect(color.status.danger).toBe("#F08585");
     expect(color.status.danger).not.toBe(color.money.expense);
   });
+  it("the one green accent reads on the base, and its badge text on it", () => {
+    expect(color.accent.signal).toBe("#8CC7A1");
+    expect(contrastRatio(color.accent.signal, color.surface.base)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(color.accent.fgOnSignal, color.accent.signal)).toBeGreaterThanOrEqual(4.5);
+  });
   it("accent.fgOnAccent on accent.default", () => {
     expect(contrastRatio(color.accent.fgOnAccent, color.accent.default)).toBeGreaterThanOrEqual(4.5);
   });
