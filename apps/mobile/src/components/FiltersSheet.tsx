@@ -24,10 +24,17 @@ type Props = {
   onClose: () => void;
 };
 
-const same = (a: Period | null, b: Period) => a !== null && a.from === b.from && a.to === b.to;
+const same = (a: Period | null, b: Period) =>
+  a !== null && a.from === b.from && a.to === b.to;
 
 /** Everything that narrows the list, in one window: a period, and for spending a category. */
-export function FiltersSheet({ today, value, withCategories, onApply, onClose }: Props) {
+export function FiltersSheet({
+  today,
+  value,
+  withCategories,
+  onApply,
+  onClose,
+}: Props) {
   const [period, setPeriod] = useState<Period | null>(value.period);
   const [category, setCategory] = useState<string | null>(value.category);
   const quick: { label: string; period: Period }[] = [
@@ -46,36 +53,68 @@ export function FiltersSheet({ today, value, withCategories, onApply, onClose }:
       <Text style={styles.heading}>Период</Text>
       <View style={styles.chips}>
         {quick.map((q) => (
-          <Chip key={q.label} label={q.label} selected={same(period, q.period)} onPress={() => setPeriod(same(period, q.period) ? null : q.period)} />
+          <Chip
+            key={q.label}
+            label={q.label}
+            selected={same(period, q.period)}
+            onPress={() => setPeriod(same(period, q.period) ? null : q.period)}
+          />
         ))}
       </View>
-      <DateField label="С" value={from} onChange={(d) => setPeriod({ from: d, to: d > to ? d : to })} max={today} />
-      <DateField label="По" value={to} onChange={(d) => setPeriod({ from: d < from ? d : from, to: d })} max={today} />
+      <DateField
+        label="С"
+        value={from}
+        onChange={(d) => setPeriod({ from: d, to: d > to ? d : to })}
+        max={today}
+      />
+      <DateField
+        label="По"
+        value={to}
+        onChange={(d) => setPeriod({ from: d < from ? d : from, to: d })}
+        max={today}
+      />
       {withCategories && (
         <>
           <Text style={styles.heading}>Категория</Text>
-          {SPEND_CATEGORIES.map((c) => {
-            const on = category === c;
-            return (
-              <Pressable
-                key={c}
-                accessibilityRole="button"
-                accessibilityLabel={categoryLabel(c)}
-                accessibilityState={{ selected: on }}
-                onPress={() => setCategory(on ? null : c)}
-                style={styles.row}
-              >
-                <View style={[styles.badge, on && styles.badgeOn]}>
-                  <Icon name={categoryIcon({ type: "spend", category: c })} color={on ? color.accent.fgOnAccent : color.fg.muted} size={18} />
-                </View>
-                <Text style={styles.text}>{categoryLabel(c)}</Text>
-              </Pressable>
-            );
-          })}
+          <View style={styles.chips}>
+            {SPEND_CATEGORIES.map((c) => {
+              const on = category === c;
+              return (
+                <Pressable
+                  key={c}
+                  accessibilityRole="button"
+                  accessibilityLabel={categoryLabel(c)}
+                  accessibilityState={{ selected: on }}
+                  onPress={() => setCategory(on ? null : c)}
+                  hitSlop={space.xs}
+                style={[styles.pill, on && styles.pillOn]}
+                >
+                  <Icon
+                    name={categoryIcon({ type: "spend", category: c })}
+                    color={on ? color.accent.fgOnAccent : color.fg.muted}
+                    size={16}
+                  />
+                  <Text style={[styles.pillText, on && styles.pillTextOn]}>
+                    {categoryLabel(c)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </>
       )}
-      <PrimaryButton label="Показать" onPress={() => apply({ period, category: withCategories ? category : null })} />
-      <Pressable accessibilityRole="button" accessibilityLabel="Сбросить" onPress={() => apply({ period: null, category: null })} style={styles.reset}>
+      <PrimaryButton
+        label="Показать"
+        onPress={() =>
+          apply({ period, category: withCategories ? category : null })
+        }
+      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Сбросить"
+        onPress={() => apply({ period: null, category: null })}
+        style={styles.reset}
+      >
         <Text style={styles.resetText}>Сбросить</Text>
       </Pressable>
     </Sheet>
@@ -85,10 +124,22 @@ export function FiltersSheet({ today, value, withCategories, onApply, onClose }:
 const styles = StyleSheet.create({
   heading: { ...type.label, color: color.fg.subtle },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
-  row: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.md },
-  badge: { width: 36, height: 36, borderRadius: radius.full, backgroundColor: color.surface.raised, alignItems: "center", justifyContent: "center" },
-  badgeOn: { backgroundColor: color.accent.default },
-  text: { ...type.body, color: color.fg.default },
-  reset: { minHeight: touchMin, alignItems: "center", justifyContent: "center" },
+  pill: {
+    minHeight: touchMin - space.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.xs,
+    paddingHorizontal: space.md,
+    borderRadius: radius.full,
+    backgroundColor: color.surface.overlay,
+  },
+  pillOn: { backgroundColor: color.accent.default },
+  pillText: { ...type.caption, color: color.fg.default },
+  pillTextOn: { color: color.accent.fgOnAccent },
+  reset: {
+    minHeight: touchMin,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   resetText: { ...type.label, color: color.fg.muted },
 });
