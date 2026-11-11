@@ -330,6 +330,8 @@ describe("Activity recipient label", () => {
     expect(await screen.findByRole("button", { name: "Что это за перевод: не указано" })).toBeTruthy();
     const closes = screen.getAllByRole("button", { name: "Закрыть" });
     await fireEvent.press(closes[closes.length - 1]!);
+    // The window closes with an animation and covers the list until it is gone: a person cannot tap a row before that.
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Что это за перевод/ })).toBeNull());
     await fireEvent.press(await screen.findByText("Кофейня"));
     await screen.findByLabelText("Применить к похожим");
     expect(screen.queryByRole("button", { name: /Что это за перевод/ })).toBeNull();

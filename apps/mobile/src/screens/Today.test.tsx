@@ -644,6 +644,8 @@ describe("Today, questions", () => {
     expect(await screen.findByText("Иван")).toBeTruthy();
     const closes = screen.getAllByRole("button", { name: "Закрыть" });
     await fireEvent.press(closes[closes.length - 1]!);
+    // The window closes with an animation and covers the questions until it is gone.
+    await waitFor(() => expect(screen.queryByText("Что это за перевод?")).toBeNull());
     await fireEvent.press(await screen.findByText("Кто это: Ольга?"));
     expect(await screen.findByText("Ольга")).toBeTruthy();
   });
