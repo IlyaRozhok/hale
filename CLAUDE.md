@@ -39,7 +39,7 @@ The owner's goal: a comfortable, quiet product that people want to open every da
    - `cd apps/mobile && npx jest` — screens.
    In a new working copy run `pnpm install --frozen-lockfile --prefer-offline` first.
 4. A PR into `main` with `gh pr create`. The description says what was done, how it was verified, and what was not verified.
-5. Merge: green CI on GitHub and an `APPROVED` verdict from an independent reviewer, recorded as a comment in the PR, then `gh pr merge --squash --delete-branch`. GitHub does not enforce this (there is no branch protection), so we hold the rule ourselves.
+5. Merge: green CI on GitHub and an `APPROVED` verdict from an independent reviewer, which the lead records as a comment in the PR (every verdict of every round is recorded, not only the approval), then `gh pr merge --squash --delete-branch`. GitHub does not enforce this (there is no branch protection), so we hold the rule ourselves.
 6. A screen change is checked by eye in the simulator on the stand, and a screenshot goes to the owner.
 7. Afterwards update `backlog.md` and `status.md`.
 
@@ -66,7 +66,7 @@ A question to the owner is one, specific, with options and your recommendation. 
 
 ## Parallel work
 
-- One builder — one task — one working copy. Two builders do not touch the same files at the same time: tasks that share files go one after another.
+- One builder — one task — one working copy. Two builders do not touch the same files at the same time: tasks that share files go one after another, the second from `main` after the first is merged.
 - Accounting changes on the server (`today`, `plan`, `transactions`, `domain`) go one at a time.
 - Only the lead agent edits `backlog.md`, `status.md`, `pitfalls.md` and the daily summary.
-- There is one simulator. Whoever starts the stand stops it, Metro included, before their session ends.
+- There is one simulator. Whoever starts the stand stops it before their session ends, and Metro too if they started it; a Metro someone else started is reported, not stopped.
