@@ -19,16 +19,18 @@ Language: talk to the owner and write `backlog.md`, `status.md`, the daily summa
 ## 1. Choosing tasks
 
 Take tasks top to bottom with the status «готова» whose «после …» condition is met, until you have the number you need. Rules:
-- two tasks must not touch the same files; tasks marked «Сервер» — no more than one at a time in a run;
+- two tasks that touch the same files never run in parallel: they go one after another within the run, the second started from `main` after the first is merged. Tasks marked «Сервер» — no more than one at a time in a run;
 - no more than two builders in parallel (the tests and the type check are heavy);
 - a task marked «Макет: да» is not built: a mockup is prepared for it (up to three a day) and it stays «ждёт владельца». A mockup is two or three variants as a picture in `docs/superpowers/daily/YYYY-MM-DD/`, with a recommendation; write the question and the path to the picture into the task;
 - if there are no ready tasks, do not invent work: the summary says that everything is waiting for the owner.
 
-Mark the chosen ones «в работе».
+Do not write «в работе» into the queue: an open PR is that mark, and only results go into the file. One run works at a time: before choosing, look at `gh pr list` and do not take a task that already has an open PR.
 
 ## 2. Building
 
-For each task start a `hale-builder` agent with `isolation: "worktree"`. Put into the brief the full task text from the queue, the owner's decisions from the audit that relate to it, and what is already known about the code. Start independent tasks in one message.
+Before handing a task out, spend a minute searching the code and the tests for what it really touches — including tests in other files that assert the behaviour the task changes — and correct the «Где» list in the brief. Tasks are chosen for parallel work by that list, so it has to be true; the builder stays inside it and stops with a question if it turns out wrong.
+
+For each task start a `hale-builder` agent with `isolation: "worktree"`. Put into the brief the full task text from the queue with the corrected «Где», the owner's decisions from the audit that relate to it, and what is already known about the code. Start independent tasks in one message.
 
 A builder returns a PR link or a question. A question you can answer from the documents — answer it and continue; a question for the owner — the task gets «ждёт владельца».
 
@@ -37,20 +39,20 @@ A builder returns a PR link or a question. A question you can answer from the do
 1. Wait for CI with one background command: `gh pr checks <N> --watch --fail-fast`. Red CI — return it to the builder with the output of the failed step. The reviewer from step 2 works at the same time.
 2. Start a `hale-reviewer` agent with `isolation: "worktree"` (otherwise it would switch the branch in the shared copy), with the PR number, the task text and any permissions you gave the builder beyond the task. It must not see your conclusions about the PR. You can start it right away without waiting for CI to finish: both conditions meet in step 4.
 3. `CHANGES REQUESTED` — pass the findings to the builder verbatim. No more than two rounds; after the second the task is «застряла» with the reason, and the PR stays open.
-4. `APPROVED` and green CI — `gh pr merge <N> --squash --delete-branch`, then `git pull`. While the branch is held by the builder's working copy, the command merges the PR but does not delete the branch on GitHub: follow it with `git push origin --delete <branch>`. On a conflict the builder rebases the next PR onto fresh `main`, and CI runs again. After the last merge make sure CI on `main` is green: each PR was checked on its own base, not together with the others. If it is red, fix it before anything else and say so in the summary.
+4. `APPROVED` and green CI — first record the verdict in the PR: `gh pr comment <N>` with the reviewer's report verbatim under the line «Вердикт независимого проверяющего» (every round, `CHANGES REQUESTED` too), so that the rule can be checked on GitHub and not only in this session. Then `gh pr merge <N> --squash --delete-branch`, then `git pull`. While the branch is held by the builder's working copy, the command merges the PR but does not delete the branch on GitHub: follow it with `git push origin --delete <branch>`. On a conflict the builder rebases the next PR onto fresh `main`, and CI runs again. After the last merge make sure CI on `main` is green: each PR was checked on its own base, not together with the others. If it is red, fix it before anything else and say so in the summary.
 
 No PR is merged without both conditions. If in doubt about money, do not merge; take it to the owner.
 
 ## 4. Screens
 
-If the look or behaviour of a screen changed during the run: bring up the stand by `scripts/sim/README.md`, walk through the changed places, take screenshots and send them to the owner. The stand's Metro shows the shared copy, so merged work is visible after `git pull`; take the "before" screenshots before it. Anything on the screen that does not match the task is not "done": return it to the builder or open a task. Stop the stand at the end.
+If the look or behaviour of a screen changed during the run: bring up the stand by `scripts/sim/README.md`, walk through the changed places, take screenshots and send them to the owner. The stand's Metro shows the shared copy, so merged work is visible after `git pull`; take the "before" screenshots before it. Anything on the screen that does not match the task is not "done": return it to the builder or open a task. Whoever brought the stand up stops it before the session ends — Metro included (the last step of the README), then check that nothing is left listening on ports 8082, 3100 and 55432.
 
 ## 5. Records
 
 One branch `docs/day-YYYY-MM-DD` and one PR (through CI and review as well), all three files in Russian:
 - `backlog.md`: statuses, dates, PR numbers, newly found tasks — at the end of their stage or in «Запас идей»;
 - `status.md`: what changed in the product, briefly, in the style of the file; a new build, test or environment pitfall goes into `docs/superpowers/pitfalls.md`, in English;
-- `docs/superpowers/daily/YYYY-MM-DD.md` — the summary; the day's screenshots and mockups go into the directory `daily/YYYY-MM-DD/`.
+- `docs/superpowers/daily/YYYY-MM-DD.md` — the summary. Mockups that wait for the owner's decision go into the directory `daily/YYYY-MM-DD/`. Screenshots are sent to the owner with the summary and are not committed: keep them in `.sim/shots/` (git-ignored) until they are sent.
 
 Create the branch as a separate working copy (`git worktree add`), not by switching the branch in the shared copy. At the end remove this run's builder and reviewer working copies and their local branches — only if a copy has nothing uncommitted and its branch is merged or pushed; otherwise leave it and say so in the summary. Do not touch other sessions' copies.
 
