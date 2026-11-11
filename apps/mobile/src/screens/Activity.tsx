@@ -67,7 +67,10 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
     setSearching(!searching);
   };
 
-  const chosenCategory = tab === "spend" ? category : null;
+  // Income has no spending categories. Under "Все" a chosen one keeps narrowing the list, in sight
+  // on the button and in the summary, until it is taken off in the window.
+  const withCategories = tab !== "income";
+  const chosenCategory = withCategories ? category : null;
   const list = useTransactions({
     group: tab,
     ...(chosenCategory ? { category: chosenCategory } : {}),
@@ -184,7 +187,7 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
         <FiltersSheet
           today={kyivDate(now())}
           value={{ period, category: chosenCategory }}
-          withCategories={tab === "spend"}
+          withCategories={withCategories}
           onApply={(f) => {
             setPeriod(f.period);
             setCategory(f.category);

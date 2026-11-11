@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import { categoryIcon } from "../categoryIcon";
-import { shiftDate } from "../format";
+import { lastDays } from "../format";
 import { SPEND_CATEGORIES, categoryLabel } from "../labels";
 import { Chip } from "./Chip";
 import { DateField } from "./DateField";
@@ -18,7 +18,7 @@ export type Filters = { period: Period | null; category: string | null };
 type Props = {
   today: string;
   value: Filters;
-  /** Categories are for spending only. */
+  /** Categories are spending's: offered wherever spending is listed, not for income. */
   withCategories: boolean;
   onApply: (f: Filters) => void;
   onClose: () => void;
@@ -27,7 +27,7 @@ type Props = {
 const same = (a: Period | null, b: Period) =>
   a !== null && a.from === b.from && a.to === b.to;
 
-/** Everything that narrows the list, in one window: a period, and for spending a category. */
+/** Everything that narrows the list, in one window: a period, and where spending is listed a category. */
 export function FiltersSheet({
   today,
   value,
@@ -39,15 +39,14 @@ export function FiltersSheet({
   const [category, setCategory] = useState<string | null>(value.category);
   const quick: { label: string; period: Period }[] = [
     { label: "Сегодня", period: { from: today, to: today } },
-    { label: "Неделя", period: { from: shiftDate(today, -6), to: today } },
-    { label: "Месяц", period: { from: `${today.slice(0, 7)}-01`, to: today } },
+    { label: "Неделя", period: lastDays(today, 7) },
+    // Not the calendar month: on the 2nd that would be two days.
+    { label: "Месяц", period: lastDays(today, 30) },
   ];
   const apply = (f: Filters) => {
     onApply(f);
     onClose();
   };
-  const from = period?.from ?? today;
-  const to = period?.to ?? today;
   return (
     <Sheet title="Фильтры" onClose={onClose}>
       <Text style={styles.heading}>Период</Text>
@@ -61,16 +60,18 @@ export function FiltersSheet({
           />
         ))}
       </View>
+      {/* Empty until a period is chosen. One date alone makes a whole period, and both fields show it:
+          a start runs to today, an end is that one day. */}
       <DateField
         label="С"
-        value={from}
-        onChange={(d) => setPeriod({ from: d, to: d > to ? d : to })}
+        value={period?.from ?? ""}
+        onChange={(d) => setPeriod({ from: d, to: !period ? today : d > period.to ? d : period.to })}
         max={today}
       />
       <DateField
         label="По"
-        value={to}
-        onChange={(d) => setPeriod({ from: d < from ? d : from, to: d })}
+        value={period?.to ?? ""}
+        onChange={(d) => setPeriod({ from: !period || d < period.from ? d : period.from, to: d })}
         max={today}
       />
       {withCategories && (
