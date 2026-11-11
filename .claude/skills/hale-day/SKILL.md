@@ -58,7 +58,7 @@ Create the branch as a separate working copy (`git worktree add`), not by switch
 
 The daily file, and the same thing as a message to the owner, in Russian, with these sections:
 
-1. **Сделано** — the task, one line on what changed for a person, the PR number.
+1. **Сделано** — the task, one line on what changed for a person, the PR link.
 2. **Решения для вас** — numbered, each with options and your recommendation; mockups attached. If there are no decisions, say so.
 3. **Не получилось** — what got stuck and why, without softening.
 4. **Деплой** — whether one is needed (did `apps/api`, `packages/contracts` or `infra` change), whether there is a migration, the command: `DEPLOY_HOST=2.31.201.103 DOMAIN=api.halemoney.com infra/deploy.sh` (if SSH does not answer, `infra/open-ssh.sh` first). Whether a new iPhone build is needed.

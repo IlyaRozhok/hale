@@ -1,6 +1,6 @@
 # Pitfalls: build, tests, simulator, agent environment
 
-For agents, in English. Each item cost someone time once. When you hit a new one, add it here.
+For agents, in English. Each item cost someone time once. When you hit a new one, put it in your report; the lead adds it here.
 
 ## Agent environment
 

@@ -16,7 +16,7 @@ Node 22 is needed: `source ~/.nvm/nvm.sh && nvm use 22`. If the agent's environm
 Every date in `seed.sql` is counted from today in Kyiv, so the picture is the same on any day: income in 8 days, a ₴2,000 limit with ₴760 spent, a reserve of ₴5,000, two payments before the income, a week within the limit, yesterday ₴340 left of a ₴1,960 limit.
 
 - A shortage before the income: `node scripts/sim/sql.mjs scripts/sim/short.sql`, then pull «Сегодня» down.
-- A loan, a FOP account and café spending older than a week and older than a month: `node scripts/sim/sql.mjs scripts/sim/extra.sql` on top of `seed.sql`. Needed for «Займы» in «План», the line «в том числе ФОП» and the «Месяц» period in the filters. The picture is different afterwards (the reserve to the income is ₴12,000, not ₴5,000); the file will not run twice in a row (the `sim-fop` account already exists) — restore the base with `seed.sql` first.
+- A loan, a FOP account and café spending older than a week and older than a month: `node scripts/sim/sql.mjs scripts/sim/extra.sql` on top of `seed.sql`. Needed for «Займы» in «План», the line «в том числе ФОП» and the «Месяц» period in the filters. The picture is different afterwards («Запас к доходу» is ₴12,000, not ₴5,000); the file will not run twice in a row (the `sim-fop` account already exists) — restore the base with `seed.sql` first.
 - Your own scenario: write SQL next to these and run it the same way. Restore the base: `node scripts/sim/sql.mjs scripts/sim/seed.sql`.
 
 ## How to tap in the simulator

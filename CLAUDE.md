@@ -26,6 +26,7 @@ The owner's goal: a comfortable, quiet product that people want to open every da
 - Enter the owner's real password, or put secrets into chat, commits or files. Do not read or commit the `private/` directory.
 - Commit to `main` directly, or merge without green CI and an independent review.
 - Write attribution lines in commits or PRs.
+- Some of these prohibitions are duplicated in `.claude/settings.json` (the `deny` section): `ssh`, the deploy scripts in `infra/`, `terraform`, the keychain, reading `private/`. This is a safeguard against mistakes; never get around it by writing the command another way.
 - Start anything that needs Apple Developer (push, widget, TestFlight) until the owner says the account is ready.
 
 ## How a task is done
@@ -38,7 +39,7 @@ The owner's goal: a comfortable, quiet product that people want to open every da
    - `cd apps/mobile && npx jest` — screens.
    In a new working copy run `pnpm install --frozen-lockfile --prefer-offline` first.
 4. A PR into `main` with `gh pr create`. The description says what was done, how it was verified, and what was not verified.
-5. Merge: green CI on GitHub and an "approved" verdict from an independent reviewer, then `gh pr merge --squash --delete-branch`. GitHub does not enforce this (there is no branch protection), so we hold the rule ourselves.
+5. Merge: green CI on GitHub and an `APPROVED` verdict from an independent reviewer, then `gh pr merge --squash --delete-branch`. GitHub does not enforce this (there is no branch protection), so we hold the rule ourselves.
 6. A screen change is checked by eye in the simulator on the stand, and a screenshot goes to the owner.
 7. Afterwards update `backlog.md` and `status.md`.
 
@@ -46,7 +47,7 @@ Commit messages are in Russian, in the style of the history: `feat(mobile): …`
 
 ## What the owner sees first
 
-- A new look for a screen, or a noticeable rearrangement: a mockup first, code after the owner's "да". Fixing a dead end without a new look needs no mockup; a screenshot afterwards is enough.
+- A new look for a screen, or a noticeable rearrangement: a mockup first, code after the owner's «да». Fixing a dead end without a new look needs no mockup; a screenshot afterwards is enough.
 - Any change to how money is calculated, unless the audit or the task records it as an accepted decision.
 - A database migration: the PR says what it does to existing rows; deployment stays with the owner.
 
@@ -67,5 +68,5 @@ A question to the owner is one, specific, with options and your recommendation. 
 
 - One builder — one task — one working copy. Two builders do not touch the same files.
 - Accounting changes on the server (`today`, `plan`, `transactions`, `domain`) go one at a time.
-- Only the lead agent edits `backlog.md`, `status.md` and the daily summary.
+- Only the lead agent edits `backlog.md`, `status.md`, `pitfalls.md` and the daily summary.
 - There is one simulator.
