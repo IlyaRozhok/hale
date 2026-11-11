@@ -676,7 +676,7 @@ describe("Plan, tax payments", () => {
 });
 
 describe("Plan, manual loan", () => {
-  it("creates a loan and Today then shows the bad case", async () => {
+  it("creates a loan and Today is counted again, without a loan row there", async () => {
     const badCase = { id: "loan:1", text: "Взят займ ₴5,000 (02.11): столько не хватало." };
     let created = false;
     const api = fakeApi({
@@ -700,9 +700,11 @@ describe("Plan, manual loan", () => {
     await fireEvent.changeText(await screen.findByLabelText("Сумма займа"), "5000");
     await pickDate("Дата займа", day);
     await fireEvent.changeText(screen.getByLabelText("Заметка к займу"), "до зарплаты");
+    const before = api.today.mock.calls.length;
     await fireEvent.press(screen.getByRole("button", { name: "Добавить займ" }));
     await waitFor(() => expect(api.createLoan).toHaveBeenCalledWith({ amount: 500_000, received_on: day, note: "до зарплаты" }));
-    expect(await screen.findByText(badCase.text)).toBeTruthy();
+    await waitFor(() => expect(api.today.mock.calls.length).toBeGreaterThan(before));
+    expect(screen.queryByText(badCase.text)).toBeNull();
     await waitFor(() => expect(screen.queryByLabelText("Сумма займа")).toBeNull());
   });
 
