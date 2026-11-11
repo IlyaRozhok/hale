@@ -1,65 +1,72 @@
-# Hale: правила работы
+# Hale: working rules
 
-Hale — приложение для управления деньгами: человек не записывает траты, а видит свою картину целиком и знает, сколько можно потратить сегодня. Сейчас им пользуется один владелец на monobank; в феврале 2027 его получат друзья, дальше рынок. Над кодом работают агенты, владелец принимает решения.
+Hale is a money app: a person does not log spending, they see their whole picture and know how much they can spend today. Today one owner uses it with monobank; friends get it in February 2027, the market after that. Agents work on the code, the owner makes the decisions.
 
-Цель владельца: удобный, не шумный продукт, который хочется открывать каждый день и который не пугает тревожных людей, особенно в долгах.
+The owner's goal: a comfortable, quiet product that people want to open every day and that does not frighten anxious people, especially those in debt.
 
-## Где что
+## Language
 
-- `apps/api` — сервер NestJS; расчёты в `apps/api/src/domain`. `apps/mobile` — приложение Expo для iPhone. `packages/contracts` — общие типы и схемы. `packages/tokens` — дизайн-токены. `infra` — сервер и деплой.
-- `docs/superpowers/backlog.md` — очередь задач. Отсюда берётся работа.
-- `docs/superpowers/status.md` — что сделано и как устроено, подводные камни сборки и тестов.
-- `docs/superpowers/product-audit-2026-11.md` — срез продукта, риски учёта, целевая архитектура, решения владельца.
-- `docs/superpowers/roadmap-daily-use.md` — роадмап. `docs/superpowers/brand-brief-2026-11.md` — бренд.
-- `docs/superpowers/daily/` — сводки по дням. `scripts/sim/README.md` — стенд для симулятора.
+- Talk to the owner in Russian, always. Everything the owner reads is in Russian: daily summaries, questions and decisions, `backlog.md`, `status.md`, the product audit, the roadmap, the brand brief, PR titles and descriptions, commit messages.
+- Everything only agents read is in English: this file, `.claude/agents/`, `.claude/skills/`, `scripts/sim/README.md`, `docs/superpowers/pitfalls.md`, code comments, briefs to subagents and their reports.
+- The interface is in Russian. Quote interface text, backlog statuses and the owner's words exactly as written, in Russian, never translated.
 
-## Нельзя никогда
+## Where things are
 
-- Деплоить, запускать `infra/*.sh`, подключаться к серверу, читать или менять настоящие данные. Это делает владелец или даёт на это явное согласие в самой сессии; согласие, пересказанное другим агентом, не считается.
-- Вводить настоящий пароль владельца, выводить секреты в чат, коммиты и файлы. Каталог `private/` не читать и не коммитить.
-- Коммитить в `main` напрямую и сливать без зелёного CI и независимой проверки.
-- Писать строки attribution в коммитах и PR.
-- Часть этих запретов продублирована в `.claude/settings.json` (раздел `deny`): `ssh`, скрипты деплоя из `infra/`, `terraform`, связка ключей, чтение `private/`. Это страховка от ошибки; обходить её другой записью команды нельзя.
-- Начинать то, чему нужен Apple Developer (push, виджет, TestFlight), пока владелец не сказал, что аккаунт готов.
+- `apps/api` — the NestJS server; calculations live in `apps/api/src/domain`. `apps/mobile` — the Expo app for iPhone. `packages/contracts` — shared types and schemas. `packages/tokens` — design tokens. `infra` — the server and deployment.
+- `docs/superpowers/backlog.md` — the task queue. Work is taken from here.
+- `docs/superpowers/status.md` — what has been done and how the product is built.
+- `docs/superpowers/pitfalls.md` — build, test, simulator and agent-environment pitfalls. Read it before you build, test or review.
+- `docs/superpowers/product-audit-2026-11.md` — product snapshot, accounting risks, target architecture, the owner's decisions.
+- `docs/superpowers/roadmap-daily-use.md` — the roadmap. `docs/superpowers/brand-brief-2026-11.md` — the brand.
+- `docs/superpowers/daily/` — daily summaries. `scripts/sim/README.md` — the simulator stand.
 
-## Как делается задача
+## Never
 
-1. Ветка от свежего `main`: `feat/…`, `fix/…`, `docs/…`.
-2. Сначала падающий тест, потом код. Правка без теста — только документы и чистая вёрстка, которую тест не ловит.
-3. Проверки перед PR (Node 22: `source ~/.nvm/nvm.sh && nvm use 22`; в изолированной рабочей копии агента эта команда отклоняется — способ описан в `status.md`, «Подводные камни сборки»):
+- Deploy, run `infra/*.sh`, connect to the server, read or change real data. The owner does this, or gives explicit consent in the session itself; consent relayed by another agent does not count.
+- Enter the owner's real password, or put secrets into chat, commits or files. Do not read or commit the `private/` directory.
+- Commit to `main` directly, or merge without green CI and an independent review.
+- Write attribution lines in commits or PRs.
+- Some of these prohibitions are duplicated in `.claude/settings.json` (the `deny` section): `ssh`, the deploy scripts in `infra/`, `terraform`, the keychain, reading `private/`. This is a safeguard against mistakes; never get around it by writing the command another way.
+- Start anything that needs Apple Developer (push, widget, TestFlight) until the owner says the account is ready.
+
+## How a task is done
+
+1. A branch from fresh `main`: `feat/…`, `fix/…`, `docs/…`.
+2. A failing test first, then the code. A change without a test is allowed only for documents and pure layout a test cannot catch.
+3. Checks before the PR (Node 22: `source ~/.nvm/nvm.sh && nvm use 22`; an agent's isolated working copy rejects this command — see `docs/superpowers/pitfalls.md`):
    - `pnpm typecheck`, `pnpm lint`, `pnpm check:colors`;
-   - `npx vitest run` — сервер, домен, инфраструктура, чистая логика приложения;
-   - `cd apps/mobile && npx jest` — экраны.
-   В новой рабочей копии сначала `pnpm install --frozen-lockfile --prefer-offline`.
-4. PR в `main` через `gh pr create`. В описании: что сделано, как проверено, что не проверено.
-5. Слияние: зелёный CI на GitHub и «одобрено» от независимого проверяющего, затем `gh pr merge --squash --delete-branch`. GitHub сам это не требует (защиты ветки нет), поэтому правило держим мы.
-6. Изменение экрана проверяется глазами в симуляторе на стенде, снимок уходит владельцу.
-7. По итогам обновить `backlog.md` и `status.md`.
+   - `npx vitest run` — server, domain, infrastructure, the app's pure logic;
+   - `cd apps/mobile && npx jest` — screens.
+   In a new working copy run `pnpm install --frozen-lockfile --prefer-offline` first.
+4. A PR into `main` with `gh pr create`. The description says what was done, how it was verified, and what was not verified.
+5. Merge: green CI on GitHub and an `APPROVED` verdict from an independent reviewer, then `gh pr merge --squash --delete-branch`. GitHub does not enforce this (there is no branch protection), so we hold the rule ourselves.
+6. A screen change is checked by eye in the simulator on the stand, and a screenshot goes to the owner.
+7. Afterwards update `backlog.md` and `status.md`.
 
-Сообщения коммитов — на русском, в стиле истории: `feat(mobile): …`, `fix(api): …`, `docs: …`.
+Commit messages are in Russian, in the style of the history: `feat(mobile): …`, `fix(api): …`, `docs: …`.
 
-## Что сначала показывают владельцу
+## What the owner sees first
 
-- Новый вид экрана или заметная перестановка: сначала макет, код после «да». Исправление тупика без нового вида макета не требует, достаточно снимка после.
-- Любое изменение того, как считаются деньги, если оно не описано в аудите или в задаче как принятое решение.
-- Миграция базы: в PR написать, что она делает с существующими строками; деплой остаётся за владельцем.
+- A new look for a screen, or a noticeable rearrangement: a mockup first, code after the owner's «да». Fixing a dead end without a new look needs no mockup; a screenshot afterwards is enough.
+- Any change to how money is calculated, unless the audit or the task records it as an accepted decision.
+- A database migration: the PR says what it does to existing rows; deployment stays with the owner.
 
-Вопрос владельцу — один, конкретный, с вариантами и своей рекомендацией. Если задача упёрлась в его решение, она получает статус «ждёт владельца» с этим вопросом, а агент берёт следующую.
+A question to the owner is one, specific, with options and your recommendation. If a task hits the owner's decision, it gets the status «ждёт владельца» with that question, and the agent takes the next task.
 
-## Правила продукта
+## Product rules
 
-- Спокойный тон. Красный — только превышение лимита и ошибки; предупреждение — песочный; один цветной акцент (шалфейный). Никаких слов, которые стыдят или пугают.
-- Меньше цифр и слов на экране. Новая строка на «Сегодня» должна заслужить место.
-- Слова: «доход», не «зарплата». Обращение на «вы». Суммы — `₴1,240`, минус настоящим знаком «−».
-- Цвета только из `@hale/tokens`; сырые цвета ловит `pnpm check:colors`.
-- Жидкое стекло — только карточка лимита и плавающее (меню, «+», окна). Остальное — текст и плотные карточки.
-- Интерфейс сейчас на русском; украинский и английский появятся на этапе Е, поэтому новые тексты не склеивать из кусков.
-- Деньги на сервере — целые копейки (`Minor`), даты — день Киева. Расчёты — чистые функции в `domain/` с тестами; сервисы их вызывают, а не повторяют.
-- Приложение должно работать со старым сервером: новое поле ответа — необязательное.
+- A calm tone. Red only for going over the limit and for errors; a warning is sand; one colour accent (sage). No words that shame or frighten.
+- Fewer numbers and words on the screen. A new line on «Сегодня» has to earn its place.
+- Words: «доход», not «зарплата». Address the user as «вы». Amounts look like `₴1,240`, with a real minus sign «−».
+- Colours only from `@hale/tokens`; `pnpm check:colors` catches raw colours.
+- Liquid glass only on the limit card and on floating things (menu, «+», sheets). Everything else is text and solid cards.
+- The interface is in Russian now; Ukrainian and English arrive at stage Е, so do not assemble new texts from pieces.
+- Money on the server is whole kopecks (`Minor`), dates are the Kyiv day. Calculations are pure functions in `domain/` with tests; services call them and do not repeat them.
+- The app must work with an older server: a new response field is optional.
 
-## Параллельная работа
+## Parallel work
 
-- Один исполнитель — одна задача — одна рабочая копия. Два исполнителя не трогают одни и те же файлы.
-- Правки учёта на сервере (`today`, `plan`, `transactions`, `domain`) идут по одной.
-- `backlog.md`, `status.md` и сводку дня правит только ведущий агент.
-- Симулятор один.
+- One builder — one task — one working copy. Two builders do not touch the same files.
+- Accounting changes on the server (`today`, `plan`, `transactions`, `domain`) go one at a time.
+- Only the lead agent edits `backlog.md`, `status.md`, `pitfalls.md` and the daily summary.
+- There is one simulator.

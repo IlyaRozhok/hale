@@ -1,0 +1,27 @@
+# Pitfalls: build, tests, simulator, agent environment
+
+For agents, in English. Each item cost someone time once. When you hit a new one, put it in your report; the lead adds it here.
+
+## Agent environment
+
+- **Node 22 in an isolated working copy.** The environment rejects `source ~/.nvm/nvm.sh && nvm use 22`. Put the path in front of the command instead: `PATH="$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node | grep '^v22' | sort -V | tail -1)/bin:$PATH" pnpm …`. In a chain like `cd apps/mobile && npx jest` the path goes after the `&&`, in front of `npx`.
+- **Git in an isolated working copy** is accepted only as a separate simple command: no `cd`, `&&` or `PATH` override on the same line.
+- **`gh pr checkout N` fails** while the PR's branch is held by the builder's working copy. A reviewer uses `gh pr view N --json headRefOid`, `git fetch origin pull/N/head`, `git checkout --detach <sha>`.
+- **`gh pr merge --delete-branch`**, for the same reason, merges the PR but stops at deleting the local branch and does not delete the branch on GitHub. After the merge: `git push origin --delete <branch>`.
+- **The full type check** (`pnpm typecheck`) takes about 6 GB of memory. No more than two builders at once; reviewers do not run it.
+
+## Tests
+
+- **Tests with sheets.** A sheet closes with a 200 ms animation and only then disappears. In tests the list under the sheet can be pressed while it is closing (on the phone the scrim blocks that), and the same sheet reopened for another row lives out the old animation and closes. So after «Закрыть» first wait until the sheet is gone (`waitFor(... toBeNull())`), and only then press on. Without this a test passes on a fast machine and fails in CI (11 November 2026: two tests, fixed).
+
+## iOS build
+
+- Run `pod install` only with `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`, otherwise it fails.
+- `pod install` over an existing `ios/Pods` wipes the version stamps of React, Hermes and the dependencies but leaves the files from the last build. The build then fails at linking or at launch. Cure: delete `ios/Pods` and install again.
+- `expo run:ios` ends by opening the app on port 8081. If another Metro is running there, the app looks at the real server: for a local check close it at once and open your own port.
+
+## Simulator and stand
+
+- **Stopping Metro.** `pkill -f "expo start"` does not find the stand's Metro (the process is named differently). Use `lsof -ti tcp:8082 -sTCP:LISTEN | xargs kill`.
+- **Taps arrive late sometimes.** After a tap wait 2 s and only then take a screenshot, otherwise the next tap opens the wrong sheet and the screenshot shows the screen from before the tap. The floating developer-menu button sits on top of «Закрыть» in sheets.
+- **The simulator tool types in the current layout, and it is Russian:** Latin letters arrive as Cyrillic (`voxiuqfaiw` becomes `мщчшгйафшц`). Use digits only for the test password, or paste it (see `scripts/sim/README.md`). The tool loses short taps: use a duration of at least 0.2 s. Its `touch_path` and `swipe` are no good for checking gestures in sheets: a real gesture needs `app_drag` through control of the Simulator window.
