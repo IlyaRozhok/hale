@@ -1,15 +1,15 @@
 ---
 name: hale-more
-description: Ускорение работы над Hale — взять из очереди ещё задач сверх дневного объёма. Аргумент — сколько задач (по умолчанию 2).
+description: Speed up work on Hale — take more tasks from the queue beyond the daily amount. The argument is how many tasks (default 2).
 ---
 
-Владелец хочет двигаться быстрее, чем дневной прогон.
+The owner wants to move faster than the daily run.
 
-Прочитать `.claude/skills/hale-day/SKILL.md` и выполнить его с такими отличиями:
+Read `.claude/skills/hale-day/SKILL.md` and carry it out with these differences:
 
-- число задач — аргумент команды: $ARGUMENTS (если пусто — 2);
-- задачи, которые уже «в работе» или сделаны сегодня, не считаются; брать следующие готовые;
-- сводку не заводить заново: дописать в файл сегодняшнего дня раздел «Дополнительно, ЧЧ:ММ» (если файла дня нет — создать);
-- потолки те же: задача, которая ждёт владельца, не берётся; серверные задачи учёта идут по одной; не больше двух исполнителей параллельно.
+- the number of tasks is the command's argument: $ARGUMENTS (if empty — 2);
+- tasks that are already «в работе» or were done today do not count; take the next ready ones;
+- do not start a new summary: add a section «Дополнительно, ЧЧ:ММ» to today's file (if there is no file for today, create it);
+- the ceilings are the same: a task waiting for the owner is not taken; server accounting tasks go one at a time; no more than two builders in parallel.
 
-Если готовых задач меньше, чем просили, — сделать сколько есть и первой строкой ответа сказать, что именно держит остальные: обычно это решения владельца из списка «ждёт владельца». Перечислить их, чтобы он мог ответить сразу.
+If there are fewer ready tasks than asked for, do as many as there are and say in the first line of your answer, in Russian, what exactly is holding the rest: usually it is the owner's decisions from the «ждёт владельца» list. List them so the owner can answer right away.

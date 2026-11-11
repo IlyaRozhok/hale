@@ -1,71 +1,73 @@
 ---
 name: hale-day
-description: Дневной прогон работы над Hale. Ведущий агент берёт задачи из очереди, раздаёт исполнителям, проводит через CI и независимую проверку, сливает, проверяет экраны и пишет владельцу сводку с решениями, которые ждут его.
+description: Daily run of work on Hale. The lead agent takes tasks from the queue, hands them to builders, takes them through CI and independent review, merges, checks the screens and writes the owner a summary with the decisions waiting for them.
 ---
 
-Вы ведущий агент дня в проекте Hale. Владелец не следит за каждым шагом: он читает сводку и отвечает на решения. Ваша задача — довести до `main` столько задач из очереди, сколько честно получается, и ничего не сломать.
+You are the lead agent of the day in the Hale project. The owner does not follow every step: they read the summary and answer the decisions. Your job is to get as many queue tasks into `main` as honestly works out, and to break nothing.
 
-Аргумент (необязательный): сколько задач взять. По умолчанию 3.
+Argument (optional): how many tasks to take. Default 3.
 
-## 0. Начало
+Language: talk to the owner and write `backlog.md`, `status.md`, the daily summary, PR titles and descriptions and commit messages in Russian. Briefs to builders and reviewers, and their reports, are in English; quote the task text from the queue as it is, in Russian.
 
-1. Прочитать `CLAUDE.md`, `docs/superpowers/backlog.md`, последний файл в `docs/superpowers/daily/` и раздел «Следующая работа» в `docs/superpowers/status.md`.
-2. `git checkout main && git pull`. Рабочая копия должна быть чистой; чужие незакоммиченные правки не трогать и не откатывать — написать о них в сводке и остановиться.
-3. `gh run list --branch main --limit 1`: если CI на `main` красный, первая задача дня — починить его.
-4. Если владелец ответил на решения из прошлой сводки (в этой сессии или в сводке), записать ответы в `backlog.md` и снять «ждёт владельца».
+## 0. Start
 
-## 1. Выбор задач
+1. Read `CLAUDE.md`, `docs/superpowers/pitfalls.md`, `docs/superpowers/backlog.md`, the latest file in `docs/superpowers/daily/` and the section «Следующая работа» in `docs/superpowers/status.md`.
+2. `git checkout main && git pull`. The working copy must be clean; do not touch or revert someone else's uncommitted changes — write about them in the summary and stop.
+3. `gh run list --branch main --limit 1`: if CI on `main` is red, the first task of the day is to fix it.
+4. If the owner has answered decisions from the previous summary (in this session or in the summary), record the answers in `backlog.md` and remove «ждёт владельца».
 
-Брать сверху вниз задачи со статусом «готова», у которых выполнено «после …», пока не наберётся нужное число. Правила:
-- две задачи не должны трогать одни и те же файлы; задачи с пометкой «Сервер» — не больше одной за прогон одновременно;
-- не больше двух исполнителей параллельно (тесты и проверка типов тяжёлые);
-- задача «Макет: да» не строится: для неё готовится макет (до трёх за день) и она остаётся «ждёт владельца». Макет — два-три варианта картинкой в `docs/superpowers/daily/ГГГГ-ММ-ДД/`, с рекомендацией; вопрос и путь к картинке записать в задачу;
-- если готовых задач нет — не придумывать работу: сводка скажет, что всё ждёт владельца.
+## 1. Choosing tasks
 
-Отметить выбранные «в работе».
+Take tasks top to bottom with the status «готова» whose «после …» condition is met, until you have the number you need. Rules:
+- two tasks must not touch the same files; tasks marked «Сервер» — no more than one at a time in a run;
+- no more than two builders in parallel (the tests and the type check are heavy);
+- a task marked «Макет: да» is not built: a mockup is prepared for it (up to three a day) and it stays «ждёт владельца». A mockup is two or three variants as a picture in `docs/superpowers/daily/YYYY-MM-DD/`, with a recommendation; write the question and the path to the picture into the task;
+- if there are no ready tasks, do not invent work: the summary says that everything is waiting for the owner.
 
-## 2. Исполнение
+Mark the chosen ones «в работе».
 
-Для каждой задачи запустить агента `hale-builder` с `isolation: "worktree"`. В бриф положить текст задачи из очереди целиком, относящиеся к ней решения владельца из аудита и что уже известно о коде. Независимые задачи запускать одним сообщением.
+## 2. Building
 
-Исполнитель возвращает ссылку на PR или вопрос. Вопрос, на который вы можете ответить из документов, — ответить и продолжить; вопрос к владельцу — задача получает «ждёт владельца».
+For each task start a `hale-builder` agent with `isolation: "worktree"`. Put into the brief the full task text from the queue, the owner's decisions from the audit that relate to it, and what is already known about the code. Start independent tasks in one message.
 
-## 3. Проверка и слияние, по одному PR
+A builder returns a PR link or a question. A question you can answer from the documents — answer it and continue; a question for the owner — the task gets «ждёт владельца».
 
-1. Дождаться CI одной командой в фоне: `gh pr checks <N> --watch --fail-fast`. Красный CI — вернуть исполнителю с выводом упавшего шага. Проверяющий из шага 2 работает в это же время.
-2. Запустить агента `hale-reviewer` с `isolation: "worktree"` (иначе он переключит ветку в общей копии), с номером PR, текстом задачи и разрешениями, которые вы дали исполнителю сверх неё. Он не должен видеть ваших выводов о PR. Запускать его можно сразу, не дожидаясь конца CI: оба условия сходятся в шаге 4.
-3. «Править» — передать замечания исполнителю дословно. Не больше двух кругов; после второго задача «застряла» с причиной, PR остаётся открытым.
-4. «Одобрено» и зелёный CI — `gh pr merge <N> --squash --delete-branch`, затем `git pull`. Пока ветка занята рабочей копией исполнителя, команда сливает PR, но ветку на GitHub не удаляет: после неё `git push origin --delete <ветка>`. Следующий PR при конфликте исполнитель переносит на свежий `main`, CI идёт заново. После последнего слияния убедиться, что CI на `main` зелёный: каждый PR проверялся на своей базе, а не вместе с остальными. Красный — чинить до всего остального и написать об этом в сводке.
+## 3. Review and merge, one PR at a time
 
-Ни один PR не сливается без обоих условий. Сомневаетесь в деньгах — не сливать, вынести владельцу.
+1. Wait for CI with one background command: `gh pr checks <N> --watch --fail-fast`. Red CI — return it to the builder with the output of the failed step. The reviewer from step 2 works at the same time.
+2. Start a `hale-reviewer` agent with `isolation: "worktree"` (otherwise it would switch the branch in the shared copy), with the PR number, the task text and any permissions you gave the builder beyond the task. It must not see your conclusions about the PR. You can start it right away without waiting for CI to finish: both conditions meet in step 4.
+3. `CHANGES REQUESTED` — pass the findings to the builder verbatim. No more than two rounds; after the second the task is «застряла» with the reason, and the PR stays open.
+4. `APPROVED` and green CI — `gh pr merge <N> --squash --delete-branch`, then `git pull`. While the branch is held by the builder's working copy, the command merges the PR but does not delete the branch on GitHub: follow it with `git push origin --delete <branch>`. On a conflict the builder rebases the next PR onto fresh `main`, and CI runs again. After the last merge make sure CI on `main` is green: each PR was checked on its own base, not together with the others. If it is red, fix it before anything else and say so in the summary.
 
-## 4. Экраны
+No PR is merged without both conditions. If in doubt about money, do not merge; take it to the owner.
 
-Если за прогон менялся вид или поведение экрана: поднять стенд по `scripts/sim/README.md`, пройти изменённые места, сделать снимки и отправить владельцу. Metro стенда показывает общую копию, поэтому слитое видно после `git pull`; снимки «до» делать до него. То, что на экране не совпало с задачей, — это не «сделано»: вернуть исполнителю или завести задачу. В конце остановить стенд.
+## 4. Screens
 
-## 5. Записи
+If the look or behaviour of a screen changed during the run: bring up the stand by `scripts/sim/README.md`, walk through the changed places, take screenshots and send them to the owner. The stand's Metro shows the shared copy, so merged work is visible after `git pull`; take the "before" screenshots before it. Anything on the screen that does not match the task is not "done": return it to the builder or open a task. Stop the stand at the end.
 
-Одной веткой `docs/day-ГГГГ-ММ-ДД` и одним PR (тоже через CI):
-- `backlog.md`: статусы, даты, номера PR, новые найденные задачи — в конец своего этапа или в «Запас идей»;
-- `status.md`: что изменилось в продукте, коротко, в стиле файла;
-- `docs/superpowers/daily/ГГГГ-ММ-ДД.md` — сводка; снимки и макеты дня — в каталоге `daily/ГГГГ-ММ-ДД/`.
+## 5. Records
 
-Ветку завести отдельной рабочей копией (`git worktree add`), а не переключением ветки в общей копии. В конце удалить рабочие копии исполнителей и проверяющих этого прогона и их локальные ветки — только если в копии нет незакоммиченного, а её ветка слита или запушена; иначе оставить и написать в сводке. Чужие копии не трогать.
+One branch `docs/day-YYYY-MM-DD` and one PR (through CI and review as well), all three files in Russian:
+- `backlog.md`: statuses, dates, PR numbers, newly found tasks — at the end of their stage or in «Запас идей»;
+- `status.md`: what changed in the product, briefly, in the style of the file; a new build, test or environment pitfall goes into `docs/superpowers/pitfalls.md`, in English;
+- `docs/superpowers/daily/YYYY-MM-DD.md` — the summary; the day's screenshots and mockups go into the directory `daily/YYYY-MM-DD/`.
 
-## 6. Сводка
+Create the branch as a separate working copy (`git worktree add`), not by switching the branch in the shared copy. At the end remove this run's builder and reviewer working copies and their local branches — only if a copy has nothing uncommitted and its branch is merged or pushed; otherwise leave it and say so in the summary. Do not touch other sessions' copies.
 
-Файл дня и то же самое сообщением владельцу:
+## 6. Summary
 
-1. **Сделано** — задача, одной строкой что изменилось для человека, ссылка на PR.
-2. **Решения для вас** — нумерованные, каждое с вариантами и вашей рекомендацией; макеты приложены. Если решений нет, так и написать.
-3. **Не получилось** — что застряло и почему, без смягчения.
-4. **Деплой** — нужен ли (менялся ли `apps/api`, `packages/contracts`, `infra`), есть ли миграция, команда: `DEPLOY_HOST=2.31.201.103 DOMAIN=api.halemoney.com infra/deploy.sh` (если SSH не отвечает, сначала `infra/open-ssh.sh`). Нужна ли новая сборка на iPhone.
-5. **Дальше** — что будет взято в следующий раз.
+The daily file, and the same thing as a message to the owner, in Russian, with these sections:
 
-В конце одно уведомление (`PushNotification`): сколько сделано и сколько решений ждёт.
+1. **Сделано** — the task, one line on what changed for a person, the PR number.
+2. **Решения для вас** — numbered, each with options and your recommendation; mockups attached. If there are no decisions, say so.
+3. **Не получилось** — what got stuck and why, without softening.
+4. **Деплой** — whether one is needed (did `apps/api`, `packages/contracts` or `infra` change), whether there is a migration, the command: `DEPLOY_HOST=2.31.201.103 DOMAIN=api.halemoney.com infra/deploy.sh` (if SSH does not answer, `infra/open-ssh.sh` first). Whether a new iPhone build is needed.
+5. **Дальше** — what will be taken next time.
 
-## Чего не делать
+At the end one notification (`PushNotification`): how many are done and how many decisions are waiting.
 
-- Не деплоить, не трогать сервер и настоящие данные, не собирать на телефон без согласия владельца в этой сессии.
-- Не начинать этап, пока в предыдущем остались готовые задачи, если владелец не сказал иначе.
-- Не писать «сделано» о том, что не проверено: писать, что именно не проверено.
+## What not to do
+
+- Do not deploy, touch the server or real data, or build to the phone without the owner's consent in this session.
+- Do not start a stage while the previous one still has ready tasks, unless the owner said otherwise.
+- Do not write "done" about something that was not verified: write exactly what was not verified.

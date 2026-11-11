@@ -1,28 +1,28 @@
-# Стенд для симулятора
+# The simulator stand
 
-Локальный сервер с выдуманными данными, чтобы смотреть приложение в симуляторе iPhone. Настоящий сервер и настоящие данные здесь не участвуют. Docker не нужен: Postgres из `embedded-postgres`, как в тестах.
+A local server with invented data, for looking at the app in the iPhone simulator. The real server and real data take no part in it. Docker is not needed: Postgres comes from `embedded-postgres`, as in the tests.
 
-Нужен Node 22: `source ~/.nvm/nvm.sh && nvm use 22`. Если среда агента эту команду отклоняет: `PATH="$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node | grep '^v22' | sort -V | tail -1)/bin:$PATH" scripts/sim/up.sh`, и так же перед `node scripts/sim/sql.mjs` и `down.sh`.
+Node 22 is needed: `source ~/.nvm/nvm.sh && nvm use 22`. If the agent's environment rejects that command: `PATH="$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node | grep '^v22' | sort -V | tail -1)/bin:$PATH" scripts/sim/up.sh`, and the same in front of `node scripts/sim/sql.mjs` and `down.sh`.
 
-## Запуск и остановка
+## Starting and stopping
 
-1. `scripts/sim/up.sh` — база на порту 55432, миграции, данные из `seed.sql`, сервер на `http://localhost:3100`. Одноразовый пароль лежит в `.sim/password` (только цифры: симулятор печатает в русской раскладке). В чат и в файлы репозитория пароль не выводить.
-2. Metro, в фоне: `cd apps/mobile && EXPO_PUBLIC_API_URL=http://localhost:3100 ./node_modules/.bin/expo start --dev-client --clear --port 8082`. Второй Metro на тот же порт не запускать. Если порт уже занят, работающий Metro можно использовать только после проверки, что он запущен из этой копии и смотрит на стенд: одной строкой `pid=$(lsof -ti tcp:8082 -sTCP:LISTEN); lsof -a -p $pid -d cwd -Fn; ps eww -p $pid | tr ' ' '\n' | grep EXPO_PUBLIC_API_URL` — первая команда должна показать `apps/mobile` этой копии, вторая `http://localhost:3100`. Не подтвердилось хотя бы одно — не использовать: Metro с другим адресом направит приложение на другой сервер. Metro показывает код этой копии: слитое в `main` видно после `git pull`.
-3. Симулятор iPhone 17 Pro с установленной dev-сборкой `com.irozhok.hale`: `xcrun simctl boot "iPhone 17 Pro"`, затем `xcrun simctl openurl booted "exp+hale://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8082"`.
-4. После проверки: `lsof -ti tcp:8082 -sTCP:LISTEN | xargs kill` (команда `pkill -f "expo start"` этот процесс не находит) и `scripts/sim/down.sh` (останавливает всё и стирает `.sim/` вместе с паролем).
+1. `scripts/sim/up.sh` — a database on port 55432, migrations, data from `seed.sql`, the server on `http://localhost:3100`. The one-time password is in `.sim/password` (digits only: the simulator types in the Russian layout). Do not put the password into chat or into repository files.
+2. Metro, in the background: `cd apps/mobile && EXPO_PUBLIC_API_URL=http://localhost:3100 ./node_modules/.bin/expo start --dev-client --clear --port 8082`. Do not start a second Metro on the same port. If the port is already taken, the running Metro may be used only after checking that it was started from this copy and points at the stand, in one line: `pid=$(lsof -ti tcp:8082 -sTCP:LISTEN); lsof -a -p $pid -d cwd -Fn; ps eww -p $pid | tr ' ' '\n' | grep EXPO_PUBLIC_API_URL` — the `lsof -a` command must show this copy's `apps/mobile`, the `ps` command `http://localhost:3100`. If either is not confirmed, do not use it: a Metro with another address sends the app to another server. Metro shows this copy's code: what was merged into `main` is visible after `git pull`.
+3. The iPhone 17 Pro simulator with the dev build `com.irozhok.hale` installed: `xcrun simctl boot "iPhone 17 Pro"`, then `xcrun simctl openurl booted "exp+hale://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8082"`.
+4. After the check: `lsof -ti tcp:8082 -sTCP:LISTEN | xargs kill` (`pkill -f "expo start"` does not find this process) and `scripts/sim/down.sh` (stops everything and wipes `.sim/` together with the password).
 
-## Данные
+## Data
 
-Все даты в `seed.sql` считаются от сегодняшнего дня в Киеве, картина одинакова в любой день: доход через 8 дней, лимит ₴2,000 и потрачено ₴760, запас ₴5,000, два платежа до дохода, неделя в лимите, вчера осталось ₴340 при лимите ₴1,960.
+Every date in `seed.sql` is counted from today in Kyiv, so the picture is the same on any day: income in 8 days, a ₴2,000 limit with ₴760 spent, a reserve of ₴5,000, two payments before the income, a week within the limit, yesterday ₴340 left of a ₴1,960 limit.
 
-- Нехватка до дохода: `node scripts/sim/sql.mjs scripts/sim/short.sql`, затем потянуть «Сегодня» вниз.
-- Займ, счёт ФОП и траты в кафе старше недели и старше месяца: `node scripts/sim/sql.mjs scripts/sim/extra.sql` поверх `seed.sql`. Нужны для «Займов» в «Плане», строки «в том числе ФОП» и периода «Месяц» в фильтрах. Картина после этого другая (запас к доходу ₴12,000, а не ₴5,000); второй раз подряд файл не выполнится (счёт `sim-fop` уже есть) — сначала вернуть исходное через `seed.sql`.
-- Свой сценарий: написать SQL рядом и выполнить так же. Вернуть исходное: `node scripts/sim/sql.mjs scripts/sim/seed.sql`.
+- A shortage before the income: `node scripts/sim/sql.mjs scripts/sim/short.sql`, then pull «Сегодня» down.
+- A loan, a FOP account and café spending older than a week and older than a month: `node scripts/sim/sql.mjs scripts/sim/extra.sql` on top of `seed.sql`. Needed for «Займы» in «План», the line «в том числе ФОП» and the «Месяц» period in the filters. The picture is different afterwards (the reserve to the income is ₴12,000, not ₴5,000); the file will not run twice in a row (the `sim-fop` account already exists) — restore the base with `seed.sql` first.
+- Your own scenario: write SQL next to these and run it the same way. Restore the base: `node scripts/sim/sql.mjs scripts/sim/seed.sql`.
 
-## Как нажимать в симуляторе
+## How to tap in the simulator
 
-- Экран 402×874 точки. Вход: поле пароля (200, 448), набрать пароль, подождать 2,5 с, «Войти» (200, 507). Пароль можно не набирать, а вставить, тогда он не попадает в вызовы инструментов: `xcrun simctl pbcopy booted < .sim/password`, нажать на поле дважды с паузой 2 с, в появившемся меню «Paste» (55, 492).
-- Меню внизу, y≈812: «Сегодня» x≈74, «Операции» x≈169, «План» x≈264, «+» x≈352.
-- Нажатия делать с длительностью 0,1–0,2 с и ждать 2 с перед снимком, иначе снимок покажет экран до нажатия.
-- Серая шестерёнка справа — кнопка dev-сборки, не часть приложения.
-- Симулятор один: экраны проверяет один агент за раз.
+- The screen is 402×874 points. Login: the password field (200, 448), type the password, wait 2.5 s, «Войти» (200, 507). The password can be pasted instead of typed, and then it never appears in tool calls: `xcrun simctl pbcopy booted < .sim/password`, tap the field twice with a 2 s pause, then «Paste» in the menu that appears (55, 492).
+- The menu at the bottom, y≈812: «Сегодня» x≈74, «Операции» x≈169, «План» x≈264, «+» x≈352.
+- Make taps 0.1–0.2 s long and wait 2 s before a screenshot, otherwise the screenshot shows the screen from before the tap.
+- The grey gear on the right is the dev build's button, not part of the app.
+- There is one simulator: one agent at a time checks screens.
