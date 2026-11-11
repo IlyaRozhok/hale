@@ -180,6 +180,23 @@ describe("goal progress", () => {
   });
 });
 
+describe("lastDays", () => {
+  it("ends today and counts today in: a week is today and the six days before", async () => {
+    const { lastDays } = await import("./format");
+    expect(lastDays("2026-11-09", 7)).toEqual({ from: "2026-11-03", to: "2026-11-09" });
+    expect(lastDays("2026-11-09", 1)).toEqual({ from: "2026-11-09", to: "2026-11-09" });
+  });
+
+  it("thirty days reach back into the month before, so the start of a month is not empty", async () => {
+    const { lastDays } = await import("./format");
+    expect(lastDays("2026-11-09", 30)).toEqual({ from: "2026-10-11", to: "2026-11-09" });
+    expect(lastDays("2026-11-01", 30)).toEqual({ from: "2026-10-03", to: "2026-11-01" });
+    // across a short February and a year end
+    expect(lastDays("2027-03-01", 30)).toEqual({ from: "2027-01-31", to: "2027-03-01" });
+    expect(lastDays("2027-01-10", 30)).toEqual({ from: "2026-12-12", to: "2027-01-10" });
+  });
+});
+
 describe("periodLabel", () => {
   it("names a day, a span within a month, and a span across months", async () => {
     const { periodLabel } = await import("./format");

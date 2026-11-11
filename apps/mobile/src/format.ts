@@ -46,6 +46,11 @@ export function shiftDate(iso: string, days: number): string {
   return new Date(toUtc(iso) + days * DAY_MS).toISOString().slice(0, 10);
 }
 
+/** The last `days` days ending today, today counted in: 7 from 9 Nov is 3–9 Nov. */
+export function lastDays(today: string, days: number): { from: string; to: string } {
+  return { from: shiftDate(today, 1 - days), to: today };
+}
+
 function plural(n: number, one: string, few: string, many: string): string {
   const m10 = n % 10;
   const m100 = n % 100;

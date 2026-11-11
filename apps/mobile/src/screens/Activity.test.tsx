@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import { Activity } from "./Activity";
-import { fakeApi, renderWith, txFixture } from "../testing";
+import { fakeApi, pickDate, renderWith, txFixture } from "../testing";
 import { NetworkError } from "../api/client";
 
 const page = (items = [txFixture()], nextCursor: string | null = null, dayTotals: Record<string, number> = {}) =>
@@ -231,6 +231,110 @@ describe("Activity filters", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Фильтры" }));
     expect(await screen.findByRole("button", { name: "Неделя" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Кафе и рестораны" })).toBeNull();
+  });
+
+  /** "Показать" and "Сбросить" close the window; nothing under it can be pressed until it is gone. */
+  const windowGone = () => waitFor(() => expect(screen.queryByRole("button", { name: "Показать" })).toBeNull());
+
+  it("the dates stay empty until a period is chosen, and empty again once it is taken off", async () => {
+    const transactions = summaryPage({ total: -2500, count: 2 });
+    await renderWith(<Activity now={now} />, fakeApi({ transactions }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Фильтры" }));
+    expect(await screen.findByRole("button", { name: "С: не выбрана" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "По: не выбрана" })).toBeTruthy();
+    expect(screen.getAllByText("Выбрать")).toHaveLength(2);
+
+    await fireEvent.press(screen.getByRole("button", { name: "Неделя" }));
+    expect(screen.getByRole("button", { name: "С: 3 ноября 2026" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "По: 9 ноября 2026" })).toBeTruthy();
+
+    await fireEvent.press(screen.getByRole("button", { name: "Неделя" }));
+    expect(screen.getByRole("button", { name: "С: не выбрана" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "По: не выбрана" })).toBeTruthy();
+
+    // Nothing was chosen, so nothing narrows the list.
+    await fireEvent.press(screen.getByRole("button", { name: "Показать" }));
+    await windowGone();
+    expect(screen.getByRole("button", { name: "Фильтры" })).toBeTruthy();
+    expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" });
+  });
+
+  it("a start date alone runs to today, and both dates show it", async () => {
+    const transactions = summaryPage({ total: -2500, count: 2 });
+    await renderWith(<Activity now={now} />, fakeApi({ transactions }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Фильтры" }));
+    await screen.findByRole("button", { name: "С: не выбрана" });
+    await pickDate("С", "2026-11-05");
+    expect(screen.getByRole("button", { name: "С: 5 ноября 2026" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "По: 9 ноября 2026" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Показать" }));
+    await windowGone();
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", from: "2026-11-05", to: "2026-11-09" }));
+  });
+
+  it("an end date alone is that one day, and both dates show it", async () => {
+    const transactions = summaryPage({ total: -2500, count: 2 });
+    await renderWith(<Activity now={now} />, fakeApi({ transactions }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Фильтры" }));
+    await screen.findByRole("button", { name: "По: не выбрана" });
+    await pickDate("По", "2026-11-05");
+    expect(screen.getByRole("button", { name: "С: 5 ноября 2026" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "По: 5 ноября 2026" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Показать" }));
+    await windowGone();
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", from: "2026-11-05", to: "2026-11-05" }));
+  });
+
+  it("«Месяц» is today and the 29 days before it, so it is not empty at the start of a month", async () => {
+    const transactions = summaryPage({ total: -130600, count: 3 });
+    await renderWith(<Activity now={() => new Date("2026-11-02T10:00:00Z")} />, fakeApi({ transactions }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Фильтры" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Месяц" }));
+    expect(screen.getByRole("button", { name: "Месяц" }).props.accessibilityState.selected).toBe(true);
+    expect(screen.getByRole("button", { name: "С: 4 октября 2026" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "По: 2 ноября 2026" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Показать" }));
+    await windowGone();
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", from: "2026-10-04", to: "2026-11-02" }));
+    expect(await screen.findByText("4 окт – 2 ноя: −₴1,306 · 3 операции")).toBeTruthy();
+  });
+
+  it("a category chosen for spending stays on under «Все», in sight, until it is taken off in the window", async () => {
+    const transactions = summaryPage({ total: -342000, count: 11 });
+    await renderWith(<Activity now={now} />, fakeApi({ transactions }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Фильтры" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Кафе и рестораны" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Показать" }));
+    await windowGone();
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", category: "cafe" }));
+
+    await fireEvent.press(screen.getByRole("button", { name: "Все" }));
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "all", category: "cafe" }));
+    expect(await screen.findByRole("button", { name: "Фильтры: 1" })).toBeTruthy();
+    expect(await screen.findByText("Кафе и рестораны: −₴3,420 · 11 операций")).toBeTruthy();
+
+    await fireEvent.press(screen.getByRole("button", { name: "Фильтры: 1" }));
+    const chosen = await screen.findByRole("button", { name: "Кафе и рестораны" });
+    expect(chosen.props.accessibilityState.selected).toBe(true);
+    await fireEvent.press(chosen);
+    await fireEvent.press(screen.getByRole("button", { name: "Показать" }));
+    await windowGone();
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "all" }));
+    expect(screen.getByRole("button", { name: "Фильтры" })).toBeTruthy();
+    expect(screen.queryByText(/Кафе и рестораны: /)).toBeNull();
+  });
+
+  it("income has no categories: one chosen for spending does not narrow it and is not counted there", async () => {
+    const transactions = summaryPage({ total: -342000, count: 11 });
+    await renderWith(<Activity now={now} />, fakeApi({ transactions }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Фильтры" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Кафе и рестораны" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Показать" }));
+    await windowGone();
+    await screen.findByRole("button", { name: "Фильтры: 1" });
+    await fireEvent.press(screen.getByRole("button", { name: "Доходы" }));
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "income" }));
+    expect(screen.getByRole("button", { name: "Фильтры" })).toBeTruthy();
   });
 });
 
