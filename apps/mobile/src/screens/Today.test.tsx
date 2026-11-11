@@ -3,9 +3,8 @@ import { Alert, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { BridgeStateDto, DailyStateDto } from "@hale/contracts";
 import { Today } from "./Today";
-import { calendarFixture, fakeApi, makeClient, pickDate, renderWith, todayFixture } from "../testing";
-import { kyivDate, shiftDate } from "../format";
-import { ApiError, NetworkError } from "../api/client";
+import { calendarFixture, fakeApi, makeClient, renderWith, todayFixture } from "../testing";
+import { NetworkError } from "../api/client";
 
 jest.mock("../metal", () => {
   const { View } = require("react-native");
@@ -298,76 +297,29 @@ describe("Today, normal mode", () => {
     });
   });
 
-  it("a loan from the bank can be repaid but offers no deletion", async () => {
-    const badCases = [{ id: "loan:1", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 1, remaining: 500_000 } }];
-    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ badCases })) }));
-    expect(await screen.findByText(badCases[0]!.text)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Удалить/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /Убрать/ })).toBeNull();
-  });
+  describe("loans stay in Plan", () => {
+    const bankLoan = { id: "loan:1", text: "Займ ₴5,000 от 01.11. При текущем темпе деньги закончатся 18.11.", repayLoan: { id: 1, remaining: 500_000, receivedOn: "2026-11-01" } };
+    const handLoan = { id: "loan:7", text: "Займ ₴10 от 03.11", removableLoanId: 7, repayLoan: { id: 7, remaining: 1000 } };
+    // An older server named the loan without the fields for the actions.
+    const plainLoan = { id: "loan:9", text: "Взят займ ₴5,000 (02.11): столько не хватало." };
+    const overPlan = { id: "bridge_over_plan:1", text: "Минус вышел за план моста на ₴100." };
 
-  it("a bad case with no loan behind it has no actions", async () => {
-    const badCases = [{ id: "bridge_over_plan:1", text: "Минус вышел за план моста на ₴100." }];
-    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ badCases })) }));
-    expect(await screen.findByText(badCases[0]!.text)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Погасил|Удалить/ })).toBeNull();
-  });
+    it("a loan the server still sends is not shown on Today, and nothing there repays or deletes it", async () => {
+      const badCases = [bankLoan, handLoan, plainLoan];
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ badCases })) }));
+      await screen.findByText("Сегодня можно");
+      for (const b of badCases) expect(screen.queryByText(b.text)).toBeNull();
+      expect(screen.queryByText(/Займ/i)).toBeNull();
+      expect(screen.queryByRole("button", { name: /Погасил|Удалить|Убрать/ })).toBeNull();
+    });
 
-  it("deletes a mistaken loan entered by hand, after asking", async () => {
-    const alert = jest.spyOn(Alert, "alert").mockImplementation(noop);
-    const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴10 от 03.11", removableLoanId: 7, repayLoan: { id: 7, remaining: 1000 } }] })) });
-    await renderWith(<Today onOpenActivity={noop} />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Удалить: Займ ₴10 от 03.11" }));
-    expect(api.deleteLoan).not.toHaveBeenCalled();
-    await act(async () => pressAlert(alert, "Удалить"));
-    await waitFor(() => expect(api.deleteLoan).toHaveBeenCalledWith(7));
-    await waitFor(() => expect(api.today).toHaveBeenCalledTimes(2));
-    alert.mockRestore();
-  });
-
-  it("repaying a loan asks for the amount and date, with what is owed filled in", async () => {
-    const api = fakeApi({ today: jest.fn(async () => todayFixture({ date: "2026-11-03", badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })) });
-    await renderWith(<Today onOpenActivity={noop} />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
-    expect(screen.getByLabelText("Сумма").props.value).toBe("5000");
-    const yesterday = shiftDate(kyivDate(), -1);
-    await pickDate("Дата", yesterday);
-    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
-    await waitFor(() => expect(api.repayLoan).toHaveBeenCalledWith(7, { amount: 500_000, date: yesterday }));
-    await waitFor(() => expect(screen.queryByLabelText("Сумма")).toBeNull());
-    await waitFor(() => expect(api.today).toHaveBeenCalledTimes(2));
-  });
-
-  it("says what a different repayment amount will do, and rejects a bad one", async () => {
-    const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })) });
-    await renderWith(<Today onOpenActivity={noop} />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
-    await fireEvent.changeText(screen.getByLabelText("Сумма"), "2000");
-    expect(screen.getByText("Останется ₴3,000, займ будет открыт.")).toBeTruthy();
-    await fireEvent.changeText(screen.getByLabelText("Сумма"), "5500");
-    expect(screen.getByText("₴500 сверх займа уйдут в обслуживание.")).toBeTruthy();
-    await fireEvent.changeText(screen.getByLabelText("Сумма"), "ноль");
-    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
-    expect(screen.getByText("Проверьте сумму и дату.")).toBeTruthy();
-    expect(api.repayLoan).not.toHaveBeenCalled();
-  });
-
-  it("the repayment form names the loan alone, without the note about the pace", async () => {
-    const text = "Займ ₴5,000 от 01.11. При текущем темпе деньги закончатся 18.11.";
-    const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text, repayLoan: { id: 7, remaining: 500_000 } }] })) });
-    await renderWith(<Today onOpenActivity={noop} />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: `Погасил: ${text}` }));
-    expect(screen.getByText("Займ ₴5,000 от 01.11")).toBeTruthy();
-  });
-
-  it("the repayment form's button works while the keyboard is up", async () => {
-    const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })) });
-    await renderWith(<Today onOpenActivity={noop} />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
-    let node = screen.getByText("Сохранить").parent;
-    while (node && node.props.keyboardShouldPersistTaps === undefined) node = node.parent;
-    expect(node?.props.keyboardShouldPersistTaps).toBe("handled");
+    it("the note that the minus went over the plan stays, with no actions, also next to loans", async () => {
+      const badCases = [bankLoan, overPlan, handLoan];
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ badCases })) }));
+      expect(await screen.findByText(overPlan.text)).toBeTruthy();
+      expect(screen.queryByText(/Займ/i)).toBeNull();
+      expect(screen.queryByRole("button", { name: /Погасил|Удалить|Убрать/ })).toBeNull();
+    });
   });
 
   describe("the limit calendar", () => {
@@ -453,68 +405,6 @@ describe("Today, normal mode", () => {
       await fireEvent.press(screen.getByRole("button", { name: "Повторить" }));
       expect(await screen.findByRole("button", { name: /^1 ноября/ })).toBeTruthy();
     });
-  });
-
-  describe("the repayment window", () => {
-    const open = async () => {
-      const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })) });
-      await renderWith(<Today onOpenActivity={noop} />, api);
-      await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
-      return screen.getByTestId("sheet-panel");
-    };
-    const touch = (y: number, timestamp: number) => ({ nativeEvent: { pageX: 100, pageY: y, timestamp, touches: [{}] } });
-    const swipe = async (panel: ReturnType<typeof screen.getByTestId>, to: number, ms: number) => {
-      await fireEvent(panel, "touchStart", touch(400, 0));
-      await fireEvent(panel, "touchMove", touch(410, ms / 2));
-      await fireEvent(panel, "touchMove", touch(to, ms));
-      await fireEvent(panel, "touchEnd", touch(to, ms));
-    };
-
-    it("closes when swiped down far enough", async () => {
-      await swipe(await open(), 600, 400);
-      await waitFor(() => expect(screen.queryByLabelText("Сумма")).toBeNull());
-    });
-
-    it("stays open after a short, slow drag", async () => {
-      await swipe(await open(), 450, 1000);
-      await act(async () => new Promise<void>((r) => setTimeout(r, 300)));
-      expect(screen.getByLabelText("Сумма")).toBeTruthy();
-    });
-
-    it("closes with the button too", async () => {
-      await open();
-      const closes = screen.getAllByRole("button", { name: "Закрыть" });
-      await fireEvent.press(closes[closes.length - 1]!);
-      await waitFor(() => expect(screen.queryByLabelText("Сумма")).toBeNull());
-    });
-  });
-
-  it("says what is wrong when the repayment date does not fit the loan", async () => {
-    const api = fakeApi({
-      today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })),
-      repayLoan: jest.fn(async () => {
-        throw new ApiError(422);
-      }),
-    });
-    await renderWith(<Today onOpenActivity={noop} />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
-    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
-    const text = await screen.findByText("Дата должна быть не раньше дня займа и не позже сегодня.");
-    expect(StyleSheet.flatten(text.props.style).color).toBe(tokens.color.status.danger);
-  });
-
-  it("keeps the repayment form open when the save fails", async () => {
-    const api = fakeApi({
-      today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })),
-      repayLoan: jest.fn(async () => {
-        throw new Error("boom");
-      }),
-    });
-    await renderWith(<Today onOpenActivity={noop} />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
-    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
-    expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
-    expect(screen.getByLabelText("Сумма")).toBeTruthy();
   });
 
   it("makes every button at least the minimum touch size", async () => {

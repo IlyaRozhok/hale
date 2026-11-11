@@ -7,7 +7,7 @@ import { LimitBar } from "../metal";
 import { limitState } from "../limitState";
 import { formatMoney, formatStamp, kyivDate, longDate, shiftDate, streakLabel } from "../format";
 import { dayPhrase, type PhraseAction } from "../dayPhrase";
-import { useCalendar, useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useAnswerCashCard, useDepositFromWallet, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
+import { useCalendar, useCancelBridge, useChooseBridge, useConfirmIncome, useAnswerCashCard, useDepositFromWallet, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
 import { PaymentPaidSheet } from "../components/PaymentPaidSheet";
 import { ErrorText } from "../components/ErrorText";
 import { BadCaseCard } from "../components/BadCaseCard";
@@ -18,7 +18,6 @@ import { LAYOUT } from "../components/layout";
 import { LimitCalendar } from "../components/LimitCalendar";
 import { QuestionCard, eventIdOf } from "../components/QuestionCard";
 import { RecipientLabelSheet } from "../components/RecipientLabelSheet";
-import { RepayLoanSheet } from "../components/RepayLoanSheet";
 import { Runway } from "../components/Runway";
 import { Sheet } from "../components/Sheet";
 import { StaleBanner } from "../components/StaleBanner";
@@ -58,13 +57,11 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const cashCard = useAnswerCashCard();
   const chooseBridge = useChooseBridge();
   const cancelBridge = useCancelBridge();
-  const deleteLoan = useDeleteLoan();
   const pull = usePullRefresh(today.refetch);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
   const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | null>(null);
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
   const [paying, setPaying] = useState<TodayDto["upcoming"][number] | null>(null);
-  const [repaying, setRepaying] = useState<{ id: number; remaining: number; receivedOn?: string; name: string } | null>(null);
 
   const hide = (id: string, on: boolean) =>
     setAnswered((prev) => {
@@ -114,6 +111,8 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const offlineSince = today.isError ? today.dataUpdatedAt : null;
   // A date question with no income event cannot be answered; an older cached answer may still hold one.
   const questions = data.questions.filter((q) => !answered.has(q.id) && !(q.kind === "income_date" && eventIdOf(q.id) === null));
+  // Loans live in Plan: the server still lists each open one here, and Today leaves them out.
+  const notes = data.badCases.filter((b) => !b.id.startsWith("loan:"));
   const noLimitNote = state.mode === "bridge" ? "Лимит появится, когда вы подтвердите план." : "До следующего дохода свободных денег нет.";
 
   const answer = (id: string, run: () => Promise<unknown>) => {
@@ -216,13 +215,8 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
             <Icon name="chevron" color={color.fg.subtle} size={16} />
           </Pressable>
         )}
-        {data.badCases.map((b) => (
-          <BadCaseCard
-            key={b.id}
-            text={b.text}
-            onRepay={b.repayLoan && (() => setRepaying({ ...b.repayLoan!, name: b.text.split(". ")[0]! }))}
-            onDelete={b.removableLoanId === undefined ? undefined : () => deleteLoan.mutate(b.removableLoanId!, { onError: () => Alert.alert("Не удалось удалить займ", "Проверьте связь и попробуйте ещё раз.") })}
-          />
+        {notes.map((b) => (
+          <BadCaseCard key={b.id} text={b.text} />
         ))}
       </ScrollView>
 
@@ -274,7 +268,6 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
         </Sheet>
       )}
       {paying && <PaymentPaidSheet payment={paying} today={data.date} onClose={() => setPaying(null)} />}
-      {repaying && <RepayLoanSheet loanId={repaying.id} remaining={repaying.remaining} receivedOn={repaying.receivedOn} name={repaying.name} onClose={() => setRepaying(null)} />}
     </View>
   );
 }
