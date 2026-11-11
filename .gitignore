@@ -9,3 +9,5 @@ private/
 .terraform/
 .idea/
 coverage/
+.sim/
+.claude/worktrees/
