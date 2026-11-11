@@ -5,6 +5,7 @@ import { DataSource, type EntityManager } from "typeorm";
 import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
 import { type DailyInput, type DailyState, computeDaily, sumDue } from "../domain/daily";
+import { runway } from "../domain/runway";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
 import { quarterLabel, quarterOf } from "../domain/quarter";
 import { runOutDate } from "../domain/run-out";
@@ -63,6 +64,8 @@ interface Facts {
   rateStale: boolean;
   slots: { own: number; fop: number; binance: number; cash: number };
   upcoming: TodayDto["upcoming"];
+  /** Where the stretch to the next income ends: its day, or the horizon's end. */
+  end: string;
   loans: Loan[];
   basis: string;
   plan: Plan | null;
@@ -487,6 +490,7 @@ export class TodayService {
       loans,
       basis,
       upcoming,
+      end,
       plan: planRow
         ? { id: planRow.id, dailyAmount: planRow.daily_amount, creditPlan: planRow.credit_plan, basis: planRow.basis }
         : null,
@@ -662,9 +666,23 @@ export class TodayService {
       });
     }
 
+    // Taxes are covered by the reserve, which is already out of `free`: they are not steps here.
+    const events = f.upcoming
+      .filter((p) => p.kind !== "tax")
+      .map((p) => ({ id: p.id, date: p.dueOn < f.date ? f.date : p.dueOn, name: p.name, amount: p.amount }));
+    const run = runway({
+      today: f.date,
+      endOn: f.end,
+      free: state.free,
+      dailyLimit: state.dailyLimit,
+      leftToday: state.leftToday,
+      payments: events,
+    });
+
     return {
       date: f.date,
       state: { ...state, bridge: state.bridge ? { ...state.bridge, confirmed: plan !== null } : null },
+      runway: { endOn: f.end, incomeOn: f.end === f.input.nextIncomeOn ? f.end : null, ...run, events },
       usdRate: f.usdRate,
       rateStale: f.rateStale,
       accounts: { own: f.slots.own, credit: f.credit, fop: f.slots.fop, binance: f.slots.binance, cash: f.slots.cash },

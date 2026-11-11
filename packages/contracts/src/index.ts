@@ -356,6 +356,22 @@ export interface TodayDto {
   goals: { id: number; name: string; saved: number; target: number }[];
   /** Days within the limit in a row, back from yesterday. */
   streak: number;
+  /** The money day by day until the next income. Absent from a server older than the app. */
+  runway?: RunwayDto;
+}
+
+/** Own money without the tax reserve and debts, at the start of each day, if every day spends its limit. */
+export interface RunwayDto {
+  /** The last day drawn: the next income's day, or 30 days ahead when no income date is known. */
+  endOn: string;
+  incomeOn: string | null;
+  /** What is left on `endOn`; negative when the money ends earlier. */
+  reserve: number;
+  /** The first day that starts below zero. */
+  zeroOn: string | null;
+  points: { date: string; balance: number }[];
+  /** Unpaid payments inside the stretch, in hryvnias; an overdue one stands on today. `id` is the one in `upcoming`. */
+  events: { id: string; date: string; name: string; amount: number }[];
 }
 
 // --- limit calendar ---------------------------------------------------------

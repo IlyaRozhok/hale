@@ -973,6 +973,57 @@ describe("questions, upcoming and run-out", () => {
   });
 });
 
+describe("runway to the next income", () => {
+  it("draws the money day by day: down by the limit, a step on the payment's day", async () => {
+    await account("black", 1_000_000);
+    await income("fop", "2026-11-12");
+    await payment("Rent", 100_000, "2026-11-06");
+    await payment("After income", 100_000, "2026-11-15");
+    await ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('tax','ЄП',50000,'UAH','2026-11-08')`);
+    const r = await today();
+    const limit = r.state.dailyLimit;
+    const run = r.runway;
+    expect(run.endOn).toBe("2026-11-12");
+    expect(run.incomeOn).toBe("2026-11-12");
+    expect(run.points).toHaveLength(11);
+    expect(run.points[0]).toEqual({ date: "2026-11-02", balance: r.state.free + 100_000 });
+    expect(run.points[4]).toEqual({ date: "2026-11-06", balance: r.state.free + 100_000 - 4 * limit });
+    expect(run.points[5]).toEqual({ date: "2026-11-07", balance: r.state.free - 5 * limit });
+    expect(run.reserve).toBe(r.state.free - 10 * limit);
+    expect(run.points[10]).toEqual({ date: "2026-11-12", balance: run.reserve });
+    expect(run.zeroOn).toBeNull();
+    // Taxes are inside the reserve, payments after the income are not in this stretch.
+    expect(run.events).toEqual([{ id: r.upcoming.find((u: { name: string }) => u.name === "Rent").id, date: "2026-11-06", name: "Rent", amount: 100_000 }]);
+  });
+
+  it("counts what is already spent today and puts an overdue payment on today", async () => {
+    const card = await account("black", 1_000_000);
+    await income("fop", "2026-11-04");
+    await payment("Late", 30_000, "2026-10-28");
+    await tx(card, -10_000, "spend", { date: "2026-11-02" });
+    const r = await today();
+    expect(r.runway.events).toEqual([{ id: r.upcoming[0].id, date: "2026-11-02", name: "Late", amount: 30_000 }]);
+    expect(r.runway.points.map((p: { balance: number }) => p.balance)).toEqual([
+      r.state.free + 30_000,
+      r.state.free - r.state.leftToday,
+      r.state.free - r.state.leftToday - r.state.dailyLimit,
+    ]);
+  });
+
+  it("looks 30 days ahead without an income date and names the day the money ends", async () => {
+    await account("black", 100_000);
+    await payment("Big", 500_000, "2026-11-10");
+    const r = await today();
+    expect(r.state.mode).toBe("bridge");
+    expect(r.runway.incomeOn).toBeNull();
+    expect(r.runway.endOn).toBe("2026-12-02");
+    expect(r.runway.points).toHaveLength(31);
+    expect(r.runway.reserve).toBeLessThan(0);
+    expect(r.runway.zeroOn).not.toBeNull();
+    expect(r.runway.zeroOn <= "2026-11-11").toBe(true);
+  });
+});
+
 describe("settings preview", () => {
   const recurring = (kind: string, amount: number) =>
     ds.query(`INSERT INTO recurring_payments (kind, name, amount, currency, day_of_month) VALUES ($1,'x',$2,'UAH',6)`, [kind, amount]);
