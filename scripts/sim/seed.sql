@@ -28,7 +28,7 @@ INSERT INTO transactions (external_id, account_id, occurred_at, local_date, desc
   ('s-3',1,pg_temp.at(-1,12),pg_temp.d(-1),'АТБ',-162000,-162000,'spend','groceries',false,'{}'),
   ('s-4',1,pg_temp.at(-2,12),pg_temp.d(-2),'Аптека',-120000,-120000,'spend','health',false,'{}'),
   ('s-5',1,pg_temp.at(-3,12),pg_temp.d(-3),'Сильпо',-180000,-180000,'spend','groceries',false,'{}'),
-  ('s-6',1,pg_temp.at(-4,12),pg_temp.d(-4),'Кино',-90000,-90000,'spend','fun',false,'{}'),
+  ('s-6',1,pg_temp.at(-4,12),pg_temp.d(-4),'Кино',-90000,-90000,'spend','leisure',false,'{}'),
   ('s-7',1,pg_temp.at(-5,12),pg_temp.d(-5),'Такси',-150000,-150000,'spend','transport',false,'{}'),
   ('s-8',1,pg_temp.at(-6,12),pg_temp.d(-6),'Сильпо',-170000,-170000,'spend','groceries',false,'{}');
 INSERT INTO goals (name, target_cents, saved_cents, sort) VALUES ('Подушка', 500000, 120000, 0);
