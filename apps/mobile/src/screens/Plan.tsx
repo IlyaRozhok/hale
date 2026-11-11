@@ -61,7 +61,7 @@ export function Plan() {
           { label: "Binance", detail: balances.data ? (binance ? formatDollars(binance.amount) : "не задан") : undefined, onPress: () => setOpen("binance") },
         ]}
       >
-        {today.data ? <AccountLines accounts={today.data.accounts} usdRate={today.data.usdRate} /> : null}
+        {today.data ? <AccountLines accounts={today.data.accounts} /> : null}
       </PlanGroup>
       <PlanGroup
         title="Приходит"

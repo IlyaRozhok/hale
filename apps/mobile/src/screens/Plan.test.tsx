@@ -63,6 +63,21 @@ describe("Plan, money", () => {
     expect(screen.getByText("₴30,000")).toBeTruthy();
     expect(screen.queryByText("₴40,325")).toBeNull();
   });
+
+  it("puts no dollars next to hryvnia totals; dollars stay where the money is in dollars", async () => {
+    const api = fakeApi({
+      today: jest.fn(async () => todayFixture({ accounts: { own: 1_032_500, credit: 3_000_000, fop: 412_500, binance: 0, cash: 0 } })),
+      manualBalances: jest.fn(async () => [balanceFixture()]),
+    });
+    await renderWith(<Plan />, api);
+    expect(await screen.findByText("в том числе ФОП")).toBeTruthy();
+    expect(screen.getByText("₴10,325")).toBeTruthy();
+    expect(screen.getByText("₴4,125")).toBeTruthy();
+    expect(screen.getByText("₴30,000")).toBeTruthy();
+    expect(await screen.findByText("$2,700")).toBeTruthy();
+    // At the fixture's rate of 41.25 the totals used to carry $250, $100 and $727 under them.
+    expect(screen.queryAllByText(/\$/).map((t) => t.props.children)).toEqual(["$2,700"]);
+  });
 });
 
 describe("Plan, loans", () => {
