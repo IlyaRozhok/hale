@@ -1,4 +1,4 @@
-// SkSL port of the fragment shader in docs/superpowers/mockups/liquid-metal.html.
+// SkSL port of the fragment shader of the liquid-metal mockup (removed from docs on 2026-11-11; see git history).
 // One surface function (height + chrome reflection); `pool` adds the mercury waterline.
 // The grey values below are shader constants, not UI colours.
 import { Skia } from "@shopify/react-native-skia";
