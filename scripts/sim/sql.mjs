@@ -3,10 +3,15 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
-const require = createRequire(new URL("../../apps/api/package.json", import.meta.url));
-const { Client } = require("pg");
+// The package belongs to apps/api: it is loaded from there, not from the repository root.
+const load = createRequire(new URL("../../apps/api/package.json", import.meta.url));
+const { Client } = load("pg");
 
 const [file, url = `postgres://hale:hale@127.0.0.1:${process.env.SIM_PG_PORT ?? 55432}/hale`] = process.argv.slice(2);
+if (!file) {
+  console.error("usage: node scripts/sim/sql.mjs <file.sql> [database url]");
+  process.exit(2);
+}
 const client = new Client({ connectionString: url });
 await client.connect();
 try {
