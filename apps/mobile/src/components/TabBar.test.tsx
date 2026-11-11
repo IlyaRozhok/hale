@@ -3,6 +3,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import { TabBar } from "./TabBar";
+import { fakeApi, renderWith } from "../testing";
 
 const METRICS = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
 const routes = ["Today", "Activity", "Plan"].map((name) => ({ key: `${name}-k`, name }));
@@ -24,17 +25,15 @@ describe("TabBar", () => {
     expect(StyleSheet.flatten(bar.props.style)).toMatchObject({ position: "absolute", left: 0, right: 0, bottom: 0 });
   });
 
-  it("the current tab opens up with its name, the others stay icons", async () => {
+  it("is icons only: the current one white, the others dim, no names and no plate", async () => {
     await render(setup(1).ui);
     expect(screen.getByRole("tab", { name: "Сегодня" }).props.accessibilityState.selected).toBe(false);
     expect(screen.getByRole("tab", { name: "Операции" }).props.accessibilityState.selected).toBe(true);
-    expect(screen.getByRole("tab", { name: "План" })).toBeTruthy();
-    expect(screen.getByText("Операции")).toBeTruthy();
-    expect(screen.queryByText("Сегодня")).toBeNull();
-    expect(screen.queryByText("План")).toBeNull();
-    expect(screen.getByTestId("icon-home")).toBeTruthy();
-    expect(screen.getByTestId("icon-list")).toBeTruthy();
-    expect(screen.getByTestId("icon-target")).toBeTruthy();
+    for (const name of ["Сегодня", "Операции", "План"]) expect(screen.queryByText(name)).toBeNull();
+    expect(screen.getByTestId("icon-list").props.accessibilityHint).toBe(tokens.color.fg.default);
+    expect(screen.getByTestId("icon-home").props.accessibilityHint).toBe(tokens.color.fg.subtle);
+    expect(screen.getByTestId("icon-target").props.accessibilityHint).toBe(tokens.color.fg.subtle);
+    expect(StyleSheet.flatten(screen.getByRole("tab", { name: "Операции" }).props.style).backgroundColor).toBeUndefined();
   });
 
   it("goes to another tab, and stays put on the current one", async () => {
@@ -47,13 +46,18 @@ describe("TabBar", () => {
     expect(navigation.navigate).not.toHaveBeenCalled();
   });
 
-  it("marks the active tab with the accent fill and keeps touch targets big enough", async () => {
+  it("keeps touch targets big enough", async () => {
     await render(setup(0).ui);
-    const on = StyleSheet.flatten(screen.getByRole("tab", { name: "Сегодня" }).props.style);
-    expect(on.backgroundColor).toBe(tokens.color.accent.default);
-    expect(on.minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
-    expect(StyleSheet.flatten(screen.getByRole("tab", { name: "План" }).props.style).backgroundColor).toBeUndefined();
-    // The open tab is wider than an icon.
-    expect(on.flex).toBeGreaterThan(StyleSheet.flatten(screen.getByRole("tab", { name: "План" }).props.style).flex);
+    for (const name of ["Сегодня", "Операции", "План"]) {
+      expect(StyleSheet.flatten(screen.getByRole("tab", { name }).props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+    }
+    expect(StyleSheet.flatten(screen.getByRole("button", { name: "Добавить операцию" }).props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+  });
+
+  it("a round button beside the menu adds an operation from any screen", async () => {
+    await renderWith(setup(2).ui, fakeApi({ cash: jest.fn(async () => ({ started: true, start: "2026-11-01", balance: 250_000 })) }));
+    expect(screen.queryByLabelText("Сумма")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Добавить операцию" }));
+    expect(await screen.findByLabelText("Сумма")).toBeTruthy();
   });
 });

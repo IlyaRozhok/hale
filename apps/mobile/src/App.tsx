@@ -34,7 +34,7 @@ const theme = {
 const Tabs = createBottomTabNavigator();
 
 function TodayTab({ navigation }: { navigation: NavigationProp<ParamListBase> }) {
-  return <Today onOpenActivity={() => navigation.navigate("Activity")} onOpenPlan={() => navigation.navigate("Plan")} />;
+  return <Today onOpenActivity={() => navigation.navigate("Activity")} />;
 }
 
 function Main() {

@@ -3,7 +3,7 @@ import { Alert, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { BridgeStateDto, DailyStateDto } from "@hale/contracts";
 import { Today } from "./Today";
-import { calendarFixture, fakeApi, goalFixture, makeClient, pickDate, renderWith, todayFixture } from "../testing";
+import { calendarFixture, fakeApi, makeClient, pickDate, renderWith, todayFixture } from "../testing";
 import { kyivDate, shiftDate } from "../format";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -34,113 +34,143 @@ const bridgeState = (bridge: Partial<BridgeStateDto> = {}): DailyStateDto => ({
   bridge: { creditNeeded: 2007000, recommendedDaily: 45000, maxDailyWithinCredit: 56000, shortfall: 0, overPlan: false, confirmed: false, ...bridge },
 });
 const openQuestions = async () => fireEvent.press(await screen.findByRole("button", { name: /^Вопросы: / }));
-const openBridge = async () => fireEvent.press(await screen.findByText(/план(а)? до зарплаты/i));
+const openBridge = async () => fireEvent.press(await screen.findByText(/план до дохода/i));
+const openCalendar = async () => fireEvent.press(await screen.findByRole("button", { name: /^Сегодня можно/ }));
 const HIDDEN = { includeHiddenElements: true };
 const levelOf = () => screen.getByTestId("limit-visual", HIDDEN).props.accessibilityHint as string;
 
 describe("Today, normal mode", () => {
-  it("shows the date, the limit with what is spent of it, and the next payment; no days to income, no dollars", async () => {
+  it("shows the date, the limit with what is spent of it and the reserve to the income; no lists, no dollars", async () => {
     const state = { ...todayFixture().state, daysLeft: 17 };
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })) }));
     expect(await screen.findByText("Сегодня можно")).toBeTruthy();
     expect(screen.getByText("Понедельник, 2 ноября")).toBeTruthy();
     expect(screen.getByText("₴720")).toBeTruthy();
-    expect(screen.getByText("₴280 из ₴1,000")).toBeTruthy();
+    expect(screen.getByText("потрачено ₴280 из ₴1,000")).toBeTruthy();
+    expect(screen.getByText("Запас к доходу")).toBeTruthy();
+    expect(screen.getByText("₴13,280")).toBeTruthy();
+    expect(screen.getByText("доход 7 ноя")).toBeTruthy();
     expect(screen.queryByText(/до зарплаты/)).toBeNull();
     expect(screen.queryByText(/сейчас$/)).toBeNull();
-    expect(screen.getByText("Скоро платить")).toBeTruthy();
-    expect(screen.getByText("Квартплата")).toBeTruthy();
-    expect(screen.getByText("6")).toBeTruthy();
-    expect(screen.getByText("ноя")).toBeTruthy();
-    expect(screen.getByText("₴17,000")).toBeTruthy();
+    // Payments and goals live in Plan: Today is the limit, one phrase and the runway.
+    expect(screen.queryByText("Скоро платить")).toBeNull();
+    expect(screen.queryByText("Квартплата")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Добавить операцию" })).toBeNull();
     expect(levelOf()).toBe("bar:ok:0.72");
+  });
+
+  it("an older server sends no runway: the screen is the limit alone", async () => {
+    const old = todayFixture();
+    delete old.runway;
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => old) }));
+    await screen.findByText("Сегодня можно");
+    expect(screen.queryByText(/^Запас/)).toBeNull();
   });
 
   it("reads the same while no income date is known", async () => {
     const state = { ...todayFixture().state, needsIncomeDate: true };
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })) }));
-    expect(await screen.findByText("₴280 из ₴1,000")).toBeTruthy();
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })) }));
+    expect(await screen.findByText("потрачено ₴280 из ₴1,000")).toBeTruthy();
   });
 
   it("keeps accounts off the home screen", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi());
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
     await screen.findByText("Сегодня можно");
     expect(screen.queryByText("Свои")).toBeNull();
     expect(screen.queryByText("Кредитные")).toBeNull();
   });
 
-  it("lists three upcoming payments and totals all of them", async () => {
-    const upcoming = ["1", "2", "3", "4"].map((id, i) => ({ id, name: `Платёж ${id}`, amount: 100000 * (i + 1), dueOn: `2026-11-1${i}`, kind: "obligation", currency: "UAH" }));
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ upcoming })) }));
-    expect(await screen.findByText("₴10,000")).toBeTruthy();
-    expect(screen.getByText("Платёж 3")).toBeTruthy();
-    expect(screen.queryByText("Платёж 4")).toBeNull();
-  });
-
-  it("hides the payments card when nothing is coming", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ upcoming: [] })) }));
-    await screen.findByText("Сегодня можно");
-    expect(screen.queryByText("Скоро платить")).toBeNull();
-  });
-
-  it("shows goals as one list with the total, each with its amount and percent, and opens Plan", async () => {
-    const goals = [
-      { id: 1, name: "Подушка", saved: 50000, target: 500000 },
-      { id: 2, name: "Машина", saved: 0, target: 1000000 },
-      { id: 3, name: "Отпуск", saved: 10000, target: 100000 },
-    ];
-    const onOpenPlan = jest.fn();
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={onOpenPlan} />, fakeApi({ today: jest.fn(async () => todayFixture({ goals })) }));
-    expect(await screen.findByText("Подушка")).toBeTruthy();
-    expect(screen.getByText("Цели")).toBeTruthy();
-    expect(screen.getByText("$600 из $16,000")).toBeTruthy();
-    expect(screen.getByText("$500 · 10%")).toBeTruthy();
-    expect(screen.getByText("$0 · 0%")).toBeTruthy();
-    expect(screen.getByText("Отпуск")).toBeTruthy();
-    expect(screen.queryByText("Добавить цель")).toBeNull();
-    expect(onOpenPlan).not.toHaveBeenCalled();
-  });
-
-  it("a goal opens its own window, where the saved amount can be changed; the heading opens all goals", async () => {
+  it("keeps goals off Today: they are in Plan", async () => {
     const goals = [{ id: 1, name: "Подушка", saved: 50000, target: 500000 }];
-    const api = fakeApi({
-      today: jest.fn(async () => todayFixture({ goals })),
-      goals: jest.fn(async () => [goalFixture({ id: 1, name: "Подушка", saved_cents: 50000, target_cents: 500000 })]),
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ goals })) }));
+    await screen.findByText("Сегодня можно");
+    expect(screen.queryByText("Подушка")).toBeNull();
+    expect(screen.queryByText("Цели")).toBeNull();
+  });
+
+  describe("the phrase of the day", () => {
+    const yesterdayWithin = (month: string) =>
+      calendarFixture({ month, today: "2026-11-02", days: month === "2026-11" ? [{ date: "2026-11-01", limit: 96_000, spent: 62_000, status: "within" as const }] : [] });
+
+    it("says how yesterday went and that the limit grew, and opens the calendar", async () => {
+      const calendar = jest.fn(async (month: string) => yesterdayWithin(month));
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ calendar }));
+      await fireEvent.press(await screen.findByText("Вчера осталось ₴340. Лимит сегодня на ₴40 больше."));
+      expect(await screen.findByText(/Ноябрь 2026/)).toBeTruthy();
     });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Подушка: $500 · 10%" }));
-    expect(await screen.findByRole("button", { name: "Изменить накопленное: Подушка" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Новая цель" })).toBeNull();
-    const closes = screen.getAllByRole("button", { name: "Закрыть" });
-    await fireEvent.press(closes[closes.length - 1]!);
-    await fireEvent.press(await screen.findByRole("button", { name: "Цели: $500 из $5,000" }));
-    expect(await screen.findByRole("button", { name: "Новая цель" })).toBeTruthy();
+
+    it("looks into the previous month on the first day", async () => {
+      const calendar = jest.fn(async (month: string) =>
+        calendarFixture({ month, today: "2026-11-01", days: month === "2026-10" ? [{ date: "2026-10-31", limit: 100_000, spent: 159_800, status: "over" as const }] : [] }),
+      );
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ date: "2026-11-01" })), calendar }));
+      expect(await screen.findByText("Вчера вышло на ₴598 больше лимита. Сегодня новый день.")).toBeTruthy();
+      expect(calendar).toHaveBeenCalledWith("2026-10");
+    });
+
+    it("a waiting question comes before yesterday, and opens the questions", async () => {
+      const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
+      const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions })), calendar: jest.fn(async (month: string) => yesterdayWithin(month)) });
+      await renderWith(<Today onOpenActivity={noop} />, api);
+      await fireEvent.press(await screen.findByText("1 вопрос ждёт ответа. Это пять секунд, и лимит станет точнее."));
+      expect(await screen.findByText("Пришло на Binance?")).toBeTruthy();
+    });
+
+    it("a payment due tomorrow is named, and a tap opens how it was paid", async () => {
+      const upcoming = [{ id: "1", name: "Квартплата", amount: 1_700_000, dueOn: "2026-11-03", kind: "obligation", currency: "UAH" }];
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ upcoming })) }));
+      await fireEvent.press(await screen.findByText("Завтра платёж: Квартплата, ₴17,000. Он уже учтён в лимите."));
+      expect(await screen.findByRole("button", { name: "Оплачено" })).toBeTruthy();
+    });
+
+    it("an overdue payment comes first of all", async () => {
+      const upcoming = [{ id: "1", name: "Квартплата", amount: 1_700_000, dueOn: "2026-10-28", kind: "obligation", currency: "UAH" }];
+      const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ upcoming, questions })) }));
+      expect(await screen.findByText("Квартплата ждёт с 28 окт. Отметьте, если уже оплачено.")).toBeTruthy();
+    });
+
+    it("a payment further away is reached through its day on the graph", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+      const chart = await screen.findByTestId("runway-chart");
+      await fireEvent(chart, "layout", { nativeEvent: { layout: { width: 400, height: 112 } } });
+      await fireEvent(chart, "responderGrant", { nativeEvent: { locationX: 320 } });
+      await fireEvent.press(screen.getByRole("button", { name: "Квартплата, ₴17,000: отметить оплату" }));
+      expect(await screen.findByRole("button", { name: "Оплачено" })).toBeTruthy();
+    });
+
+    it("a quiet day says nothing", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+      await screen.findByText("Сегодня можно");
+      expect(screen.queryByText(/^Вчера/)).toBeNull();
+      expect(screen.queryByText(/ждёт/)).toBeNull();
+    });
   });
 
   it("keeps Today for today: no goal invitation, also with cached data from before goals existed", async () => {
     const old = todayFixture();
     delete (old as Partial<typeof old>).goals;
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => old) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => old) }));
     await screen.findByText("Сегодня можно");
     expect(screen.queryByRole("button", { name: "Добавить цель" })).toBeNull();
   });
 
   it("has no settings button: settings live in Plan", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi());
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
     await screen.findByText("Сегодня можно");
     expect(screen.queryByRole("button", { name: "Настройки" })).toBeNull();
   });
 
   it("states an overspent day calmly, in the ordinary colour", async () => {
     const state = { ...todayFixture().state, leftToday: -12000, level: 0 };
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })) }));
     const amount = await screen.findByText("₴0");
     expect(StyleSheet.flatten(amount.props.style).color).toBe(tokens.color.fg.default);
     expect(screen.queryByText(/превыш|перерасход|красн/i)).toBeNull();
   });
 
   it("always shows the metal bar, even if the server still has the ring saved", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ limitVisual: "ring" })) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ limitVisual: "ring" })) }));
     await screen.findByText("Сегодня можно");
     expect(levelOf()).toBe("bar:ok:0.72");
   });
@@ -152,7 +182,7 @@ describe("Today, normal mode", () => {
     };
 
     it("spending with no limit yet is not called going over a limit", async () => {
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 0, leftToday: -60100, level: 0 }));
+      await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 0, leftToday: -60100, level: 0 }));
       expect(await screen.findByText("Сегодня можно")).toBeTruthy();
       expect(screen.queryByText("Сегодня больше лимита")).toBeNull();
       expect(screen.getByText("₴0")).toBeTruthy();
@@ -160,11 +190,11 @@ describe("Today, normal mode", () => {
     });
 
     it("overspent looks like any day: nothing left today, the spending quietly below, tomorrow again", async () => {
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 95000, leftToday: -60100, level: 0 }));
+      await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 95000, leftToday: -60100, level: 0 }));
       const heading = await screen.findByText("Сегодня можно");
       expect(StyleSheet.flatten(heading.props.style).color).not.toBe(tokens.color.status.danger);
       expect(screen.getByText("₴0")).toBeTruthy();
-      expect(screen.getByText("₴1,551 из ₴950 · завтра снова ₴950")).toBeTruthy();
+      expect(screen.getByText("потрачено ₴1,551 из ₴950 · завтра снова ₴950")).toBeTruthy();
       expect(screen.queryByText(/больше лимита|Сверх/)).toBeNull();
       expect(screen.queryByText(/^\+/)).toBeNull();
       expect(screen.queryByText(/−/)).toBeNull();
@@ -172,76 +202,49 @@ describe("Today, normal mode", () => {
     });
 
     it("exactly used up: the limit is used, nothing over it", async () => {
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 95000, leftToday: 0, level: 0 }));
+      await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 95000, leftToday: 0, level: 0 }));
       expect(await screen.findByText("Сегодня можно")).toBeTruthy();
       expect(screen.getByText("₴0")).toBeTruthy();
-      expect(screen.getByText("₴950 из ₴950 · завтра снова ₴950")).toBeTruthy();
+      expect(screen.getByText("потрачено ₴950 из ₴950 · завтра снова ₴950")).toBeTruthy();
     });
 
     it("the metal bar is empty when nothing is left, and absent with no limit", async () => {
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 95000, leftToday: -100, level: 0.4 }));
+      await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 95000, leftToday: -100, level: 0.4 }));
       await screen.findByText("Сегодня можно");
       // Nothing left: the strip fills and turns red; the words stay calm.
       expect(levelOf()).toBe("bar:over:0");
     });
 
     it("used up exactly: the strip says nothing is left, the words stay calm and white", async () => {
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 95000, leftToday: 0, level: 0 }));
+      await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 95000, leftToday: 0, level: 0 }));
       const heading = await screen.findByText("Сегодня можно");
       expect(levelOf()).toBe("bar:over:0");
       expect(StyleSheet.flatten(heading.props.style).color).not.toBe(tokens.color.status.danger);
     });
 
     it("a quarter or less left turns the spark to low", async () => {
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 200000, leftToday: 30000, level: 0.15 }));
+      await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 200000, leftToday: 30000, level: 0.15 }));
       await screen.findByText("Сегодня можно");
       expect(levelOf()).toBe("bar:low:0.15");
     });
 
     it("no limit, no bar", async () => {
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 0, leftToday: 0, level: 0 }));
+      await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 0, leftToday: 0, level: 0 }));
       await screen.findByText("Сегодня можно");
       expect(screen.queryByTestId("limit-visual", HIDDEN)).toBeNull();
     });
 
     it("shows what was spent today", async () => {
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, withState({ dailyLimit: 200000, leftToday: 124000, level: 0.62 }));
-      expect(await screen.findByText("₴760 из ₴2,000")).toBeTruthy();
+      await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 200000, leftToday: 124000, level: 0.62 }));
+      expect(await screen.findByText("потрачено ₴760 из ₴2,000")).toBeTruthy();
       expect(levelOf()).toBe("bar:ok:0.62");
     });
 
-    it("a row of this week's days, coloured by how each went, opens the calendar", async () => {
-      const calendar = jest.fn(async (month: string) =>
-        calendarFixture({
-          month,
-          today: "2026-11-02",
-          streak: 5,
-          days:
-            month === "2026-11"
-              ? [
-                  { date: "2026-11-01", limit: 100000, spent: 150000, status: "over" as const },
-                  { date: "2026-11-02", limit: 100000, spent: 28000, status: "today" as const },
-                ]
-              : [
-                  { date: "2026-10-27", limit: null, spent: 0, status: "no_limit" as const },
-                  { date: "2026-10-28", limit: 100000, spent: 10, status: "within" as const },
-                  { date: "2026-10-29", limit: 100000, spent: 10, status: "within" as const },
-                  { date: "2026-10-30", limit: 100000, spent: 10, status: "within" as const },
-                  { date: "2026-10-31", limit: 100000, spent: 900000, status: "far_over" as const },
-                ],
-        }),
-      );
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ streak: 5 })), calendar }));
-      const week = await screen.findByRole("button", { name: "Серия: 5 дней в лимите" });
-      await waitFor(() => expect(screen.getAllByTestId(/^week-day-/)).toHaveLength(7));
-      expect(screen.getByTestId("week-day-2026-11-01").props.accessibilityHint).toBe("over");
-      expect(screen.getByTestId("week-day-2026-10-31").props.accessibilityHint).toBe("over");
-      expect(screen.getByTestId("week-day-2026-10-28").props.accessibilityHint).toBe("within");
-      expect(screen.getByTestId("week-day-2026-10-27").props.accessibilityHint).toBe("no_limit");
-      expect(screen.getByTestId("week-day-2026-11-02").props.accessibilityHint).toBe("today");
-      expect(calendar).toHaveBeenCalledWith("2026-10");
-      expect(screen.queryByText("5 дней в лимите")).toBeNull();
-      await fireEvent.press(week);
+    it("the limit card itself opens the calendar; no week row on the screen", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ streak: 5 })) }));
+      await screen.findByText("Сегодня можно");
+      expect(screen.queryAllByTestId(/^week-day-/)).toHaveLength(0);
+      await openCalendar();
       expect(await screen.findByText(/Ноябрь 2026/)).toBeTruthy();
     });
   });
@@ -252,7 +255,7 @@ describe("Today, normal mode", () => {
         { id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" },
         { id: "income_date:5", kind: "income_date" as const, text: "Когда ожидается следующий доход?" },
       ];
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
       const bell = await screen.findByRole("button", { name: "Вопросы: 2" });
       expect(screen.getByText("2")).toBeTruthy();
       await fireEvent.press(bell);
@@ -260,7 +263,7 @@ describe("Today, normal mode", () => {
     });
 
     it("with nothing to answer it is quiet and says so", async () => {
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi());
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi());
       await fireEvent.press(await screen.findByRole("button", { name: "Вопросы" }));
       expect(await screen.findByText("Вопросов нет")).toBeTruthy();
     });
@@ -274,7 +277,7 @@ describe("Today, normal mode", () => {
       const today = jest.fn(async () => todayFixture());
       const api = fakeApi({ today });
       const client = makeClient();
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api, client);
+      await renderWith(<Today onOpenActivity={noop} />, api, client);
       await screen.findByText("Сегодня можно");
       today.mockImplementationOnce(() => new Promise((r) => (finish = r)));
       await act(async () => void client.refetchQueries({ queryKey: ["today"] }));
@@ -285,7 +288,7 @@ describe("Today, normal mode", () => {
     it("a pull shows it until the data arrives", async () => {
       let finish: (v: ReturnType<typeof todayFixture>) => void = noop;
       const today = jest.fn(async () => todayFixture());
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today }));
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today }));
       await screen.findByText("Сегодня можно");
       today.mockImplementationOnce(() => new Promise((r) => (finish = r)));
       await act(async () => control().onRefresh());
@@ -297,7 +300,7 @@ describe("Today, normal mode", () => {
 
   it("a loan from the bank can be repaid but offers no deletion", async () => {
     const badCases = [{ id: "loan:1", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 1, remaining: 500_000 } }];
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ badCases })) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ badCases })) }));
     expect(await screen.findByText(badCases[0]!.text)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Удалить/ })).toBeNull();
@@ -306,7 +309,7 @@ describe("Today, normal mode", () => {
 
   it("a bad case with no loan behind it has no actions", async () => {
     const badCases = [{ id: "bridge_over_plan:1", text: "Минус вышел за план моста на ₴100." }];
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ badCases })) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ badCases })) }));
     expect(await screen.findByText(badCases[0]!.text)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Погасил|Удалить/ })).toBeNull();
   });
@@ -314,7 +317,7 @@ describe("Today, normal mode", () => {
   it("deletes a mistaken loan entered by hand, after asking", async () => {
     const alert = jest.spyOn(Alert, "alert").mockImplementation(noop);
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴10 от 03.11", removableLoanId: 7, repayLoan: { id: 7, remaining: 1000 } }] })) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: "Удалить: Займ ₴10 от 03.11" }));
     expect(api.deleteLoan).not.toHaveBeenCalled();
     await act(async () => pressAlert(alert, "Удалить"));
@@ -325,7 +328,7 @@ describe("Today, normal mode", () => {
 
   it("repaying a loan asks for the amount and date, with what is owed filled in", async () => {
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ date: "2026-11-03", badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
     expect(screen.getByLabelText("Сумма").props.value).toBe("5000");
     const yesterday = shiftDate(kyivDate(), -1);
@@ -338,7 +341,7 @@ describe("Today, normal mode", () => {
 
   it("says what a different repayment amount will do, and rejects a bad one", async () => {
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
     await fireEvent.changeText(screen.getByLabelText("Сумма"), "2000");
     expect(screen.getByText("Останется ₴3,000, займ будет открыт.")).toBeTruthy();
@@ -353,14 +356,14 @@ describe("Today, normal mode", () => {
   it("the repayment form names the loan alone, without the note about the pace", async () => {
     const text = "Займ ₴5,000 от 01.11. При текущем темпе деньги закончатся 18.11.";
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text, repayLoan: { id: 7, remaining: 500_000 } }] })) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: `Погасил: ${text}` }));
     expect(screen.getByText("Займ ₴5,000 от 01.11")).toBeTruthy();
   });
 
   it("the repayment form's button works while the keyboard is up", async () => {
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
     let node = screen.getByText("Сохранить").parent;
     while (node && node.props.keyboardShouldPersistTaps === undefined) node = node.parent;
@@ -390,21 +393,21 @@ describe("Today, normal mode", () => {
     const flat = (name: string) => StyleSheet.flatten(screen.getByRole("button", { name: new RegExp(`^${name}`) }).props.style);
     const openIt = async (over = {}) => {
       const api = fakeApi({ today: jest.fn(async () => todayFixture({ date: "2026-11-05", streak: 2 })), ...november(), ...over });
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
-      await fireEvent.press(await screen.findByRole("button", { name: "Серия: 2 дня в лимите" }));
+      await renderWith(<Today onOpenActivity={noop} />, api);
+      await openCalendar();
       await screen.findByText("Ноябрь 2026");
       await screen.findByRole("button", { name: /^1 ноября/ });
       return api;
     };
 
     it("names the streak in the right word form", async () => {
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ streak: 5 })) }));
-      expect(await screen.findByRole("button", { name: "Серия: 5 дней в лимите" })).toBeTruthy();
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ streak: 5 })) }));
+      expect((await screen.findByRole("button", { name: /^Сегодня можно/ })).props.accessibilityHint).toBe("Серия: 5 дней в лимите");
     });
 
     it("offers the calendar by name while there is no streak", async () => {
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi());
-      expect(await screen.findByRole("button", { name: "Календарь лимитов" })).toBeTruthy();
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+      expect((await screen.findByRole("button", { name: /^Сегодня можно/ })).props.accessibilityHint).toBe("Календарь лимитов");
     });
 
     it("colours days by status and says the status in words too", async () => {
@@ -443,8 +446,8 @@ describe("Today, normal mode", () => {
         throw new NetworkError();
       });
       const api = fakeApi({ today: jest.fn(async () => todayFixture({ streak: 2 })), calendar });
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
-      await fireEvent.press(await screen.findByRole("button", { name: "Серия: 2 дня в лимите" }));
+      await renderWith(<Today onOpenActivity={noop} />, api);
+      await openCalendar();
       expect(await screen.findByText("Не получилось загрузить месяц.", {}, { timeout: 4000 })).toBeTruthy();
       calendar.mockImplementation(november().calendar as never);
       await fireEvent.press(screen.getByRole("button", { name: "Повторить" }));
@@ -455,7 +458,7 @@ describe("Today, normal mode", () => {
   describe("the repayment window", () => {
     const open = async () => {
       const api = fakeApi({ today: jest.fn(async () => todayFixture({ badCases: [{ id: "loan:7", text: "Займ ₴5,000 от 01.11", repayLoan: { id: 7, remaining: 500_000 } }] })) });
-      await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+      await renderWith(<Today onOpenActivity={noop} />, api);
       await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
       return screen.getByTestId("sheet-panel");
     };
@@ -493,7 +496,7 @@ describe("Today, normal mode", () => {
         throw new ApiError(422);
       }),
     });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
     await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
     const text = await screen.findByText("Дата должна быть не раньше дня займа и не позже сегодня.");
@@ -507,7 +510,7 @@ describe("Today, normal mode", () => {
         throw new Error("boom");
       }),
     });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: "Погасил: Займ ₴5,000 от 01.11" }));
     await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
@@ -521,7 +524,7 @@ describe("Today, normal mode", () => {
       { id: "income_date:5", kind: "income_date" as const, text: "Когда ожидается следующий доход?" },
       { id: "recipient_label:0123456789abcdef", kind: "recipient_label" as const, text: "Кто это: Иван?" },
     ];
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
     expect(await screen.findByRole("button", { name: "Вопросы: 4" })).toBeTruthy();
     for (const b of screen.getAllByRole("button")) {
       expect(StyleSheet.flatten(b.props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
@@ -540,7 +543,7 @@ describe("Today, questions", () => {
   it("a question that leads to Activity closes the sheet first", async () => {
     const onOpenActivity = jest.fn();
     const questions = [{ id: "usdc_arrived", kind: "usdc_arrived" as const, text: "Посмотреть операцию" }];
-    await renderWith(<Today onOpenActivity={onOpenActivity} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    await renderWith(<Today onOpenActivity={onOpenActivity} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
     await openQuestions();
     await fireEvent.press(await screen.findByText("Посмотреть операцию"));
     expect(onOpenActivity).toHaveBeenCalled();
@@ -549,7 +552,7 @@ describe("Today, questions", () => {
 
   it("closing the recipient sheet returns to the question list", async () => {
     const questions = [{ id: "recipient_label:0123456789abcdef", kind: "recipient_label" as const, text: "Кто это: Иван?" }];
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
     await openQuestions();
     await fireEvent.press(await screen.findByText("Кто это: Иван?"));
     expect(await screen.findByText("Что это за перевод?")).toBeTruthy();
@@ -562,7 +565,7 @@ describe("Today, questions", () => {
   it("a USDC arrival is confirmed with one tap and the card goes away", async () => {
     const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions })) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await openQuestions();
     await fireEvent.press(await screen.findByText("Да, пришло"));
     await waitFor(() => expect(api.confirmIncome).toHaveBeenCalledWith(12));
@@ -572,7 +575,7 @@ describe("Today, questions", () => {
   it("an income date is set with one tap on a quick choice", async () => {
     const questions = [{ id: "income_date:5", kind: "income_date" as const, text: "Когда ожидается следующий доход?" }];
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions })) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await openQuestions();
     await fireEvent.press(await screen.findByText("Через неделю"));
     await waitFor(() => expect(api.setIncomeDate).toHaveBeenCalledWith(5, "2026-11-09"));
@@ -583,7 +586,7 @@ describe("Today, questions", () => {
 
   it("a credit from Binance is matched with one tap against the event and the row, and the card goes away", async () => {
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions: [USDC_MATCH] })) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await openQuestions();
     await fireEvent.press(await screen.findByRole("button", { name: "Да, вывод с Binance" }));
     await waitFor(() => expect(api.matchUsdc).toHaveBeenCalledWith(12, 34));
@@ -593,7 +596,7 @@ describe("Today, questions", () => {
 
   it("answering no marks the row, not the balance", async () => {
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions: [USDC_MATCH] })) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await openQuestions();
     await fireEvent.press(await screen.findByRole("button", { name: "Нет" }));
     await waitFor(() => expect(api.dismissUsdcMatch).toHaveBeenCalledWith(34));
@@ -604,7 +607,7 @@ describe("Today, questions", () => {
   it("refreshes Today after a match and brings the card back if the match fails", async () => {
     const today = jest.fn(async () => todayFixture({ questions: [USDC_MATCH] }));
     const ok = fakeApi({ today });
-    const first = await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, ok);
+    const first = await renderWith(<Today onOpenActivity={noop} />, ok);
     await openQuestions();
     await fireEvent.press(await screen.findByRole("button", { name: "Да, вывод с Binance" }));
     await waitFor(() => expect(today).toHaveBeenCalledTimes(2));
@@ -616,7 +619,7 @@ describe("Today, questions", () => {
         throw new NetworkError();
       }),
     });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, failing);
+    await renderWith(<Today onOpenActivity={noop} />, failing);
     await openQuestions();
     await fireEvent.press(await screen.findByRole("button", { name: "Да, вывод с Binance" }));
     await waitFor(() => expect(failing.matchUsdc).toHaveBeenCalled());
@@ -625,7 +628,7 @@ describe("Today, questions", () => {
 
   it("hides a date question with no income event, even from an older cached answer", async () => {
     const questions = [{ id: "income_date", kind: "income_date" as const, text: "Когда ожидается следующий доход?" }];
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
     await screen.findByText("Сегодня можно");
     expect(screen.queryByRole("button", { name: /^Вопросы: / })).toBeNull();
   });
@@ -635,7 +638,7 @@ describe("Today, questions", () => {
       { id: "recipient_label:aaaa", kind: "recipient_label" as const, text: "Иван: 3 перевода, ₴2,500", subject: "Иван" },
       { id: "recipient_label:bbbb", kind: "recipient_label" as const, text: "Кто это: Ольга?" },
     ];
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
     await openQuestions();
     await fireEvent.press(await screen.findByText("Иван: 3 перевода, ₴2,500"));
     expect(await screen.findByText("Иван")).toBeTruthy();
@@ -649,7 +652,7 @@ describe("Today, questions", () => {
     const questions = [{ id: "recipient_label:0123456789abcdef", kind: "recipient_label" as const, text: "Кто это: Иван?" }];
     const onOpenActivity = jest.fn();
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions })) });
-    await renderWith(<Today onOpenActivity={onOpenActivity} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={onOpenActivity} />, api);
     await openQuestions();
     await fireEvent.press(await screen.findByText("Кто это: Иван?"));
     expect(await screen.findByText("Что это за перевод?")).toBeTruthy();
@@ -668,7 +671,7 @@ describe("Today, questions", () => {
         throw new NetworkError();
       }),
     });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await openQuestions();
     await fireEvent.press(await screen.findByText("Да, пришло"));
     await waitFor(() => expect(api.confirmIncome).toHaveBeenCalled());
@@ -678,24 +681,24 @@ describe("Today, questions", () => {
 
 describe("Today, decision rows", () => {
   it("shows no row when nothing needs a decision", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi());
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
     await screen.findByText("Сегодня можно");
     expect(screen.queryByRole("button", { name: /^Вопросы: / })).toBeNull();
-    expect(screen.queryByText(/план[а]? до зарплаты/i)).toBeNull();
+    expect(screen.queryByText(/план до дохода/i)).toBeNull();
   });
 
   it("keeps questions and the plan out of the way until asked for", async () => {
     const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions, state: bridgeState() })) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions, state: bridgeState() })) }));
     expect(await screen.findByRole("button", { name: "Вопросы: 1" })).toBeTruthy();
-    expect(screen.getByText("Нужен план до зарплаты")).toBeTruthy();
+    expect(screen.getByText("Нужен план до дохода. Это пара минут, и у дня появится лимит.")).toBeTruthy();
     expect(screen.queryByText("Пришло на Binance?")).toBeNull();
     expect(screen.queryByLabelText("Сумма в день")).toBeNull();
   });
 
   it("names the daily amount once a plan is confirmed", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state: bridgeState({ confirmed: true }) })) }));
-    expect(await screen.findByRole("button", { name: "План до зарплаты: ₴450 в день" })).toBeTruthy();
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state: bridgeState({ confirmed: true }) })) }));
+    expect(await screen.findByRole("button", { name: "План до дохода: ₴450 в день" })).toBeTruthy();
     expect(screen.getByText("₴450 в день")).toBeTruthy();
   });
 
@@ -704,7 +707,7 @@ describe("Today, decision rows", () => {
       { id: "recipient_label:0123456789abcdef", kind: "recipient_label" as const, text: "Кто это: Иван?" },
       { id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" },
     ];
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
     await openQuestions();
     await fireEvent.press(await screen.findByText("Кто это: Иван?"));
     expect(await screen.findByText("Что это за перевод?")).toBeTruthy();
@@ -724,16 +727,16 @@ describe("Today, bridge", () => {
   };
 
   it("shows the plan and a slider", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: bridgeToday() }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: bridgeToday() }));
     await openBridge();
-    expect(await screen.findByText(/До зарплаты 18 дн/)).toBeTruthy();
+    expect(await screen.findByText(/До дохода 18 дн/)).toBeTruthy();
     expect(screen.getByText("₴20,070")).toBeTruthy();
     expect(screen.getByLabelText("Сумма в день")).toBeTruthy();
     expect(screen.getByText("Подтвердить план")).toBeTruthy();
   });
 
   it("with no limit yet, asks to confirm the plan instead of saying the limit was used", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state: { ...bridgeState(), dailyLimit: 0, leftToday: 0 } })) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state: { ...bridgeState(), dailyLimit: 0, leftToday: 0 } })) }));
     await openBridge();
     expect(await screen.findByText("Лимит появится, когда вы подтвердите план.")).toBeTruthy();
     expect(screen.queryByText(/использован/)).toBeNull();
@@ -745,7 +748,7 @@ describe("Today, bridge", () => {
       today: bridgeToday(),
       previewBridge: jest.fn(async (d: number) => ({ dailyAmount: d, creditNeeded: 2800000, shortfall: 0 })),
     });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await openBridge();
     const slider = await screen.findByLabelText("Сумма в день");
     await fireEvent(slider, "valueChange", 50000);
@@ -764,7 +767,7 @@ describe("Today, bridge", () => {
       today: bridgeToday(),
       previewBridge: jest.fn(async (d: number) => ({ dailyAmount: d, creditNeeded: 3791600, shortfall: 791600 })),
     });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await openBridge();
     await fireEvent(await screen.findByLabelText("Сумма в день"), "valueChange", 100000);
     await tick(310);
@@ -775,7 +778,7 @@ describe("Today, bridge", () => {
   it("unmoved, the slider shows the server's exact amount and confirm sends it unrounded", async () => {
     const state = { ...bridgeState(), dailyLimit: 47300, leftToday: 47300 };
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ state })) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await openBridge();
     const slider = await screen.findByLabelText("Сумма в день");
     expect(slider.props.value).toBe(47300);
@@ -790,7 +793,7 @@ describe("Today, bridge", () => {
 
   it("a confirmed plan shows calm feedback and no button until the amount changes", async () => {
     const api = fakeApi({ today: bridgeToday({ confirmed: true }) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await openBridge();
     expect(await screen.findByText(/План подтверждён/)).toBeTruthy();
     expect(screen.queryByText("Подтвердить план")).toBeNull();
@@ -804,7 +807,7 @@ describe("Today, bridge", () => {
   it("a confirmed plan can be cancelled, after asking", async () => {
     const alert = jest.spyOn(Alert, "alert").mockImplementation(noop);
     const api = fakeApi({ today: bridgeToday({ confirmed: true }) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await openBridge();
     await fireEvent.press(await screen.findByRole("button", { name: "Отменить план" }));
     expect(api.cancelBridge).not.toHaveBeenCalled();
@@ -815,7 +818,7 @@ describe("Today, bridge", () => {
   });
 
   it("an unconfirmed plan has nothing to cancel", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: bridgeToday() }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: bridgeToday() }));
     await openBridge();
     await screen.findByLabelText("Сумма в день");
     expect(screen.queryByRole("button", { name: "Отменить план" })).toBeNull();
@@ -826,7 +829,7 @@ describe("Today, bridge", () => {
       throw new NetworkError();
     });
     const api = fakeApi({ today: bridgeToday(), previewBridge });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await openBridge();
     await fireEvent(await screen.findByLabelText("Сумма в день"), "valueChange", 60000);
     await tick(310);
@@ -838,7 +841,7 @@ describe("Today, bridge", () => {
   });
 
   it("describes the slider value for assistive tech", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: bridgeToday() }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: bridgeToday() }));
     await openBridge();
     const slider = await screen.findByLabelText("Сумма в день");
     expect(slider.props.accessibilityValue).toEqual({ text: "₴450 в день" });
@@ -846,7 +849,7 @@ describe("Today, bridge", () => {
 
   it("confirms the chosen amount", async () => {
     const api = fakeApi({ today: bridgeToday() });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await openBridge();
     await fireEvent(await screen.findByLabelText("Сумма в день"), "valueChange", 50000);
     await tick(310);
@@ -862,7 +865,7 @@ describe("Today, bridge", () => {
 
 describe("Today, accessibility and old data", () => {
   it("hides the metal from assistive tech and labels the amount as one phrase", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi());
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
     await screen.findByText("Сегодня можно");
     let node = screen.getByTestId("limit-visual", HIDDEN).parent;
     while (node && node.props.accessibilityElementsHidden !== true) node = node.parent;
@@ -872,7 +875,7 @@ describe("Today, accessibility and old data", () => {
 
   it("announces a stale sync as an alert", async () => {
     const stale = todayFixture({ syncStale: true });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => stale) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => stale) }));
     expect(await screen.findByRole("alert")).toBeTruthy();
   });
 
@@ -881,20 +884,20 @@ describe("Today, accessibility and old data", () => {
     client.setQueryData(["today"], todayFixture({ date: "2026-11-01" }));
     const api = fakeApi({ today: jest.fn(() => new Promise<never>(() => undefined)) });
     const now = () => new Date("2026-11-02T10:00:00Z");
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} now={now} />, api, client);
+    await renderWith(<Today onOpenActivity={noop} now={now} />, api, client);
     expect(await screen.findByText("Показаны данные за 01.11, не за сегодня.")).toBeTruthy();
   });
 
   it("a failed first load offers a retry", async () => {
     const api = fakeApi({ today: jest.fn(async () => { throw new Error("offline"); }) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await screen.findByText(/Не получилось загрузить данные/);
     expect(screen.getByRole("button", { name: "Повторить" })).toBeTruthy();
   });
 
   it("shows no earlier-day note for today's data", async () => {
     const now = () => new Date("2026-11-02T10:00:00Z");
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} now={now} />, fakeApi());
+    await renderWith(<Today onOpenActivity={noop} now={now} />, fakeApi());
     await screen.findByText("Сегодня можно");
     expect(screen.queryByText(/не за сегодня/)).toBeNull();
   });
@@ -903,7 +906,7 @@ describe("Today, accessibility and old data", () => {
 describe("Today, loading and offline", () => {
   it("shows a skeleton on first load", async () => {
     const api = fakeApi({ today: jest.fn(() => new Promise(() => undefined)) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     expect(screen.getByTestId("today-skeleton")).toBeTruthy();
   });
 
@@ -913,7 +916,7 @@ describe("Today, loading and offline", () => {
         throw new NetworkError();
       }),
     });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     expect(await screen.findByText(/Не получилось загрузить данные/)).toBeTruthy();
     expect(screen.getByText("Повторить")).toBeTruthy();
   });
@@ -927,7 +930,7 @@ describe("Today, loading and offline", () => {
         throw new NetworkError();
       }),
     });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api, client);
+    await renderWith(<Today onOpenActivity={noop} />, api, client);
     expect(await screen.findByText(/Нет связи/)).toBeTruthy();
     expect(screen.getByText(/08:30/)).toBeTruthy();
     expect(screen.getByText("₴720")).toBeTruthy();
@@ -936,7 +939,7 @@ describe("Today, loading and offline", () => {
 
   it("a stale bank sync keeps the limit and shows when it last updated", async () => {
     const stale = todayFixture({ syncStale: true, syncedAt: new Date(2026, 10, 1, 21, 10).toISOString() });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => stale) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => stale) }));
     expect(await screen.findByText(/01\.11 21:10/)).toBeTruthy();
     expect(screen.getByText("₴720")).toBeTruthy();
     expect(levelOf()).toBe("bar:ok:0.72");
@@ -944,7 +947,7 @@ describe("Today, loading and offline", () => {
 
   it("a stale sync with no sync yet says so", async () => {
     const stale = todayFixture({ syncStale: true, syncedAt: null });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => stale) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => stale) }));
     expect(await screen.findByText(/Синхронизации с банком ещё не было/)).toBeTruthy();
     expect(screen.getByText("₴720")).toBeTruthy();
   });

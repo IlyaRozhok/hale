@@ -29,6 +29,14 @@ describe("Glass", () => {
     expect(screen.getByText("Текст")).toBeTruthy();
   });
 
+  it("the one glass card is lightly tinted glass, and an ordinary solid card where the system has none", async () => {
+    await render(<Glass kind="card"><Text>Текст</Text></Glass>);
+    expect(screen.getByTestId("native-glass").props.tintColor).toBe(tokens.color.glass.surface.tint);
+    jest.mocked(isLiquidGlassAvailable).mockReturnValue(false);
+    await render(<Glass kind="card" testID="plain"><Text>Текст</Text></Glass>);
+    expect(flat("plain")).toMatchObject({ backgroundColor: tokens.color.card.fill, borderColor: tokens.color.card.edge });
+  });
+
   it("the menu is the most see-through", async () => {
     await render(<Glass kind="menu"><Text>Текст</Text></Glass>);
     expect(screen.getByTestId("native-glass").props.tintColor).toBe(tokens.color.glass.menu.tint);

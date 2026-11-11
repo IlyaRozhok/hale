@@ -1,4 +1,4 @@
-import { palette as p, blackAlpha } from "./palette";
+import { palette as p, blackAlpha, sandAlpha, whiteAlpha } from "./palette";
 
 /** Semantic Silver tokens. Surfaces are opaque; what is translucent is the scrim and the glass. */
 export const color = {
@@ -35,6 +35,16 @@ export const color = {
   card: { fill: p.graphite[900], edge: p.graphite[800] },
   /** The limit strip: silver, with a small spark at its end that says how the day stands. */
   limit: { ok: p.sage, low: p.sand, over: p.ember, overDeep: p.wine, strip: p.silver[100] },
+  /** The runway graph: a forecast line with a soft fill fading to nothing, sand once it is below zero. */
+  runway: {
+    line: p.white,
+    fill: whiteAlpha(0.16),
+    fade: whiteAlpha(0),
+    low: p.sand,
+    lowFill: sandAlpha(0.2),
+    lowFade: sandAlpha(0),
+    zero: p.graphite[500],
+  },
   /** The thin limit strip: brushed silver whose highlight glides slowly along it. */
   metalBar: { shade: p.silver[400], body: p.silver[200], glint: p.white },
   // Statuses differ by lightness, and danger (errors) by a calm red. Each also carries a text label.

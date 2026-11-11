@@ -5,32 +5,29 @@ import { tokens } from "@hale/tokens";
 import type { TodayDto } from "@hale/contracts";
 import { LimitBar } from "../metal";
 import { limitState } from "../limitState";
-import { formatMoney, formatStamp, kyivDate, longDate } from "../format";
-import { useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useAnswerCashCard, useDepositFromWallet, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
-import { CashOperationSheet } from "../components/CashOperationSheet";
+import { formatMoney, formatStamp, kyivDate, longDate, shiftDate, streakLabel } from "../format";
+import { dayPhrase, type PhraseAction } from "../dayPhrase";
+import { useCalendar, useCancelBridge, useChooseBridge, useConfirmIncome, useDeleteLoan, useAnswerCashCard, useDepositFromWallet, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
 import { PaymentPaidSheet } from "../components/PaymentPaidSheet";
 import { ErrorText } from "../components/ErrorText";
 import { BadCaseCard } from "../components/BadCaseCard";
 import { BridgePlan } from "../components/BridgePlan";
 import { Glass } from "../components/Glass";
-import { GoalsList } from "../components/GoalsList";
-import { GoalSheet, GoalsSheet } from "../components/GoalsSection";
-import { WeekDots } from "../components/WeekDots";
 import { Icon } from "../components/Icon";
 import { LAYOUT } from "../components/layout";
 import { LimitCalendar } from "../components/LimitCalendar";
 import { QuestionCard, eventIdOf } from "../components/QuestionCard";
 import { RecipientLabelSheet } from "../components/RecipientLabelSheet";
 import { RepayLoanSheet } from "../components/RepayLoanSheet";
+import { Runway } from "../components/Runway";
 import { Sheet } from "../components/Sheet";
 import { StaleBanner } from "../components/StaleBanner";
 import { TodaySkeleton } from "../components/TodaySkeleton";
-import { Upcoming } from "../components/Upcoming";
 import { usePullRefresh } from "../usePullRefresh";
 
 const { color, radius, space, touchMin, type } = tokens;
 
-type Props = { onOpenActivity: () => void; onOpenPlan: () => void; /** Test seam for the current moment. */ now?: () => Date };
+type Props = { onOpenActivity: () => void; /** Test seam for the current moment. */ now?: () => Date };
 
 function freshnessLines(data: TodayDto, offlineSince: number | null, now: Date): string[] {
   const lines: string[] = [];
@@ -64,10 +61,9 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const deleteLoan = useDeleteLoan();
   const pull = usePullRefresh(today.refetch);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
-  const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | "cash" | "goals" | null>(null);
+  const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | null>(null);
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
   const [paying, setPaying] = useState<TodayDto["upcoming"][number] | null>(null);
-  const [goalOpen, setGoalOpen] = useState<number | null>(null);
   const [repaying, setRepaying] = useState<{ id: number; remaining: number; receivedOn?: string; name: string } | null>(null);
 
   const hide = (id: string, on: boolean) =>
@@ -79,6 +75,9 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
     });
 
   const data = today.data;
+  // How yesterday went, for the phrase of the day. It waits for today's date and may never come: then the phrase is about something else.
+  const dayBefore = data ? shiftDate(data.date, -1) : null;
+  const calendar = useCalendar(dayBefore?.slice(0, 7) ?? "", dayBefore !== null);
   const top = insets.top + space.sm;
   const closeSheet = () => setSheet(null);
   /** Closes the sheet only if it is still the one open: a late answer must not close another. */
@@ -128,7 +127,24 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
     );
   };
 
-  const goals = data.goals ?? [];
+  const phrase = dayPhrase({
+    today: data.date,
+    dailyLimit: state.dailyLimit,
+    needsPlan: state.mode === "bridge" && state.bridge !== null && !state.bridge.confirmed,
+    questions: questions.length,
+    upcoming: data.upcoming,
+    yesterday: calendar.data?.days.find((d) => d.date === dayBefore) ?? null,
+    streak: data.streak ?? 0,
+  });
+  const act = (action: PhraseAction) => {
+    if (action.kind === "pay") setPaying(action.payment);
+    else setSheet(action.kind);
+  };
+  const limitLabel = over
+    ? `${heading} ₴0, потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)} на день`
+    : hasLimit
+      ? `${heading} ${formatMoney(shownLeft)}, из ${formatMoney(state.dailyLimit)} на день`
+      : `${heading} ${formatMoney(shownLeft)}. ${noLimitNote}`;
 
   return (
     <View style={styles.root}>
@@ -140,68 +156,63 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
       >
         <View style={styles.header}>
           <Text style={styles.date}>{longDate(data.date)}</Text>
-          <View style={styles.headerButtons}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={questions.length > 0 ? `Вопросы: ${questions.length}` : "Вопросы"}
-              onPress={() => setSheet("questions")}
-              style={styles.profile}
-            >
-              <Icon name="bell" color={color.fg.muted} size={20} />
-              {questions.length > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{questions.length}</Text>
-                </View>
-              )}
-            </Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel="Добавить операцию" onPress={() => setSheet("cash")} style={styles.profile}>
-              <Icon name="plus" color={color.fg.muted} size={20} />
-            </Pressable>
-          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={questions.length > 0 ? `Вопросы: ${questions.length}` : "Вопросы"}
+            onPress={() => setSheet("questions")}
+            style={styles.profile}
+          >
+            <Icon name="bell" color={color.fg.muted} size={20} />
+            {questions.length > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{questions.length}</Text>
+              </View>
+            )}
+          </Pressable>
         </View>
         <StaleBanner lines={freshnessLines(data, offlineSince, now())} />
-        <Glass style={styles.hero}>
-          <View
-            style={styles.heroText}
-            accessible
-            accessibilityLabel={
-              over
-                ? `${heading} ₴0, потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)} на день`
-                : hasLimit
-                  ? `${heading} ${formatMoney(shownLeft)}, из ${formatMoney(state.dailyLimit)} на день`
-                  : `${heading} ${formatMoney(shownLeft)}. ${noLimitNote}`
-            }
-          >
+        {/* The whole card is the way into the limit calendar. */}
+        <Pressable accessibilityRole="button" accessibilityLabel={limitLabel} accessibilityHint={streakLabel(data.streak ?? 0)} onPress={() => setSheet("calendar")} style={styles.heroPress}>
+          <Glass kind="card" style={styles.hero}>
             <Text style={styles.eyebrow}>{heading}</Text>
             <Text style={styles.amount}>{over ? formatMoney(0) : formatMoney(shownLeft)}</Text>
             {!hasLimit && <Text style={styles.note}>{noLimitNote}</Text>}
             {!hasLimit && spent > 0 && <Text style={styles.subtle}>Потрачено {formatMoney(spent)}</Text>}
-          </View>
-          {hasLimit && (
-            <>
-              <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-                <LimitBar level={level} state={dayState} />
-              </View>
-              <Text style={[styles.subtle, styles.spentLine]}>
-                {`${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}${state.leftToday <= 0 ? ` · завтра снова ${formatMoney(state.dailyLimit)}` : ""}`}
-              </Text>
-            </>
-          )}
-          <View style={styles.week}>
-            <WeekDots today={data.date} streak={data.streak ?? 0} state={dayState} onPress={() => setSheet("calendar")} />
-          </View>
-        </Glass>
+            {hasLimit && (
+              <>
+                <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                  <LimitBar level={level} state={dayState} />
+                </View>
+                <Text style={[styles.subtle, styles.spentLine]}>
+                  {`потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}${state.leftToday <= 0 ? ` · завтра снова ${formatMoney(state.dailyLimit)}` : ""}`}
+                </Text>
+              </>
+            )}
+          </Glass>
+        </Pressable>
 
-        {state.mode === "bridge" && state.bridge && (
+        {phrase && (
+          <Pressable accessibilityRole="button" onPress={() => act(phrase.action)} style={styles.phraseRow}>
+            <Text style={styles.phrase}>{phrase.text}</Text>
+          </Pressable>
+        )}
+
+        {data.runway && (
+          <View style={styles.runway}>
+            <Runway runway={data.runway} today={data.date} onPay={(id) => setPaying(data.upcoming.find((p) => p.id === id) ?? null)} />
+          </View>
+        )}
+
+        {state.mode === "bridge" && state.bridge?.confirmed && (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={state.bridge.confirmed ? `План до зарплаты: ${formatMoney(state.dailyLimit)} в день` : "Нужен план до зарплаты"}
+            accessibilityLabel={`План до дохода: ${formatMoney(state.dailyLimit)} в день`}
             onPress={() => setSheet("bridge")}
             style={styles.planRow}
           >
             <Icon name="route" color={color.fg.muted} size={18} />
-            <Text style={styles.planText}>{state.bridge.confirmed ? "План до зарплаты" : "Нужен план до зарплаты"}</Text>
-            {state.bridge.confirmed && <Text style={styles.planAmount}>{`${formatMoney(state.dailyLimit)} в день`}</Text>}
+            <Text style={styles.planText}>План до дохода</Text>
+            <Text style={styles.planAmount}>{`${formatMoney(state.dailyLimit)} в день`}</Text>
             <Icon name="chevron" color={color.fg.subtle} size={16} />
           </Pressable>
         )}
@@ -213,15 +224,11 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
             onDelete={b.removableLoanId === undefined ? undefined : () => deleteLoan.mutate(b.removableLoanId!, { onError: () => Alert.alert("Не удалось удалить займ", "Проверьте связь и попробуйте ещё раз.") })}
           />
         ))}
-
-        {goals.length > 0 && <GoalsList goals={goals} onOpenGoal={setGoalOpen} onOpenAll={() => setSheet("goals")} />}
-        <Upcoming items={data.upcoming} today={data.date} onPress={setPaying} />
       </ScrollView>
 
-      {sheet === "cash" && <CashOperationSheet onClose={closeSheet} />}
       {sheet === "calendar" && <LimitCalendar today={data.date} streak={data.streak ?? 0} onClose={closeSheet} />}
       {sheet === "bridge" && state.bridge && (
-        <Sheet title="План до зарплаты" onClose={closeSheet}>
+        <Sheet title="План до дохода" onClose={closeSheet}>
           <BridgePlan
             state={state}
             usdRate={data.usdRate}
@@ -266,8 +273,6 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
           )}
         </Sheet>
       )}
-      {goalOpen !== null && <GoalSheet goalId={goalOpen} onClose={() => setGoalOpen(null)} />}
-      {sheet === "goals" && <GoalsSheet onClose={closeSheet} />}
       {paying && <PaymentPaidSheet payment={paying} today={data.date} onClose={() => setPaying(null)} />}
       {repaying && <RepayLoanSheet loanId={repaying.id} remaining={repaying.remaining} receivedOn={repaying.receivedOn} name={repaying.name} onClose={() => setRepaying(null)} />}
     </View>
@@ -276,15 +281,16 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  headerButtons: { flexDirection: "row", gap: space.sm },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md },
   date: { ...type.label, color: color.fg.default, flexShrink: 1 },
   profile: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: color.glass.row },
-  hero: { overflow: "hidden", paddingHorizontal: 0, paddingVertical: 0 },
-  heroText: { paddingHorizontal: space.lg, paddingTop: space.lg, gap: 2 },
-  bar: { paddingHorizontal: space.lg, marginTop: space.md },
-  spentLine: { paddingHorizontal: space.lg, marginTop: space.xs },
-  week: { paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.xs, marginTop: space.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: color.card.edge },
+  heroPress: { minHeight: touchMin },
+  hero: { overflow: "hidden", borderRadius: radius.xl, paddingHorizontal: space.lg, paddingTop: space.lg, paddingBottom: space.lg, gap: 2 },
+  bar: { marginTop: space.md },
+  spentLine: { marginTop: space.xs },
+  phraseRow: { minHeight: touchMin, justifyContent: "center", paddingHorizontal: space.xs },
+  phrase: { ...type.body, color: color.fg.default },
+  runway: { marginTop: space.sm },
   badge: {
     position: "absolute",
     top: space.xs,

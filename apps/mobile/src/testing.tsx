@@ -33,6 +33,21 @@ export function todayFixture(over: Partial<TodayDto> = {}): TodayDto {
     limitVisual: "mercury",
     goals: [],
     streak: 0,
+    runway: {
+      endOn: "2026-11-07",
+      incomeOn: "2026-11-07",
+      reserve: 1328000,
+      zeroOn: null,
+      points: [
+        { date: "2026-11-02", balance: 3500000 },
+        { date: "2026-11-03", balance: 3428000 },
+        { date: "2026-11-04", balance: 3328000 },
+        { date: "2026-11-05", balance: 3228000 },
+        { date: "2026-11-06", balance: 3128000 },
+        { date: "2026-11-07", balance: 1328000 },
+      ],
+      events: [{ id: "1", date: "2026-11-06", name: "Квартплата", amount: 1700000 }],
+    },
     ...over,
   };
 }

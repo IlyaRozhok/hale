@@ -118,7 +118,7 @@ describe("cash taken from the owner's card at another bank", () => {
     questions: [{ id: "cash_card:42", kind: "cash_card", text: "Перевод ₴15,600 на 545708****4563 (09.11). Снял наличными?" }],
   });
   const open = async (api: ReturnType<typeof fakeApi>) => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: /^Вопросы: / }));
   };
 

@@ -48,7 +48,7 @@ export function BridgePlan({ state, usdRate, onConfirm, onCancel, confirming }: 
 
   return (
     <Glass style={styles.stack}>
-      <Text style={styles.text}>До зарплаты {state.daysLeft} дн.</Text>
+      <Text style={styles.text}>До дохода {state.daysLeft} дн.</Text>
       <View style={styles.line}>
         <Text style={styles.muted}>Нужно из кредитки</Text>
         <Text style={[styles.value, !fresh && styles.pending]}>{formatMoney(shown.creditNeeded)}</Text>

@@ -1,0 +1,116 @@
+import { fireEvent, render, screen } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
+import { tokens } from "@hale/tokens";
+import type { RunwayDto } from "@hale/contracts";
+import { Runway } from "./Runway";
+
+const run = (over: Partial<RunwayDto> = {}): RunwayDto => ({
+  endOn: "2026-11-15",
+  incomeOn: "2026-11-15",
+  reserve: 310_000,
+  zeroOn: null,
+  points: [
+    { date: "2026-11-11", balance: 1_350_000 },
+    { date: "2026-11-12", balance: 1_226_000 },
+    { date: "2026-11-13", balance: 1_026_000 },
+    { date: "2026-11-14", balance: 526_000 },
+    { date: "2026-11-15", balance: 310_000 },
+  ],
+  events: [{ id: "7", date: "2026-11-13", name: "Квартплата", amount: 300_000 }],
+  ...over,
+});
+
+/** The same days, short of money: the line goes below zero on the 14th. */
+const shortRun = () =>
+  run({
+    reserve: -240_000,
+    zeroOn: "2026-11-14",
+    points: [
+      { date: "2026-11-11", balance: 800_000 },
+      { date: "2026-11-12", balance: 676_000 },
+      { date: "2026-11-13", balance: 476_000 },
+      { date: "2026-11-14", balance: -24_000 },
+      { date: "2026-11-15", balance: -240_000 },
+    ],
+  });
+
+const touch = (x: number, type: "responderGrant" | "responderMove" = "responderGrant") =>
+  fireEvent(screen.getByTestId("runway-chart"), type, { nativeEvent: { locationX: x } });
+const measure = () => fireEvent(screen.getByTestId("runway-chart"), "layout", { nativeEvent: { layout: { width: 400, height: 112 } } });
+
+describe("Runway", () => {
+  it("names the reserve to the income with one figure and marks only the ends of the axis", async () => {
+    await render(<Runway runway={run()} today="2026-11-11" />);
+    expect(screen.getByText("Запас к доходу")).toBeTruthy();
+    expect(StyleSheet.flatten(screen.getByText("₴3,100").props.style).color).toBe(tokens.color.fg.default);
+    expect(screen.getByText("сегодня")).toBeTruthy();
+    expect(screen.getByText("доход 15 ноя")).toBeTruthy();
+    // No list of dates under the graph: they come by touch.
+    expect(screen.queryByText(/13 ноя/)).toBeNull();
+    expect(screen.queryByText(/Квартплата/)).toBeNull();
+  });
+
+  it("a shortfall is the same figure in sand, with the day the money ends", async () => {
+    await render(<Runway runway={shortRun()} today="2026-11-11" />);
+    expect(StyleSheet.flatten(screen.getByText("−₴2,400").props.style).color).toBe(tokens.color.limit.low);
+    await measure();
+    expect(screen.getByText("ноль 14 ноя")).toBeTruthy();
+  });
+
+  it("without an income date it is the reserve for 30 days, and the axis ends on a plain date", async () => {
+    await render(<Runway runway={run({ incomeOn: null })} today="2026-11-11" />);
+    expect(screen.getByText("Запас на 30 дней")).toBeTruthy();
+    expect(screen.getByText("15 ноя")).toBeTruthy();
+    expect(screen.queryByText(/доход/)).toBeNull();
+  });
+
+  it("a touch tells the nearest day: its date, the money and the payment of that day", async () => {
+    await render(<Runway runway={run()} today="2026-11-11" />);
+    await measure();
+    await touch(190); // the days stand at 0, 100, 200, 300, 400
+    expect(screen.getByText("13 ноя · ₴10,260")).toBeTruthy();
+    expect(screen.getByText("Квартплата −₴3,000")).toBeTruthy();
+    // Nothing to press unless the screen can mark a payment paid.
+    expect(screen.queryByRole("button", { name: /Квартплата/ })).toBeNull();
+    await touch(310, "responderMove");
+    expect(screen.getByText("14 ноя · ₴5,260")).toBeTruthy();
+    expect(screen.queryByText(/Квартплата/)).toBeNull();
+    await touch(5, "responderMove");
+    expect(screen.getByText("Сегодня · ₴13,500")).toBeTruthy();
+    await touch(399, "responderMove");
+    expect(screen.getByText("15 ноя · ₴3,100")).toBeTruthy();
+    expect(screen.getByText("день дохода")).toBeTruthy();
+  });
+
+  it("a second touch on the same day puts the note away", async () => {
+    await render(<Runway runway={run()} today="2026-11-11" />);
+    await measure();
+    await touch(100);
+    expect(screen.getByText("12 ноя · ₴12,260")).toBeTruthy();
+    await touch(100);
+    expect(screen.queryByText(/12 ноя/)).toBeNull();
+  });
+
+  it("the payment in the note opens how it was paid", async () => {
+    const onPay = jest.fn();
+    await render(<Runway runway={run()} today="2026-11-11" onPay={onPay} />);
+    await measure();
+    await touch(200);
+    const row = screen.getByRole("button", { name: "Квартплата, ₴3,000: отметить оплату" });
+    expect(StyleSheet.flatten(row.props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+    await fireEvent.press(row);
+    expect(onPay).toHaveBeenCalledWith("7");
+  });
+
+  it("says the whole picture in words for assistive tech", async () => {
+    await render(<Runway runway={shortRun()} today="2026-11-11" />);
+    expect(screen.getByLabelText("Запас к доходу −₴2,400. Деньги до нуля 14 ноя. Платежи: Квартплата 13 ноя, ₴3,000.")).toBeTruthy();
+  });
+
+  it("on the income's day there is nothing to draw: only the figure", async () => {
+    await render(<Runway runway={run({ points: [{ date: "2026-11-11", balance: 310_000 }], events: [] })} today="2026-11-11" />);
+    expect(screen.getByText("₴3,100")).toBeTruthy();
+    expect(screen.queryByTestId("runway-chart")).toBeNull();
+    expect(screen.queryByText("сегодня")).toBeNull();
+  });
+});

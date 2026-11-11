@@ -36,3 +36,5 @@ export const palette = {
 export const whiteAlpha = (opacity: number): string => `rgba(255, 255, 255, ${opacity})`;
 
 export const blackAlpha = (opacity: number): string => `rgba(10, 11, 13, ${opacity})`;
+
+export const sandAlpha = (opacity: number): string => `rgba(214, 178, 110, ${opacity})`;

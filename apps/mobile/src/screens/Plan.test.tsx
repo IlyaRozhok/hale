@@ -687,7 +687,7 @@ describe("Plan, manual loan", () => {
     });
     await renderWith(
       <>
-        <Today onOpenActivity={noop} onOpenPlan={noop} />
+        <Today onOpenActivity={noop} />
         <Plan />
       </>,
       api,

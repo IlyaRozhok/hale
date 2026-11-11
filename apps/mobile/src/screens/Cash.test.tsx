@@ -3,6 +3,7 @@ import { Alert } from "react-native";
 import { Activity } from "./Activity";
 import { Plan } from "./Plan";
 import { Today } from "./Today";
+import { TabBar } from "../components/TabBar";
 import { fakeApi, renderWith, todayFixture, txFixture } from "../testing";
 import { kyivDate } from "../format";
 import { ApiError } from "../api/client";
@@ -18,10 +19,13 @@ const started = () => ({ cash: jest.fn(async () => ({ started: true, start: "202
 const notStarted = () => ({ cash: jest.fn(async () => ({ started: false, start: null, balance: 0 })) });
 const manual = txFixture({ id: 5, manual: true, accountKind: "cash", description: "Рынок", amount: -30_000, amountUah: -30_000, category: "groceries", localDate: kyivDate() });
 
-describe("adding a cash operation from Today", () => {
+/** The menu with its round "+" button, as on every screen. */
+const menu = <TabBar state={{ index: 0, routes: [{ key: "Today-k", name: "Today" }] } as never} navigation={{ emit: jest.fn(() => ({ defaultPrevented: false })), navigate: jest.fn() } as never} />;
+
+describe("adding a cash operation from the menu", () => {
   it("a purchase: amount, category, save", async () => {
     const api = fakeApi(started());
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(menu, api);
     await press("Добавить операцию");
     await fireEvent.changeText(await screen.findByLabelText("Сумма"), "300,50");
     await press("Кафе и рестораны");
@@ -32,7 +36,7 @@ describe("adding a cash operation from Today", () => {
 
   it("other kinds need no category and keep a note", async () => {
     const api = fakeApi(started());
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(menu, api);
     await press("Добавить операцию");
     await press("Получил");
     expect(screen.queryByRole("button", { name: "Кафе и рестораны" })).toBeNull();
@@ -44,7 +48,7 @@ describe("adding a cash operation from Today", () => {
 
   it("asks for an amount and a category before saving", async () => {
     const api = fakeApi(started());
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(menu, api);
     await press("Добавить операцию");
     await press("Сохранить");
     expect(await screen.findByText("Введите сумму и выберите категорию.")).toBeTruthy();
@@ -53,7 +57,7 @@ describe("adding a cash operation from Today", () => {
 
   it("starts the wallet first when it is not started", async () => {
     const api = fakeApi(notStarted());
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(menu, api);
     await press("Добавить операцию");
     expect(await screen.findByText(/Сколько наличных у вас сейчас/)).toBeTruthy();
     await fireEvent.changeText(screen.getByLabelText("Наличные сейчас"), "2500");
@@ -69,7 +73,7 @@ describe("the cash question", () => {
 
   it("from the wallet, from Binance, or other", async () => {
     const api = fakeApi({ today: jest.fn(async () => question("cash_source:42:7")) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: /^Вопросы: / }));
     expect(screen.getByRole("button", { name: "Вывод с Binance" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Другое" })).toBeTruthy();
@@ -79,7 +83,7 @@ describe("the cash question", () => {
 
   it("offers Binance only with a USDC income to match", async () => {
     const api = fakeApi({ today: jest.fn(async () => question("cash_source:42:0")) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: /^Вопросы: / }));
     expect(screen.queryByRole("button", { name: "Вывод с Binance" })).toBeNull();
     await press("Другое");
@@ -166,24 +170,19 @@ describe("an operation entered by hand, in Activity", () => {
   });
 });
 
-describe("a payment in «Скоро платить»", () => {
+describe("a payment that is waiting, from the phrase of the day", () => {
   const overdue = () => todayFixture({ date: "2026-11-09", upcoming: [{ id: "3", name: "Квартплата", amount: 1_700_000, dueOn: "2026-11-06", kind: "obligation", currency: "UAH" }] });
   const wallet = (balance: number, isStarted = true) => ({ cash: jest.fn(async () => ({ started: isStarted, start: isStarted ? "2026-11-01" : null, balance })) });
 
-  it("marks an overdue payment calmly", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => overdue()) }));
-    expect(await screen.findByText("просрочен")).toBeTruthy();
-  });
-
-  it("an upcoming one is not marked", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi());
-    await screen.findByText("Квартплата");
+  it("names an overdue payment calmly, without the word and without red", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => overdue()) }));
+    expect(await screen.findByText("Квартплата ждёт с 6 ноя. Отметьте, если уже оплачено.")).toBeTruthy();
     expect(screen.queryByText("просрочен")).toBeNull();
   });
 
   it("is marked paid in one tap, without cash when the wallet is not started", async () => {
     const api = fakeApi({ today: jest.fn(async () => overdue()), ...wallet(0, false) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await press(/^Квартплата/);
     expect(screen.queryByLabelText("Наличными из кошелька")).toBeNull();
     await press("Оплачено");
@@ -193,7 +192,7 @@ describe("a payment in «Скоро платить»", () => {
 
   it("is paid from the wallet when it covers the payment", async () => {
     const api = fakeApi({ today: jest.fn(async () => overdue()), ...wallet(2_000_000) });
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, api);
+    await renderWith(<Today onOpenActivity={noop} />, api);
     await press(/^Квартплата/);
     await fireEvent(await screen.findByLabelText("Наличными из кошелька"), "valueChange", true);
     expect(screen.getByText("Наличные уменьшатся на ₴17,000, лимит не изменится.")).toBeTruthy();
@@ -203,7 +202,7 @@ describe("a payment in «Скоро платить»", () => {
   });
 
   it("cannot be paid from a wallet that has less", async () => {
-    await renderWith(<Today onOpenActivity={noop} onOpenPlan={noop} />, fakeApi({ today: jest.fn(async () => overdue()), ...wallet(1_000_000) }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => overdue()), ...wallet(1_000_000) }));
     await press(/^Квартплата/);
     expect((await screen.findByLabelText("Наличными из кошелька")).props.disabled).toBe(true);
     expect(screen.getByText("В кошельке по записям ₴10,000. Если наличные были до начала учёта, просто отметьте оплату.")).toBeTruthy();
