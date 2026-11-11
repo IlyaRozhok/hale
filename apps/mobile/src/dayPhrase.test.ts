@@ -10,7 +10,7 @@ const input = (over: Partial<In> = {}): In => ({ today: "2026-11-11", dailyLimit
 describe("dayPhrase", () => {
   it("first asks for a plan when the money does not reach the income", () => {
     expect(dayPhrase(input({ needsPlan: true, questions: 2, upcoming: [pay({ dueOn: "2026-11-01" })] }))).toEqual({
-      text: "Нужен план до дохода. Это пара минут, и у дня появится лимит.",
+      text: "Нужен план до дохода. Это пара минут: выберите сумму на день.",
       action: { kind: "bridge" },
     });
   });

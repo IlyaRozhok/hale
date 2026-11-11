@@ -1020,7 +1020,8 @@ describe("runway to the next income", () => {
     expect(r.runway.points).toHaveLength(31);
     expect(r.runway.reserve).toBeLessThan(0);
     expect(r.runway.zeroOn).not.toBeNull();
-    expect(r.runway.zeroOn <= "2026-11-11").toBe(true);
+    // ₴1,000 at ₴450 a day: the third day, the 4th, spends the last of it.
+    expect(r.runway.zeroOn).toBe("2026-11-04");
   });
 });
 

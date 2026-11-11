@@ -367,7 +367,7 @@ export interface RunwayDto {
   incomeOn: string | null;
   /** What is left on `endOn`; negative when the money ends earlier. */
   reserve: number;
-  /** The first day that starts below zero. */
+  /** The day the money ends: its spending or payment takes the balance below zero. */
   zeroOn: string | null;
   points: { date: string; balance: number }[];
   /** Unpaid payments inside the stretch, in hryvnias; an overdue one stands on today. `id` is the one in `upcoming`. */

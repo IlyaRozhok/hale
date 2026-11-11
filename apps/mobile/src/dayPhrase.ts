@@ -30,7 +30,7 @@ const date = (iso: string) => {
  * payment at the door, then how yesterday went. Null on a day with nothing to say.
  */
 export function dayPhrase(i: PhraseInput): Phrase | null {
-  if (i.needsPlan) return { text: "Нужен план до дохода. Это пара минут, и у дня появится лимит.", action: { kind: "bridge" } };
+  if (i.needsPlan) return { text: "Нужен план до дохода. Это пара минут: выберите сумму на день.", action: { kind: "bridge" } };
 
   const byDate = [...i.upcoming].sort((a, b) => a.dueOn.localeCompare(b.dueOn));
   const late = byDate.find((p) => p.dueOn < i.today);

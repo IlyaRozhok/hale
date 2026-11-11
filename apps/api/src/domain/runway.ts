@@ -18,7 +18,7 @@ export interface Runway {
   points: { date: string; balance: Minor }[];
   /** What is left on `endOn` if every day spends its limit. */
   reserve: Minor;
-  /** The first day that starts below zero; null if none does. */
+  /** The day the money ends: its spending or payment takes the balance below zero. Null if none does. */
   zeroOn: string | null;
 }
 
@@ -35,5 +35,6 @@ export function runway(i: RunwayInput): Runway {
     balance -= spend + paid;
     points.push({ date: addDays(d, 1), balance });
   }
-  return { points, reserve: balance, zeroOn: points.find((p) => p.balance < 0)?.date ?? null };
+  const below = points.findIndex((p) => p.balance < 0);
+  return { points, reserve: balance, zeroOn: below < 0 ? null : points[Math.max(0, below - 1)]!.date };
 }

@@ -6,13 +6,13 @@ import { dayMonth, formatMoney } from "../format";
 import { nearestDay, runwayChart } from "../runwayChart";
 import { RunwayLine } from "./RunwayLine";
 
-const { color, radius, space, touchMin, type } = tokens;
+const { color, space, touchMin, type } = tokens;
 
 const HEIGHT = 112;
 const PAD = 10;
 const EDGE = 6;
-/** Wider than this from the left, a note or a label turns to the other side so it stays inside. */
-const NOTE = 150;
+/** Closer than this to the right edge, the zero label turns to the left so it stays inside. */
+const LABEL = 96;
 
 const dateOf = (iso: string) => {
   const { day, month } = dayMonth(iso);
@@ -52,7 +52,6 @@ export function Runway({ runway, today, onPay }: { runway: RunwayDto; today: str
   };
 
   const point = selected === null ? undefined : runway.points[selected];
-  const noteX = selected === null ? 0 : EDGE + (chart.xs[selected] ?? 0);
   const crossX = chart.cross === null ? null : EDGE + chart.cross;
   return (
     <View style={styles.root}>
@@ -73,35 +72,38 @@ export function Runway({ runway, today, onPay }: { runway: RunwayDto; today: str
             {width > 0 && <RunwayLine chart={chart} width={width} height={HEIGHT} edge={EDGE} selected={selected} />}
             {crossX !== null && runway.zeroOn && (
               <Text
-                style={[styles.cross, crossX > width - NOTE ? { right: width - crossX + space.sm, top: chart.zeroY + 2 } : { left: crossX + space.sm, top: chart.zeroY - 18 }]}
+                style={[styles.cross, crossX > width - LABEL ? { right: width - crossX + space.sm, top: chart.zeroY + 2 } : { left: crossX + space.sm, top: chart.zeroY - 18 }]}
                 pointerEvents="none"
               >
                 {`ноль ${dateOf(runway.zeroOn)}`}
               </Text>
-            )}
-            {point && (
-              <View style={[styles.note, noteX > width / 2 ? { right: width - noteX + space.sm } : { left: noteX + space.sm }]} pointerEvents={onPay ? "box-none" : "none"}>
-                <Text style={styles.noteHead}>{`${point.date === today ? "Сегодня" : dateOf(point.date)} · ${formatMoney(point.balance)}`}</Text>
-                {runway.events
-                  .filter((e) => e.date === point.date)
-                  .map((e) =>
-                    onPay ? (
-                      <Pressable key={e.id} accessibilityRole="button" accessibilityLabel={`${e.name}, ${formatMoney(e.amount)}: отметить оплату`} onPress={() => onPay(e.id)} style={styles.pay}>
-                        <Text style={styles.payText}>{`${e.name} ${formatMoney(-e.amount)}`}</Text>
-                        <Text style={styles.noteLine}>отметить оплату</Text>
-                      </Pressable>
-                    ) : (
-                      <Text key={e.id} style={styles.noteLine}>{`${e.name} ${formatMoney(-e.amount)}`}</Text>
-                    ),
-                  )}
-                {runway.incomeOn === point.date && <Text style={styles.noteLine}>день дохода</Text>}
-              </View>
             )}
           </View>
           <View style={styles.axis}>
             <Text style={styles.tick}>сегодня</Text>
             <Text style={styles.tick}>{runway.incomeOn ? `доход ${dateOf(runway.endOn)}` : dateOf(runway.endOn)}</Text>
           </View>
+          {/* Under the graph, so the line is never covered: the touched day, and its payments to press. */}
+          {point && (
+            <View style={styles.note}>
+              <View style={styles.noteRow}>
+                <Text style={styles.noteHead}>{`${point.date === today ? "Сегодня" : dateOf(point.date)} · ${formatMoney(point.balance)}`}</Text>
+                {runway.incomeOn === point.date && <Text style={styles.noteLine}>день дохода</Text>}
+              </View>
+              {runway.events
+                .filter((e) => e.date === point.date)
+                .map((e) =>
+                  onPay ? (
+                    <Pressable key={e.id} accessibilityRole="button" accessibilityLabel={`${e.name}, ${formatMoney(e.amount)}: отметить оплату`} onPress={() => onPay(e.id)} style={[styles.noteRow, styles.pay]}>
+                      <Text style={styles.payText}>{`${e.name} ${formatMoney(-e.amount)}`}</Text>
+                      <Text style={styles.noteLine}>отметить оплату</Text>
+                    </Pressable>
+                  ) : (
+                    <Text key={e.id} style={styles.noteLine}>{`${e.name} ${formatMoney(-e.amount)}`}</Text>
+                  ),
+                )}
+            </View>
+          )}
         </>
       )}
     </View>
@@ -118,19 +120,10 @@ const styles = StyleSheet.create({
   axis: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: EDGE },
   tick: { ...type.caption, color: color.fg.subtle },
   cross: { ...type.caption, position: "absolute", color: color.limit.low },
-  note: {
-    position: "absolute",
-    top: 0,
-    maxWidth: NOTE + space.xl,
-    paddingHorizontal: space.sm,
-    paddingVertical: space.xs,
-    borderRadius: radius.md,
-    backgroundColor: color.surface.raised,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.card.edge,
-  },
-  noteHead: { ...type.caption, fontWeight: "500", color: color.fg.default, fontVariant: ["tabular-nums"] },
+  note: { paddingHorizontal: EDGE, paddingTop: space.xs },
+  noteRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md },
+  noteHead: { ...type.label, color: color.fg.default, fontVariant: ["tabular-nums"] },
   noteLine: { ...type.caption, color: color.fg.muted, fontVariant: ["tabular-nums"] },
-  pay: { minHeight: touchMin, justifyContent: "center" },
-  payText: { ...type.caption, color: color.fg.default, fontVariant: ["tabular-nums"] },
+  pay: { minHeight: touchMin },
+  payText: { ...type.label, fontWeight: "400", color: color.fg.default, fontVariant: ["tabular-nums"], flexShrink: 1 },
 });

@@ -30,11 +30,16 @@ describe("runway", () => {
     expect(runway({ ...base, leftToday: -50_000 }).points[1]!.balance).toBe(1_000_000);
   });
 
-  it("names the first day the money is below zero", () => {
+  it("names the day the money ends: the one whose spending or payment takes it below zero", () => {
+    // 400,000 → 276,000 → 76,000 → the 13th spends 200,000 of it.
     const r = runway({ ...base, free: 400_000 });
     expect(r.reserve).toBe(400_000 - 124_000 - 600_000);
-    expect(r.zeroOn).toBe("2026-11-14");
+    expect(r.zeroOn).toBe("2026-11-13");
+    // A payment's day, not the morning after it.
+    expect(runway({ ...base, free: 100_000, payments: [{ date: "2026-11-12", amount: 900_000 }] }).zeroOn).toBe("2026-11-12");
     expect(runway({ ...base, free: -1 }).zeroOn).toBe("2026-11-11");
+    // Ending exactly at zero is not below it.
+    expect(runway({ ...base, endOn: "2026-11-12", free: 124_000 }).zeroOn).toBeNull();
   });
 
   it("is a single point when the income is today", () => {

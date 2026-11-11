@@ -691,7 +691,7 @@ describe("Today, decision rows", () => {
     const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
     await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions, state: bridgeState() })) }));
     expect(await screen.findByRole("button", { name: "Вопросы: 1" })).toBeTruthy();
-    expect(screen.getByText("Нужен план до дохода. Это пара минут, и у дня появится лимит.")).toBeTruthy();
+    expect(screen.getByText("Нужен план до дохода. Это пара минут: выберите сумму на день.")).toBeTruthy();
     expect(screen.queryByText("Пришло на Binance?")).toBeNull();
     expect(screen.queryByLabelText("Сумма в день")).toBeNull();
   });
