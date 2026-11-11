@@ -2,21 +2,21 @@
 
 Локальный сервер с выдуманными данными, чтобы смотреть приложение в симуляторе iPhone. Настоящий сервер и настоящие данные здесь не участвуют. Docker не нужен: Postgres из `embedded-postgres`, как в тестах.
 
-Нужен Node 22: `source ~/.nvm/nvm.sh && nvm use 22`. Если среда агента эту команду отклоняет: `PATH="$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node | grep '^v22' | tail -1)/bin:$PATH" scripts/sim/up.sh`, и так же перед `node scripts/sim/sql.mjs` и `down.sh`.
+Нужен Node 22: `source ~/.nvm/nvm.sh && nvm use 22`. Если среда агента эту команду отклоняет: `PATH="$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node | grep '^v22' | sort -V | tail -1)/bin:$PATH" scripts/sim/up.sh`, и так же перед `node scripts/sim/sql.mjs` и `down.sh`.
 
 ## Запуск и остановка
 
 1. `scripts/sim/up.sh` — база на порту 55432, миграции, данные из `seed.sql`, сервер на `http://localhost:3100`. Одноразовый пароль лежит в `.sim/password` (только цифры: симулятор печатает в русской раскладке). В чат и в файлы репозитория пароль не выводить.
-2. Metro, в фоне: `cd apps/mobile && EXPO_PUBLIC_API_URL=http://localhost:3100 ./node_modules/.bin/expo start --dev-client --clear --port 8082`. Второй Metro на тот же порт не запускать: если порт 8082 уже слушает Metro из этой же копии с тем же адресом сервера (`lsof -nP -iTCP:8082 -sTCP:LISTEN`), использовать его. Metro показывает код этой копии: слитое в `main` видно после `git pull`.
+2. Metro, в фоне: `cd apps/mobile && EXPO_PUBLIC_API_URL=http://localhost:3100 ./node_modules/.bin/expo start --dev-client --clear --port 8082`. Второй Metro на тот же порт не запускать. Если порт уже занят, работающий Metro можно использовать только после проверки, что он запущен из этой копии и смотрит на стенд: `pid=$(lsof -ti tcp:8082 -sTCP:LISTEN)`, затем `lsof -a -p $pid -d cwd -Fn` должен показать `apps/mobile` этой копии, а `ps eww -p $pid | tr ' ' '\n' | grep EXPO_PUBLIC_API_URL` — `http://localhost:3100`. Не подтвердилось хотя бы одно — не использовать: Metro с другим адресом направит приложение на другой сервер. Metro показывает код этой копии: слитое в `main` видно после `git pull`.
 3. Симулятор iPhone 17 Pro с установленной dev-сборкой `com.irozhok.hale`: `xcrun simctl boot "iPhone 17 Pro"`, затем `xcrun simctl openurl booted "exp+hale://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8082"`.
-4. После проверки: `lsof -ti tcp:8082 | xargs kill` (команда `pkill -f "expo start"` этот процесс не находит) и `scripts/sim/down.sh` (останавливает всё и стирает `.sim/` вместе с паролем).
+4. После проверки: `lsof -ti tcp:8082 -sTCP:LISTEN | xargs kill` (команда `pkill -f "expo start"` этот процесс не находит) и `scripts/sim/down.sh` (останавливает всё и стирает `.sim/` вместе с паролем).
 
 ## Данные
 
 Все даты в `seed.sql` считаются от сегодняшнего дня в Киеве, картина одинакова в любой день: доход через 8 дней, лимит ₴2,000 и потрачено ₴760, запас ₴5,000, два платежа до дохода, неделя в лимите, вчера осталось ₴340 при лимите ₴1,960.
 
 - Нехватка до дохода: `node scripts/sim/sql.mjs scripts/sim/short.sql`, затем потянуть «Сегодня» вниз.
-- Займ, счёт ФОП и траты в кафе старше недели и старше месяца: `node scripts/sim/sql.mjs scripts/sim/extra.sql` поверх `seed.sql`. Нужны для «Займов» в «Плане», строки «в том числе ФОП» и периода «Месяц» в фильтрах.
+- Займ, счёт ФОП и траты в кафе старше недели и старше месяца: `node scripts/sim/sql.mjs scripts/sim/extra.sql` поверх `seed.sql`. Нужны для «Займов» в «Плане», строки «в том числе ФОП» и периода «Месяц» в фильтрах. Картина после этого другая (запас к доходу ₴12,000, а не ₴5,000); второй раз подряд файл не выполнится (счёт `sim-fop` уже есть) — сначала вернуть исходное через `seed.sql`.
 - Свой сценарий: написать SQL рядом и выполнить так же. Вернуть исходное: `node scripts/sim/sql.mjs scripts/sim/seed.sql`.
 
 ## Как нажимать в симуляторе
