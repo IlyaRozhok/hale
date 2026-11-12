@@ -449,6 +449,34 @@ describe("Today, normal mode", () => {
       expect(screen.getByText("4 ноября: потрачено ₴50, лимита не было")).toBeTruthy();
     });
 
+    it("offers a day's operations only once a day is picked, for any day", async () => {
+      await openIt();
+      expect(screen.queryByRole("button", { name: "Операции дня" })).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: сверх лимита" }));
+      const link = screen.getByRole("button", { name: "Операции дня" });
+      expect(StyleSheet.flatten(link.props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+      await fireEvent.press(screen.getByRole("button", { name: "4 ноября: лимита не было" }));
+      expect(screen.getByRole("button", { name: "Операции дня" })).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "5 ноября: сегодня" }));
+      expect(screen.getByRole("button", { name: "Операции дня" })).toBeTruthy();
+      // Another month has no picked day yet.
+      await fireEvent.press(screen.getByRole("button", { name: "Предыдущий месяц" }));
+      expect(await screen.findByText("Октябрь 2026")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Операции дня" })).toBeNull();
+    });
+
+    it("«Операции дня» closes the calendar and opens the operations of that day", async () => {
+      const onOpenActivity = jest.fn();
+      const api = fakeApi({ today: jest.fn(async () => todayFixture({ date: "2026-11-05", streak: 2 })), ...november() });
+      await renderWith(<Today onOpenActivity={onOpenActivity} />, api);
+      await openCalendar();
+      await fireEvent.press(await screen.findByRole("button", { name: "2 ноября: сверх лимита" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Операции дня" }));
+      expect(onOpenActivity).toHaveBeenCalledTimes(1);
+      expect(onOpenActivity).toHaveBeenCalledWith("2026-11-02");
+      await waitFor(() => expect(screen.queryByText("Ноябрь 2026")).toBeNull());
+    });
+
     it("walks to the previous month and does not go past the current one", async () => {
       const api = await openIt();
       expect(screen.getByRole("button", { name: "Следующий месяц" }).props.accessibilityState.disabled).toBe(true);
