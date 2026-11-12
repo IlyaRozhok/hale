@@ -22,6 +22,7 @@ For agents, in English. Each item cost someone time once. When you hit a new one
 
 - Run `pod install` only with `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`, otherwise it fails.
 - `pod install` over an existing `ios/Pods` wipes the version stamps of React, Hermes and the dependencies but leaves the files from the last build. The build then fails at linking or at launch. Cure: delete `ios/Pods` and install again.
+- A rebuild does not always move the 7-day signature. Xcode may reuse the existing Personal Team provisioning profile while it is valid (seen on 12 November 2026; the build of 11 November got a fresh one), and then the app expires on the old date. Read the real date after a build: `strings <DerivedData>/Build/Products/Release-iphoneos/Hale.app/embedded.mobileprovision | grep -A1 ExpirationDate` (the `security` command is denied to agents).
 - `expo run:ios` ends by opening the app on port 8081. If another Metro is running there, the app looks at the real server: for a local check close it at once and open your own port.
 
 ## Simulator and stand
