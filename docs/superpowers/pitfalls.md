@@ -8,11 +8,15 @@ For agents, in English. Each item cost someone time once. When you hit a new one
 - **Git in an isolated working copy** is accepted only as a separate simple command: no `cd`, `&&` or `PATH` override on the same line.
 - **`gh pr checkout N` fails** while the PR's branch is held by the builder's working copy. A reviewer uses `gh pr view N --json headRefOid`, `git fetch origin pull/N/head`, `git checkout --detach <sha>`.
 - **`gh pr merge --delete-branch`**, for the same reason, merges the PR but stops at deleting the local branch and does not delete the branch on GitHub. After the merge: `git push origin --delete <branch>`.
+- **Compound commands in an isolated working copy.** A Bash command that mixes a long heredoc (for example `python3 - <<EOF` editing files) with `cd … && PATH=… npx jest`, or with `git`, is refused as "too complex to verify that it stays inside the worktree". Split it: put the script in a file in the scratch directory and run it as its own command.
+- **The simulator tool does not work in a scheduled run.** `mcp__Claude_Code_iOS_Simulator__control` answers "Mobile simulator tools require an attended session" when the session was started by the schedule. The stand and Metro still start, but nothing can be tapped. Do not drive the Simulator window another way: skip the screen check, stop the stand, and say in the summary which screens nobody saw (12 November 2026).
 - **The full type check** (`pnpm typecheck`) takes about 6 GB of memory. No more than two builders at once; reviewers do not run it.
 
 ## Tests
 
 - **Tests with sheets.** A sheet closes with a 200 ms animation and only then disappears. In tests the list under the sheet can be pressed while it is closing (on the phone the scrim blocks that), and the same sheet reopened for another row lives out the old animation and closes. So after «Закрыть» first wait until the sheet is gone (`waitFor(... toBeNull())`), and only then press on. Without this a test passes on a fast machine and fails in CI (11 November 2026: two tests, fixed).
+
+- **`Login.test.tsx` on a cold run.** Right after `pnpm install`, the first full `npx jest` can time out (5000 ms) in "signs in with the password and device name"; alone or on a second run it passes. Seen once by a reviewer on 12 November 2026, not in CI.
 
 ## iOS build
 
