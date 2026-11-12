@@ -1,4 +1,6 @@
+import { Alert } from "react-native";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { SessionProvider } from "../session";
 import { Settings } from "./Settings";
 import { Plan } from "./Plan";
 import { fakeApi, makeClient, openPlanPart, renderWith, taxFixture, todayFixture } from "../testing";
@@ -17,6 +19,10 @@ jest.mock("@react-native-community/slider", () => {
 });
 
 const noop = () => undefined;
+const pressAlert = (alert: jest.SpyInstance, label: string) => {
+  const buttons = alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[];
+  buttons.find((b) => b.text === label)!.onPress?.();
+};
 
 describe("Settings, lifestyle cap", () => {
   beforeEach(() => jest.useFakeTimers());
@@ -105,7 +111,7 @@ describe("Settings, preview accuracy", () => {
 });
 
 describe("Settings, closing", () => {
-  it("has a close control and only the lifestyle cap", async () => {
+  it("has a close control and no display or loan settings", async () => {
     const onClose = jest.fn();
     await renderWith(<Settings onClose={onClose} />, fakeApi());
     await screen.findByLabelText("Потолок трат в месяц");
@@ -123,7 +129,75 @@ describe("Settings, refetch of Today", () => {
     const api = fakeApi();
     await renderWith(<Settings onClose={noop} />, api, client);
     const slider = await screen.findByLabelText("Потолок трат в месяц");
+    // Settings itself reads Today (the bank line), so an invalidated Today is fetched again at once.
+    await waitFor(() => expect(api.today).toHaveBeenCalledTimes(1));
     await fireEvent(slider, "slidingComplete", 120000);
-    await waitFor(() => expect(client.getQueryState(TODAY_KEY)?.isInvalidated).toBe(true));
+    await waitFor(() => expect(api.today).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("Settings, bank connection", () => {
+  it("says when the bank was last synced", async () => {
+    const at = new Date();
+    at.setHours(9, 5, 0, 0);
+    await renderWith(<Settings onClose={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ syncedAt: at.toISOString() })) }));
+    expect(await screen.findByText("Банк обновлялся сегодня 09:05")).toBeTruthy();
+    expect(screen.queryByText("Синхронизации с банком ещё не было.")).toBeNull();
+  });
+
+  it("says so when there has been no sync yet", async () => {
+    await renderWith(<Settings onClose={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ syncedAt: null })) }));
+    expect(await screen.findByText("Синхронизации с банком ещё не было.")).toBeTruthy();
+    expect(screen.queryByText(/Банк обновлялся/)).toBeNull();
+  });
+
+  it("shows no bank line until Today is loaded", async () => {
+    await renderWith(<Settings onClose={noop} />, fakeApi({ today: jest.fn(() => new Promise<never>(() => undefined)) }));
+    await screen.findByLabelText("Потолок трат в месяц");
+    expect(screen.queryByText(/Банк обновлялся/)).toBeNull();
+    expect(screen.queryByText(/Синхронизации с банком/)).toBeNull();
+  });
+});
+
+describe("Settings, sign-out", () => {
+  const open = async (signOut: () => void) => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+    await renderWith(
+      <SessionProvider signOut={signOut}>
+        <Settings onClose={noop} />
+      </SessionProvider>,
+      fakeApi(),
+    );
+    await fireEvent.press(await screen.findByRole("button", { name: "Выйти" }));
+    return alert;
+  };
+
+  it("asks first and signs out only after «Выйти» is confirmed", async () => {
+    const signOut = jest.fn();
+    const alert = await open(signOut);
+    expect(alert).toHaveBeenCalledWith("Выйти из Hale?", "Чтобы войти снова, понадобится пароль.", [
+      { text: "Отмена", style: "cancel" },
+      expect.objectContaining({ text: "Выйти" }),
+    ]);
+    expect(signOut).not.toHaveBeenCalled();
+    await act(async () => pressAlert(alert, "Выйти"));
+    expect(signOut).toHaveBeenCalledTimes(1);
+    alert.mockRestore();
+  });
+
+  it("«Отмена» leaves the session alone", async () => {
+    const signOut = jest.fn();
+    const alert = await open(signOut);
+    await act(async () => pressAlert(alert, "Отмена"));
+    expect(signOut).not.toHaveBeenCalled();
+    alert.mockRestore();
+  });
+
+  it("renders without a session provider", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+    await renderWith(<Settings onClose={noop} />, fakeApi());
+    await fireEvent.press(await screen.findByRole("button", { name: "Выйти" }));
+    expect(() => pressAlert(alert, "Выйти")).not.toThrow();
+    alert.mockRestore();
   });
 });

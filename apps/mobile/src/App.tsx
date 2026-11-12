@@ -21,6 +21,7 @@ import { createPushDeps } from "./pushNative";
 import { registerPush } from "./push";
 import { useApi } from "./api/context";
 import { Today } from "./screens/Today";
+import { SessionProvider } from "./session";
 
 const { color } = tokens;
 const DAY = 24 * 60 * 60 * 1000;
@@ -89,6 +90,8 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
+  const leave = useCallback(() => void signOut(), [signOut]);
+
   const signedIn = async (t: string) => {
     await keychain.set(TOKEN_KEY, t);
     setToken(t);
@@ -105,7 +108,11 @@ export default function App() {
         persistOptions={{ persister, maxAge: 7 * DAY, dehydrateOptions: { shouldDehydrateQuery: shouldPersist } }}
       >
         <ApiProvider api={api}>
-          {token === undefined ? <View style={styles.blank} /> : token === null ? <Login deviceName={DEVICE_NAME} onSignedIn={signedIn} /> : <Main />}
+          {token === undefined ? <View style={styles.blank} /> : token === null ? <Login deviceName={DEVICE_NAME} onSignedIn={signedIn} /> : (
+            <SessionProvider signOut={leave}>
+              <Main />
+            </SessionProvider>
+          )}
         </ApiProvider>
       </PersistQueryClientProvider>
     </SafeAreaProvider>
