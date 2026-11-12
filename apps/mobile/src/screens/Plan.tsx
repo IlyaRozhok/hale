@@ -71,7 +71,7 @@ export function Plan() {
         title="Уходит"
         rows={[
           { label: "Платежи", detail: payments.data ? paymentsLine(payments.data) : undefined, onPress: () => setOpen("payments") },
-          { label: "Рассрочки", detail: payments.data ? installmentsLine(payments.data, today.data?.usdRate ?? 0) : undefined, onPress: () => setOpen("installments") },
+          { label: "Рассрочки", detail: payments.data ? installmentsLine(payments.data, today.data?.usdRate) : undefined, onPress: () => setOpen("installments") },
           { label: "Налоги", detail: payments.data ? taxLine(payments.data) : undefined, onPress: () => setOpen("tax") },
           { label: "Займы", detail: stillOpen === undefined ? undefined : stillOpen > 0 ? `открыто ${formatMoney(stillOpen)}` : "открытых нет", onPress: () => setOpen("loans") },
         ]}

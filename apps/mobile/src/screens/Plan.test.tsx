@@ -52,6 +52,26 @@ describe("Plan, calm groups", () => {
   });
 });
 
+describe("Plan, a dollar installment before «Сегодня» has loaded", () => {
+  const laptop = taxFixture({ id: 2, kind: "installment", name: "Ноутбук", amount: 10_000, currency: "USD", due_on: "2026-12-02", tax_quarter: null });
+
+  it("shows no sum until the rate is known, then the sum at the rate", async () => {
+    let arrive: (v: ReturnType<typeof todayFixture>) => void = noop;
+    const api = fakeApi({
+      today: jest.fn(() => new Promise<ReturnType<typeof todayFixture>>((resolve) => { arrive = resolve; })),
+      payments: jest.fn(async () => [laptop, taxFixture({ id: 1, kind: "obligation", name: "Квартира", amount: 100_000, due_on: "2026-11-26" })]),
+    });
+    await renderWith(<Plan />, api);
+    // The payments have arrived: their own line is there, and the rate is still not.
+    expect(await screen.findByText("ближайший 26.11, ₴1,000")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Рассрочки" })).toBeTruthy();
+    expect(screen.queryByText("осталось ₴0")).toBeNull();
+    expect(screen.queryByText(/^осталось/)).toBeNull();
+    await act(async () => arrive(todayFixture()));
+    expect(await screen.findByText("осталось ₴4,125")).toBeTruthy();
+  });
+});
+
 describe("Plan, money", () => {
   it("shows own and credit money separately, with the title", async () => {
     await renderWith(<Plan />, fakeApi());

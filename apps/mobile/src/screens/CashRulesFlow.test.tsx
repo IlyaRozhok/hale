@@ -105,6 +105,22 @@ describe("paid with chosen operations", () => {
     expect(api.payWith).not.toHaveBeenCalled();
   });
 
+  // «Сегодня» sends a foreign payment's amount already in hryvnias and keeps `currency` as a mark
+  // (today.e2e: "converts upcoming foreign payments"), so the hryvnia sign here is the right one.
+  it("a dollar payment arrives in hryvnias and is shown in them, with no cash offered", async () => {
+    const dollar = { id: "12", name: "Ноутбук", amount: 412_500, dueOn: "2026-11-20", kind: "installment", currency: "USD" };
+    const api = fakeApi({ cash: jest.fn(async () => ({ started: true, start: "2026-11-01", balance: 5_000_000 })) });
+    await renderWith(<PaymentPaidSheet payment={dollar} today="2026-11-09" onClose={noop} />, api);
+    expect(await screen.findByText("₴4,125 · до 20.11")).toBeTruthy();
+    await waitFor(() => expect(api.cash).toHaveBeenCalled());
+    await waitFor(() => expect(api.paymentCandidates).toHaveBeenCalled());
+    expect(screen.queryByText(/\$/)).toBeNull();
+    expect(screen.queryByLabelText("Наличными из кошелька")).toBeNull();
+    expect(screen.queryByText("Чем оплачено")).toBeNull();
+    await press("Оплачено");
+    await waitFor(() => expect(api.markPaid).toHaveBeenCalledWith(12));
+  });
+
   it("shows no list when there is nothing to choose", async () => {
     const api = fakeApi();
     await renderWith(<PaymentPaidSheet payment={payment} today="2026-11-09" onClose={noop} />, api);
