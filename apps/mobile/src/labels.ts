@@ -1,5 +1,6 @@
 // Russian names for server codes. No native imports: runs in node tests.
 import type { RecipientLabelName, TxTypeDto } from "@hale/contracts";
+import { formatMoney, pluralIndex } from "./format";
 
 const TYPES: Record<TxTypeDto, string> = {
   income: "Доход",
@@ -85,6 +86,32 @@ export const LABEL_CHOICES: { label: RecipientLabelName; text: string; effect: s
   { label: "own_account", text: "Это мой счёт", effect: "Не расход: деньги остаются у вас" },
   { label: "skip", text: "Не спрашивать", effect: "Считается в дневном лимите, вопроса больше не будет" },
 ];
+
+type LabelChoice = (typeof LABEL_CHOICES)[number];
+
+/** The answers offered at once; the others wait behind "Другое". */
+export const FREQUENT_ANSWERS: readonly RecipientLabelName[] = ["close_regular", "service", "own_account"];
+
+/**
+ * The answers to "Что это за перевод?": the frequent ones, then the answer given before when that is a
+ * rare one, so the chosen answer is always in sight; `rest` is what "Другое" opens, in the usual order.
+ */
+export function answerChoices(current: RecipientLabelName | null): { shown: LabelChoice[]; rest: LabelChoice[] } {
+  const shown = LABEL_CHOICES.filter((c) => FREQUENT_ANSWERS.includes(c.label));
+  const own = LABEL_CHOICES.find((c) => c.label === current);
+  if (own && !shown.includes(own)) shown.push(own);
+  return { shown, rest: LABEL_CHOICES.filter((c) => !shown.includes(c)) };
+}
+
+/**
+ * Who the question is about and what went to them, in one line: "Олена К. · 3 перевода, ₴4,500".
+ * The name alone while the totals are not known; nothing when there is neither.
+ */
+export function recipientLine(name: string | undefined, sent: { count: number; total: number } | undefined): string | undefined {
+  if (!sent) return name;
+  const totals = `${sent.count} ${["перевод", "перевода", "переводов"][pluralIndex(sent.count)]}, ${formatMoney(sent.total)}`;
+  return name ? `${name} · ${totals}` : totals;
+}
 
 /** What an earlier answer now reads as; "obligation" is no longer offered but may have been given. */
 const EARLIER_ANSWERS: Partial<Record<RecipientLabelName, string>> = {
