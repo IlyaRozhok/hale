@@ -711,66 +711,93 @@ describe("bridge mode", () => {
   });
 
   describe("the day the shortage came on", () => {
-    const month = async () => (await api.get("/today/calendar?month=2026-11").expect(200)).body.days;
-
-    it("is marked with the limit that applies from tomorrow; the next day is an ordinary shortage day", async () => {
+    const calendar = async () => (await api.get("/today/calendar?month=2026-11").expect(200)).body;
+    const month = async () => (await calendar()).days;
+    const fixed = (date: string, amount: number, mode: string) =>
+      ds.query(`INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3)`, [date, amount, mode]);
+    /** An ordinary 1 November, then 2 November begins ordinary too: ₴1,000 for the day. */
+    async function ordinaryMorning() {
       const card = await account("black", 4_000_000, { creditLimit: 3_000_000 });
       await income("fop", "2026-11-12");
       at("2026-11-01T10:00:00Z");
       expect((await today()).state.shortageStart).toBeUndefined();
-
       at("2026-11-02T10:00:00Z");
       const morning = await today();
-      expect(morning.state.mode).toBe("normal");
+      expect(morning.state).toMatchObject({ mode: "normal", dailyLimit: 100_000 });
       expect(morning.state.shortageStart).toBeUndefined();
+      return card;
+    }
+
+    it("while the day keeps its morning limit, names the limit that applies from tomorrow", async () => {
+      const card = await ordinaryMorning();
       await tx(card, -1_100_000, "spend");
       await setBalance(card, 2_900_000);
-
       // The numbers are the same as before: only the mark is new.
       const crossed = await today();
-      expect(crossed.state).toMatchObject({ mode: "bridge", dailyLimit: morning.state.dailyLimit, shortageStart: { nextLimit: 45_000 } });
-      expect(crossed.state.leftToday).toBe(morning.state.dailyLimit - 1_100_000);
-
-      const chosen = (await api.post("/bridge", { dailyAmount: 60_000 }).expect(201)).body;
-      expect(chosen.state).toMatchObject({ dailyLimit: 60_000, leftToday: 60_000 - 1_100_000, shortageStart: { nextLimit: 60_000 } });
-      expect((await month()).at(-1)).toEqual({ date: "2026-11-02", limit: null, spent: 1_100_000, status: "today", shortageStart: true });
-
-      at("2026-11-03T10:00:00Z");
-      const next = await today();
-      expect(next.state).toMatchObject({ mode: "bridge", dailyLimit: 60_000 });
-      expect(next.state.shortageStart).toBeUndefined();
-      await tx(card, -70_000, "spend", { date: "2026-11-03" });
-
-      at("2026-11-04T10:00:00Z");
-      await today();
-      const days = await month();
-      // Grey for the app: no limit to judge the day by, though more was spent than the new limit.
-      expect(days[1]).toEqual({ date: "2026-11-02", limit: null, spent: 1_100_000, status: "no_limit", shortageStart: true });
-      expect(days[2]).toEqual({ date: "2026-11-03", limit: 60_000, spent: 70_000, status: "over" });
+      expect(crossed.state).toMatchObject({ mode: "bridge", dailyLimit: 100_000, leftToday: -1_000_000 });
+      expect(crossed.state.shortageStart).toEqual({ nextLimit: 45_000 });
+      // Today's cell keeps its limit: nothing judges today, and an older app shows it as before.
+      expect((await month()).at(-1)).toEqual({ date: "2026-11-02", limit: 100_000, spent: 1_100_000, status: "today", shortageStart: true });
     });
 
-    it("is also the day a limit fixed again mid-day turned out to be the shortage one", async () => {
-      const card = await account("black", 4_000_000, { creditLimit: 3_000_000 });
-      await income("fop", "2026-11-12");
-      at("2026-11-01T10:00:00Z");
+    it("once a plan is confirmed the day's limit already is the new one: marked, with no limit for tomorrow to announce", async () => {
+      const card = await ordinaryMorning();
+      await tx(card, -1_100_000, "spend");
+      await setBalance(card, 2_900_000);
       await today();
-      at("2026-11-02T10:00:00Z");
-      await today();
+      const chosen = (await api.post("/bridge", { dailyAmount: 60_000 }).expect(201)).body;
+      expect(chosen.state).toMatchObject({ dailyLimit: 60_000, leftToday: 60_000 - 1_100_000 });
+      expect(chosen.state.shortageStart).toEqual({});
+      expect((await today()).state.shortageStart).toEqual({});
+    });
+
+    it("the same when the day's limit was fixed again mid-day as the shortage one", async () => {
+      const card = await ordinaryMorning();
       await tx(card, -30_000, "spend");
       await setBalance(card, 3_970_000);
       await payment("Rent", 1_700_000, "2026-11-06");
       await ds.query(`DELETE FROM daily_snapshots WHERE local_date='2026-11-02'`); // what adding a payment in the app does
       const r = await today();
-      expect(r.state).toMatchObject({ mode: "bridge", dailyLimit: 45_000, leftToday: 15_000, shortageStart: { nextLimit: 45_000 } });
+      expect(r.state).toMatchObject({ mode: "bridge", dailyLimit: 45_000, leftToday: 15_000 });
+      expect(r.state.shortageStart).toEqual({});
+      // Fixed once more the same day, it is still that day.
+      await ds.query(`DELETE FROM daily_snapshots WHERE local_date='2026-11-02'`);
+      expect((await today()).state.shortageStart).toEqual({});
+    });
+
+    it("the next day is an ordinary shortage day; the calendar and the streak both leave the marked day unjudged", async () => {
+      const card = await ordinaryMorning();
+      await tx(card, -1_100_000, "spend");
+      await setBalance(card, 2_900_000);
+      await api.post("/bridge", { dailyAmount: 60_000 }).expect(201);
+
+      at("2026-11-03T10:00:00Z");
+      const next = await today();
+      expect(next.state).toMatchObject({ mode: "bridge", dailyLimit: 60_000 });
+      expect(next.state.shortageStart).toBeUndefined();
+      await tx(card, -10_000, "spend", { date: "2026-11-03" });
+
+      at("2026-11-04T10:00:00Z");
+      const later = await today();
+      const body = await calendar();
+      expect(body.days[0]).toMatchObject({ date: "2026-11-01", status: "within" });
+      // Grey for the app: no limit to judge the day by, though far more was spent than the new limit.
+      expect(body.days[1]).toEqual({ date: "2026-11-02", limit: null, spent: 1_100_000, status: "no_limit", shortageStart: true });
+      expect(body.days[2]).toEqual({ date: "2026-11-03", limit: 60_000, spent: 10_000, status: "within" });
+      // 1 and 3 November count; the 2nd neither breaks the row nor adds to it.
+      expect(body.streak).toBe(2);
+      expect(later.streak).toBe(2);
+
+      await tx(card, -70_000, "spend", { date: "2026-11-04" });
+      at("2026-11-05T10:00:00Z");
+      await today();
+      const after = await calendar();
+      expect(after.days[3]).toEqual({ date: "2026-11-04", limit: 60_000, spent: 70_000, status: "over" });
+      expect(after.streak).toBe(0);
     });
 
     it("is not marked when the shortage ended the same day", async () => {
-      const card = await account("black", 4_000_000, { creditLimit: 3_000_000 });
-      await income("fop", "2026-11-12");
-      at("2026-11-01T10:00:00Z");
-      await today();
-      at("2026-11-02T10:00:00Z");
-      await today();
+      const card = await ordinaryMorning();
       await tx(card, -1_100_000, "spend");
       await setBalance(card, 2_900_000);
       expect((await today()).state.shortageStart).toBeDefined();
@@ -778,7 +805,7 @@ describe("bridge mode", () => {
       expect((await today()).state.shortageStart).toBeUndefined();
       at("2026-11-03T10:00:00Z");
       await today();
-      expect((await month())[1]).toMatchObject({ date: "2026-11-02", status: "far_over" });
+      expect((await month())[1]).toEqual({ date: "2026-11-02", limit: 100_000, spent: 1_100_000, status: "far_over" });
     });
 
     it("is not marked on the very first day: there was no limit before it", async () => {
@@ -787,6 +814,42 @@ describe("bridge mode", () => {
       expect(r.state.mode).toBe("bridge");
       expect(r.state.shortageStart).toBeUndefined();
       expect((await month()).at(-1)).toEqual({ date: "2026-11-02", limit: 45_000, spent: 0, status: "today" });
+    });
+
+    it("days fixed by the server before this rule stay as they were, in the calendar and in the streak", async () => {
+      // As the old server wrote them: the mode a day began in. The shortage came on on the 2nd, the 3rd began in it.
+      const card = await account("black", 2_900_000, { creditLimit: 3_000_000 });
+      await income("fop", "2026-11-12");
+      await fixed("2026-11-01", 100_000, "normal");
+      await fixed("2026-11-02", 100_000, "normal");
+      await tx(card, -1_100_000, "spend", { date: "2026-11-02" });
+      await fixed("2026-11-03", 45_000, "bridge");
+      await tx(card, -40_000, "spend", { date: "2026-11-03" });
+      at("2026-11-04T10:00:00Z");
+      const r = await today();
+      expect(r.state.mode).toBe("bridge");
+      expect(r.state.shortageStart).toBeUndefined();
+      const body = await calendar();
+      expect(body.days).toEqual([
+        { date: "2026-11-01", limit: 100_000, spent: 0, status: "within" },
+        { date: "2026-11-02", limit: 100_000, spent: 1_100_000, status: "far_over" },
+        { date: "2026-11-03", limit: 45_000, spent: 40_000, status: "within" },
+        { date: "2026-11-04", limit: 45_000, spent: 0, status: "today" },
+      ]);
+      expect(body.streak).toBe(1);
+      expect(r.streak).toBe(1);
+    });
+
+    it("a crossing the server did not see before midnight puts the mark on the new day, whose limit is the new one from its start", async () => {
+      const card = await ordinaryMorning();
+      await tx(card, -1_100_000, "spend"); // late in the evening: no request follows that day
+      await setBalance(card, 2_900_000);
+      at("2026-11-02T22:05:00Z"); // 00:05 in Kyiv on the 3rd
+      const r = await today();
+      expect(r.date).toBe("2026-11-03");
+      expect(r.state).toMatchObject({ mode: "bridge", dailyLimit: 45_000, leftToday: 45_000 });
+      expect(r.state.shortageStart).toEqual({});
+      expect((await month())[1]).toEqual({ date: "2026-11-02", limit: 100_000, spent: 1_100_000, status: "far_over" });
     });
   });
 

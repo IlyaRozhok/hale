@@ -109,22 +109,30 @@ export function computeDaily(i: DailyInput): DailyState {
   return { mode, daysLeft, free, dailyLimit, leftToday, level, needsIncomeDate: !hasIncomeDate, bridge };
 }
 
-/** A fixed day and the mode it was in. */
-export interface DayMode {
-  date: string;
-  mode: string;
+/**
+ * What a fixed day's row says about the day. `bridge_start` is the day the shortage mode came on:
+ * what was spent on it is not judged against the new limit (audit 6.7). Rows written before this
+ * mark existed hold only the other two values, so earlier days are never read as such a day.
+ */
+export type DayMark = "normal" | "bridge" | "bridge_start";
+
+export interface DayMarkInput {
+  /** The mode the day is in now. */
+  live: DailyState["mode"];
+  /** What today's row holds; null when the day has no row (not fixed yet, or about to be fixed again). */
+  stored: string | null;
+  /** What the last fixed day before today holds; null when there is none. */
+  previous: string | null;
 }
 
 /**
- * The days the shortage mode came on: a shortage day whose last fixed day before it was not one.
- * What was spent on such a day is not judged against the new limit (audit 6.7). The very first fixed
- * day is never one: there was no limit before it to replace.
+ * The mark today's row should carry. The shortage came on today when a day fixed as ordinary is now
+ * in shortage, or when the day is fixed (again) in shortage right after an ordinary day. The very
+ * first fixed day is never one: there was no limit before it to replace.
  */
-export function shortageStartDays(days: readonly DayMode[]): Set<string> {
-  const sorted = [...days].sort((a, b) => a.date.localeCompare(b.date));
-  const starts = new Set<string>();
-  for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i]!.mode === "bridge" && sorted[i - 1]!.mode !== "bridge") starts.add(sorted[i]!.date);
-  }
-  return starts;
+export function dayMark(i: DayMarkInput): DayMark {
+  if (i.live === "normal") return "normal";
+  if (i.stored === "bridge_start" || i.stored === "normal") return "bridge_start";
+  if (i.stored === null && i.previous === "normal") return "bridge_start";
+  return "bridge";
 }

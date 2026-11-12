@@ -246,29 +246,62 @@ describe("Today, normal mode", () => {
     });
 
     describe("the day the shortage came on", () => {
-      const start = (over: Partial<DailyStateDto> = {}) =>
-        withState({ ...bridgeState({ confirmed: true }), dailyLimit: 45000, leftToday: -31000, level: 0, shortageStart: { nextLimit: 45000 }, ...over });
+      const start = (over: Partial<DailyStateDto> = {}) => withState({ ...bridgeState(), level: 0, ...over });
 
-      it("has a sand bar and says when the new limit starts, with no comparison of what is already spent", async () => {
-        await renderWith(<Today onOpenActivity={noop} />, start());
-        expect(await screen.findByText("Новый лимит ₴450 действует с завтра")).toBeTruthy();
-        expect(levelOf()).toBe("bar:low:0");
-        expect(screen.getByText("₴0")).toBeTruthy();
-        expect(screen.queryByText(/потрачено/i)).toBeNull();
-        expect(screen.queryByText(/завтра снова/)).toBeNull();
-        expect(screen.queryByText(/−/)).toBeNull();
-        expect(screen.getByLabelText("Сегодня можно ₴0. Новый лимит ₴450 действует с завтра")).toBeTruthy();
+      describe("while the day still runs on the limit it began with", () => {
+        const morningLimit = (over: Partial<DailyStateDto> = {}) =>
+          start({ dailyLimit: 100000, leftToday: -1000000, shortageStart: { nextLimit: 45000 }, ...over });
+
+        it("has a sand bar and says when the new limit starts, with no comparison of what is already spent", async () => {
+          await renderWith(<Today onOpenActivity={noop} />, morningLimit());
+          expect(await screen.findByText("Новый лимит ₴450 действует с завтра")).toBeTruthy();
+          expect(levelOf()).toBe("bar:low:0");
+          expect(screen.getByText("₴0")).toBeTruthy();
+          expect(screen.queryByText(/потрачено/i)).toBeNull();
+          expect(screen.queryByText(/завтра снова/)).toBeNull();
+          expect(screen.queryByText(/₴1,000/)).toBeNull();
+          expect(screen.queryByText(/−/)).toBeNull();
+          expect(screen.getByLabelText("Сегодня можно ₴0. Новый лимит ₴450 действует с завтра")).toBeTruthy();
+        });
+
+        it("with some of the morning limit left, shows it and stays sand", async () => {
+          await renderWith(<Today onOpenActivity={noop} />, morningLimit({ leftToday: 60000, level: 0.6 }));
+          expect(await screen.findByText("Новый лимит ₴450 действует с завтра")).toBeTruthy();
+          expect(screen.getByText("₴600")).toBeTruthy();
+          expect(levelOf()).toBe("bar:low:0.6");
+        });
       });
 
-      it("before a plan is confirmed, names the limit of tomorrow, not the one the day began with", async () => {
-        await renderWith(<Today onOpenActivity={noop} />, start({ bridge: bridgeState().bridge, dailyLimit: 100000, leftToday: -1000000, shortageStart: { nextLimit: 60000 } }));
-        expect(await screen.findByText("Новый лимит ₴600 действует с завтра")).toBeTruthy();
-        expect(levelOf()).toBe("bar:low:0");
-        expect(screen.queryByText(/₴1,000/)).toBeNull();
+      describe("once the day's limit already is the new one", () => {
+        const newLimit = (over: Partial<DailyStateDto> = {}) => start({ dailyLimit: 45000, leftToday: 15000, level: 0.33, shortageStart: {}, ...over });
+
+        it("does not say the limit starts tomorrow: the ordinary line is back, the amount is honest, the bar is sand", async () => {
+          await renderWith(<Today onOpenActivity={noop} />, newLimit());
+          expect(await screen.findByText("потрачено ₴300 из ₴450")).toBeTruthy();
+          expect(screen.getByText("₴150")).toBeTruthy();
+          expect(levelOf()).toBe("bar:low:0.33");
+          expect(screen.queryByText(/действует с завтра/)).toBeNull();
+          expect(screen.getByLabelText("Сегодня можно ₴150, из ₴450 на день")).toBeTruthy();
+        });
+
+        it("over the new limit there is still no red that day", async () => {
+          await renderWith(<Today onOpenActivity={noop} />, newLimit({ leftToday: -31000, level: 0 }));
+          expect(await screen.findByText("потрачено ₴760 из ₴450 · завтра снова ₴450")).toBeTruthy();
+          expect(screen.getByText("₴0")).toBeTruthy();
+          expect(levelOf()).toBe("bar:low:0");
+          expect(screen.queryByText(/действует с завтра/)).toBeNull();
+        });
+      });
+
+      it("with no limit yet there is no bar and no word about tomorrow", async () => {
+        await renderWith(<Today onOpenActivity={noop} />, start({ dailyLimit: 0, leftToday: 0, shortageStart: { nextLimit: 45000 } }));
+        expect(await screen.findByText("Лимит появится, когда вы подтвердите план.")).toBeTruthy();
+        expect(screen.queryByTestId("limit-visual", HIDDEN)).toBeNull();
+        expect(screen.queryByText(/действует с завтра/)).toBeNull();
       });
 
       it("the next day is an ordinary one: over the limit is red again", async () => {
-        await renderWith(<Today onOpenActivity={noop} />, start({ shortageStart: undefined }));
+        await renderWith(<Today onOpenActivity={noop} />, start({ dailyLimit: 45000, leftToday: -31000 }));
         expect(await screen.findByText("потрачено ₴760 из ₴450 · завтра снова ₴450")).toBeTruthy();
         expect(levelOf()).toBe("bar:over:0");
         expect(screen.queryByText(/действует с завтра/)).toBeNull();

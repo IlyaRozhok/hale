@@ -59,7 +59,7 @@ describe("dayPhrase", () => {
 
   it("a day with no limit says nothing, and neither does a quiet day with no history", () => {
     expect(dayPhrase(input({ yesterday: yesterday({ limit: null, status: "no_limit" }) }))).toBeNull();
-    // The day the shortage came on arrives without a limit: it is not said to be over anything.
+    // Pins the server contract, no new code: the day the shortage came on arrives without a limit, so it is not said to be over anything.
     expect(dayPhrase(input({ yesterday: yesterday({ limit: null, spent: 259_800, status: "no_limit", shortageStart: true }) }))).toBeNull();
     expect(dayPhrase(input())).toBeNull();
     // Yesterday's figures from another day are not yesterday's.

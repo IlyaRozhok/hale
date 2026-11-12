@@ -7,7 +7,7 @@ const LOW = 0.25;
 
 /**
  * How the day stands, for the colour of the spark at the end of the limit strip. On the day the
- * shortage mode came on it is sand whatever was spent: that spending is not judged against the new limit.
+ * shortage mode came on it is sand whatever was spent: there is no red that day (audit 6.7).
  */
 export function limitState(s: { leftToday: number; level: number; shortageStart?: object }): LimitState {
   if (s.shortageStart) return "low";

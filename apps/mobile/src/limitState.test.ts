@@ -17,6 +17,8 @@ describe("limitState", () => {
   it("is never over on the day the shortage came on: sand, whatever was spent before the new limit", () => {
     const shortageStart = { nextLimit: 45000 };
     expect(limitState({ leftToday: -60100, level: 0, shortageStart })).toBe("low");
+    // Also once the day's limit already is the new one and the server names no limit for tomorrow.
+    expect(limitState({ leftToday: -60100, level: 0, shortageStart: {} })).toBe("low");
     expect(limitState({ leftToday: 0, level: 0, shortageStart })).toBe("low");
     expect(limitState({ leftToday: 40000, level: 0.9, shortageStart })).toBe("low");
   });
