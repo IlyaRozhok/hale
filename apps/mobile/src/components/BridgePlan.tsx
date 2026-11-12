@@ -16,6 +16,8 @@ const MIN = 10000; // ₴100
 type Props = {
   state: DailyStateDto;
   usdRate: number;
+  /** The credit limit of the cards; 0 when there is none. */
+  creditLimit?: number;
   onConfirm: (dailyAmount: number) => void;
   onCancel: () => void;
   confirming: boolean;
@@ -24,7 +26,7 @@ type Props = {
 const roundToStep = (v: number) => Math.max(MIN, Math.round(v / STEP) * STEP);
 
 /** The bridge plan: pick a daily amount, see the credit it needs, confirm if it fits the limit. */
-export function BridgePlan({ state, usdRate, onConfirm, onCancel, confirming }: Props) {
+export function BridgePlan({ state, usdRate, creditLimit = 0, onConfirm, onCancel, confirming }: Props) {
   const base = state.bridge;
   // Unmoved, the slider shows the server's exact amount, so the numbers beside it are the server's too.
   const current = state.dailyLimit > 0 ? state.dailyLimit : (base?.recommendedDaily ?? MIN);
@@ -49,9 +51,15 @@ export function BridgePlan({ state, usdRate, onConfirm, onCancel, confirming }: 
   return (
     <Glass style={styles.stack}>
       <Text style={styles.text}>До дохода {state.daysLeft} дн.</Text>
-      <View style={styles.line}>
-        <Text style={styles.muted}>Нужно из кредитки</Text>
-        <Text style={[styles.value, !fresh && styles.pending]}>{formatMoney(shown.creditNeeded)}</Text>
+      <View style={styles.missing}>
+        <View style={styles.line}>
+          <Text style={styles.muted}>Не хватает до дохода</Text>
+          <Text style={[styles.value, !fresh && styles.pending]}>{formatMoney(shown.creditNeeded)}</Text>
+        </View>
+        {/* Said only when it is true: there is a credit limit and the whole amount fits in it. */}
+        {creditLimit > 0 && shown.creditNeeded > 0 && shown.shortfall === 0 && (
+          <Text style={styles.caption}>Эту сумму можно закрыть из кредитного лимита.</Text>
+        )}
       </View>
       <View style={styles.line}>
         <Text style={styles.muted}>В день</Text>
@@ -108,6 +116,8 @@ const styles = StyleSheet.create({
   stack: { gap: space.md },
   text: { ...type.body, color: color.fg.default },
   muted: { ...type.body, color: color.fg.muted },
+  missing: { gap: space.xs },
+  caption: { ...type.caption, color: color.fg.subtle },
   line: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
   value: { ...type.body, color: color.fg.default, fontVariant: ["tabular-nums"] },
   pending: { opacity: 0.6 },

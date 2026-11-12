@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { Alert, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { BridgeStateDto, DailyStateDto } from "@hale/contracts";
@@ -245,6 +245,36 @@ describe("Today, normal mode", () => {
       expect(levelOf()).toBe("bar:low:0.15");
     });
 
+    describe("the day the shortage came on", () => {
+      const start = (over: Partial<DailyStateDto> = {}) =>
+        withState({ ...bridgeState({ confirmed: true }), dailyLimit: 45000, leftToday: -31000, level: 0, shortageStart: { nextLimit: 45000 }, ...over });
+
+      it("has a sand bar and says when the new limit starts, with no comparison of what is already spent", async () => {
+        await renderWith(<Today onOpenActivity={noop} />, start());
+        expect(await screen.findByText("Новый лимит ₴450 действует с завтра")).toBeTruthy();
+        expect(levelOf()).toBe("bar:low:0");
+        expect(screen.getByText("₴0")).toBeTruthy();
+        expect(screen.queryByText(/потрачено/i)).toBeNull();
+        expect(screen.queryByText(/завтра снова/)).toBeNull();
+        expect(screen.queryByText(/−/)).toBeNull();
+        expect(screen.getByLabelText("Сегодня можно ₴0. Новый лимит ₴450 действует с завтра")).toBeTruthy();
+      });
+
+      it("before a plan is confirmed, names the limit of tomorrow, not the one the day began with", async () => {
+        await renderWith(<Today onOpenActivity={noop} />, start({ bridge: bridgeState().bridge, dailyLimit: 100000, leftToday: -1000000, shortageStart: { nextLimit: 60000 } }));
+        expect(await screen.findByText("Новый лимит ₴600 действует с завтра")).toBeTruthy();
+        expect(levelOf()).toBe("bar:low:0");
+        expect(screen.queryByText(/₴1,000/)).toBeNull();
+      });
+
+      it("the next day is an ordinary one: over the limit is red again", async () => {
+        await renderWith(<Today onOpenActivity={noop} />, start({ shortageStart: undefined }));
+        expect(await screen.findByText("потрачено ₴760 из ₴450 · завтра снова ₴450")).toBeTruthy();
+        expect(levelOf()).toBe("bar:over:0");
+        expect(screen.queryByText(/действует с завтра/)).toBeNull();
+      });
+    });
+
     it("no limit, no bar", async () => {
       await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 0, leftToday: 0, level: 0 }));
       await screen.findByText("Сегодня можно");
@@ -392,6 +422,31 @@ describe("Today, normal mode", () => {
       expect(screen.getByRole("button", { name: "3 ноября: сильно сверх лимита" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "4 ноября: лимита не было" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "5 ноября: сегодня" })).toBeTruthy();
+    });
+
+    describe("the day the shortage came on", () => {
+      const days = [
+        { date: "2026-11-01", limit: 100_000, spent: 80_000, status: "within" as const },
+        { date: "2026-11-02", limit: null, spent: 1_100_000, status: "no_limit" as const, shortageStart: true as const },
+        { date: "2026-11-03", limit: 45_000, spent: 70_000, status: "far_over" as const },
+        { date: "2026-11-05", limit: 45_000, spent: 0, status: "today" as const },
+      ];
+      const calendar = jest.fn(async (month: string) => calendarFixture({ month, today: "2026-11-05", days: month === "2026-11" ? days : [] }));
+
+      it("is grey: a quiet number, no dot, and words that do not judge it", async () => {
+        await openIt({ calendar });
+        expect(dot("2026-11-02")).toBeNull();
+        const day = screen.getByRole("button", { name: "2 ноября: изменился лимит" });
+        expect(StyleSheet.flatten(within(day).getByText("2").props.style).color).toBe(tokens.color.fg.subtle);
+        expect(StyleSheet.flatten(dot("2026-11-03")!.props.style).backgroundColor).toBe(tokens.color.calendar.farOver);
+      });
+
+      it("tapped, tells what was spent and why the day is not rated", async () => {
+        await openIt({ calendar });
+        await fireEvent.press(screen.getByRole("button", { name: "2 ноября: изменился лимит" }));
+        expect(screen.getByText("2 ноября: потрачено ₴11,000. В этот день изменился лимит, день без оценки.")).toBeTruthy();
+        expect(screen.queryByText(/лимита не было/)).toBeNull();
+      });
     });
 
     it("puts no dot on a day without a limit or on today", async () => {
@@ -720,6 +775,33 @@ describe("Today, bridge", () => {
     expect(screen.getByText("₴20,070")).toBeTruthy();
     expect(screen.getByLabelText("Сумма в день")).toBeTruthy();
     expect(screen.getByText("Подтвердить план")).toBeTruthy();
+  });
+
+  describe("what is missing until the income", () => {
+    const CAPTION = "Эту сумму можно закрыть из кредитного лимита.";
+
+    it("is called that, not money from a credit card, and says the credit limit can cover it", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: bridgeToday() }));
+      await openBridge();
+      expect(await screen.findByText("Не хватает до дохода")).toBeTruthy();
+      expect(screen.getByText(CAPTION)).toBeTruthy();
+      expect(screen.queryByText(/кредитк/i)).toBeNull();
+    });
+
+    it("does not mention a credit limit when there is none", async () => {
+      const fixture = todayFixture({ state: bridgeState({ shortfall: 2007000, maxDailyWithinCredit: 0 }) });
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => ({ ...fixture, accounts: { ...fixture.accounts, credit: 0 } })) }));
+      await openBridge();
+      expect(await screen.findByText("Не хватает до дохода")).toBeTruthy();
+      expect(screen.queryByText(CAPTION)).toBeNull();
+    });
+
+    it("does not promise the credit limit covers it when it does not", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: bridgeToday({ creditNeeded: 3791600, shortfall: 791600 }) }));
+      await openBridge();
+      expect(await screen.findByText(/Не хватает ₴7,916/)).toBeTruthy();
+      expect(screen.queryByText(CAPTION)).toBeNull();
+    });
   });
 
   it("with no limit yet, asks to confirm the plan instead of saying the limit was used", async () => {
