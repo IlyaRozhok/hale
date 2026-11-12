@@ -27,8 +27,8 @@ export const color = {
     /** List rows: too many for real glass, so a see-through fill. */
     row: blackAlpha(0.6),
   },
-  /** How a day went against the limit; dark numbers on them. */
-  calendar: { within: p.sage, over: p.rose, farOver: p.crimson },
+  /** How a day went against the limit: a small dot under its number. Red only for far over. */
+  calendar: { within: p.sage, over: p.sand, farOver: p.crimson },
   /** The app's backdrop of metal folds: `peak` caps its thin crests, `sheet` the wide light that survives the glass's blur. */
   backdrop: { peak: p.silver[400], sheet: p.graphite[500], glow: p.dusk, mid: p.dusk2 },
   /** Solid cards on the dark background: there is nothing behind them for glass to blur. */
@@ -91,8 +91,8 @@ export const type = {
   amount: { fontSize: 52, lineHeight: 60, fontWeight: "600", letterSpacing: -1.5 },
 } as const;
 
-/** The liquid metal: a quarter of the pixels (it is soft), how fast the level moves, the pose when motion is reduced, widths of thin metal edges. */
-export const metal = { renderScale: 2, levelTau: 0.35, stillTime: 4, edge: 1.5, edgeToday: 2.5, barHeight: 6, barSpeed: 0.25 } as const;
+/** The liquid metal: a quarter of the pixels (it is soft), how fast the level moves, the pose when motion is reduced. */
+export const metal = { renderScale: 2, levelTau: 0.35, stillTime: 4, barHeight: 6, barSpeed: 0.25 } as const;
 
 /** Minimum touch target in points (Apple HIG). */
 export const touchMin = 44;

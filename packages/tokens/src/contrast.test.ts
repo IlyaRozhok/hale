@@ -100,17 +100,21 @@ describe("floating glass, in the worst case", () => {
 });
 
 describe("limit calendar colours", () => {
-  it("carry a dark number, and differ from one another", () => {
+  it("are small dots seen on the sheet, and differ from one another", () => {
     const { within, over, farOver } = color.calendar;
-    for (const c of [within, over, farOver]) expect(contrastRatio(color.fg.inverse, c)).toBeGreaterThanOrEqual(4.5);
+    for (const c of [within, over, farOver]) expect(contrastRatio(c, color.glass.floating.fallback)).toBeGreaterThanOrEqual(3);
     expect(new Set([within, over, farOver]).size).toBe(3);
     expect(contrastRatio(over, farOver)).toBeGreaterThanOrEqual(1.2);
+  });
+  it("keep red for far over the limit only: over the limit is the sand of a warning", () => {
+    expect(color.calendar.over).toBe(color.limit.low);
+    expect(color.calendar.farOver).not.toBe(color.calendar.over);
   });
 });
 
 describe("metal settings", () => {
   it("are in the tokens", () => {
-    expect(tokens.metal).toEqual({ renderScale: 2, levelTau: 0.35, stillTime: 4, edge: 1.5, edgeToday: 2.5, barHeight: 6, barSpeed: 0.25 });
+    expect(tokens.metal).toEqual({ renderScale: 2, levelTau: 0.35, stillTime: 4, barHeight: 6, barSpeed: 0.25 });
   });
 });
 

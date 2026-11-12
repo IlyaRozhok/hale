@@ -3,8 +3,6 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { CalendarDayDto } from "@hale/contracts";
 import { useCalendar } from "../api/queries";
-import { dayEdges } from "../calendarLayout";
-import { MetalEdges } from "../metal/MetalEdges";
 import { dateLabel, formatMoney, monthGrid, monthTitle, streakLabel } from "../format";
 import { ErrorText } from "./ErrorText";
 import { PrimaryButton } from "./PrimaryButton";
@@ -14,6 +12,8 @@ const { color, radius, space, touchMin, type } = tokens;
 
 /** Half the gap between days. */
 const INSET = 2;
+/** The dot under a day's number. */
+const DOT = 5;
 
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
@@ -25,7 +25,7 @@ const WORDS: Record<CalendarDayDto["status"], string> = {
   today: "сегодня",
 };
 
-const FILLS: Partial<Record<CalendarDayDto["status"], string>> = {
+const DOTS: Partial<Record<CalendarDayDto["status"], string>> = {
   within: color.calendar.within,
   over: color.calendar.over,
   far_over: color.calendar.farOver,
@@ -51,17 +51,17 @@ export function LimitCalendar({ today, streak, onClose }: { today: string; strea
   const thisMonth = today.slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
   const [picked, setPicked] = useState<CalendarDayDto | null>(null);
-  const [gridWidth, setGridWidth] = useState(0);
   const calendar = useCalendar(month);
   const byDate = new Map((calendar.data?.month === month ? calendar.data.days : []).map((d) => [d.date, d]));
   const grid = monthGrid(Number(month.slice(0, 4)), Number(month.slice(5, 7)));
+  const streakNow = calendar.data?.streak ?? streak;
   const go = (by: number) => {
     setPicked(null);
     setMonth(shiftMonth(month, by));
   };
 
   return (
-    <Sheet title="Календарь лимитов" subtitle={streakLabel(calendar.data?.streak ?? streak)} onClose={onClose}>
+    <Sheet title="Календарь лимитов" subtitle={streakNow > 0 ? streakLabel(streakNow) : undefined} onClose={onClose}>
       <View style={styles.head}>
         <Arrow label="Предыдущий месяц" text="‹" onPress={() => go(-1)} />
         <Text style={styles.title}>{monthTitle(Number(month.slice(0, 4)), Number(month.slice(5, 7)))}</Text>
@@ -79,24 +79,19 @@ export function LimitCalendar({ today, streak, onClose }: { today: string; strea
               <Text key={d} style={styles.weekday}>{d}</Text>
             ))}
           </View>
-          <View style={styles.row} onLayout={(e) => setGridWidth(e.nativeEvent.layout.width)}>
+          <View style={styles.row}>
             {grid.map((date, i) => {
               const day = date ? byDate.get(date) : undefined;
               if (!date || !day) {
                 return (
                   <View key={date ?? `blank-${i}`} style={styles.slot}>
                     {date ? <Text style={styles.future}>{Number(date.slice(8))}</Text> : null}
+                    {date ? <View style={styles.dot} /> : null}
                   </View>
                 );
               }
-              return <Day key={date} day={day} onPress={() => setPicked(day)} />;
+              return <Day key={date} day={day} picked={picked?.date === date} onPress={() => setPicked(day)} />;
             })}
-            <MetalEdges
-              edges={dayEdges(grid, (date) => byDate.get(date)?.status, gridWidth, touchMin, INSET)}
-              width={gridWidth}
-              height={(Math.ceil(grid.length / 7) * touchMin)}
-              radius={radius.md}
-            />
           </View>
         </>
       )}
@@ -104,7 +99,7 @@ export function LimitCalendar({ today, streak, onClose }: { today: string; strea
       <View style={styles.legend}>
         {LEGEND.map((l) => (
           <View key={l.text} style={styles.legendItem}>
-            <View style={[styles.dot, { backgroundColor: l.fill }]} />
+            <View style={[styles.legendDot, { backgroundColor: l.fill }]} />
             <Text style={styles.legendText}>{l.text}</Text>
           </View>
         ))}
@@ -113,21 +108,17 @@ export function LimitCalendar({ today, streak, onClose }: { today: string; strea
   );
 }
 
-function Day({ day, onPress }: { day: CalendarDayDto; onPress: () => void }) {
-  const fill = FILLS[day.status];
+function Day({ day, picked, onPress }: { day: CalendarDayDto; picked: boolean; onPress: () => void }) {
+  const dot = DOTS[day.status];
   const label = `${dateLabel(day.date).replace(/ \d{4}$/, "")}: ${WORDS[day.status]}`;
   return (
-    <View style={styles.slot}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        hitSlop={INSET}
-        onPress={onPress}
-        style={[styles.day, fill ? { backgroundColor: fill } : null]}
-      >
-        <Text style={[styles.number, fill ? styles.numberOnFill : day.status === "no_limit" ? styles.numberQuiet : null]}>{Number(day.date.slice(8))}</Text>
-      </Pressable>
-    </View>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={styles.slot}>
+      <View testID={`calendar-day-${day.date}`} style={[styles.day, day.status === "today" && styles.ringToday, picked && styles.ringPicked]}>
+        <Text style={[styles.number, day.status === "no_limit" && styles.numberQuiet]}>{Number(day.date.slice(8))}</Text>
+        {/* The dot's place is kept on days without one, so the numbers of a row stand on one line. */}
+        {dot ? <View testID={`calendar-dot-${day.date}`} style={[styles.dot, { backgroundColor: dot }]} /> : <View style={styles.dot} />}
+      </View>
+    </Pressable>
   );
 }
 
@@ -146,15 +137,17 @@ const styles = StyleSheet.create({
   arrow: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
   row: { flexDirection: "row", flexWrap: "wrap" },
   weekday: { width: "14.28%", textAlign: "center", ...type.caption, color: color.fg.subtle, paddingBottom: space.xs },
-  slot: { width: "14.28%", height: touchMin, alignItems: "center", justifyContent: "center" },
+  slot: { width: "14.28%", height: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
   day: { alignSelf: "stretch", flex: 1, margin: INSET, alignItems: "center", justifyContent: "center", borderRadius: radius.md },
+  ringToday: { borderWidth: 1, borderColor: color.fg.subtle },
+  ringPicked: { borderWidth: 1, borderColor: color.fg.default },
   number: { ...type.body, color: color.fg.default, fontVariant: ["tabular-nums"] },
-  numberOnFill: { color: color.fg.inverse },
   numberQuiet: { color: color.fg.subtle },
   future: { ...type.body, color: color.fg.subtle, opacity: 0.4, fontVariant: ["tabular-nums"] },
   detail: { ...type.body, color: color.fg.default },
   legend: { flexDirection: "row", flexWrap: "wrap", gap: space.md },
   legendItem: { flexDirection: "row", alignItems: "center", gap: space.xs },
-  dot: { width: 10, height: 10, borderRadius: radius.full },
+  dot: { width: DOT, height: DOT, borderRadius: radius.full },
+  legendDot: { width: 10, height: 10, borderRadius: radius.full },
   legendText: { ...type.caption, color: color.fg.muted },
 });
