@@ -34,8 +34,15 @@ const SEARCH_DELAY_MS = 300;
 /** A row an answer can be about: already answered, or still a plain transfer out. */
 const isTransferToSomeone = (t: TransactionDto) => t.amount < 0 && (t.recipientLabel !== null || t.type === "person_transfer");
 
+type Props = {
+  /** Test seam for the current moment. */
+  now?: () => Date;
+  /** From the navigator. `day` asks for the operations of that one day; `at` differs on every arrival. */
+  route?: { params?: { day?: string; at?: number } };
+};
+
 /** The operations list by day, newest first, pages by cursor. Transfers between own accounts only show under "Все". */
-export function Activity({ now = () => new Date() }: { /** Test seam for the current moment. */ now?: () => Date }) {
+export function Activity({ now = () => new Date(), route }: Props) {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>("spend");
   const [searching, setSearching] = useState(false);
@@ -58,6 +65,24 @@ export function Activity({ now = () => new Date() }: { /** Test seam for the cur
     const id = setTimeout(() => setSearch(text.trim()), SEARCH_DELAY_MS);
     return () => clearTimeout(id);
   }, [text]);
+
+  // Arriving from a day of the limit calendar: that day's spending, and nothing chosen before it.
+  // Done while rendering, so the list is never asked for with the old filters first.
+  const day = route?.params?.day;
+  const arrival = day ? `${day}@${route?.params?.at ?? 0}` : null;
+  const [applied, setApplied] = useState<string | null>(null);
+  if (day && arrival !== applied) {
+    setApplied(arrival);
+    setTab("spend");
+    setCategory(null);
+    setPeriod({ from: day, to: day });
+    setSearching(false);
+    setText("");
+    setSearch("");
+    setFiltering(false);
+    setOpen(null);
+    setSheet(null);
+  }
 
   const toggleSearch = () => {
     if (searching) {

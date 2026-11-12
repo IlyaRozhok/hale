@@ -35,7 +35,8 @@ const theme = {
 const Tabs = createBottomTabNavigator();
 
 function TodayTab({ navigation }: { navigation: NavigationProp<ParamListBase> }) {
-  return <Today onOpenActivity={() => navigation.navigate("Activity")} />;
+  // `at` changes with every arrival, so the same day opened twice in a row is applied twice.
+  return <Today onOpenActivity={(day) => navigation.navigate("Activity", day ? { day, at: Date.now() } : undefined)} />;
 }
 
 function Main() {

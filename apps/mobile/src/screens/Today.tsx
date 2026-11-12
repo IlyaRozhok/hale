@@ -26,7 +26,7 @@ import { usePullRefresh } from "../usePullRefresh";
 
 const { color, radius, space, touchMin, type } = tokens;
 
-type Props = { onOpenActivity: () => void; /** Test seam for the current moment. */ now?: () => Date };
+type Props = { /** Opens the operations; with a date, those of that one day. */ onOpenActivity: (day?: string) => void; /** Test seam for the current moment. */ now?: () => Date };
 
 function freshnessLines(data: TodayDto, offlineSince: number | null, now: Date): string[] {
   const lines: string[] = [];
@@ -220,7 +220,17 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
         ))}
       </ScrollView>
 
-      {sheet === "calendar" && <LimitCalendar today={data.date} streak={data.streak ?? 0} onClose={closeSheet} />}
+      {sheet === "calendar" && (
+        <LimitCalendar
+          today={data.date}
+          streak={data.streak ?? 0}
+          onClose={closeSheet}
+          onOpenDay={(date) => {
+            closeSheet();
+            onOpenActivity(date);
+          }}
+        />
+      )}
       {sheet === "bridge" && state.bridge && (
         <Sheet title="План до дохода" onClose={closeSheet}>
           <BridgePlan

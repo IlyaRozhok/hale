@@ -46,8 +46,16 @@ function shiftMonth(month: string, by: number): string {
   return d.toISOString().slice(0, 7);
 }
 
+type Props = {
+  today: string;
+  streak: number;
+  onClose: () => void;
+  /** Leads to the operations of the picked day. */
+  onOpenDay: (date: string) => void;
+};
+
 /** A month of days coloured by how they went against the limit, with the current streak. */
-export function LimitCalendar({ today, streak, onClose }: { today: string; streak: number; onClose: () => void }) {
+export function LimitCalendar({ today, streak, onClose, onOpenDay }: Props) {
   const thisMonth = today.slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
   const [picked, setPicked] = useState<CalendarDayDto | null>(null);
@@ -95,7 +103,14 @@ export function LimitCalendar({ today, streak, onClose }: { today: string; strea
           </View>
         </>
       )}
-      {picked && <Text style={styles.detail}>{figures(picked)}</Text>}
+      {picked && (
+        <View>
+          <Text style={styles.detail}>{figures(picked)}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Операции дня" onPress={() => onOpenDay(picked.date)} style={styles.link}>
+            <Text style={styles.linkText}>Операции дня</Text>
+          </Pressable>
+        </View>
+      )}
       <View style={styles.legend}>
         {LEGEND.map((l) => (
           <View key={l.text} style={styles.legendItem}>
@@ -145,6 +160,8 @@ const styles = StyleSheet.create({
   numberQuiet: { color: color.fg.subtle },
   future: { ...type.body, color: color.fg.subtle, opacity: 0.4, fontVariant: ["tabular-nums"] },
   detail: { ...type.body, color: color.fg.default },
+  link: { alignSelf: "flex-start", minHeight: touchMin, justifyContent: "center" },
+  linkText: { ...type.label, color: color.accent.default },
   legend: { flexDirection: "row", flexWrap: "wrap", gap: space.md },
   legendItem: { flexDirection: "row", alignItems: "center", gap: space.xs },
   dot: { width: DOT, height: DOT, borderRadius: radius.full },
