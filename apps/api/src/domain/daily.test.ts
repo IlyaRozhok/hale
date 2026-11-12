@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeDaily, sumDue, type DailyInput } from "./daily.js";
+import { computeDaily, shortageStartDays, sumDue, type DailyInput } from "./daily.js";
 
 const input = (o: Partial<DailyInput> = {}): DailyInput => ({
   today: "2026-11-02",
@@ -195,5 +195,31 @@ describe("computeDaily bridge with accrued tax not yet due", () => {
     const r = computeDaily(input({ obligationsDue: 1_000_000, taxReserve: 100_000, taxAccruedNotDue: 100_000, foodFloor: 0 }));
     expect(r.free).toBe(-67_500);
     expect(r.bridge!.creditNeeded).toBe(0);
+  });
+});
+
+describe("shortageStartDays", () => {
+  const day = (date: string, mode: string) => ({ date, mode });
+  it("is the first shortage day after an ordinary one, not the days that follow", () => {
+    const days = [day("2026-11-01", "normal"), day("2026-11-02", "bridge"), day("2026-11-03", "bridge")];
+    expect([...shortageStartDays(days)]).toEqual(["2026-11-02"]);
+  });
+  it("finds each start when the shortage comes back, in any order of rows", () => {
+    const days = [
+      day("2026-11-05", "bridge"),
+      day("2026-11-01", "normal"),
+      day("2026-11-04", "normal"),
+      day("2026-11-02", "bridge"),
+      day("2026-11-03", "bridge"),
+    ];
+    expect([...shortageStartDays(days)].sort()).toEqual(["2026-11-02", "2026-11-05"]);
+  });
+  it("looks past a day that was never fixed to the last fixed one", () => {
+    expect([...shortageStartDays([day("2026-11-01", "bridge"), day("2026-11-03", "bridge")])]).toEqual([]);
+    expect([...shortageStartDays([day("2026-11-01", "normal"), day("2026-11-03", "bridge")])]).toEqual(["2026-11-03"]);
+  });
+  it("is not the very first fixed day: there was no limit before it to replace", () => {
+    expect(shortageStartDays([day("2026-11-01", "bridge")]).size).toBe(0);
+    expect(shortageStartDays([]).size).toBe(0);
   });
 });

@@ -4,7 +4,7 @@ import type { BridgePreviewDto, CalendarDto, SettingsPreviewDto, TodayDto } from
 import { DataSource, type EntityManager } from "typeorm";
 import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
-import { type DailyInput, type DailyState, computeDaily, sumDue } from "../domain/daily";
+import { type DailyInput, type DailyState, type DayMode, computeDaily, shortageStartDays, sumDue } from "../domain/daily";
 import { runway } from "../domain/runway";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
 import { quarterLabel, quarterOf } from "../domain/quarter";
@@ -128,6 +128,16 @@ export class TodayService {
 
     const morning = this.compute(f, plan, 0, f.spentToday);
     const limit = await this.snapshot(f.date, morning);
+    // The day's row keeps the mode the day is in now, so that the day the shortage came on can be told later.
+    await this.ds.query(`UPDATE daily_snapshots SET mode=$2 WHERE local_date=$1 AND mode<>$2`, [f.date, state.mode]);
+    const before: DayMode[] = await this.ds.query(
+      `SELECT local_date::text AS date, mode FROM daily_snapshots WHERE local_date < $1 ORDER BY local_date DESC LIMIT 1`,
+      [f.date],
+    );
+    // In the shortage mode the engine's limit is the one a new day starts with: the plan's, or the recommended one.
+    const shortageStart = shortageStartDays([...before, { date: f.date, mode: state.mode }]).has(f.date)
+      ? { nextLimit: state.dailyLimit }
+      : undefined;
     const leftToday = limit - f.spentToday;
     state = {
       ...state,
@@ -135,7 +145,7 @@ export class TodayService {
       leftToday,
       level: limit > 0 ? Math.min(1, Math.max(0, leftToday / limit)) : 0,
     };
-    return this.dto(f, state, plan);
+    return this.dto(f, state, plan, shortageStart);
   }
 
   async previewBridge(dailyAmount: number): Promise<BridgePreviewDto> {
@@ -211,17 +221,22 @@ export class TodayService {
     const first = `${month}-01`;
     const [y, mo] = month.split("-").map(Number) as [number, number];
     const last = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
-    const limits = new Map(
-      ((await m.query(`SELECT local_date::text AS date, daily_limit::float8 AS "limit" FROM daily_snapshots WHERE local_date BETWEEN $1 AND $2`, [first, last])) as { date: string; limit: number }[]).map(
-        (r) => [r.date, r.limit],
-      ),
-    );
+    // The month's fixed days, and the last one before it: the mode it was in tells whether the 1st began a shortage.
+    const fixed = (await m.query(
+      `SELECT local_date::text AS date, daily_limit::float8 AS "limit", mode FROM daily_snapshots
+        WHERE local_date BETWEEN $1 AND $2 OR local_date = (SELECT max(local_date) FROM daily_snapshots WHERE local_date < $1)`,
+      [first, last],
+    )) as { date: string; limit: number; mode: string }[];
+    const limits = new Map(fixed.map((r) => [r.date, r.limit]));
+    const starts = shortageStartDays(fixed);
     const spent = await this.spentByDay(m, first, last);
     const days: CalendarDto["days"] = [];
     for (let date = first; date <= last && date <= today; date = addDays(date, 1)) {
-      const limit = limits.get(date) ?? null;
+      // The day the shortage came on has no limit to be judged by: an older app then shows it as a day without one.
+      const start = starts.has(date);
+      const limit = start ? null : (limits.get(date) ?? null);
       const amount = spent.get(date) ?? 0;
-      days.push({ date, limit, spent: amount, status: date === today ? "today" : dayStatus(limit, amount) });
+      days.push({ date, limit, spent: amount, status: date === today ? "today" : dayStatus(limit, amount), ...(start ? { shortageStart: true as const } : {}) });
     }
     return { month, today, streak: await this.streak(m, today), days };
   }
@@ -602,7 +617,7 @@ export class TodayService {
   }
 
   // --- the response -------------------------------------------------------------
-  private async dto(f: Facts, state: DailyState, plan: Plan | null): Promise<TodayDto> {
+  private async dto(f: Facts, state: DailyState, plan: Plan | null, shortageStart?: { nextLimit: number }): Promise<TodayDto> {
     const m = this.ds.manager;
     const questions: TodayDto["questions"] = [];
     const usdc: { id: number }[] = await m.query(
@@ -681,7 +696,7 @@ export class TodayService {
 
     return {
       date: f.date,
-      state: { ...state, bridge: state.bridge ? { ...state.bridge, confirmed: plan !== null } : null },
+      state: { ...state, bridge: state.bridge ? { ...state.bridge, confirmed: plan !== null } : null, ...(shortageStart ? { shortageStart } : {}) },
       runway: { endOn: f.end, incomeOn: f.end === f.input.nextIncomeOn ? f.end : null, ...run, events },
       usdRate: f.usdRate,
       rateStale: f.rateStale,

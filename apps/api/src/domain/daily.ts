@@ -108,3 +108,23 @@ export function computeDaily(i: DailyInput): DailyState {
 
   return { mode, daysLeft, free, dailyLimit, leftToday, level, needsIncomeDate: !hasIncomeDate, bridge };
 }
+
+/** A fixed day and the mode it was in. */
+export interface DayMode {
+  date: string;
+  mode: string;
+}
+
+/**
+ * The days the shortage mode came on: a shortage day whose last fixed day before it was not one.
+ * What was spent on such a day is not judged against the new limit (audit 6.7). The very first fixed
+ * day is never one: there was no limit before it to replace.
+ */
+export function shortageStartDays(days: readonly DayMode[]): Set<string> {
+  const sorted = [...days].sort((a, b) => a.date.localeCompare(b.date));
+  const starts = new Set<string>();
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i]!.mode === "bridge" && sorted[i - 1]!.mode !== "bridge") starts.add(sorted[i]!.date);
+  }
+  return starts;
+}

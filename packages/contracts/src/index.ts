@@ -320,6 +320,11 @@ export interface DailyStateDto {
   level: number;
   needsIncomeDate: boolean;
   bridge: BridgeStateDto | null;
+  /**
+   * Set only on the day the shortage mode came on: what is already spent is not judged against the
+   * new limit, which applies from tomorrow. Absent on any other day and from an older server.
+   */
+  shortageStart?: { nextLimit: number };
 }
 
 export interface TodayDto {
@@ -379,10 +384,12 @@ export const calendarQuery = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|
 
 export interface CalendarDayDto {
   date: string;
-  /** The day's fixed limit; null when none was fixed. */
+  /** The day's fixed limit; null when none was fixed, and on the day the shortage mode came on. */
   limit: number | null;
   spent: number;
   status: "within" | "over" | "far_over" | "no_limit" | "today";
+  /** The shortage mode came on that day: its spending is not judged. Absent otherwise and from an older server. */
+  shortageStart?: true;
 }
 
 export interface CalendarDto {
