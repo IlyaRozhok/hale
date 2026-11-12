@@ -380,17 +380,65 @@ describe("Today, normal mode", () => {
       expect((await screen.findByRole("button", { name: /^Сегодня можно/ })).props.accessibilityHint).toBe("Календарь лимитов");
     });
 
-    it("colours days by status and says the status in words too", async () => {
+    const dot = (date: string) => screen.queryByTestId(`calendar-dot-${date}`);
+
+    it("marks a day with a small dot of its status colour, and says the status in words too", async () => {
       await openIt();
-      expect(flat("1 ноября").backgroundColor).toBe(tokens.color.calendar.within);
-      expect(flat("2 ноября").backgroundColor).toBe(tokens.color.calendar.over);
-      expect(flat("3 ноября").backgroundColor).toBe(tokens.color.calendar.farOver);
-      expect(flat("4 ноября").backgroundColor).toBeUndefined();
-      expect(flat("5 ноября").backgroundColor).toBeUndefined();
+      expect(StyleSheet.flatten(dot("2026-11-01")!.props.style).backgroundColor).toBe(tokens.color.calendar.within);
+      expect(StyleSheet.flatten(dot("2026-11-02")!.props.style).backgroundColor).toBe(tokens.color.calendar.over);
+      expect(StyleSheet.flatten(dot("2026-11-03")!.props.style).backgroundColor).toBe(tokens.color.calendar.farOver);
       expect(screen.getByRole("button", { name: "1 ноября: в лимите" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "2 ноября: сверх лимита" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "3 ноября: сильно сверх лимита" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "4 ноября: лимита не было" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "5 ноября: сегодня" })).toBeTruthy();
+    });
+
+    it("puts no dot on a day without a limit or on today", async () => {
+      await openIt();
+      expect(dot("2026-11-04")).toBeNull();
+      expect(dot("2026-11-05")).toBeNull();
+    });
+
+    const ring = (date: string) => StyleSheet.flatten(screen.getByTestId(`calendar-day-${date}`).props.style);
+
+    it("does not fill a day: the colour is only in the dot", async () => {
+      await openIt();
+      for (const d of ["01", "02", "03", "04", "05"]) expect(ring(`2026-11-${d}`).backgroundColor).toBeUndefined();
+      for (const day of ["1 ноября", "2 ноября", "3 ноября", "4 ноября", "5 ноября"]) expect(flat(day).backgroundColor).toBeUndefined();
+    });
+
+    it("rings today thinly and the picked day brighter", async () => {
+      await openIt();
+      expect(ring("2026-11-05")).toMatchObject({ borderWidth: 1, borderColor: tokens.color.fg.subtle });
+      expect(ring("2026-11-02").borderWidth).toBeUndefined();
+      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: сверх лимита" }));
+      expect(ring("2026-11-02")).toMatchObject({ borderWidth: 1, borderColor: tokens.color.fg.default });
+      expect(ring("2026-11-05").borderColor).toBe(tokens.color.fg.subtle);
+      await fireEvent.press(screen.getByRole("button", { name: "5 ноября: сегодня" }));
+      expect(ring("2026-11-05")).toMatchObject({ borderWidth: 1, borderColor: tokens.color.fg.default });
+      expect(ring("2026-11-02").borderWidth).toBeUndefined();
+    });
+
+    it("keeps every day a button of the minimum touch size", async () => {
+      await openIt();
+      for (const day of ["1 ноября", "4 ноября", "5 ноября"]) expect(flat(day).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+    });
+
+    it("with a streak the heading's second line is the streak", async () => {
+      await openIt();
+      expect(screen.getAllByText("Календарь лимитов")).toHaveLength(1);
+      expect(screen.getByText("Серия: 2 дня в лимите")).toBeTruthy();
+    });
+
+    it("with no streak the heading is said once and has no second line", async () => {
+      const calendar = jest.fn(async (month: string) => ({ ...(await november().calendar(month)), streak: 0 }));
+      const api = fakeApi({ today: jest.fn(async () => todayFixture({ date: "2026-11-05", streak: 0 })), calendar });
+      await renderWith(<Today onOpenActivity={noop} />, api);
+      await openCalendar();
+      await screen.findByRole("button", { name: /^1 ноября/ });
+      expect(screen.getAllByText("Календарь лимитов")).toHaveLength(1);
+      expect(screen.queryByText(/^Серия/)).toBeNull();
     });
 
     it("tells a day's figures when it is tapped", async () => {

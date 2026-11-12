@@ -4,9 +4,6 @@ jest.mock("./components/Icon", () => {
   return { Icon: ({ name, color }: { name: string; color: string }) => <View testID={`icon-${name}`} accessibilityHint={color} /> };
 });
 
-// A canvas of Skia, which needs the native module; the positions it draws at are tested in calendarLayout.
-jest.mock("./metal/MetalEdges", () => ({ MetalEdges: () => null }));
-
 // The runway's line is a canvas of Skia; where it draws is tested in runwayChart.
 jest.mock("./components/RunwayLine", () => {
   const { View } = jest.requireActual("react-native");
