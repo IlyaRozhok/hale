@@ -625,13 +625,13 @@ describe("Today, questions", () => {
     await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
     await openQuestions();
     await fireEvent.press(await screen.findByText("Иван: 3 перевода, ₴2,500"));
-    expect(await screen.findByText("Иван")).toBeTruthy();
+    expect(await screen.findByText("Иван · 5 переводов, ₴1,000")).toBeTruthy();
     const closes = screen.getAllByRole("button", { name: "Закрыть" });
     await fireEvent.press(closes[closes.length - 1]!);
     // The window closes with an animation and covers the questions until it is gone.
     await waitFor(() => expect(screen.queryByText("Что это за перевод?")).toBeNull());
     await fireEvent.press(await screen.findByText("Кто это: Ольга?"));
-    expect(await screen.findByText("Ольга")).toBeTruthy();
+    expect(await screen.findByText("Ольга · 5 переводов, ₴1,000")).toBeTruthy();
   });
 
   it("a recipient question opens the label sheet for that recipient, and the card goes away once answered", async () => {
@@ -642,7 +642,8 @@ describe("Today, questions", () => {
     await openQuestions();
     await fireEvent.press(await screen.findByText("Кто это: Иван?"));
     expect(await screen.findByText("Что это за перевод?")).toBeTruthy();
-    expect(screen.getByText("Иван")).toBeTruthy();
+    expect(await screen.findByText("Иван · 5 переводов, ₴1,000")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Другое" }));
     await fireEvent.press(screen.getByRole("button", { name: "Разовая помощь или подарок" }));
     await waitFor(() => expect(api.labelRecipient).toHaveBeenCalledWith("0123456789abcdef", "one_off"));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Вопросы: 1" })).toBeNull());

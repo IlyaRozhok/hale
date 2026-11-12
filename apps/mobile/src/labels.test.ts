@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { recipientLabelName, txType } from "@hale/contracts";
-import { accountLabel, answerText, categoryLabel, LABEL_CHOICES, SPEND_CATEGORIES, TYPE_CHOICES, typeChips, typeLabel } from "./labels";
+import {
+  accountLabel, answerChoices, answerText, categoryLabel, FREQUENT_ANSWERS, LABEL_CHOICES, recipientLine, SPEND_CATEGORIES, TYPE_CHOICES, typeChips,
+  typeLabel,
+} from "./labels";
 
 describe("labels", () => {
   it("names every transaction type in Russian", () => {
@@ -20,6 +23,35 @@ describe("labels", () => {
   it("offers the transfer answers, each saying what it does to the limit", () => {
     expect(LABEL_CHOICES.map((c) => c.label)).toEqual(["close_regular", "one_off", "service", "debt_repayment", "lend", "own_account", "skip"]);
     for (const c of LABEL_CHOICES) expect(c.effect).toMatch(/лимит|не расход/i);
+  });
+
+  it("offers three transfer answers at once, the other four behind", () => {
+    expect(FREQUENT_ANSWERS).toEqual(["close_regular", "service", "own_account"]);
+    const fresh = answerChoices(null);
+    expect(fresh.shown.map((c) => c.label)).toEqual(["close_regular", "service", "own_account"]);
+    expect(fresh.rest.map((c) => c.label)).toEqual(["one_off", "debt_repayment", "lend", "skip"]);
+    expect(answerChoices("service")).toEqual(fresh);
+    // The texts are the ones the full list has.
+    for (const c of [...fresh.shown, ...fresh.rest]) expect(LABEL_CHOICES).toContain(c);
+  });
+
+  it("keeps a rare answer given before in sight", () => {
+    const rare = answerChoices("lend");
+    expect(rare.shown.map((c) => c.label)).toEqual(["close_regular", "service", "own_account", "lend"]);
+    expect(rare.rest.map((c) => c.label)).toEqual(["one_off", "debt_repayment", "skip"]);
+    // An earlier answer that is no longer offered adds nothing.
+    for (const old of ["shared_budget", "help", "obligation"] as const) expect(answerChoices(old)).toEqual(answerChoices(null));
+  });
+
+  it("says who the transfers went to and how much, in one line", () => {
+    expect(recipientLine("Олена К.", { count: 3, total: 450_000 })).toBe("Олена К. · 3 перевода, ₴4,500");
+    expect(recipientLine("Иван", { count: 1, total: 50_000 })).toBe("Иван · 1 перевод, ₴500");
+    expect(recipientLine("Иван", { count: 5, total: 100_000 })).toBe("Иван · 5 переводов, ₴1,000");
+    expect(recipientLine("Иван", { count: 11, total: 100_000 })).toBe("Иван · 11 переводов, ₴1,000");
+    expect(recipientLine("Иван", { count: 22, total: 100_000 })).toBe("Иван · 22 перевода, ₴1,000");
+    expect(recipientLine("Иван", undefined)).toBe("Иван");
+    expect(recipientLine(undefined, { count: 3, total: 450_000 })).toBe("3 перевода, ₴4,500");
+    expect(recipientLine(undefined, undefined)).toBeUndefined();
   });
 
   it("names any answer, the earlier ones too", () => {

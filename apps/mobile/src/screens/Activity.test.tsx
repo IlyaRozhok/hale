@@ -458,12 +458,18 @@ describe("Activity recipient label", () => {
     await renderWith(<Activity />, api);
     await fireEvent.press(await screen.findByText("Иван"));
     expect(await screen.findByText("Что это за перевод?")).toBeTruthy();
-    expect(await screen.findByText("Переводов: 5, всего ₴1,000, последний 02.11")).toBeTruthy();
+    expect(await screen.findByText("Иван · 5 переводов, ₴1,000")).toBeTruthy();
     expect(api.recipient).toHaveBeenCalledWith("fedcba9876543210");
-    for (const t of ["Близкий человек, регулярно", "Разовая помощь или подарок", "Оплата услуги или покупка", "Возвращаю долг", "Даю в долг", "Это мой счёт", "Не спрашивать"]) {
+    for (const t of ["Близкий человек, регулярно", "Оплата услуги или покупка", "Это мой счёт"]) {
       expect(screen.getByRole("button", { name: t })).toBeTruthy();
     }
     expect(screen.getByText("Считается в дневном лимите. Платёж из плана лимит не тратит")).toBeTruthy();
+    // The rare answers wait behind «Другое».
+    expect(screen.queryByRole("button", { name: "Даю в долг" })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Другое" }));
+    for (const t of ["Разовая помощь или подарок", "Возвращаю долг", "Даю в долг", "Не спрашивать"]) {
+      expect(screen.getByRole("button", { name: t })).toBeTruthy();
+    }
     await fireEvent.press(screen.getByRole("button", { name: "Даю в долг" }));
     await waitFor(() => expect(api.labelRecipient).toHaveBeenCalledWith("fedcba9876543210", "lend"));
     await waitFor(() => expect(screen.queryByText("Что это за перевод?")).toBeNull());
@@ -478,7 +484,8 @@ describe("Activity recipient label", () => {
     });
     await renderWith(<Activity />, api);
     await fireEvent.press(await screen.findByText("Иван"));
-    await fireEvent.press(await screen.findByRole("button", { name: "Не спрашивать" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Другое" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Не спрашивать" }));
     await waitFor(() => expect(api.labelRecipient).toHaveBeenCalledWith("fedcba9876543210", "skip"));
   });
 
