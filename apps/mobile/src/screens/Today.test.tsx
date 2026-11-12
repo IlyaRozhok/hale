@@ -51,9 +51,12 @@ describe("Today, normal mode", () => {
     expect(screen.getByText("доход 7 ноя")).toBeTruthy();
     expect(screen.queryByText(/до зарплаты/)).toBeNull();
     expect(screen.queryByText(/сейчас$/)).toBeNull();
-    // Payments and goals live in Plan: Today is the limit, one phrase and the runway.
+    // The list of payments and the goals live in Plan: Today is the limit, one phrase, the runway
+    // and under it the one nearest payment.
     expect(screen.queryByText("Скоро платить")).toBeNull();
-    expect(screen.queryByText("Квартплата")).toBeNull();
+    expect(screen.getByText("Ближайший платёж")).toBeTruthy();
+    expect(screen.getByText("Квартплата · 6 ноя")).toBeTruthy();
+    expect(screen.getByText("₴17,000")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Добавить операцию" })).toBeNull();
     expect(levelOf()).toBe("bar:ok:0.72");
   });
@@ -127,6 +130,21 @@ describe("Today, normal mode", () => {
       const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
       await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ upcoming, questions })) }));
       expect(await screen.findByText("Квартплата ждёт с 28 окт. Отметьте, если уже оплачено.")).toBeTruthy();
+    });
+
+    it("the nearest payment under the graph opens how it was paid", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+      await fireEvent.press(await screen.findByRole("button", { name: "Ближайший платёж: Квартплата, 6 ноя, ₴17,000: отметить оплату" }));
+      expect(await screen.findByRole("button", { name: "Оплачено" })).toBeTruthy();
+      // The sheet is for that payment: its amount and day stand under the name.
+      expect(screen.getByText(/^₴17,000 · /)).toBeTruthy();
+    });
+
+    it("no payments before the income: no row under the graph", async () => {
+      const runway = { ...todayFixture().runway!, events: [] };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ runway, upcoming: [] })) }));
+      await screen.findByText("Запас к доходу");
+      expect(screen.queryByText("Ближайший платёж")).toBeNull();
     });
 
     it("a payment further away is reached through its day on the graph", async () => {

@@ -4,6 +4,7 @@ import { tokens } from "@hale/tokens";
 import type { RunwayDto } from "@hale/contracts";
 import { dayMonth, formatMoney } from "../format";
 import { nearestDay, runwayChart } from "../runwayChart";
+import { Icon } from "./Icon";
 import { RunwayLine } from "./RunwayLine";
 
 const { color, space, touchMin, type } = tokens;
@@ -22,7 +23,8 @@ const dateOf = (iso: string) => {
 /**
  * The reserve to the next income: one figure and the money day by day under it. The picture carries
  * no dates but its two ends; a touch tells a day's date, money and payment, and with `onPay` the
- * payment there can be pressed to mark it paid.
+ * payment there can be pressed to mark it paid. While no day is touched, the same place under the
+ * graph names the nearest payment of the stretch, if there is one.
  */
 export function Runway({ runway, today, onPay }: { runway: RunwayDto; today: string; onPay?: (paymentId: string) => void }) {
   const [width, setWidth] = useState(0);
@@ -52,6 +54,18 @@ export function Runway({ runway, today, onPay }: { runway: RunwayDto; today: str
   };
 
   const point = selected === null ? undefined : runway.points[selected];
+  // ISO dates compare as text; of equal dates the first in the server's order stays.
+  const next = runway.events.reduce<RunwayDto["events"][number] | undefined>((first, e) => (first === undefined || e.date < first.date ? e : first), undefined);
+  const nextDay = next === undefined ? "" : next.date === today ? "сегодня" : dateOf(next.date);
+  const nextBody = next && (
+    <>
+      <View style={styles.nextText}>
+        <Text style={styles.nextCaption}>Ближайший платёж</Text>
+        <Text style={styles.nextName} numberOfLines={1}>{`${next.name} · ${nextDay}`}</Text>
+      </View>
+      <Text style={styles.nextAmount}>{formatMoney(next.amount)}</Text>
+    </>
+  );
   const crossX = chart.cross === null ? null : EDGE + chart.cross;
   return (
     <View style={styles.root}>
@@ -104,6 +118,21 @@ export function Runway({ runway, today, onPay }: { runway: RunwayDto; today: str
                 )}
             </View>
           )}
+          {!point &&
+            next &&
+            (onPay ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Ближайший платёж: ${next.name}, ${nextDay}, ${formatMoney(next.amount)}: отметить оплату`}
+                onPress={() => onPay(next.id)}
+                style={styles.next}
+              >
+                {nextBody}
+                <Icon name="chevron" color={color.fg.subtle} size={16} />
+              </Pressable>
+            ) : (
+              <View style={styles.next}>{nextBody}</View>
+            ))}
         </>
       )}
     </View>
@@ -125,5 +154,10 @@ const styles = StyleSheet.create({
   noteHead: { ...type.label, color: color.fg.default, fontVariant: ["tabular-nums"] },
   noteLine: { ...type.caption, color: color.fg.muted, fontVariant: ["tabular-nums"] },
   pay: { minHeight: touchMin },
+  next: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: EDGE, paddingTop: space.xs },
+  nextText: { flex: 1 },
+  nextCaption: { ...type.caption, color: color.fg.subtle },
+  nextName: { ...type.label, color: color.fg.default },
+  nextAmount: { ...type.label, fontWeight: "400", color: color.fg.muted, fontVariant: ["tabular-nums"] },
   payText: { ...type.label, fontWeight: "400", color: color.fg.default, fontVariant: ["tabular-nums"], flexShrink: 1 },
 });
