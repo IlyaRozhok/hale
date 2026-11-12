@@ -129,9 +129,12 @@ export interface DayMarkInput {
  * The mark today's row should carry. The shortage came on today when a day fixed as ordinary is now
  * in shortage, or when the day is fixed (again) in shortage right after an ordinary day. The very
  * first fixed day is never one: there was no limit before it to replace.
+ *
+ * A day that began in shortage keeps `bridge` even while the money is briefly above zero: were it
+ * rewritten to `normal`, falling back the same day would mark a day whose limit never changed.
  */
 export function dayMark(i: DayMarkInput): DayMark {
-  if (i.live === "normal") return "normal";
+  if (i.live === "normal") return i.stored === "bridge" ? "bridge" : "normal";
   if (i.stored === "bridge_start" || i.stored === "normal") return "bridge_start";
   if (i.stored === null && i.previous === "normal") return "bridge_start";
   return "bridge";

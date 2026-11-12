@@ -336,7 +336,8 @@ export class TodayService {
   /**
    * Writes the day's row once (concurrent first requests share it) and returns its limit. An existing
    * row's limit is never rewritten here: only choosing a bridge plan, closing one, or setting an income
-   * date replaces it (design §5.2).
+   * date replaces it (design §5.2). The row's `mode` is another matter: `getToday` rewrites it to the
+   * day's current mark right after this call.
    */
   private async snapshot(date: string, morning: DailyState, mark: DayMark): Promise<number> {
     return this.ds.transaction(async (m) => {

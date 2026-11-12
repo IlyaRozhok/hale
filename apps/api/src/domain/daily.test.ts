@@ -199,10 +199,16 @@ describe("computeDaily bridge with accrued tax not yet due", () => {
 });
 
 describe("dayMark", () => {
-  it("is normal whenever the day is not in the shortage mode now, whatever was stored", () => {
-    for (const stored of [null, "normal", "bridge", "bridge_start"] as const) {
+  it("is normal when the day is not in the shortage mode now, unless it began in it", () => {
+    for (const stored of [null, "normal", "bridge_start"] as const) {
       expect(dayMark({ live: "normal", stored, previous: "bridge" })).toBe("normal");
     }
+  });
+  it("a day that began in shortage stays one while the money is briefly above zero, so coming back does not mark it", () => {
+    const up = dayMark({ live: "normal", stored: "bridge", previous: "bridge" });
+    expect(up).toBe("bridge");
+    expect(dayMark({ live: "bridge", stored: up, previous: "bridge" })).toBe("bridge");
+    expect(dayMark({ live: "normal", stored: "bridge", previous: "normal" })).toBe("bridge");
   });
   it("marks the day the shortage came on when a day fixed as ordinary is seen in shortage", () => {
     expect(dayMark({ live: "bridge", stored: "normal", previous: "normal" })).toBe("bridge_start");

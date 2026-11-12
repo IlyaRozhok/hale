@@ -808,6 +808,58 @@ describe("bridge mode", () => {
       expect((await month())[1]).toEqual({ date: "2026-11-02", limit: 100_000, spent: 1_100_000, status: "far_over" });
     });
 
+    it("a day that began in shortage is not marked when the money rises above zero and falls back", async () => {
+      const card = await account("black", 2_900_000, { creditLimit: 3_000_000 });
+      await income("fop", "2026-11-12");
+      await fixed("2026-11-01", 45_000, "bridge");
+      expect((await today()).state).toMatchObject({ mode: "bridge", dailyLimit: 45_000 });
+      await tx(card, -60_000, "spend");
+      await setBalance(card, 2_840_000);
+      const over = await today();
+      expect(over.state.leftToday).toBe(-15_000);
+      expect(over.state.shortageStart).toBeUndefined();
+
+      await setBalance(card, 4_500_000);
+      const up = await today();
+      expect(up.state).toMatchObject({ mode: "normal", dailyLimit: 45_000, leftToday: -15_000 });
+      expect(up.state.shortageStart).toBeUndefined();
+      await setBalance(card, 2_840_000);
+      const back = await today();
+      expect(back.state).toMatchObject({ mode: "bridge", dailyLimit: 45_000, leftToday: -15_000 });
+      expect(back.state.shortageStart).toBeUndefined();
+
+      at("2026-11-03T10:00:00Z");
+      const next = await today();
+      const body = await calendar();
+      expect(body.days[1]).toEqual({ date: "2026-11-02", limit: 45_000, spent: 60_000, status: "over" });
+      expect(body.streak).toBe(0);
+      expect(next.streak).toBe(0);
+    });
+
+    // Pins a known limit, not a wanted behaviour: this is a real transition day and it stays red.
+    // Yesterday was a shortage day, today began ordinary, and the day's row was deleted at the moment
+    // of crossing (an action in the plan). Nothing stored tells it from a day that began in shortage;
+    // telling them apart needs a stored fact, that is a migration.
+    it("known limit: after a shortage day, a day re-fixed at the crossing is not marked", async () => {
+      const card = await account("black", 4_000_000, { creditLimit: 3_000_000 });
+      await income("fop", "2026-11-12");
+      await fixed("2026-11-01", 45_000, "bridge");
+      expect((await today()).state).toMatchObject({ mode: "normal", dailyLimit: 100_000 });
+      await tx(card, -60_000, "spend");
+      await setBalance(card, 3_940_000);
+      await payment("Rent", 1_700_000, "2026-11-06");
+      await ds.query(`DELETE FROM daily_snapshots WHERE local_date='2026-11-02'`); // what adding a payment in the app does
+      const r = await today();
+      expect(r.state).toMatchObject({ mode: "bridge", dailyLimit: 45_000, leftToday: -15_000 });
+      expect(r.state.shortageStart).toBeUndefined();
+
+      at("2026-11-03T10:00:00Z");
+      await today();
+      const body = await calendar();
+      expect(body.days[1]).toEqual({ date: "2026-11-02", limit: 45_000, spent: 60_000, status: "over" });
+      expect(body.streak).toBe(0);
+    });
+
     it("is not marked on the very first day: there was no limit before it", async () => {
       await setup();
       const r = await today();
