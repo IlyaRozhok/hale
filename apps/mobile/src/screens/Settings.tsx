@@ -1,14 +1,15 @@
 import { useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import Slider from "@react-native-community/slider";
 import { tokens } from "@hale/tokens";
 import { ErrorText } from "../components/ErrorText";
-import { formatMoney } from "../format";
-import { useCapPreview, useSaveSettings, useSettings } from "../api/queries";
+import { formatMoney, formatStamp } from "../format";
+import { useCapPreview, useSaveSettings, useSettings, useToday } from "../api/queries";
 import { Glass } from "../components/Glass";
 import { Icon } from "../components/Icon";
 import { ActionRow } from "../components/ActionRow";
 import { RulesSheet } from "../components/RulesSheet";
+import { useSignOut } from "../session";
 
 const { color, space, touchMin, type } = tokens;
 
@@ -23,6 +24,9 @@ const SAVE_FAILED = "Не удалось сохранить. Значение в
 export function Settings({ onClose }: { onClose: () => void }) {
   const settings = useSettings();
   const save = useSaveSettings();
+  // The cached Today answer already knows when the bank last answered; no request of its own kind.
+  const today = useToday();
+  const signOut = useSignOut();
   const [draft, setDraft] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -39,6 +43,12 @@ export function Settings({ onClose }: { onClose: () => void }) {
       onSettled: onDone,
     });
   };
+
+  const confirmSignOut = () =>
+    Alert.alert("Выйти из Hale?", "Чтобы войти снова, понадобится пароль.", [
+      { text: "Отмена", style: "cancel" },
+      { text: "Выйти", onPress: signOut },
+    ]);
 
   return (
     <ScrollView
@@ -94,6 +104,14 @@ export function Settings({ onClose }: { onClose: () => void }) {
         </>
       )}
       <ActionRow label="Мои правила" onPress={() => setRulesOpen(true)} />
+      {today.data && (
+        <Text style={styles.muted}>
+          {today.data.syncedAt ? `Банк обновлялся ${formatStamp(today.data.syncedAt)}` : "Синхронизации с банком ещё не было."}
+        </Text>
+      )}
+      <Pressable accessibilityRole="button" accessibilityLabel="Выйти" onPress={confirmSignOut} style={styles.signOut}>
+        <Text style={styles.signOutText}>Выйти</Text>
+      </Pressable>
       {rulesOpen && <RulesSheet onClose={() => setRulesOpen(false)} />}
     </ScrollView>
   );
@@ -113,4 +131,6 @@ const styles = StyleSheet.create({
   line: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
   slider: { height: touchMin },
   stale: { opacity: 0.6 },
+  signOut: { minWidth: touchMin, minHeight: touchMin, justifyContent: "center", alignSelf: "flex-start" },
+  signOutText: { ...type.label, color: color.fg.default },
 });
