@@ -154,7 +154,9 @@ describe("an operation entered by hand, in Activity", () => {
   it("a bank row still opens the type editor", async () => {
     await renderWith(<Activity />, fakeApi());
     await fireEvent.press(await screen.findByText("Кофейня"));
-    expect(await screen.findByText("Изменить тип или категорию")).toBeTruthy();
+    expect(await screen.findByLabelText("Применить к похожим")).toBeTruthy();
+    expect(screen.getByText("Тип")).toBeTruthy();
+    expect(screen.getByText("Категория")).toBeTruthy();
   });
 
   it("shows a failed save calmly", async () => {

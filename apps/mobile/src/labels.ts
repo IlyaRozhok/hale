@@ -21,6 +21,32 @@ export const TYPE_CHOICES = Object.keys(TYPES) as TxTypeDto[];
 
 export const typeLabel = (type: TxTypeDto | null): string => (type ? TYPES[type] : "Не определён");
 
+/** The types offered at once for money going out; the others wait behind "Ещё". */
+export const FREQUENT_TYPES_OUT: readonly TxTypeDto[] = ["spend", "obligation", "own_transfer", "person_transfer"];
+/** The same for money coming in. */
+export const FREQUENT_TYPES_IN: readonly TxTypeDto[] = ["income", "person_in", "own_transfer"];
+
+/**
+ * The type chips of an operation: the frequent ones for its direction, then its own type when that is a
+ * rare one, so the chosen type is always in sight; `rest` is what "Ещё" opens, in the usual order.
+ */
+export function typeChips(amount: number, current: TxTypeDto | null): { shown: TxTypeDto[]; rest: TxTypeDto[] } {
+  const frequent = amount < 0 ? FREQUENT_TYPES_OUT : FREQUENT_TYPES_IN;
+  const shown = current !== null && !frequent.includes(current) ? [...frequent, current] : [...frequent];
+  return { shown, rest: TYPE_CHOICES.filter((t) => !shown.includes(t)) };
+}
+
+const ACCOUNTS = new Map([
+  ["black", "Чёрная карта"],
+  ["white", "Белая карта"],
+  ["fop", "Счёт ФОП"],
+  ["jar", "Банка"],
+  ["cash", "Наличные"],
+]);
+
+/** The account an operation went through, by the server's kind; null for a kind with no name here. */
+export const accountLabel = (kind: string): string | null => ACCOUNTS.get(kind) ?? null;
+
 const CATEGORIES: Record<string, string> = {
   groceries: "Продукты",
   cafe: "Кафе и рестораны",
