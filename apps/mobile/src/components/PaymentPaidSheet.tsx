@@ -17,6 +17,8 @@ const spent = (t: TransactionDto) => Math.abs(t.amountUah ?? t.amount);
 /**
  * "Оплачено" for a planned payment. The owner may say which operations paid it, several if the sum
  * was put together; otherwise in cash from the wallet (only when the wallet covers it) or just paid.
+ * `payment.amount` is in hryvnias whatever `currency` says: "Сегодня" converts a foreign payment
+ * before sending it, so every amount here takes the hryvnia sign.
  */
 export function PaymentPaidSheet({ payment, today, onClose }: Props) {
   const id = Number(payment.id);

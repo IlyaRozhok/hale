@@ -62,6 +62,17 @@ describe("installments", () => {
     expect(installmentsLine(list, 40)).toBe("осталось ₴4,200");
     expect(installmentsLine([], 40)).toBe("нет");
   });
+
+  it("says nothing while a dollar series has no rate to count it at", () => {
+    expect(installmentsLine(list, undefined)).toBeUndefined();
+    expect(installmentsLine(list, 0)).toBeUndefined();
+    expect(installmentsLine(list.slice(3, 4), undefined)).toBeUndefined();
+  });
+
+  it("needs no rate for hryvnia series, and none to say there is nothing", () => {
+    expect(installmentsLine(list.slice(0, 3), undefined)).toBe("осталось ₴4,000");
+    expect(installmentsLine([], undefined)).toBe("нет");
+  });
 });
 
 describe("tax line", () => {

@@ -52,10 +52,16 @@ export function installmentGroups(payments: readonly ScheduledPaymentDto[]): Ins
   return [...groups.values()];
 }
 
-export function installmentsLine(payments: readonly ScheduledPaymentDto[], usdRate: number): string {
+/**
+ * What is left of all series, in hryvnias. The rate comes with "Сегодня" and may not be here yet:
+ * a dollar series then has no honest sum, so there is no line (undefined) rather than a wrong one.
+ */
+export function installmentsLine(payments: readonly ScheduledPaymentDto[], usdRate: number | undefined): string | undefined {
   const groups = installmentGroups(payments);
   if (groups.length === 0) return NONE;
-  return `осталось ${formatMoney(groups.reduce((s, g) => s + (g.currency === "USD" ? g.total * usdRate : g.total), 0))}`;
+  const rate = usdRate !== undefined && usdRate > 0 ? usdRate : undefined;
+  if (rate === undefined && groups.some((g) => g.currency === "USD")) return undefined;
+  return `осталось ${formatMoney(groups.reduce((s, g) => s + (g.currency === "USD" ? g.total * (rate ?? 0) : g.total), 0))}`;
 }
 
 export function taxLine(payments: readonly ScheduledPaymentDto[]): string {
