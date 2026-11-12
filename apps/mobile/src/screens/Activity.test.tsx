@@ -407,6 +407,64 @@ describe("Activity filters", () => {
     await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "income" }));
     expect(screen.getByRole("button", { name: "Фильтры" })).toBeTruthy();
   });
+
+  describe("the window under «Доходы», with a category remembered from spending", () => {
+    /** «Кафе и рестораны» chosen under «Траты», then over to «Доходы» with the window open there. */
+    const openUnderIncome = async (transactions: ReturnType<typeof summaryPage>) => {
+      await renderWith(<Activity now={now} />, fakeApi({ transactions }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Фильтры" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Кафе и рестораны" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Показать" }));
+      await windowGone();
+      await fireEvent.press(screen.getByRole("button", { name: "Доходы" }));
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "income" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Фильтры" }));
+      await screen.findByRole("button", { name: "Показать" });
+      expect(screen.queryByRole("button", { name: "Кафе и рестораны" })).toBeNull();
+    };
+
+    it("«Показать» there keeps the category: it is back on «Траты» and on «Все»", async () => {
+      const transactions = summaryPage({ total: -342000, count: 11 });
+      await openUnderIncome(transactions);
+      await fireEvent.press(screen.getByRole("button", { name: "Неделя" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Показать" }));
+      await windowGone();
+      // Income itself is narrowed by the period only.
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "income", from: "2026-11-03", to: "2026-11-09" }));
+      expect(screen.getByRole("button", { name: "Фильтры: 1" })).toBeTruthy();
+
+      await fireEvent.press(screen.getByRole("button", { name: "Траты" }));
+      await waitFor(() =>
+        expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", category: "cafe", from: "2026-11-03", to: "2026-11-09" }),
+      );
+      expect(await screen.findByRole("button", { name: "Фильтры: 2" })).toBeTruthy();
+
+      await fireEvent.press(screen.getByRole("button", { name: "Все" }));
+      await waitFor(() =>
+        expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "all", category: "cafe", from: "2026-11-03", to: "2026-11-09" }),
+      );
+      expect(await screen.findByRole("button", { name: "Фильтры: 2" })).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Фильтры: 2" }));
+      expect((await screen.findByRole("button", { name: "Кафе и рестораны" })).props.accessibilityState.selected).toBe(true);
+    });
+
+    it("«Сбросить» there clears everything, the category too", async () => {
+      const transactions = summaryPage({ total: -342000, count: 11 });
+      await openUnderIncome(transactions);
+      await fireEvent.press(screen.getByRole("button", { name: "Сбросить" }));
+      await windowGone();
+
+      await fireEvent.press(screen.getByRole("button", { name: "Траты" }));
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" }));
+      expect(screen.getByRole("button", { name: "Фильтры" })).toBeTruthy();
+
+      await fireEvent.press(screen.getByRole("button", { name: "Все" }));
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "all" }));
+      expect(screen.getByRole("button", { name: "Фильтры" })).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Фильтры" }));
+      expect((await screen.findByRole("button", { name: "Кафе и рестораны" })).props.accessibilityState.selected).toBe(false);
+    });
+  });
 });
 
 describe("Activity edit sheet", () => {

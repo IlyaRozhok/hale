@@ -18,7 +18,8 @@ export type Filters = { period: Period | null; category: string | null };
 type Props = {
   today: string;
   value: Filters;
-  /** Categories are spending's: offered wherever spending is listed, not for income. */
+  /** Categories are spending's: offered wherever spending is listed, not for income. Where they are not
+   *  offered, "Показать" passes the incoming category through and only "Сбросить" clears it. */
   withCategories: boolean;
   onApply: (f: Filters) => void;
   onClose: () => void;
@@ -104,11 +105,10 @@ export function FiltersSheet({
           </View>
         </>
       )}
+      {/* Without the category block the category is the one that came in: remembered for spending, not erased here. */}
       <PrimaryButton
         label="Показать"
-        onPress={() =>
-          apply({ period, category: withCategories ? category : null })
-        }
+        onPress={() => apply({ period, category })}
       />
       <Pressable
         accessibilityRole="button"

@@ -211,7 +211,8 @@ export function Activity({ now = () => new Date(), route }: Props) {
       {filtering && (
         <FiltersSheet
           today={kyivDate(now())}
-          value={{ period, category: chosenCategory }}
+          // The remembered category, also under "Доходы": the window does not show it there, and hands it back untouched.
+          value={{ period, category }}
           withCategories={withCategories}
           onApply={(f) => {
             setPeriod(f.period);
