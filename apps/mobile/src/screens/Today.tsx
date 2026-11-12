@@ -108,6 +108,10 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   // Owner's choice: an overspent day looks like any day; only the strip's spark turns red.
   const heading = "Сегодня можно";
   const dayState = limitState(state);
+  // The day the shortage mode came on, while it still runs on the limit it began with: what is already spent
+  // is not set against the new one. Once the day's limit is the new one the server names none for tomorrow.
+  const nextLimit = state.shortageStart?.nextLimit;
+  const nextLimitNote = nextLimit !== undefined ? `Новый лимит ${formatMoney(nextLimit)} действует с завтра` : null;
   const offlineSince = today.isError ? today.dataUpdatedAt : null;
   // A date question with no income event cannot be answered; an older cached answer may still hold one.
   const questions = data.questions.filter((q) => !answered.has(q.id) && !(q.kind === "income_date" && eventIdOf(q.id) === null));
@@ -139,7 +143,9 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
     if (action.kind === "pay") setPaying(action.payment);
     else setSheet(action.kind);
   };
-  const limitLabel = over
+  const limitLabel = hasLimit && nextLimitNote
+    ? `${heading} ${formatMoney(over ? 0 : shownLeft)}. ${nextLimitNote}`
+    : over
     ? `${heading} ₴0, потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)} на день`
     : hasLimit
       ? `${heading} ${formatMoney(shownLeft)}, из ${formatMoney(state.dailyLimit)} на день`
@@ -183,7 +189,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
                   <LimitBar level={level} state={dayState} />
                 </View>
                 <Text style={[styles.subtle, styles.spentLine]}>
-                  {`потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}${state.leftToday <= 0 ? ` · завтра снова ${formatMoney(state.dailyLimit)}` : ""}`}
+                  {nextLimitNote ?? `потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}${state.leftToday <= 0 ? ` · завтра снова ${formatMoney(state.dailyLimit)}` : ""}`}
                 </Text>
               </>
             )}
@@ -236,6 +242,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
           <BridgePlan
             state={state}
             usdRate={data.usdRate}
+            creditLimit={data.accounts.credit}
             confirming={chooseBridge.isPending}
             onConfirm={(amount) => chooseBridge.mutate(amount, { onSuccess: () => closeIfOpen("bridge") })}
             onCancel={() => cancelBridge.mutate(undefined, {

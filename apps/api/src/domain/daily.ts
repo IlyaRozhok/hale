@@ -108,3 +108,34 @@ export function computeDaily(i: DailyInput): DailyState {
 
   return { mode, daysLeft, free, dailyLimit, leftToday, level, needsIncomeDate: !hasIncomeDate, bridge };
 }
+
+/**
+ * What a fixed day's row says about the day. `bridge_start` is the day the shortage mode came on:
+ * what was spent on it is not judged against the new limit (audit 6.7). Rows written before this
+ * mark existed hold only the other two values, so earlier days are never read as such a day.
+ */
+export type DayMark = "normal" | "bridge" | "bridge_start";
+
+export interface DayMarkInput {
+  /** The mode the day is in now. */
+  live: DailyState["mode"];
+  /** What today's row holds; null when the day has no row (not fixed yet, or about to be fixed again). */
+  stored: string | null;
+  /** What the last fixed day before today holds; null when there is none. */
+  previous: string | null;
+}
+
+/**
+ * The mark today's row should carry. The shortage came on today when a day fixed as ordinary is now
+ * in shortage, or when the day is fixed (again) in shortage right after an ordinary day. The very
+ * first fixed day is never one: there was no limit before it to replace.
+ *
+ * A day that began in shortage keeps `bridge` even while the money is briefly above zero: were it
+ * rewritten to `normal`, falling back the same day would mark a day whose limit never changed.
+ */
+export function dayMark(i: DayMarkInput): DayMark {
+  if (i.live === "normal") return i.stored === "bridge" ? "bridge" : "normal";
+  if (i.stored === "bridge_start" || i.stored === "normal") return "bridge_start";
+  if (i.stored === null && i.previous === "normal") return "bridge_start";
+  return "bridge";
+}

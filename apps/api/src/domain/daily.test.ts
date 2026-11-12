@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeDaily, sumDue, type DailyInput } from "./daily.js";
+import { computeDaily, dayMark, sumDue, type DailyInput } from "./daily.js";
 
 const input = (o: Partial<DailyInput> = {}): DailyInput => ({
   today: "2026-11-02",
@@ -195,5 +195,39 @@ describe("computeDaily bridge with accrued tax not yet due", () => {
     const r = computeDaily(input({ obligationsDue: 1_000_000, taxReserve: 100_000, taxAccruedNotDue: 100_000, foodFloor: 0 }));
     expect(r.free).toBe(-67_500);
     expect(r.bridge!.creditNeeded).toBe(0);
+  });
+});
+
+describe("dayMark", () => {
+  it("is normal when the day is not in the shortage mode now, unless it began in it", () => {
+    for (const stored of [null, "normal", "bridge_start"] as const) {
+      expect(dayMark({ live: "normal", stored, previous: "bridge" })).toBe("normal");
+    }
+  });
+  it("a day that began in shortage stays one while the money is briefly above zero, so coming back does not mark it", () => {
+    const up = dayMark({ live: "normal", stored: "bridge", previous: "bridge" });
+    expect(up).toBe("bridge");
+    expect(dayMark({ live: "bridge", stored: up, previous: "bridge" })).toBe("bridge");
+    expect(dayMark({ live: "normal", stored: "bridge", previous: "normal" })).toBe("bridge");
+  });
+  it("marks the day the shortage came on when a day fixed as ordinary is seen in shortage", () => {
+    expect(dayMark({ live: "bridge", stored: "normal", previous: "normal" })).toBe("bridge_start");
+    expect(dayMark({ live: "bridge", stored: "normal", previous: null })).toBe("bridge_start");
+  });
+  it("keeps the mark once it is there, and never adds it to a day already known as a shortage day", () => {
+    expect(dayMark({ live: "bridge", stored: "bridge_start", previous: "normal" })).toBe("bridge_start");
+    expect(dayMark({ live: "bridge", stored: "bridge", previous: "normal" })).toBe("bridge");
+  });
+  it("a day fixed for the first time, or again, in shortage is the start only right after an ordinary day", () => {
+    expect(dayMark({ live: "bridge", stored: null, previous: "normal" })).toBe("bridge_start");
+    expect(dayMark({ live: "bridge", stored: null, previous: "bridge" })).toBe("bridge");
+    expect(dayMark({ live: "bridge", stored: null, previous: "bridge_start" })).toBe("bridge");
+  });
+  it("is not the start on the very first fixed day: there was no limit before it to replace", () => {
+    expect(dayMark({ live: "bridge", stored: null, previous: null })).toBe("bridge");
+  });
+  it("reads a value it does not know as an ordinary shortage day, so nothing is marked by mistake", () => {
+    expect(dayMark({ live: "bridge", stored: "other", previous: "normal" })).toBe("bridge");
+    expect(dayMark({ live: "bridge", stored: null, previous: "other" })).toBe("bridge");
   });
 });

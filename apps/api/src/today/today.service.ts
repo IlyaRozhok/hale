@@ -4,7 +4,7 @@ import type { BridgePreviewDto, CalendarDto, SettingsPreviewDto, TodayDto } from
 import { DataSource, type EntityManager } from "typeorm";
 import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
-import { type DailyInput, type DailyState, computeDaily, sumDue } from "../domain/daily";
+import { type DailyInput, type DailyState, type DayMark, computeDaily, dayMark, sumDue } from "../domain/daily";
 import { runway } from "../domain/runway";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
 import { quarterLabel, quarterOf } from "../domain/quarter";
@@ -26,6 +26,8 @@ const DEFAULT_LIFESTYLE_CAP = 10_000_000;
 /** Design §5.3: about ₴450 a day, used while the owner has not set a food floor (0 would mean a ₴0 bridge limit). */
 const DEFAULT_FOOD_FLOOR = 45_000;
 const MAX_RECIPIENT_QUESTIONS = 3;
+/** The row of the day the shortage mode came on. */
+const START: DayMark = "bridge_start";
 /** Older transfers are history: asking about them now changes nothing. */
 const QUESTION_WINDOW_DAYS = 30;
 
@@ -127,7 +129,14 @@ export class TodayService {
     }
 
     const morning = this.compute(f, plan, 0, f.spentToday);
-    const limit = await this.snapshot(f.date, morning);
+    // The row's mode follows the day: it is how the day the shortage came on is known, today and later.
+    const mark = dayMark({ live: state.mode, ...(await this.storedMarks(this.ds.manager, f.date)) });
+    const limit = await this.snapshot(f.date, morning, mark);
+    await this.ds.query(`UPDATE daily_snapshots SET mode=$2 WHERE local_date=$1 AND mode<>$2`, [f.date, mark]);
+    // In the shortage mode the engine's limit is the one a new day starts with: the plan's, or the recommended one.
+    // While the day still runs on another limit, that one is named as tomorrow's; otherwise it is already in force.
+    const shortageStart =
+      mark === "bridge_start" ? (state.dailyLimit !== limit ? { nextLimit: state.dailyLimit } : {}) : undefined;
     const leftToday = limit - f.spentToday;
     state = {
       ...state,
@@ -135,7 +144,7 @@ export class TodayService {
       leftToday,
       level: limit > 0 ? Math.min(1, Math.max(0, leftToday / limit)) : 0,
     };
-    return this.dto(f, state, plan);
+    return this.dto(f, state, plan, shortageStart);
   }
 
   async previewBridge(dailyAmount: number): Promise<BridgePreviewDto> {
@@ -211,27 +220,31 @@ export class TodayService {
     const first = `${month}-01`;
     const [y, mo] = month.split("-").map(Number) as [number, number];
     const last = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
-    const limits = new Map(
-      ((await m.query(`SELECT local_date::text AS date, daily_limit::float8 AS "limit" FROM daily_snapshots WHERE local_date BETWEEN $1 AND $2`, [first, last])) as { date: string; limit: number }[]).map(
-        (r) => [r.date, r.limit],
+    const fixed = new Map(
+      ((await m.query(`SELECT local_date::text AS date, daily_limit::float8 AS "limit", mode FROM daily_snapshots WHERE local_date BETWEEN $1 AND $2`, [first, last])) as { date: string; limit: number; mode: string }[]).map(
+        (r) => [r.date, r],
       ),
     );
     const spent = await this.spentByDay(m, first, last);
     const days: CalendarDto["days"] = [];
     for (let date = first; date <= last && date <= today; date = addDays(date, 1)) {
-      const limit = limits.get(date) ?? null;
+      const row = fixed.get(date);
+      const start = row?.mode === START;
+      const isToday = date === today;
+      // A past day on which the shortage came on goes without its limit: an older app then shows it as a day without one.
+      const limit = start && !isToday ? null : (row?.limit ?? null);
       const amount = spent.get(date) ?? 0;
-      days.push({ date, limit, spent: amount, status: date === today ? "today" : dayStatus(limit, amount) });
+      days.push({ date, limit, spent: amount, status: isToday ? "today" : dayStatus(limit, amount, start), ...(start ? { shortageStart: true as const } : {}) });
     }
     return { month, today, streak: await this.streak(m, today), days };
   }
 
   /** Every fixed day is read: a streak can reach back any distance, and there is one row a day. */
   private async streak(m: EntityManager, today: string): Promise<number> {
-    const rows = (await m.query(`SELECT local_date::text AS date, daily_limit::float8 AS "limit" FROM daily_snapshots WHERE local_date < $1`, [today])) as { date: string; limit: number }[];
+    const rows = (await m.query(`SELECT local_date::text AS date, daily_limit::float8 AS "limit", mode FROM daily_snapshots WHERE local_date < $1`, [today])) as { date: string; limit: number; mode: string }[];
     if (rows.length === 0) return 0;
     const spent = await this.spentByDay(m, rows.reduce((a, r) => (r.date < a ? r.date : a), today), today);
-    return currentStreak(rows.map((r) => ({ ...r, spent: spent.get(r.date) ?? 0 })), today);
+    return currentStreak(rows.map((r) => ({ date: r.date, limit: r.limit, spent: spent.get(r.date) ?? 0, shortageStart: r.mode === START })), today);
   }
 
   private async spentByDay(m: EntityManager, from: string, to: string): Promise<Map<string, number>> {
@@ -269,10 +282,12 @@ export class TodayService {
           dailyAmount, b.creditNeeded, f.date, f.basis,
         ]);
       }
+      // The plan changes the day's limit, not what the day is: the day the shortage came on stays that day.
+      const mark = dayMark({ live: "bridge", ...(await this.storedMarks(m, f.date)) });
       await m.query(
-        `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,'bridge')
-         ON CONFLICT (local_date) DO UPDATE SET daily_limit=EXCLUDED.daily_limit, mode='bridge'`,
-        [f.date, dailyAmount],
+        `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3)
+         ON CONFLICT (local_date) DO UPDATE SET daily_limit=EXCLUDED.daily_limit, mode=EXCLUDED.mode`,
+        [f.date, dailyAmount, mark],
       );
     });
     return this.getToday();
@@ -309,16 +324,26 @@ export class TodayService {
     });
   }
 
+  /** What today's row and the last fixed day before it say, for `dayMark`. */
+  private async storedMarks(m: EntityManager, date: string): Promise<{ stored: string | null; previous: string | null }> {
+    const rows: { date: string; mode: string }[] = await m.query(
+      `SELECT local_date::text AS date, mode FROM daily_snapshots WHERE local_date <= $1 ORDER BY local_date DESC LIMIT 2`,
+      [date],
+    );
+    return { stored: rows.find((r) => r.date === date)?.mode ?? null, previous: rows.find((r) => r.date < date)?.mode ?? null };
+  }
+
   /**
    * Writes the day's row once (concurrent first requests share it) and returns its limit. An existing
-   * row is never rewritten here: only choosing a bridge plan, closing one, or setting an income date
-   * replaces it (design §5.2).
+   * row's limit is never rewritten here: only choosing a bridge plan, closing one, or setting an income
+   * date replaces it (design §5.2). The row's `mode` is another matter: `getToday` rewrites it to the
+   * day's current mark right after this call.
    */
-  private async snapshot(date: string, morning: DailyState): Promise<number> {
+  private async snapshot(date: string, morning: DailyState, mark: DayMark): Promise<number> {
     return this.ds.transaction(async (m) => {
       await m.query(
         `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3) ON CONFLICT (local_date) DO NOTHING`,
-        [date, morning.dailyLimit, morning.mode],
+        [date, morning.dailyLimit, mark],
       );
       const row = (await m.query(`SELECT daily_limit::float8 AS daily_limit FROM daily_snapshots WHERE local_date=$1`, [date]))[0] as {
         daily_limit: number;
@@ -602,7 +627,7 @@ export class TodayService {
   }
 
   // --- the response -------------------------------------------------------------
-  private async dto(f: Facts, state: DailyState, plan: Plan | null): Promise<TodayDto> {
+  private async dto(f: Facts, state: DailyState, plan: Plan | null, shortageStart?: { nextLimit?: number }): Promise<TodayDto> {
     const m = this.ds.manager;
     const questions: TodayDto["questions"] = [];
     const usdc: { id: number }[] = await m.query(
@@ -681,7 +706,7 @@ export class TodayService {
 
     return {
       date: f.date,
-      state: { ...state, bridge: state.bridge ? { ...state.bridge, confirmed: plan !== null } : null },
+      state: { ...state, bridge: state.bridge ? { ...state.bridge, confirmed: plan !== null } : null, ...(shortageStart ? { shortageStart } : {}) },
       runway: { endOn: f.end, incomeOn: f.end === f.input.nextIncomeOn ? f.end : null, ...run, events },
       usdRate: f.usdRate,
       rateStale: f.rateStale,

@@ -37,8 +37,13 @@ const LEGEND = [
   { fill: color.calendar.farOver, text: "больше 150%" },
 ];
 
+const dayName = (d: CalendarDayDto) => dateLabel(d.date).replace(/ \d{4}$/, "");
+
+/** The day the shortage mode came on is not rated: what was spent before the new limit is not set against it. */
 const figures = (d: CalendarDayDto) =>
-  `${dateLabel(d.date).replace(/ \d{4}$/, "")}: потрачено ${formatMoney(d.spent)}${d.limit !== null && d.limit > 0 ? ` из ${formatMoney(d.limit)}` : ", лимита не было"}`;
+  d.shortageStart
+    ? `${dayName(d)}: потрачено ${formatMoney(d.spent)}. В этот день изменился лимит, день без оценки.`
+    : `${dayName(d)}: потрачено ${formatMoney(d.spent)}${d.limit !== null && d.limit > 0 ? ` из ${formatMoney(d.limit)}` : ", лимита не было"}`;
 
 /** "2026-11" and a number of months later. */
 function shiftMonth(month: string, by: number): string {
@@ -125,11 +130,12 @@ export function LimitCalendar({ today, streak, onClose, onOpenDay }: Props) {
 
 function Day({ day, picked, onPress }: { day: CalendarDayDto; picked: boolean; onPress: () => void }) {
   const dot = DOTS[day.status];
-  const label = `${dateLabel(day.date).replace(/ \d{4}$/, "")}: ${WORDS[day.status]}`;
+  // Grey like a day without a limit (a quiet number, no dot), but named for what it was.
+  const label = `${dayName(day)}: ${day.shortageStart && day.status !== "today" ? "изменился лимит" : WORDS[day.status]}`;
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={styles.slot}>
       <View testID={`calendar-day-${day.date}`} style={[styles.day, day.status === "today" && styles.ringToday, picked && styles.ringPicked]}>
-        <Text style={[styles.number, day.status === "no_limit" && styles.numberQuiet]}>{Number(day.date.slice(8))}</Text>
+        <Text style={[styles.number, (day.status === "no_limit" || day.shortageStart) && day.status !== "today" && styles.numberQuiet]}>{Number(day.date.slice(8))}</Text>
         {/* The dot's place is kept on days without one, so the numbers of a row stand on one line. */}
         {dot ? <View testID={`calendar-dot-${day.date}`} style={[styles.dot, { backgroundColor: dot }]} /> : <View style={styles.dot} />}
       </View>
