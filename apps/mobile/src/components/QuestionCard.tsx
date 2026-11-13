@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { CashCardAnswer, TodayDto } from "@hale/contracts";
-import { shiftDate } from "../format";
+import { formatDollars, shiftDate } from "../format";
 import { AmountForm } from "./AmountForm";
 import { Glass } from "./Glass";
 
@@ -25,7 +25,10 @@ export function eventIdOf(id: string): number | null {
 type Props = {
   question: Question;
   today: string;
+  /** «Да, $2,700»: the expected amount arrived. */
   onConfirmUsdc: (eventId: number) => void;
+  /** «Пришло другое»: ask how much came; `expectedAmount` in cents is what to fill in. */
+  onUsdcOther: (eventId: number, expectedAmount: number) => void;
   onMatchUsdc: (eventId: number, transactionId: number) => void;
   onDismissUsdc: (transactionId: number) => void;
   onCashFromWallet: (transactionId: number) => void;
@@ -35,15 +38,28 @@ type Props = {
   onLabelRecipient: (counterKey: string) => void;
 };
 
-export function QuestionCard({ question, today, onConfirmUsdc, onMatchUsdc, onDismissUsdc, onCashFromWallet, onCashCard, onSetDate, onOpenActivity, onLabelRecipient }: Props) {
+export function QuestionCard({ question, today, onConfirmUsdc, onUsdcOther, onMatchUsdc, onDismissUsdc, onCashFromWallet, onCashCard, onSetDate, onOpenActivity, onLabelRecipient }: Props) {
   const eventId = eventIdOf(question.id);
   const text = <Text style={styles.text}>{question.text}</Text>;
 
   if (question.kind === "usdc_arrived" && eventId !== null) {
+    const expected = question.expectedAmount;
+    // An older server sends no amount: then the one answer of before.
+    if (expected === undefined || !(expected > 0)) {
+      return (
+        <Glass style={styles.stack}>
+          {text}
+          <Choice label="Да, пришло" onPress={() => onConfirmUsdc(eventId)} />
+        </Glass>
+      );
+    }
     return (
       <Glass style={styles.stack}>
         {text}
-        <Choice label="Да, пришло" onPress={() => onConfirmUsdc(eventId)} />
+        <View style={styles.choices}>
+          <Choice label={`Да, ${formatDollars(expected)}`} onPress={() => onConfirmUsdc(eventId)} />
+          <Choice label="Пришло другое" onPress={() => onUsdcOther(eventId, expected)} />
+        </View>
       </Glass>
     );
   }

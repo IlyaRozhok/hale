@@ -1026,6 +1026,8 @@ describe("questions, upcoming and run-out", () => {
     const r = await today();
     const kinds = r.questions.map((q: { kind: string }) => q.kind);
     expect(kinds.filter((k: string) => k === "usdc_arrived")).toHaveLength(1);
+    // The card offers «Да, $5,000»: the question carries the expected amount in cents (Б18).
+    expect(r.questions.find((q: { kind: string }) => q.kind === "usdc_arrived")).toMatchObject({ text: "Пришло на Binance?", expectedAmount: 500_000 });
     expect(kinds.filter((k: string) => k === "recipient_label")).toHaveLength(3);
     expect(kinds).not.toContain("income_date");
 

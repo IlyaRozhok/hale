@@ -72,7 +72,9 @@ export function useConfirmIncome() {
   const api = useApi();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (eventId: number) => api.confirmIncome(eventId),
+    // Without `amount` the call carries no body: «Да, $2,700» works against an older server.
+    mutationFn: ({ eventId, amount }: { eventId: number; amount?: number }) =>
+      amount === undefined ? api.confirmIncome(eventId) : api.confirmIncome(eventId, amount),
     onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: TODAY_KEY }), client.invalidateQueries({ queryKey: MANUAL_BALANCES_KEY })]),
   });
 }

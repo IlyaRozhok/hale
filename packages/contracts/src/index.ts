@@ -58,6 +58,12 @@ export interface IncomeEventDto {
 }
 
 export const incomeDateInput = z.object({ date: isoDate }).strict();
+/**
+ * «Пришло на Binance»: `amount` is what actually arrived, in the income's minor units (cents for USDC).
+ * Without it the expected amount is taken, as an older app sends it. The bound is $1,000,000,000 in cents.
+ */
+export const confirmIncomeInput = z.object({ amount: money.positive().max(100_000_000_000).optional() }).strict();
+export type ConfirmIncomeInput = z.infer<typeof confirmIncomeInput>;
 export const matchTransactionInput = z
   .object({ transactionId: z.number().int().positive() })
   .strict();
@@ -345,6 +351,8 @@ export interface TodayDto {
     text: string;
     /** Who a recipient question is about. */
     subject?: string;
+    /** For `usdc_arrived`: the expected amount in the income's minor units (cents). Absent on an older server. */
+    expectedAmount?: number;
   }[];
   badCases: {
     id: string;
