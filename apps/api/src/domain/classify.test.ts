@@ -155,6 +155,66 @@ describe("refunds on the fop account", () => {
   });
 });
 
+describe("refund of an order from a business (Б13)", () => {
+  const comment = "Повернення коштів за замовлення №12345";
+
+  it("money from a ФОП or ТОВ with a refund comment is a refund, not money from a person", () => {
+    for (const description of ["Від: ФОП Іванов Іван Іванович", "Від: ТОВ Магазин"]) {
+      expect(classify(tx({ description, comment, amount: 52_950, mcc: 4829 }), ctx())).toMatchObject({
+        type: "spend",
+        category: "refund",
+        source: "auto",
+        needsLabel: false,
+      });
+    }
+  });
+
+  it("the sender's name from the bank counts the same as the description", () => {
+    const r = classify(
+      tx({ description: "Переказ на картку", counterName: "ФОП Іванов Іван Іванович", comment, amount: 52_950, mcc: 4829 }),
+      ctx(),
+    );
+    expect(r).toMatchObject({ type: "spend", category: "refund" });
+  });
+
+  it("the comment is matched by its start, in any case", () => {
+    const r = classify(tx({ description: "Від: ФОП Іванов", comment: "  повернення КОШТІВ за товар", amount: 10_000, mcc: 4829 }), ctx());
+    expect(r).toMatchObject({ type: "spend", category: "refund" });
+  });
+
+  it("a known shop keeps its category", () => {
+    const r = classify(tx({ description: "Від: ТОВ Uklon", comment, amount: 9_000, mcc: 4829 }), ctx());
+    expect(r).toMatchObject({ type: "spend", category: "transport" });
+  });
+
+  it("the same comment from a person without ФОП or ТОВ stays money from a person", () => {
+    const r = classify(tx({ description: "Від: Тест Тестовий", comment, amount: 52_950, mcc: 4829 }), ctx());
+    expect(r).toMatchObject({ type: "person_in", category: "transfer" });
+  });
+
+  it("money from a ФОП without the comment, or with another comment, does not change", () => {
+    expect(classify(tx({ description: "Від: ФОП Іванов", amount: 52_950, mcc: 4829 }), ctx())).toMatchObject({ type: "person_in" });
+    expect(classify(tx({ description: "Від: ФОП Іванов", comment: "за послуги", amount: 52_950, mcc: 4829 }), ctx())).toMatchObject({
+      type: "person_in",
+    });
+    // "ФОП" inside the name, not at its start, is not a business prefix.
+    expect(classify(tx({ description: "Від: Іванов ФОП", comment, amount: 52_950, mcc: 4829 }), ctx())).toMatchObject({
+      type: "person_in",
+    });
+  });
+
+  it("the same refund on the fop account is a refund, not income", () => {
+    const r = classify(tx({ accountKind: "fop", description: "Від: ФОП Іванов", comment, amount: 52_950, mcc: 4829 }), ctx());
+    expect(r).toMatchObject({ type: "spend", category: "refund", source: "auto", needsLabel: false });
+  });
+
+  it("an owner rule still wins", () => {
+    const c = ctx({ rules: [{ matchKind: "recipient", matchValue: "ФОП Іванов", type: "income", category: "income" }] });
+    const r = classify(tx({ description: "Від: ФОП Іванов", counterName: "ФОП Іванов", comment, amount: 52_950, mcc: 4829 }), c);
+    expect(r).toMatchObject({ type: "income", source: "owner" });
+  });
+});
+
 describe("cash", () => {
   it("atm withdrawal is cash_out, cash deposit is cash_in", () => {
     expect(classify(tx({ description: "Банкомат 12345", mcc: 6011 }), ctx()).type).toBe("cash_out");

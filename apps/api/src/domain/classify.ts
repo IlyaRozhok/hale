@@ -90,6 +90,10 @@ const CASHBACK = /^виведення кешбеку/i;
 const REFUND = /^(скасування|повернення платежу)/i;
 const REFUND_OF_TRANSFER = /переказ/i;
 const FROM_PREFIX = /^від:/i;
+/** A business's refund of an order, as the sender writes it in the transfer comment (Б13). */
+const ORDER_REFUND_COMMENT = /^повернення\s+коштів/iu;
+/** Only a sole trader or a company: a friend returning a debt must not become a purchase refund. */
+const BUSINESS_SENDER = /^(фоп|тов)\s/iu;
 
 /** Money taken out as cash, by the bank text or the MCC. */
 export const isWithdrawal = (tx: Pick<ClassifyInput, "amount" | "description" | "mcc">): boolean =>
@@ -216,6 +220,15 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
   if (incoming && REFUND.test(d) && !REFUND_OF_TRANSFER.test(d)) {
     // A shop we do not know is still a refund: it lowers that day's spending and asks nothing.
     const known = categoryByMerchant(d) ?? categoryByMcc(mcc);
+    return done("spend", "auto", known === "uncategorized" ? "refund" : known);
+  }
+
+  // A business (ФОП, ТОВ) sending money with the comment «Повернення коштів …» is cancelling an
+  // order: a refund, exactly as the bank's own refund text above, on every account kind. The rule
+  // is deliberately narrow: the same comment from a person stays money from a person.
+  const sender = (tx.counterName?.trim() || d.replace(FROM_PREFIX, "")).trim();
+  if (incoming && ORDER_REFUND_COMMENT.test((tx.comment ?? "").trim()) && BUSINESS_SENDER.test(sender)) {
+    const known = categoryByMerchant(sender) ?? categoryByMcc(mcc);
     return done("spend", "auto", known === "uncategorized" ? "refund" : known);
   }
 
