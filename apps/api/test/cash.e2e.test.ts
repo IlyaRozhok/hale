@@ -340,6 +340,27 @@ describe("a planned payment paid with chosen operations", () => {
     await api.get(`/cash/payments/99999/candidates`).expect(404);
   });
 
+  it("does not offer a transfer between the owner's own accounts here; a transfer to another bank stays", async () => {
+    const c = await card();
+    const other = await card();
+    await ds.query(`UPDATE accounts SET iban='UA903052990000026007000000001' WHERE id=$1`, [other]);
+    const id = await plan(1_700_000);
+    // Both legs at monobank: the other leg arrives on another account within the window.
+    const paired = await bankTx(c, -19_300, "own_transfer", "2026-11-08", { description: "Переказ на картку", time: "09:00:00" });
+    await bankTx(other, 19_300, "own_transfer", "2026-11-08", { time: "09:01:00" });
+    // The counterparty IBAN is one of the owner's own accounts.
+    const byIban = await bankTx(c, -2_700, "own_transfer", "2026-11-08", { description: "Переказ на картку", time: "09:30:00" });
+    await ds.query(`UPDATE transactions SET counter_iban='UA903052990000026007000000001' WHERE id=$1`, [byIban]);
+    // To the owner's card at another bank: no other leg, a foreign IBAN.
+    const otherBank = await bankTx(c, -1_560_000, "own_transfer", "2026-11-08", { description: "545708****4563", time: "11:00:00" });
+    await ds.query(`UPDATE transactions SET counter_iban='UA213223130000026007233566001' WHERE id=$1`, [otherBank]);
+    const silpo = await bankTx(c, -310_500, "cash_out", "2026-11-07", { description: "Видача готівки Сільпо" });
+    const person = await bankTx(c, -50_000, "person_transfer", "2026-10-30");
+    expect(await candidates(id)).toEqual([otherBank, silpo, person]);
+    expect(await candidates(id)).not.toContain(paired);
+    expect(await candidates(id)).not.toContain(byIban);
+  });
+
   it("closes the payment; the rows become this payment and stop spending the limit", async () => {
     const c = await card();
     const id = await plan(1_700_000);

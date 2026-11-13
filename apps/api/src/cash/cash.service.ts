@@ -17,7 +17,7 @@ import { Clock } from "../today/clock";
 import { LimitService } from "../today/limit.service";
 import { TransactionsService } from "../transactions/transactions.service";
 import { counterKeySql } from "../transactions/counter-key";
-import { CASH_ACCOUNT_ID, cardTransferSql, walletBalance } from "./wallet";
+import { CASH_ACCOUNT_ID, cardTransferSql, internalTransferSql, walletBalance } from "./wallet";
 
 const DEFAULT_NOTE: Record<CashOperationKind, string> = {
   spend: "Покупка наличными",
@@ -252,7 +252,9 @@ export class CashService {
 
   /**
    * Outgoing withdrawals, transfers and obligations on bank accounts, from a week before the due
-   * date to today, none larger than the payment and none already paying another one.
+   * date to today, none larger than the payment and none already paying another one. A transfer
+   * between the owner's own accounts is not offered: nothing can be paid with it. A transfer to the
+   * owner's card at another bank is.
    */
   private async candidateIds(m: EntityManager, paymentId: number): Promise<number[]> {
     const p = (await m.query(`SELECT amount::float8 AS amount, currency, due_on::text AS due_on FROM scheduled_payments WHERE id=$1`, [paymentId]))[0] as
@@ -266,6 +268,7 @@ export class CashService {
           AND t.type = ANY('{cash_out,person_transfer,own_transfer,obligation,spend}'::text[])
           AND t.local_date BETWEEN $2::date - 7 AND $3::date
           AND t.amount_uah IS NOT NULL AND -t.amount_uah <= $1
+          AND NOT ${internalTransferSql("t")}
           AND NOT EXISTS (SELECT 1 FROM payment_links l WHERE l.transaction_id = t.id)
           AND NOT EXISTS (SELECT 1 FROM scheduled_payments s WHERE s.transaction_id = t.id)
         ORDER BY t.occurred_at DESC, t.id DESC`,
