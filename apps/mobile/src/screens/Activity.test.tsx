@@ -88,6 +88,38 @@ describe("Activity list", () => {
     expect(screen.queryByText(/· в обработке/)).toBeNull();
   });
 
+  it("under «Траты» a row the limit does not count is marked quietly; one without the field is not", async () => {
+    const items = [
+      txFixture({ id: 1, description: "Квартплата", type: "obligation", category: "transfer", amount: -800000, amountUah: -800000, inLimit: false }),
+      txFixture({ id: 2, description: "Кофейня", inLimit: true }),
+      txFixture({ id: 3, description: "Старый сервер", type: "tax", category: "tax", amount: -300000, amountUah: -300000 }),
+    ];
+    await renderWith(<Activity />, fakeApi({ transactions: page(items, null, { "2026-11-02": -12000 }) }));
+    expect(await screen.findByText("Квартплата")).toBeTruthy();
+    const marks = screen.getAllByText("не из лимита");
+    expect(marks).toHaveLength(1);
+    expect(flat(marks[0]!.props.style).color).toBe(tokens.color.fg.muted);
+    // The category line stays as it was: the mark is its own line, not glued to it.
+    expect(screen.getByText("Обязательный платёж")).toBeTruthy();
+    expect(screen.queryByText(/· не из лимита/)).toBeNull();
+    // The day header is the server's figure: nothing is added up or taken out here.
+    expect(screen.getByText("−₴120")).toBeTruthy();
+    expect(screen.queryByText("−₴11,085")).toBeNull();
+    expect(screen.queryByText("−₴8,085")).toBeNull();
+  });
+
+  it("under «Все» and «Доходы» nothing is marked, whatever the server says about the limit", async () => {
+    const items = [txFixture({ id: 1, description: "Квартплата", type: "obligation", category: "transfer", inLimit: false })];
+    await renderWith(<Activity />, fakeApi({ transactions: page(items) }));
+    expect(await screen.findByText("не из лимита")).toBeTruthy();
+    fireEvent.press(screen.getByLabelText("Все"));
+    await waitFor(() => expect(screen.queryByText("не из лимита")).toBeNull());
+    expect(screen.getByText("Квартплата")).toBeTruthy();
+    fireEvent.press(screen.getByLabelText("Доходы"));
+    await screen.findByText("Квартплата");
+    expect(screen.queryByText("не из лимита")).toBeNull();
+  });
+
   it("each row has a round badge of its category; unknown ones a plain circle", async () => {
     const items = [
       txFixture({ id: 1, category: "groceries" }),

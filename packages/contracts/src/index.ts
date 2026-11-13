@@ -525,14 +525,26 @@ export interface TransactionDto {
    * kept the limit at the moment of the operation). Absent from an older server.
    */
   creditPart?: number | null;
+  /**
+   * Whether this row counts against the day limit (the «потрачено» of «Сегодня» and the calendar).
+   * Absent from an older server.
+   */
+  inLimit?: boolean;
 }
 
 export interface TransactionPageDto {
   items: TransactionDto[];
   nextCursor: string | null;
-  /** Sum of amountUah per local date of this page, over the whole day and under the same filters. */
+  /**
+   * Per local date of this page, over the whole day and under the same filters: the signed sum of amountUah.
+   * Under group "spend" only the rows that count against the limit are summed (so it is −«потрачено» of that
+   * day), and a day none of whose rows counts has no entry.
+   */
   dayTotals: Record<string, number>;
-  /** With a category or a period chosen: the sum and the count of everything found. Otherwise null; absent from an older server. */
+  /**
+   * With a category or a period chosen: the sum and the count of everything found; under group "spend" of
+   * the rows that count against the limit only. Otherwise null; absent from an older server.
+   */
   summary?: { total: number; count: number } | null;
 }
 

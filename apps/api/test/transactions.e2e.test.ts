@@ -149,6 +149,25 @@ describe("GET /transactions", () => {
     expect(all.body.dayTotals).toEqual({ "2026-11-10": -9700 });
   });
 
+  it("under «Траты» the day total and the summary are what counted against the limit; the rest is listed and marked (Б2)", async () => {
+    const a = await account();
+    await tx(a, { at: "2026-11-10T12:00:00.000Z", amount: -100, description: "Cafe" });
+    await tx(a, { at: "2026-11-10T11:00:00.000Z", amount: -2000, type: "obligation", description: "Rent" });
+    await tx(a, { at: "2026-11-10T10:00:00.000Z", amount: -3000, type: "tax", description: "Tax" });
+    await tx(a, { at: "2026-11-09T10:00:00.000Z", amount: -4000, type: "debt_payment", description: "Debt" });
+    const page = await api.get("/transactions?group=spend&from=2026-11-09&to=2026-11-10").expect(200);
+    const items = page.body.items as { description: string; inLimit: boolean }[];
+    expect(items.map((i) => [i.description, i.inLimit])).toEqual([["Cafe", true], ["Rent", false], ["Tax", false], ["Debt", false]]);
+    // The day of the debt payment alone has no total: nothing on it counted.
+    expect(page.body.dayTotals).toEqual({ "2026-11-10": -100 });
+    expect(page.body.summary).toEqual({ total: -100, count: 1 });
+    // «Все» keeps the plain sum and count over everything listed.
+    const all = await api.get("/transactions?group=all&from=2026-11-09&to=2026-11-10").expect(200);
+    expect(all.body.dayTotals).toEqual({ "2026-11-10": -5100, "2026-11-09": -4000 });
+    expect(all.body.summary).toEqual({ total: -9100, count: 4 });
+    expect((all.body.items as { inLimit: boolean }[]).map((i) => i.inLimit)).toEqual([true, false, false, false]);
+  });
+
   it("dayTotals leaves out a day whose rows all have no known rate, instead of showing zero", async () => {
     const a = await account();
     await tx(a, { at: "2026-11-10T08:00:00.000Z", amount: -5000, amountUah: null });
@@ -218,7 +237,7 @@ describe("GET /transactions", () => {
     expect(Object.keys(x).sort()).toEqual(
       [
         "accountKind", "amount", "cashOut", "amountUah", "category", "counterKey", "counterName", "currency", "description",
-        "creditPart", "fxRate", "hold", "id", "localDate", "manual", "needsLabel", "occurredAt", "paymentName", "recipientLabel",
+        "creditPart", "fxRate", "hold", "id", "inLimit", "localDate", "manual", "needsLabel", "occurredAt", "paymentName", "recipientLabel",
         "type",
       ].sort(),
     );

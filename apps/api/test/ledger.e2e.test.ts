@@ -4,13 +4,14 @@ import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import type { TxType } from "../src/domain/classify";
-import { type AccountKind, type LedgerContext, type LedgerRow, ACCOUNT_KINDS, ledgerEffect, limitSpentByDay } from "../src/domain/ledger";
+import { type AccountKind, type LedgerContext, type LedgerRow, ACCOUNT_KINDS, countsAgainstLimit, ledgerEffect, limitSpentByDay } from "../src/domain/ledger";
 import { Clock } from "../src/today/clock";
 
 // «Потрачено» in the calendar and today's spent are counted in Postgres by the limit SQL, and the «Траты»
-// group of the list is filtered by the spend-group SQL. These tests seed rows of every kind into the real
-// database and check that what the services return is exactly what ledgerEffect says about the same rows,
-// read back after the service ran.
+// group of the list is filtered by the spend-group SQL while its day totals, its summary and the inLimit
+// mark of every row go by the limit SQL (Б2). These tests seed rows of every kind into the real database
+// and check that what the services return is exactly what ledgerEffect says about the same rows, read
+// back after the service ran.
 
 let app: INestApplication;
 let ds: DataSource;
@@ -212,14 +213,20 @@ describe("the limit in the database is the ledger's", () => {
 interface SpendGroup {
   /** Ids on the list, sorted. */
   ids: number[];
-  /** The total of every listed day; a day whose rows all lack a hryvnia amount has none. */
+  /** Ids of the listed rows marked as counting against the limit, sorted. */
+  inLimit: number[];
+  /**
+   * The total of every listed day, signed as the rows are (−spent): what the day took from the limit.
+   * A day none of whose rows counts against the limit has none.
+   */
   dayTotals: Record<string, number>;
-  /** The period summary over the whole month. */
+  /** The period summary over the whole month: the limit's sum and the count of the counted rows. */
   summary: { total: number; count: number };
 }
 
 const sortedIds = (ids: readonly number[]) => [...ids].sort((a, b) => a - b);
 const pageIds = (body: { items: { id: number }[] }) => sortedIds(body.items.map((i) => i.id));
+const markedIds = (body: { items: { id: number; inLimit?: boolean }[] }) => sortedIds(body.items.filter((i) => i.inLimit === true).map((i) => i.id));
 
 /** What the list says for «Траты»: one page of everything, its day totals, and the summary over the month. */
 async function servedSpendGroup(): Promise<SpendGroup> {
@@ -233,26 +240,33 @@ async function servedSpendGroup(): Promise<SpendGroup> {
   // The period covers every seeded day, so the page is the same and the summary is over all of it.
   expect(pageIds(period.body)).toEqual(pageIds(page.body));
   expect(period.body.dayTotals).toEqual(page.body.dayTotals);
+  expect(markedIds(period.body)).toEqual(markedIds(page.body));
+  // Every listed row says whether it counts: the mark is never left out.
+  for (const i of page.body.items as { inLimit?: boolean }[]) expect(typeof i.inLimit).toBe("boolean");
   return {
     ids: pageIds(page.body),
+    inLimit: markedIds(page.body),
     dayTotals: page.body.dayTotals as Record<string, number>,
     summary: period.body.summary as { total: number; count: number },
   };
 }
 
-/** The ledger over the stored rows: the rows in the group, their day sums, their sum and count. */
+/**
+ * The ledger over the stored rows: the rows in the group, and over those of them that count against
+ * the limit their day sums (−limitSpentByDay), their sum and their count.
+ */
 async function expectedSpendGroup(): Promise<SpendGroup> {
   const ctx = await context();
   const rows = (await storedRows()).filter((r) => ledgerEffect(r, ctx).inSpendGroup);
+  const counted = rows.filter((r) => countsAgainstLimit(r, ctx));
   const dayTotals: Record<string, number> = {};
-  for (const r of rows) {
-    if (r.amountUah === null) continue;
-    dayTotals[r.localDate] = (dayTotals[r.localDate] ?? 0) + r.amountUah;
-  }
+  // `0 - x` rather than `-x`: a day of zero gives 0, not -0.
+  for (const [date, spent] of limitSpentByDay(rows, ctx)) dayTotals[date] = 0 - spent;
   return {
     ids: sortedIds(rows.map((r) => r.id)),
+    inLimit: sortedIds(counted.map((r) => r.id)),
     dayTotals,
-    summary: { total: rows.reduce((s, r) => s + (r.amountUah ?? 0), 0), count: rows.length },
+    summary: { total: 0 - counted.reduce((s, r) => s + ledgerEffect(r, ctx).limitSpend, 0), count: counted.length },
   };
 }
 
@@ -261,20 +275,37 @@ async function checkSpendGroup(): Promise<StoredRow[]> {
   const got = await servedSpendGroup();
   const want = await expectedSpendGroup();
   expect(got.ids).toEqual(want.ids);
+  expect(got.inLimit).toEqual(want.inLimit);
   expect(got.dayTotals).toEqual(want.dayTotals);
   expect(got.summary).toEqual(want.summary);
   return (await storedRows()).filter((r) => want.ids.includes(r.id));
+}
+
+/** The day totals and the summary of «Все» over the month stay the plain signed sum of every row, as before Б2. */
+async function checkAllGroupUnchanged(): Promise<void> {
+  const period = await get(`/transactions?group=all&limit=200&from=${MONTH}-01&to=${MONTH}-12`);
+  expect(period.status).toBe(200);
+  expect(period.body.nextCursor).toBeNull();
+  const rows = await storedRows();
+  const dayTotals: Record<string, number> = {};
+  for (const r of rows) {
+    if (r.amountUah === null) continue;
+    dayTotals[r.localDate] = (dayTotals[r.localDate] ?? 0) + r.amountUah;
+  }
+  expect(pageIds(period.body)).toEqual(sortedIds(rows.map((r) => r.id)));
+  expect(period.body.dayTotals).toEqual(dayTotals);
+  expect(period.body.summary).toEqual({ total: rows.reduce((s, r) => s + (r.amountUah ?? 0), 0), count: rows.length });
 }
 
 describe("the «Траты» group in the database is the ledger's", () => {
   const ofType = (rows: readonly StoredRow[], type: TxType | null) => rows.filter((r) => r.type === type);
   const onEveryKind = (date: string) => Array<string>(ACCOUNT_KINDS.length).fill(date);
 
-  it("with a cash wallet: the list, its day totals and the summary equal inSpendGroup over the same rows", async () => {
+  it("with a cash wallet: the list equals inSpendGroup, its day totals and summary the limit, over the same rows", async () => {
     await seed(coverRows(), "2026-11-10");
     const listed = await checkSpendGroup();
-    // The group is wider than the limit, as on the server today (Б2 decides whether it stays so): payments,
-    // taxes, debts and loans out are listed; jars and rows without a hryvnia amount are not filtered out.
+    // The group is wider than the limit on purpose (Б2): payments, taxes, debts and loans out are listed but
+    // marked as not counting; jars and rows without a hryvnia amount are not filtered out either.
     for (const type of ["obligation", "tax", "debt_payment", "loan_out"] as const) expect(ofType(listed, type).length, type).toBe(ACCOUNT_KINDS.length);
     const outside: readonly (TxType | null)[] = ["income", "person_in", "cash_in", "own_transfer", "loan_in", "goal_contribution", null];
     for (const type of outside) expect(ofType(listed, type), String(type)).toEqual([]);
@@ -283,6 +314,44 @@ describe("the «Траты» group in the database is the ledger's", () => {
     // A withdrawal is listed before the wallet start and not on or after it, on every kind.
     const cashOut = ofType(listed, "cash_out").filter((r) => r.amountUah === -50_000);
     expect(cashOut.map((r) => r.localDate)).toEqual(onEveryKind("2026-11-09"));
+    await checkAllGroupUnchanged();
+  });
+
+  it("the day totals and the summary under «Траты» are the calendar's «потрачено» with the sign of the rows", async () => {
+    await seed(coverRows(), "2026-11-10");
+    const got = await servedSpendGroup();
+    const calendar = (await served()).calendar;
+    for (const [date, total] of Object.entries(got.dayTotals)) expect(total, date).toBe(0 - calendar.get(date)!);
+    // A day whose listed rows are all outside the limit has no total; the calendar shows zero for it.
+    expect(got.dayTotals["2026-11-02"]).toBeUndefined();
+    expect(calendar.get("2026-11-02")).toBe(0);
+    const spentInMonth = [...calendar.values()].reduce((s, x) => s + x, 0);
+    expect(got.summary.total).toBe(0 - spentInMonth);
+    const ctx = await context();
+    expect(got.summary.count).toBe((await storedRows()).filter((r) => countsAgainstLimit(r, ctx)).length);
+  });
+
+  it("an obligation, a tax, a debt payment, a loan out and a jar row are listed, marked and left out of the total", async () => {
+    await seed(
+      [
+        { type: "spend", kind: "black", amountUah: -10_000, date: "2026-11-06" },
+        { type: "obligation", kind: "black", amountUah: -20_000, date: "2026-11-06" },
+        { type: "tax", kind: "fop", amountUah: -30_000, date: "2026-11-06" },
+        { type: "debt_payment", kind: "white", amountUah: -40_000, date: "2026-11-06" },
+        { type: "loan_out", kind: "black", amountUah: -50_000, date: "2026-11-06" },
+        { type: "spend", kind: "jar", amountUah: -60_000, date: "2026-11-06" },
+        { type: "obligation", kind: "black", amountUah: -70_000, date: "2026-11-07" },
+      ],
+      null,
+    );
+    const page = await get(`/transactions?group=spend&limit=200&from=2026-11-06&to=2026-11-07`);
+    expect(page.status).toBe(200);
+    const items = page.body.items as { type: string; accountKind: string; inLimit: boolean }[];
+    expect(items).toHaveLength(7);
+    expect(items.filter((i) => i.inLimit).map((i) => i.type)).toEqual(["spend"]);
+    expect(items.find((i) => i.accountKind === "jar")!.inLimit).toBe(false);
+    expect(page.body.dayTotals).toEqual({ "2026-11-06": -10_000 });
+    expect(page.body.summary).toEqual({ total: -10_000, count: 1 });
   });
 
   it("without a cash wallet every withdrawal is listed", async () => {

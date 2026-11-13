@@ -190,7 +190,15 @@ export function Activity({ now = () => new Date(), route }: Props) {
             );
           }}
           renderItem={({ item, index, section }) => (
-            <TxRow tx={item} onPress={() => setOpen(item)} first={index === 0} last={index === section.data.length - 1} />
+            <TxRow
+              tx={item}
+              onPress={() => setOpen(item)}
+              first={index === 0}
+              last={index === section.data.length - 1}
+              // Under «Траты» the day total is what the limit counted (the server's figure, see dayTotals in
+              // the contract); the rows it left out say so, so the list still adds up to its heading.
+              markOutsideLimit={tab === "spend"}
+            />
           )}
           contentContainerStyle={{ paddingHorizontal: space.xl, paddingBottom: LAYOUT.tabBar + insets.bottom }}
           onEndReachedThreshold={0.5}
