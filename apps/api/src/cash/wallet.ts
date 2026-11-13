@@ -8,6 +8,17 @@ export const CASH_ACCOUNT_ID = "manual:cash";
 const PAIR_WINDOW_S = 600;
 
 /**
+ * SQL condition over `t` (transactions): a transfer between the owner's own accounts, both legs in
+ * our base. Either the other leg arrived on another account within the window, or the counterparty
+ * IBAN is one of our accounts. Nothing can be paid with such a transfer.
+ */
+export const internalTransferSql = (t = "t"): string =>
+  `(${t}.type = 'own_transfer'
+    AND (EXISTS (SELECT 1 FROM transactions o WHERE o.account_id <> ${t}.account_id AND o.amount = -${t}.amount
+                   AND abs(extract(epoch FROM (o.occurred_at - ${t}.occurred_at))) <= ${PAIR_WINDOW_S})
+         OR EXISTS (SELECT 1 FROM accounts oa WHERE oa.iban IS NOT NULL AND oa.iban = ${t}.counter_iban)))`;
+
+/**
  * SQL condition over `t` (transactions) and `a` (its account): money sent to the owner's own card at
  * another bank since the wallet start. Its other leg is not at monobank, so it may have been taken
  * out there as cash.
@@ -15,8 +26,7 @@ const PAIR_WINDOW_S = 600;
 export const cardTransferSql = (t = "t", a = "a"): string =>
   `(${t}.type = 'own_transfer' AND ${t}.amount < 0 AND ${a}.kind NOT IN ('jar','cash') AND NOT ${t}.from_wallet
     AND ${t}.local_date >= (SELECT cash_start FROM settings WHERE id=1)
-    AND NOT EXISTS (SELECT 1 FROM transactions o WHERE o.account_id <> ${t}.account_id AND o.amount = -${t}.amount
-                     AND abs(extract(epoch FROM (o.occurred_at - ${t}.occurred_at))) <= ${PAIR_WINDOW_S}))`;
+    AND NOT ${internalTransferSql(t)})`;
 
 /** SQL for the cash such a transfer gave: the amount set for it, else all of it if the card's answer is yes, else 0. */
 export const cardCashSql = (t = "t"): string =>
