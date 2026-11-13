@@ -6,6 +6,7 @@ import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import { applySeed, parseSeed } from "../../../scripts/seed-private";
 import { PlanService } from "../src/plan/plan.service";
 import { Clock } from "../src/today/clock";
+import { TodayService } from "../src/today/today.service";
 
 let app: INestApplication;
 let ds: DataSource;
@@ -94,7 +95,13 @@ async function income(source: "fop" | "usdc", on: string, over: { status?: strin
 const payment = (name: string, amount: number, due: string, kind = "obligation") =>
   ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ($1,$2,$3,'UAH',$4)`, [kind, name, amount, due]);
 
-const today = async () => (await api.get("/today").expect(200)).body;
+/** The day's row is written by the jobs, never by a read (task Б3); `snapshot.e2e.test.ts` checks that. */
+const fix = () => app.get(TodayService).ensureSnapshot();
+/** What the owner sees: the 15-minute job has fixed the day, then the app read it. */
+const today = async () => {
+  await fix();
+  return (await api.get("/today").expect(200)).body;
+};
 
 describe("auth", () => {
   it("requires a token", async () => {
@@ -195,10 +202,10 @@ describe("daily limit snapshot", () => {
     expect(await ds.query(`SELECT 1 FROM daily_snapshots`)).toHaveLength(2);
   });
 
-  it("shares one limit between concurrent first requests", async () => {
+  it("shares one limit between concurrent first writers and requests", async () => {
     await account("black", 1_000_000);
     await income("fop", "2026-11-12");
-    const rs = await Promise.all([1, 2, 3, 4, 5].map(() => api.get("/today")));
+    const rs = await Promise.all([1, 2, 3, 4, 5].map(() => fix().then(() => api.get("/today"))));
     for (const r of rs) {
       expect(r.status).toBe(200);
       expect(r.body.state.dailyLimit).toBe(100_000);

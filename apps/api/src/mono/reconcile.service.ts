@@ -8,6 +8,7 @@ import { ImportService } from "./import.service";
 import { JOB_CLOCK, type JobClock } from "./jobs/job-runner";
 import { MonoClient } from "./mono.client";
 import { markContact, markSynced } from "./sync-status";
+import { TodayService } from "../today/today.service";
 
 export const RECONCILE_DAYS = 7;
 const DAY_S = 86_400;
@@ -22,6 +23,7 @@ export class ReconcileService implements OnApplicationBootstrap {
     @Inject(ImportService) private readonly imports: ImportService,
     @Inject(JOB_CLOCK) private readonly clock: JobClock,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(TodayService) private readonly today: TodayService,
   ) {}
 
   /** A freshly configured server installs its webhook now instead of waiting for 04:00. */
@@ -83,6 +85,8 @@ export class ReconcileService implements OnApplicationBootstrap {
       throw new Error(`reconcile failed for ${failures.length} account(s): ${failures.join("; ")}`);
     }
     await markSynced(this.ds, new Date(this.clock.now()));
+    // The night's facts are in: the day's row is fixed on them (task Б3).
+    await this.today.ensureSnapshot();
   }
 
   private async installWebhookOnly(): Promise<void> {
