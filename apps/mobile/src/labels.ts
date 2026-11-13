@@ -33,7 +33,9 @@ export const FREQUENT_TYPES_IN: readonly TxTypeDto[] = ["income", "person_in", "
  */
 export function typeChips(amount: number, current: TxTypeDto | null): { shown: TxTypeDto[]; rest: TxTypeDto[] } {
   const frequent = amount < 0 ? FREQUENT_TYPES_OUT : FREQUENT_TYPES_IN;
-  const shown = current !== null && !frequent.includes(current) ? [...frequent, current] : [...frequent];
+  // A type this app has no name for (from a newer server) is left out, as if the row had none.
+  const own = current !== null && TYPE_CHOICES.includes(current) && !frequent.includes(current);
+  const shown = own ? [...frequent, current] : [...frequent];
   return { shown, rest: TYPE_CHOICES.filter((t) => !shown.includes(t)) };
 }
 

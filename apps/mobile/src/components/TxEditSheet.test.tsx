@@ -36,6 +36,12 @@ describe("TxEditSheet header: the operation itself", () => {
     expect(screen.getAllByText("Кофейня")).toHaveLength(1);
   });
 
+  it("an empty bank text under a name leaves no blank line", async () => {
+    await renderWith(<TxEditSheet tx={txFixture({ description: "", counterName: "Сільпо" })} onClose={noop} />, fakeApi());
+    await screen.findByText(/^Изменится/);
+    expect(screen.queryAllByText("")).toHaveLength(0);
+  });
+
   it("an account it has no name for leaves no loose separator", async () => {
     const tx = txFixture({ amount: -42000, amountUah: -42000, occurredAt: at, accountKind: "something_new" });
     await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi());
@@ -113,6 +119,17 @@ describe("TxEditSheet types: the frequent ones and «Ещё»", () => {
     await screen.findByText("Тип");
     for (const name of OUT_FREQUENT) expect(selected(name)).toBe(false);
     expect(chip("Не определён")).toBeNull();
+  });
+
+  it("a type this app does not know yet draws no empty selected chip", async () => {
+    const tx = txFixture({ type: "something_new" as never });
+    await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi());
+    await screen.findByText("Тип");
+    for (const name of OUT_FREQUENT) expect(selected(name)).toBe(false);
+    expect(screen.queryAllByRole("button", { name: "" })).toHaveLength(0);
+    await fireEvent.press(screen.getByRole("button", { name: "Ещё" }));
+    for (const name of ALL) expect(selected(name)).toBe(false);
+    expect(screen.queryAllByRole("button", { name: "" })).toHaveLength(0);
   });
 });
 

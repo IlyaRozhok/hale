@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { TransactionDto, TransactionPatch } from "@hale/contracts";
 import { useEditTransaction, useSetCardCash, useSimilarCount } from "../api/queries";
-import { dayMonth, formatMoney, formatSignedMoney, formatSignedOriginal, operationsText } from "../format";
+import { dayMonth, formatMoney, formatSignedMoney, formatSignedOriginal, operationsText, two } from "../format";
 import { AmountForm } from "./AmountForm";
 import { SPEND_CATEGORIES, accountLabel, answerText, categoryLabel, typeChips, typeLabel } from "../labels";
 import { ErrorText } from "./ErrorText";
@@ -14,8 +14,6 @@ import { Sheet } from "./Sheet";
 const { color, space, touchMin, type } = tokens;
 
 type Props = { tx: TransactionDto; onClose: () => void; /** Present when the row is a transfer to someone. */ onAnswer?: () => void };
-
-const two = (n: number) => String(n).padStart(2, "0");
 
 /** A moment in the device's local time: "10 ноя, 14:32". */
 function dateTime(iso: string): string {
@@ -54,7 +52,7 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
 
   return (
     <Sheet title={title} subtitle={facts(tx)} onClose={onClose}>
-      {tx.description !== title && <Text style={styles.note}>{tx.description}</Text>}
+      {tx.description !== "" && tx.description !== title && <Text style={styles.note}>{tx.description}</Text>}
       {onAnswer && <ActionRow label={`Что это за перевод: ${answerText(tx.recipientLabel)}`} onPress={onAnswer} />}
       {tx.cashOut !== null && <CardCash tx={tx} cashOut={tx.cashOut} />}
       <Text style={styles.heading}>Категория</Text>

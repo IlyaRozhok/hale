@@ -92,4 +92,10 @@ describe("labels", () => {
     expect(typeChips(100, "spend").shown).toEqual(["income", "person_in", "own_transfer", "spend"]);
     expect(typeChips(-100, null).shown).toHaveLength(4);
   });
+
+  it("does not offer a type this app has no name for", () => {
+    // A newer server may send a type the app does not know: it is treated like no type at all.
+    const unknown = typeChips(-100, "something_new" as never);
+    expect(unknown).toEqual(typeChips(-100, null));
+  });
 });
