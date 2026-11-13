@@ -4,7 +4,7 @@ import { tokens } from "@hale/tokens";
 import type { BridgeStateDto, DailyStateDto } from "@hale/contracts";
 import { Today } from "./Today";
 import { calendarFixture, fakeApi, makeClient, renderWith, todayFixture } from "../testing";
-import { NetworkError } from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
 
 jest.mock("../metal", () => {
   const { View } = require("react-native");
@@ -829,12 +829,92 @@ describe("Today, bridge", () => {
       expect(screen.queryByText(CAPTION)).toBeNull();
     });
 
-    it("does not promise the credit limit covers it when it does not", async () => {
+    it("does not promise the credit limit covers it when it does not, and names one amount, not a second one (А22)", async () => {
       await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: bridgeToday({ creditNeeded: 3791600, shortfall: 791600 }) }));
       await openBridge();
-      expect(await screen.findByText(/Не хватает ₴7,916/)).toBeTruthy();
+      expect(await screen.findByText("Не хватает ₴37,916. План можно подтвердить: лимит на день будет.")).toBeTruthy();
       expect(screen.queryByText(CAPTION)).toBeNull();
+      expect(screen.queryByText(/₴7,916/)).toBeNull();
+      expect(screen.getByRole("button", { name: "Подтвердить план" }).props.accessibilityState.disabled).toBe(false);
     });
+  });
+
+  describe("when the money is short even with the credit limit (А22)", () => {
+    /** No credit limit at all: everything missing is short. The money runs out on 17 November. */
+    const shortToday = (bridge: Partial<BridgeStateDto> = {}) => {
+      const fixture = todayFixture({ state: bridgeState({ shortfall: 2007000, maxDailyWithinCredit: 0, ...bridge }) });
+      return jest.fn(async () => ({
+        ...fixture,
+        accounts: { ...fixture.accounts, credit: 0 },
+        runway: { ...fixture.runway!, zeroOn: "2026-11-17" },
+      }));
+    };
+    const LINE = "Не хватает ₴20,070. План можно подтвердить: лимит на день будет, а недостающее понадобится к 17 ноября.";
+
+    it("says so in sand, without a word about credit, and lets the plan be confirmed", async () => {
+      const api = fakeApi({ today: shortToday() });
+      await renderWith(<Today onOpenActivity={noop} />, api);
+      await openBridge();
+      const line = await screen.findByText(LINE);
+      expect(StyleSheet.flatten(line.props.style).color).toBe(tokens.color.limit.low);
+      expect(screen.queryByText(/кредит/i)).toBeNull();
+      expect(screen.queryByText(/Попробуйте сумму поменьше/)).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: "Подтвердить план" }));
+      await tick(0);
+      expect(api.chooseBridge).toHaveBeenCalledWith(45000);
+    });
+
+    it("leaves the date out once the slider moves: the money's last day is drawn for the amount the day has", async () => {
+      const api = fakeApi({
+        today: shortToday(),
+        previewBridge: jest.fn(async (d: number) => ({ dailyAmount: d, creditNeeded: 2997000, shortfall: 2997000 })),
+      });
+      await renderWith(<Today onOpenActivity={noop} />, api);
+      await openBridge();
+      await fireEvent(await screen.findByLabelText("Сумма в день"), "valueChange", 100000);
+      await tick(310);
+      expect(await screen.findByText("Не хватает ₴29,970. План можно подтвердить: лимит на день будет.")).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Подтвердить план" }));
+      await tick(0);
+      expect(api.chooseBridge).toHaveBeenCalledWith(100000);
+    });
+
+    it("once confirmed, says only when the missing money is needed", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: shortToday({ confirmed: true }) }));
+      await openBridge();
+      expect(await screen.findByText(/План подтверждён/)).toBeTruthy();
+      expect(StyleSheet.flatten(screen.getByText("Недостающее понадобится к 17 ноября.").props.style).color).toBe(tokens.color.limit.low);
+      expect(screen.queryByText(LINE)).toBeNull();
+    });
+
+    it("an older server that refuses such a plan gets a calm line, and the plan stays unconfirmed", async () => {
+      const chooseBridge = jest.fn(async () => {
+        throw new ApiError(422);
+      });
+      const api = fakeApi({ today: shortToday(), chooseBridge });
+      await renderWith(<Today onOpenActivity={noop} />, api);
+      await openBridge();
+      await fireEvent.press(await screen.findByRole("button", { name: "Подтвердить план" }));
+      await tick(0);
+      const line = await screen.findByText("Подтвердить такой план пока не получилось. Лимит на сегодня остаётся прежним.");
+      expect(StyleSheet.flatten(line.props.style).color).not.toBe(tokens.color.status.danger);
+      expect(screen.getByLabelText("Сумма в день")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Подтвердить план" })).toBeTruthy();
+      expect(screen.queryByText(/План подтверждён/)).toBeNull();
+    });
+  });
+
+  it("a confirm that fails for another reason says so too, not in silence", async () => {
+    const chooseBridge = jest.fn(async () => {
+      throw new NetworkError();
+    });
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: bridgeToday(), chooseBridge }));
+    await openBridge();
+    await fireEvent.press(await screen.findByRole("button", { name: "Подтвердить план" }));
+    await tick(0);
+    const line = await screen.findByText("Не удалось подтвердить план. Проверьте связь и попробуйте ещё раз.");
+    expect(StyleSheet.flatten(line.props.style).color).not.toBe(tokens.color.status.danger);
+    expect(screen.getByLabelText("Сумма в день")).toBeTruthy();
   });
 
   it("with no limit yet, asks to confirm the plan instead of saying the limit was used", async () => {
@@ -864,7 +944,7 @@ describe("Today, bridge", () => {
     expect(await screen.findByText("₴28,000")).toBeTruthy();
   });
 
-  it("with a shortfall shows how much is missing and no confirm button", async () => {
+  it("with a shortfall after the slider moves, keeps one amount missing and the confirm button (А22)", async () => {
     const api = fakeApi({
       today: bridgeToday(),
       previewBridge: jest.fn(async (d: number) => ({ dailyAmount: d, creditNeeded: 3791600, shortfall: 791600 })),
@@ -873,8 +953,10 @@ describe("Today, bridge", () => {
     await openBridge();
     await fireEvent(await screen.findByLabelText("Сумма в день"), "valueChange", 100000);
     await tick(310);
-    expect(await screen.findByText(/Не хватает ₴7,916/)).toBeTruthy();
-    expect(screen.queryByText("Подтвердить план")).toBeNull();
+    expect(await screen.findByText("Не хватает ₴37,916. План можно подтвердить: лимит на день будет.")).toBeTruthy();
+    expect(screen.getByText("₴37,916")).toBeTruthy();
+    expect(screen.queryByText(/₴7,916/)).toBeNull();
+    expect(screen.getByText("Подтвердить план")).toBeTruthy();
   });
 
   it("unmoved, the slider shows the server's exact amount and confirm sends it unrounded", async () => {

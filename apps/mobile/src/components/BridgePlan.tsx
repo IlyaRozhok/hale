@@ -3,7 +3,7 @@ import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import Slider from "@react-native-community/slider";
 import { tokens } from "@hale/tokens";
 import type { DailyStateDto } from "@hale/contracts";
-import { formatMoney, formatUsd } from "../format";
+import { dateLabel, formatMoney, formatUsd } from "../format";
 import { useBridgePreview } from "../api/queries";
 import { ErrorText } from "./ErrorText";
 import { Glass } from "./Glass";
@@ -21,12 +21,25 @@ type Props = {
   onConfirm: (dailyAmount: number) => void;
   onCancel: () => void;
   confirming: boolean;
+  /**
+   * The day own money runs out (the runway's zero day), drawn for the day's current limit; null or
+   * absent when there is none, or from an older server.
+   */
+  zeroOn?: string | null;
+  /** Why the last confirm did not go through: an older server refuses a plan the credit limit does not cover. */
+  confirmFailed?: "refused" | "failed" | null;
 };
 
 const roundToStep = (v: number) => Math.max(MIN, Math.round(v / STEP) * STEP);
 
-/** The bridge plan: pick a daily amount, see the credit it needs, confirm if it fits the limit. */
-export function BridgePlan({ state, usdRate, creditLimit = 0, onConfirm, onCancel, confirming }: Props) {
+const dayMonth = (iso: string) => dateLabel(iso).replace(/ \d{4}$/, "");
+
+/**
+ * The bridge plan: pick a daily amount, see what is missing until the income, confirm it. A plan the
+ * credit limit does not cover is confirmed too (owner's decision, А22): the day gets its limit, and
+ * a sand line says how much is missing and by when it is needed.
+ */
+export function BridgePlan({ state, usdRate, creditLimit = 0, onConfirm, onCancel, confirming, zeroOn = null, confirmFailed = null }: Props) {
   const base = state.bridge;
   // Unmoved, the slider shows the server's exact amount, so the numbers beside it are the server's too.
   // On the day the shortage came on the day still runs on its morning limit; the plan is the new one.
@@ -44,6 +57,17 @@ export function BridgePlan({ state, usdRate, creditLimit = 0, onConfirm, onCance
   const daily = formatUsd(value, usdRate);
   const needsAction = !base.confirmed || changed;
   const canConfirm = fresh && !confirming && !preview.failed;
+  const short = !preview.failed && fresh && shown.shortfall > 0;
+  // The zero day is drawn for the day's limit: it holds only while the slider shows that amount.
+  const neededOn = zeroOn && value === state.dailyLimit ? dayMonth(zeroOn) : null;
+  // One amount missing on the screen: the same one as in «Не хватает до дохода», never the part beyond the credit limit.
+  const shortLine = !short
+    ? null
+    : needsAction
+      ? `Не хватает ${formatMoney(shown.creditNeeded)}. ${neededOn ? `План можно подтвердить: лимит на день будет, а недостающее понадобится к ${neededOn}.` : "План можно подтвердить: лимит на день будет."}`
+      : neededOn
+        ? `Недостающее понадобится к ${neededOn}.`
+        : null;
   const askCancel = () =>
     Alert.alert("Отменить план?", "Лимит на сегодня будет посчитан заново.", [
       { text: "Оставить", style: "cancel" },
@@ -88,9 +112,8 @@ export function BridgePlan({ state, usdRate, creditLimit = 0, onConfirm, onCance
           </Pressable>
         </View>
       )}
-      {!preview.failed && fresh && shown.shortfall > 0 ? (
-        <ErrorText>Не хватает {formatMoney(shown.shortfall)}: столько выходит за кредитный лимит. Попробуйте сумму поменьше.</ErrorText>
-      ) : needsAction ? (
+      {shortLine && <Text style={styles.short}>{shortLine}</Text>}
+      {needsAction ? (
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ disabled: !canConfirm }}
@@ -103,6 +126,13 @@ export function BridgePlan({ state, usdRate, creditLimit = 0, onConfirm, onCance
       ) : (
         <Text style={styles.text} accessibilityRole="text">
           План подтверждён: {formatMoney(value)} в день. Сдвиньте ползунок, чтобы изменить.
+        </Text>
+      )}
+      {needsAction && confirmFailed && (
+        <Text style={styles.muted}>
+          {confirmFailed === "refused"
+            ? "Подтвердить такой план пока не получилось. Лимит на сегодня остаётся прежним."
+            : "Не удалось подтвердить план. Проверьте связь и попробуйте ещё раз."}
         </Text>
       )}
       {base.confirmed && !changed && (
@@ -120,6 +150,8 @@ const styles = StyleSheet.create({
   muted: { ...type.body, color: color.fg.muted },
   missing: { gap: space.xs },
   caption: { ...type.caption, color: color.fg.subtle },
+  /** A warning, not an error: sand. */
+  short: { ...type.body, color: color.limit.low },
   line: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
   value: { ...type.body, color: color.fg.default, fontVariant: ["tabular-nums"] },
   pending: { opacity: 0.6 },
