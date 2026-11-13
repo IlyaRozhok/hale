@@ -42,6 +42,10 @@ export class Transaction {
   @Column({ type: "boolean", default: false }) usdc_checked!: boolean;
   @Column({ type: "boolean", default: false }) from_wallet!: boolean;
   @Column({ type: "bigint", nullable: true, transformer: bt }) cash_amount!: number | null;
+  /** The account balance right after the operation, as the bank sent it. NULL on rows stored before A16. */
+  @Column({ type: "bigint", nullable: true, transformer: bt }) balance_after!: number | null;
+  /** The account's credit limit when the operation arrived by webhook; NULL otherwise (never guessed later). */
+  @Column({ type: "bigint", nullable: true, transformer: bt }) credit_limit_at!: number | null;
   @Column({ type: "jsonb" }) raw!: unknown;
 }
 

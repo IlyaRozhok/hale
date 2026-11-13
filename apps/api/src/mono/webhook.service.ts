@@ -69,7 +69,7 @@ export class WebhookService implements OnModuleInit {
     if (!account) {
       throw new Error(`webhook item for unknown account ${externalId}, even after refreshing accounts`);
     }
-    await this.imports.upsertStatementItem(account.id, statementItem);
+    await this.imports.upsertStatementItem(account.id, statementItem, { live: true });
     // The item carries the balance after it. A late or re-delivered item must not undo a newer one.
     const at = new Date(statementItem.time * 1000);
     await this.ds.query(

@@ -218,13 +218,39 @@ describe("GET /transactions", () => {
     expect(Object.keys(x).sort()).toEqual(
       [
         "accountKind", "amount", "cashOut", "amountUah", "category", "counterKey", "counterName", "currency", "description",
-        "fxRate", "hold", "id", "localDate", "manual", "needsLabel", "occurredAt", "paymentName", "recipientLabel", "type",
+        "creditPart", "fxRate", "hold", "id", "localDate", "manual", "needsLabel", "occurredAt", "paymentName", "recipientLabel",
+        "type",
       ].sort(),
     );
     expect(x).toMatchObject({ accountKind: "fop", currency: "UAH", counterName: "Ivan P", hold: false, manual: false });
     expect(x.counterKey).toMatch(/^[0-9a-f]{16}$/);
     expect(x.counterKey).toBe(y.counterKey);
     expect(x.occurredAt).toBe("2026-11-18T10:00:00.000Z");
+  });
+
+  it("says how much of a spend came from the credit limit, only where the limit at the time was stored", async () => {
+    const a = await account("black");
+    const usd = await account("white", "USD");
+    const credit = async (id: number, balanceAfter: number | null, limitAt: number | null) =>
+      ds.query("UPDATE transactions SET balance_after=$2, credit_limit_at=$3 WHERE id=$1", [id, balanceAfter, limitAt]);
+    // A ₴20,000 limit. ₴700 of own money, ₴1,800 spent: ₴1,100 from the limit.
+    const partly = await tx(a, { amount: -180_000, description: "Rozetka" });
+    await credit(partly, 1_890_000, 2_000_000);
+    const wholly = await tx(a, { amount: -16_000, description: "Uklon" });
+    await credit(wholly, 1_874_000, 2_000_000);
+    const own = await tx(a, { amount: -42_000, description: "Silpo" });
+    await credit(own, 2_500_000, 2_000_000);
+    const old = await tx(a, { amount: -16_000, description: "Old" });
+    await credit(old, 1_874_000, null);
+    const foreign = await tx(usd, { amount: -1_000, amountUah: -41_000, fxRate: 41, description: "Foreign" });
+    await credit(foreign, -500, 2_000_000);
+    const items = (await api.get("/transactions?limit=50").expect(200)).body.items as { id: number; creditPart: number | null }[];
+    const part = (id: number) => items.find((i) => i.id === id)!.creditPart;
+    expect(part(partly)).toBe(110_000);
+    expect(part(wholly)).toBe(16_000);
+    expect(part(own)).toBeNull();
+    expect(part(old)).toBeNull();
+    expect(part(foreign)).toBeNull();
   });
 
   it("derives the same key for the same normalised name without an IBAN", async () => {

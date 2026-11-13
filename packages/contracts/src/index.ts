@@ -512,6 +512,11 @@ export interface TransactionDto {
   cashOut: number | null;
   /** The planned payment this operation paid, if any: the list shows its name. */
   paymentName: string | null;
+  /**
+   * Kopecks of this spend paid from the credit limit; null when none or not known (rows before the server
+   * kept the limit at the moment of the operation). Absent from an older server.
+   */
+  creditPart?: number | null;
 }
 
 export interface TransactionPageDto {
