@@ -37,8 +37,10 @@ describe("api client", () => {
     await api.matchUsdc(12, 34);
     await api.dismissUsdcMatch(34);
     await api.manualBalances();
-    await api.patchManualBalance(7, 0);
+    await api.patchManualBalance(7, { amount: 0 });
     await api.createManualBalance({ name: "Binance", amount: 1, currency: "USD" });
+    await api.patchManualBalance(8, { name: "Solana", amount: 75_000 });
+    await api.deleteManualBalance(8);
     const calls = (fetchImpl.mock.calls as unknown as [string, RequestInit][]).map(([url, init]) => [init.method, url.replace("https://api.example.test", ""), init.body]);
     expect(calls).toEqual([
       ["POST", "/plan/incomes/12/match-transaction", JSON.stringify({ transactionId: 34 })],
@@ -46,6 +48,8 @@ describe("api client", () => {
       ["GET", "/plan/manual-balances", undefined],
       ["PATCH", "/plan/manual-balances/7", JSON.stringify({ amount: 0 })],
       ["POST", "/plan/manual-balances", JSON.stringify({ name: "Binance", amount: 1, currency: "USD" })],
+      ["PATCH", "/plan/manual-balances/8", JSON.stringify({ name: "Solana", amount: 75_000 })],
+      ["DELETE", "/plan/manual-balances/8", undefined],
     ]);
   });
 

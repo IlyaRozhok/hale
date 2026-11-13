@@ -592,12 +592,12 @@ describe("Plan, Binance balance", () => {
     await press("Binance");
     await screen.findByText(/\$2,700\.00/);
     await type("2 500,50");
-    await waitFor(() => expect(api.patchManualBalance).toHaveBeenCalledWith(7, 250_050));
+    await waitFor(() => expect(api.patchManualBalance).toHaveBeenCalledWith(7, { amount: 250_050 }));
     expect(await screen.findByText("Баланс сохранён.")).toBeTruthy();
     await waitFor(() => expect(api.manualBalances.mock.calls.length).toBeGreaterThan(1));
     await waitFor(() => expect(api.today.mock.calls.length).toBeGreaterThan(1));
     await type("0");
-    await waitFor(() => expect(api.patchManualBalance).toHaveBeenLastCalledWith(7, 0));
+    await waitFor(() => expect(api.patchManualBalance).toHaveBeenLastCalledWith(7, { amount: 0 }));
   });
 
   it("creates the row the first time", async () => {
@@ -634,6 +634,64 @@ describe("Plan, Binance balance", () => {
     await renderWith(<Plan />, fakeApi({ manualBalances }));
     await press("Binance");
     expect(await screen.findByText("Не получилось загрузить баланс.")).toBeTruthy();
+  });
+});
+
+describe("Plan, set aside", () => {
+  const solana = () => balanceFixture({ id: 9, name: "Solana", amount: 75_000, counts_as_own: false });
+  const withSolana = () => ({ manualBalances: jest.fn(async () => [balanceFixture(), solana()]) });
+
+  it("shows money set aside in its own group under «Деньги», in dollars, and keeps Binance in «Деньги»", async () => {
+    await renderWith(<Plan />, fakeApi(withSolana()));
+    expect(await screen.findByText("Отложено")).toBeTruthy();
+    const row = await screen.findByRole("button", { name: "Solana" });
+    expect(row.props.accessibilityHint).toBe("$750");
+    expect(screen.getByRole("button", { name: "Binance" }).props.accessibilityHint).toBe("$2,700");
+    const titles = screen.getAllByText(/^(Деньги|Отложено|Приходит)$/).map((t) => t.props.children);
+    expect(titles).toEqual(["Деньги", "Отложено", "Приходит"]);
+    expect(screen.getByRole("button", { name: "Добавить в отложенное" })).toBeTruthy();
+  });
+
+  it("an amount in another currency is shown in that currency", async () => {
+    const deposit = balanceFixture({ id: 10, name: "Депозит", amount: 50_000, currency: "EUR", counts_as_own: false });
+    await renderWith(<Plan />, fakeApi({ manualBalances: jest.fn(async () => [solana(), deposit]) }));
+    expect((await screen.findByRole("button", { name: "Депозит" })).props.accessibilityHint).toBe("€500.00");
+  });
+
+  it("with nothing set aside there is no group: one quiet part folded into «Ещё» under «Деньги»", async () => {
+    const api = fakeApi({ manualBalances: jest.fn(async () => [balanceFixture()]) });
+    await renderWith(<Plan />, api);
+    expect(await screen.findByRole("button", { name: /^Ещё: .*отложено/ })).toBeTruthy();
+    expect(screen.queryByText("Отложено")).toBeNull();
+    await openPlanPart("Отложено");
+    expect(await screen.findByLabelText("Сколько стоит сейчас, $")).toBeTruthy();
+    await fireEvent.changeText(screen.getByLabelText("Название"), "Solana");
+    await fireEvent.changeText(screen.getByLabelText("Сколько стоит сейчас, $"), "750");
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(api.createManualBalance).toHaveBeenCalledWith({ name: "Solana", amount: 75_000, currency: "USD", counts_as_own: false }));
+  });
+
+  it("adds another from the group, and refreshes the balances and Today after", async () => {
+    const api = fakeApi(withSolana());
+    await renderWith(<Plan />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Добавить в отложенное" }));
+    await fireEvent.changeText(await screen.findByLabelText("Название"), "Депозит");
+    await fireEvent.changeText(screen.getByLabelText("Сколько стоит сейчас, $"), "1 000");
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(api.createManualBalance).toHaveBeenCalledWith({ name: "Депозит", amount: 100_000, currency: "USD", counts_as_own: false }));
+    await waitFor(() => expect(api.manualBalances.mock.calls.length).toBeGreaterThan(1));
+    await waitFor(() => expect(api.today.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it("opens one to change its name and price", async () => {
+    const api = fakeApi(withSolana());
+    await renderWith(<Plan />, api);
+    await openPlanPart("Solana");
+    expect((await screen.findByLabelText("Название")).props.value).toBe("Solana");
+    await fireEvent.changeText(screen.getByLabelText("Сколько стоит сейчас, $"), "820");
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(api.patchManualBalance).toHaveBeenCalledWith(9, { name: "Solana", amount: 82_000 }));
+    expect(api.createManualBalance).not.toHaveBeenCalled();
   });
 });
 

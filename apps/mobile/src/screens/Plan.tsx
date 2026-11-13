@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { ManualBalanceDto } from "@hale/contracts";
 import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePullRefresh } from "../usePullRefresh";
@@ -15,12 +16,18 @@ import { IncomesSheet } from "../components/IncomesSheet";
 import { InstallmentsSheet } from "../components/InstallmentsSheet";
 import { LoansSheet } from "../components/LoansSheet";
 import { PaymentsSheet } from "../components/PaymentsSheet";
-import { PlanGroup } from "../components/PlanGroup";
+import { PlanGroup, type PlanRow } from "../components/PlanGroup";
+import { SetAsideSheet } from "../components/SetAsideSheet";
 import { TaxSheet } from "../components/TaxPayments";
-import { formatDollars, formatMoney } from "../format";
+import { formatDollars, formatMoney, formatOriginal } from "../format";
 import { goalsLine, incomesLine, installmentsLine, paymentsLine, taxLine } from "../planSummary";
 
 const { color, radius, space, touchMin, type } = tokens;
+
+/** A balance kept by hand in its own currency: whole dollars like the rest of the plan, others with cents. */
+function balanceDetail(b: ManualBalanceDto): string {
+  return b.currency === "USD" ? formatDollars(b.amount) : formatOriginal(b.amount, b.currency);
+}
 
 type Part = "incomes" | "payments" | "installments" | "tax" | "loans" | "goals" | "binance" | "cash" | "settings";
 
@@ -38,9 +45,15 @@ export function Plan() {
   const cash = useCash();
   const [open, setOpen] = useState<Part | null>(null);
   const close = () => setOpen(null);
+  // A set-aside balance being opened, or "new" for adding one.
+  const [aside, openAside] = useState<ManualBalanceDto | "new" | null>(null);
 
   const binance = balances.data?.find((b) => b.name === "Binance");
   const stillOpen = history.data?.stats.stillOpen;
+  // Money set aside (a coin, a deposit) stays out of own money and the limit: its own group below «Деньги».
+  const setAsideBalances = balances.data?.filter((b) => !b.counts_as_own) ?? [];
+  // With nothing set aside there is no group, only one quiet part folded into «Ещё» of «Деньги».
+  const noSetAside: PlanRow[] = balances.data && setAsideBalances.length === 0 ? [{ label: "Отложено", detail: "нет", onPress: () => openAside("new") }] : [];
 
   return (
     <ScrollView
@@ -59,10 +72,18 @@ export function Plan() {
         rows={[
           { label: "Наличные", detail: cash.data ? (cash.data.started ? formatMoney(cash.data.balance) : "не начат") : undefined, onPress: () => setOpen("cash") },
           { label: "Binance", detail: balances.data ? (binance ? formatDollars(binance.amount) : "не задан") : undefined, onPress: () => setOpen("binance") },
+          ...noSetAside,
         ]}
       >
         {today.data ? <AccountLines accounts={today.data.accounts} /> : null}
       </PlanGroup>
+      {setAsideBalances.length > 0 && (
+        <PlanGroup
+          title="Отложено"
+          rows={setAsideBalances.map((b) => ({ key: String(b.id), label: b.name, detail: balanceDetail(b), onPress: () => openAside(b) }))}
+          action={{ text: "+ Добавить", a11y: "Добавить в отложенное", onPress: () => openAside("new") }}
+        />
+      )}
       <PlanGroup
         title="Приходит"
         rows={[{ label: "Доходы", detail: incomes.data && events.data ? incomesLine(incomes.data, events.data) : undefined, onPress: () => setOpen("incomes") }]}
@@ -85,6 +106,7 @@ export function Plan() {
       {open === "goals" && <GoalsSheet onClose={close} />}
       {open === "binance" && <BinanceSheet onClose={close} />}
       {open === "cash" && <CashSheet onClose={close} />}
+      {aside !== null && <SetAsideSheet balance={aside === "new" ? undefined : aside} onClose={() => openAside(null)} />}
       {open === "settings" && (
         <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={close}>
           <Settings onClose={close} />

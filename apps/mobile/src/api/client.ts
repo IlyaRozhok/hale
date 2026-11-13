@@ -80,7 +80,9 @@ export interface Api {
   dismissUsdcMatch(transactionId: number): Promise<void>;
   manualBalances(): Promise<ManualBalanceDto[]>;
   createManualBalance(input: ManualBalanceInput): Promise<ManualBalanceDto>;
-  patchManualBalance(id: number, amount: number): Promise<ManualBalanceDto>;
+  /** Changes the name, the amount or both; the server keeps what is left out. */
+  patchManualBalance(id: number, patch: { name?: string; amount?: number }): Promise<ManualBalanceDto>;
+  deleteManualBalance(id: number): Promise<void>;
   transactions(query: TransactionsFilter & { cursor?: string }): Promise<TransactionPageDto>;
   editTransaction(id: number, patch: Pick<TransactionPatch, "type" | "category" | "applyToSimilar">): Promise<TransactionEditDto>;
   labelRecipient(counterKey: string, label: RecipientLabelName): Promise<RecipientLabelResultDto>;
@@ -205,7 +207,8 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     deleteRule: async (id) => void (await request("DELETE", `/rules/${id}`)),
     manualBalances: () => request("GET", "/plan/manual-balances"),
     createManualBalance: (input) => request("POST", "/plan/manual-balances", input),
-    patchManualBalance: (id, amount) => request("PATCH", `/plan/manual-balances/${id}`, { amount }),
+    patchManualBalance: (id, patch) => request("PATCH", `/plan/manual-balances/${id}`, patch),
+    deleteManualBalance: async (id) => void (await request("DELETE", `/plan/manual-balances/${id}`)),
     goals: () => request("GET", "/plan/goals"),
     createGoal: (input) => request("POST", "/plan/goals", input),
     patchGoal: (id, patch) => request("PATCH", `/plan/goals/${id}`, patch),
