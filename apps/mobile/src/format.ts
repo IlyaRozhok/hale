@@ -34,10 +34,6 @@ export function formatUsd(kopecks: number, usdRate: number): string | null {
   return signed(kopecks / usdRate, "$");
 }
 
-export function formatMoneyWithUsd(kopecks: number, usdRate: number): { uah: string; usd: string | null } {
-  return { uah: formatMoney(kopecks), usd: formatUsd(kopecks, usdRate) };
-}
-
 const DAY_MS = 86_400_000;
 const toUtc = (iso: string) => Date.parse(`${iso}T00:00:00Z`);
 
@@ -68,7 +64,8 @@ export function dueLabel(dueOn: string, today: string): string {
   return `через ${days} ${plural(days, "день", "дня", "дней")}`;
 }
 
-const two = (n: number) => String(n).padStart(2, "0");
+/** A number as two digits: 5 -> "05". */
+export const two = (n: number) => String(n).padStart(2, "0");
 
 /** A moment in the device's local time: "сегодня 09:05" or "01.11 23:40". */
 export function formatStamp(iso: string, now: Date = new Date()): string {

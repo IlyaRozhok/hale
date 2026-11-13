@@ -125,7 +125,6 @@ const styles = StyleSheet.create({
   title: { ...type.title, color: color.fg.default },
   stack: { gap: space.md },
   heading: { ...type.title, color: color.fg.default },
-  text: { ...type.body, color: color.fg.default },
   muted: { ...type.body, color: color.fg.muted, flexShrink: 1 },
   value: { ...type.body, color: color.fg.default, fontVariant: ["tabular-nums"] },
   line: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
