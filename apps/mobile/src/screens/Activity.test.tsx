@@ -32,6 +32,14 @@ describe("Activity list", () => {
     expect(screen.getByText("Между своими")).toBeTruthy();
   });
 
+  it("a row with a type this app does not know reads as an undefined type, not as empty or «undefined»", async () => {
+    const items = [txFixture({ id: 1, description: "Новое", amount: -500, amountUah: -500, type: "something_new" as never, category: null })];
+    await renderWith(<Activity />, fakeApi({ transactions: page(items) }));
+    expect(await screen.findByText("Новое")).toBeTruthy();
+    expect(screen.getByText("Не определён")).toBeTruthy();
+    expect(screen.queryByText(/undefined/)).toBeNull();
+  });
+
   it("spending is plain white, money in is the green accent, own transfers neutral", async () => {
     const items = [
       txFixture({ id: 1, description: "Трата", amount: -8500, amountUah: -8500 }),

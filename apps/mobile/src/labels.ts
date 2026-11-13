@@ -20,7 +20,8 @@ const TYPES: Record<TxTypeDto, string> = {
 
 export const TYPE_CHOICES = Object.keys(TYPES) as TxTypeDto[];
 
-export const typeLabel = (type: TxTypeDto | null): string => (type ? TYPES[type] : "Не определён");
+// A type this app has no name for (from a newer server) reads as no type, as in typeChips.
+export const typeLabel = (type: TxTypeDto | null): string => (type && TYPES[type]) || "Не определён";
 
 /** The types offered at once for money going out; the others wait behind "Ещё". */
 export const FREQUENT_TYPES_OUT: readonly TxTypeDto[] = ["spend", "obligation", "own_transfer", "person_transfer"];

@@ -12,6 +12,10 @@ describe("labels", () => {
     expect(typeLabel("person_transfer")).toBe("Перевод человеку");
   });
 
+  it("reads a type this app does not know (from a newer server) as no type, never as an empty name", () => {
+    expect(typeLabel("something_new" as never)).toBe(typeLabel(null));
+  });
+
   it("names categories in Russian and falls back to the raw name", () => {
     expect(categoryLabel("groceries")).toBe("Продукты");
     expect(categoryLabel("cafe")).toBe("Кафе и рестораны");
