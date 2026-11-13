@@ -23,6 +23,7 @@ import { Sheet } from "../components/Sheet";
 import { StaleBanner } from "../components/StaleBanner";
 import { TodaySkeleton } from "../components/TodaySkeleton";
 import { usePullRefresh } from "../usePullRefresh";
+import { ApiError } from "../api/client";
 
 const { color, radius, space, touchMin, type } = tokens;
 
@@ -238,12 +239,24 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
         />
       )}
       {sheet === "bridge" && state.bridge && (
-        <Sheet title="План до дохода" onClose={closeSheet}>
+        <Sheet
+          title="План до дохода"
+          onClose={() => {
+            chooseBridge.reset(); // a failed confirm is not carried to the next time the plan opens
+            closeSheet();
+          }}
+        >
           <BridgePlan
             state={state}
             usdRate={data.usdRate}
             creditLimit={data.accounts.credit}
             confirming={chooseBridge.isPending}
+            zeroOn={data.runway?.zeroOn ?? null}
+            today={data.date}
+            onMove={() => {
+              if (chooseBridge.isError) chooseBridge.reset();
+            }}
+            confirmFailed={chooseBridge.error ? (chooseBridge.error instanceof ApiError && chooseBridge.error.status === 422 ? "refused" : "failed") : null}
             onConfirm={(amount) => chooseBridge.mutate(amount, { onSuccess: () => closeIfOpen("bridge") })}
             onCancel={() => cancelBridge.mutate(undefined, {
                 onSuccess: () => closeIfOpen("bridge"),
