@@ -147,15 +147,20 @@ export class ImportService implements OnModuleInit {
     if (rows[0]?.n === 0) await this.reclassifier.enqueue(new Date(this.clock.now()));
   }
 
-  /** Upserts one item and classifies it (type and category are never taken from the bank). */
-  async upsertStatementItem(accountId: number, item: MonoStatementItem): Promise<Transaction> {
-    const tx = await this.upsertRow(accountId, item);
+  /**
+   * Upserts one item and classifies it (type and category are never taken from the bank).
+   * `live` is set only for an item that has just happened (the webhook): the account's stored credit
+   * limit is then the limit at the moment of the operation and is kept with a new row. A row found later
+   * (history, the daily check) may be days old, when the limit could have been different, so it gets none.
+   */
+  async upsertStatementItem(accountId: number, item: MonoStatementItem, opts: { live?: boolean } = {}): Promise<Transaction> {
+    const tx = await this.upsertRow(accountId, item, opts.live ?? false);
     if (!this.reclassifier) return tx;
     await this.reclassifier.reclassifyIds([tx.id]);
     return this.ds.getRepository(Transaction).findOneByOrFail({ id: tx.id });
   }
 
-  private async upsertRow(accountId: number, item: MonoStatementItem): Promise<Transaction> {
+  private async upsertRow(accountId: number, item: MonoStatementItem, live = false): Promise<Transaction> {
     const account = await this.ds.getRepository(Account).findOneByOrFail({ id: accountId });
     let fxRate: number | null = null;
     let amountUah: number | null = item.amount;
@@ -169,12 +174,15 @@ export class ImportService implements OnModuleInit {
     }
     const occurredAt = new Date(item.time * 1000);
 
-    // type, category and type_source are only set on insert; later syncs never overwrite them.
+    // type, category, type_source and credit_limit_at are only set on insert; later syncs never overwrite them.
+    // balance_after follows the bank on every sync, like amount: the bank's balance after an item is not
+    // expected to change, and if it ever does, the bank's latest word is the one to keep.
     await this.ds.query(
       `INSERT INTO transactions
          (external_id, account_id, occurred_at, local_date, description, comment, mcc,
-          amount, amount_uah, fx_rate, hold, counter_iban, counter_name, type_source, raw)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'auto',$14)
+          amount, amount_uah, fx_rate, hold, counter_iban, counter_name, type_source, raw,
+          balance_after, credit_limit_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'auto',$14,$15,$16)
        ON CONFLICT (external_id) DO UPDATE SET
          description=EXCLUDED.description, comment=EXCLUDED.comment, mcc=EXCLUDED.mcc,
          amount=EXCLUDED.amount,
@@ -185,7 +193,7 @@ export class ImportService implements OnModuleInit {
          END,
          fx_rate=COALESCE(transactions.fx_rate, EXCLUDED.fx_rate),
          hold=EXCLUDED.hold, counter_iban=EXCLUDED.counter_iban,
-         counter_name=EXCLUDED.counter_name, raw=EXCLUDED.raw`,
+         counter_name=EXCLUDED.counter_name, raw=EXCLUDED.raw, balance_after=EXCLUDED.balance_after`,
       [
         item.id,
         accountId,
@@ -201,6 +209,8 @@ export class ImportService implements OnModuleInit {
         item.counterIban ?? null,
         item.counterName ?? null,
         JSON.stringify(item),
+        item.balance,
+        live ? account.credit_limit : null,
       ],
     );
     return this.ds.getRepository(Transaction).findOneByOrFail({ external_id: item.id });

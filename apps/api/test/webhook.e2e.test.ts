@@ -167,6 +167,60 @@ describe("webhook balance", () => {
   });
 });
 
+describe("credit limit at the moment of the operation (A16)", () => {
+  const stored = async (id: string) =>
+    (await ds.query("SELECT balance_after::int AS b, credit_limit_at::int AS l FROM transactions WHERE external_id=$1", [id]))[0] as {
+      b: number | null;
+      l: number | null;
+    };
+  const reconcileWith = async (items: unknown[]) => {
+    await app.close();
+    app = await createTestApp(url, { config: { MONO_WEBHOOK_SECRET: SECRET, MONOBANK_TOKEN: "tok" }, client });
+    client.clientInfo.mockResolvedValue({ ...info, accounts: [{ ...info.accounts[0]!, creditLimit: 2_000_000 }] });
+    client.statement.mockResolvedValueOnce(items);
+    await app.get(ReconcileService).runDaily();
+  };
+
+  it("a webhook item keeps the balance after it and the account's limit at that moment", async () => {
+    await ds.query("UPDATE accounts SET credit_limit=2000000");
+    await request(http()).post(`/mono/webhook/${SECRET}`).send(body("acc-1", hookItem("c1", { balance: 1_890_000 }))).expect(200);
+    await app.get(JobRunner).runOnce();
+    expect(await stored("c1")).toEqual({ b: 1_890_000, l: 2_000_000 });
+  });
+
+  it("a webhook item processed over an hour after the operation keeps no limit: it may have changed since", async () => {
+    await ds.query("UPDATE accounts SET credit_limit=2000000");
+    const late = hookItem("late", { balance: 1_890_000, time: Math.floor(Date.now() / 1000) - 2 * 3600 });
+    await request(http()).post(`/mono/webhook/${SECRET}`).send(body("acc-1", late)).expect(200);
+    await app.get(JobRunner).runOnce();
+    expect(await stored("late")).toEqual({ b: 1_890_000, l: null });
+  });
+
+  it("a row first seen by the daily check keeps its balance, but no limit: it may be days old", async () => {
+    await reconcileWith([hookItem("r1", { balance: 1_890_000 })]);
+    expect(await stored("r1")).toEqual({ b: 1_890_000, l: null });
+  });
+
+  it("the daily check does not erase the limit a webhook stored, nor overwrite it with today's", async () => {
+    await ds.query("UPDATE accounts SET credit_limit=1500000");
+    await request(http()).post(`/mono/webhook/${SECRET}`).send(body("acc-1", hookItem("k1", { balance: 1_400_000 }))).expect(200);
+    await app.get(JobRunner).runOnce();
+    await reconcileWith([hookItem("k1", { hold: false, balance: 1_400_000 })]);
+    expect(await stored("k1")).toEqual({ b: 1_400_000, l: 1_500_000 });
+  });
+
+  it("a webhook re-delivered for a row stored before A16 leaves it unmarked", async () => {
+    await ds.query("UPDATE accounts SET credit_limit=2000000");
+    await ds.query(
+      `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, amount, amount_uah, raw)
+       SELECT 'pre', id, now(), CURRENT_DATE, -5000, -5000, '{}' FROM accounts WHERE external_id='acc-1'`,
+    );
+    await request(http()).post(`/mono/webhook/${SECRET}`).send(body("acc-1", hookItem("pre", { balance: 1_890_000 }))).expect(200);
+    await app.get(JobRunner).runOnce();
+    expect((await stored("pre")).l).toBeNull();
+  });
+});
+
 describe("POST /mono/import", () => {
   const login = async () => {
     const { TEST_PASSWORD } = await import("./app");

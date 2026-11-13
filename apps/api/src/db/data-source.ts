@@ -18,6 +18,7 @@ import { LoanServiceCost1794700800000 } from "./migrations/0014-loan-service-cos
 import { LoanRepaidDateUnknown1794787200000 } from "./migrations/0015-loan-repaid-date-unknown";
 import { CashWallet1794873600000 } from "./migrations/0016-cash-wallet";
 import { CashAndRulesFlow1794960000000 } from "./migrations/0017-cash-and-rules-flow";
+import { TransactionsCreditLimitAt1795046400000 } from "./migrations/0018-transactions-credit-limit-at";
 
 export const migrations = [
   Init1793577600000,
@@ -37,6 +38,7 @@ export const migrations = [
   LoanRepaidDateUnknown1794787200000,
   CashWallet1794873600000,
   CashAndRulesFlow1794960000000,
+  TransactionsCreditLimitAt1795046400000,
 ];
 
 export function createDataSource(url: string): DataSource {

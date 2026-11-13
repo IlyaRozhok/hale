@@ -13,6 +13,7 @@ import type {
 } from "@hale/contracts";
 import { DataSource, type EntityManager } from "typeorm";
 import { isCounterpartyName } from "../domain/counterparty";
+import { creditPart } from "../domain/credit";
 import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
 import { PlanService } from "../plan/plan.service";
 import { cardCashSql, cardTransferSql } from "../cash/wallet";
@@ -24,6 +25,7 @@ const COLUMNS = `
   t.id, t.occurred_at, to_char(t.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS ts,
   t.local_date::text AS local_date, t.description, t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah,
   t.fx_rate::float8 AS fx_rate, a.currency, t.type, t.category, t.hold, t.needs_label,
+  t.balance_after::float8 AS balance_after, t.credit_limit_at::float8 AS credit_limit_at,
   ${KEY} AS counter_key, t.counter_iban, t.counter_name, a.kind AS account_kind, (a.kind = 'cash') AS manual,
   CASE WHEN ${cardTransferSql()} THEN ${cardCashSql()}::float8 END AS card_cash,
   COALESCE(
@@ -53,6 +55,8 @@ interface Row {
   manual: boolean;
   card_cash: number | null;
   payment_name: string | null;
+  balance_after: number | null;
+  credit_limit_at: number | null;
 }
 
 /** A stored answer about a recipient. */
@@ -89,6 +93,7 @@ const view = (r: Row, rules: readonly AnswerRule[]): TransactionDto => ({
   recipientLabel: answerFor(rules, r),
   cashOut: r.card_cash,
   paymentName: r.payment_name,
+  creditPart: creditPart({ amount: r.amount, balanceAfter: r.balance_after, creditLimit: r.credit_limit_at, currency: r.currency }),
 });
 
 const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6})\|(\d{1,10})$/;

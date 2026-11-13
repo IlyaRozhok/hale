@@ -28,6 +28,15 @@ function facts(tx: TransactionDto): string {
   return [amount, dateTime(tx.occurredAt), accountLabel(tx.accountKind)].filter((part) => part !== null).join(" · ");
 }
 
+/** How much of a spend came from the credit limit: a reference line, not a warning. Null when none. */
+function creditText(tx: TransactionDto): string | null {
+  if (tx.creditPart == null) return null;
+  // Compared in whole hryvnias, as formatMoney shows them: never "₴0 — …", never "₴161 — …" under −₴161.
+  const part = Math.round(tx.creditPart / 100);
+  if (part <= 0) return null;
+  return part >= Math.round(Math.abs(tx.amount) / 100) ? "Оплачено из кредитного лимита" : `${formatMoney(tx.creditPart)} — из кредитного лимита`;
+}
+
 /**
  * The operation on top, then its category and type, each changed with one tap; "apply to similar" is on
  * unless turned off. The rare types wait behind "Ещё".
@@ -49,10 +58,12 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
 
   const title = tx.counterName ?? tx.description;
   const types = typeChips(tx.amount, tx.type);
+  const credit = creditText(tx);
 
   return (
     <Sheet title={title} subtitle={facts(tx)} onClose={onClose}>
       {tx.description !== "" && tx.description !== title && <Text style={styles.note}>{tx.description}</Text>}
+      {credit !== null && <Text style={styles.note}>{credit}</Text>}
       {onAnswer && <ActionRow label={`Что это за перевод: ${answerText(tx.recipientLabel)}`} onPress={onAnswer} />}
       {tx.cashOut !== null && <CardCash tx={tx} cashOut={tx.cashOut} />}
       <Text style={styles.heading}>Категория</Text>

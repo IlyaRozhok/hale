@@ -61,6 +61,49 @@ describe("TxEditSheet header: the operation itself", () => {
   });
 });
 
+describe("TxEditSheet: a spend from the credit limit (A16)", () => {
+  it("paid wholly from the limit: one quiet line says so", async () => {
+    const tx = txFixture({ amount: -16_000, amountUah: -16_000, creditPart: 16_000 });
+    await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi());
+    expect(await screen.findByText("Оплачено из кредитного лимита")).toBeTruthy();
+  });
+
+  it("paid partly from the limit: the line names that part", async () => {
+    const tx = txFixture({ amount: -180_000, amountUah: -180_000, creditPart: 110_000 });
+    await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi());
+    expect(await screen.findByText("₴1,100 — из кредитного лимита")).toBeTruthy();
+    expect(screen.queryByText("Оплачено из кредитного лимита")).toBeNull();
+  });
+
+  it("a credit part that rounds to ₴0 draws no line", async () => {
+    const tx = txFixture({ amount: -10_030, amountUah: -10_030, creditPart: 30 });
+    await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi());
+    await screen.findByText("Тип");
+    expect(screen.queryByText(/кредитного лимита/)).toBeNull();
+  });
+
+  it("a credit part that rounds to the whole shown amount reads as wholly from the limit", async () => {
+    const tx = txFixture({ amount: -16_100, amountUah: -16_100, creditPart: 16_050 });
+    await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi());
+    expect(await screen.findByText("Оплачено из кредитного лимита")).toBeTruthy();
+    expect(screen.queryByText("₴161 — из кредитного лимита")).toBeNull();
+  });
+
+  it("own money or an old row: no line", async () => {
+    await renderWith(<TxEditSheet tx={txFixture({ creditPart: null })} onClose={noop} />, fakeApi());
+    await screen.findByText("Тип");
+    expect(screen.queryByText(/кредитного лимита/)).toBeNull();
+  });
+
+  it("an older server without the field: no line", async () => {
+    const tx = txFixture();
+    delete tx.creditPart;
+    await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi());
+    await screen.findByText("Тип");
+    expect(screen.queryByText(/кредитного лимита/)).toBeNull();
+  });
+});
+
 describe("TxEditSheet types: the frequent ones and «Ещё»", () => {
   it("money going out: four frequent types, the rest are hidden", async () => {
     await renderWith(<TxEditSheet tx={txFixture({ type: "spend" })} onClose={noop} />, fakeApi());
