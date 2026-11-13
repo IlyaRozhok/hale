@@ -14,6 +14,7 @@ import { DataSource, type EntityManager } from "typeorm";
 import { isWithdrawal } from "../domain/classify";
 import { kyivDate } from "../domain/money";
 import { Clock } from "../today/clock";
+import { LimitService } from "../today/limit.service";
 import { TransactionsService } from "../transactions/transactions.service";
 import { counterKeySql } from "../transactions/counter-key";
 import { CASH_ACCOUNT_ID, cardTransferSql, walletBalance } from "./wallet";
@@ -46,6 +47,7 @@ export class CashService {
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(Clock) private readonly clock: Clock,
     @Inject(TransactionsService) private readonly tx: TransactionsService,
+    @Inject(LimitService) private readonly limit: LimitService,
   ) {}
 
   async wallet(m: EntityManager = this.ds.manager): Promise<CashWalletDto> {
@@ -64,7 +66,7 @@ export class CashService {
       await m.query(`UPDATE settings SET cash_start=$1 WHERE id=1`, [date]);
       const account = await this.account(m);
       if (p.amount > 0) await this.insert(m, account, { type: "own_transfer", amount: p.amount, category: "own", date, note: "Начальный остаток" });
-      await m.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [today]);
+      await this.limit.invalidate("cash", m);
       return this.wallet(m);
     });
   }
@@ -111,9 +113,10 @@ export class CashService {
   async remove(id: number): Promise<{ deleted: true }> {
     await this.ds.transaction(async (m) => {
       await this.manualRow(m, id);
-      // A planned payment paid with this row is unpaid again.
-      await m.query(`UPDATE scheduled_payments SET paid_at=NULL WHERE transaction_id=$1`, [id]);
+      // A planned payment paid with this row is unpaid again, and back in the day's limit at once.
+      const reopened = (await m.query(`UPDATE scheduled_payments SET paid_at=NULL WHERE transaction_id=$1`, [id])) as [unknown[], number];
       await m.query(`DELETE FROM transactions WHERE id=$1`, [id]);
+      if (reopened[1] > 0) await this.limit.invalidate("payment_paid", m);
     });
     return { deleted: true };
   }
@@ -148,6 +151,7 @@ export class CashService {
       if (balance < p.amount) throw new UnprocessableEntityException("the wallet has less cash than the payment");
       const tx = await this.insert(m, account, { type: "obligation", amount: -p.amount, category: "transfer", date: this.today(), note: p.name });
       await m.query(`UPDATE scheduled_payments SET paid_at=now(), transaction_id=$2 WHERE id=$1`, [id, tx]);
+      await this.limit.invalidate("payment_paid", m);
       return this.wallet(m);
     });
   }
@@ -241,6 +245,7 @@ export class CashService {
         `UPDATE scheduled_payments SET paid_at = (SELECT max(occurred_at) FROM transactions WHERE id = ANY($2::int[])) WHERE id=$1`,
         [paymentId, chosen],
       );
+      await this.limit.invalidate("payment_paid", m);
       return { linked: chosen.length };
     });
   }

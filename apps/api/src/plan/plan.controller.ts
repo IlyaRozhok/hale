@@ -35,6 +35,7 @@ import {
 import { DataSource, type ObjectLiteral, type Repository } from "typeorm";
 import type { z } from "zod";
 import { ExpectedIncome, Goal, Loan, ManualBalance, RecurringPayment, ScheduledPayment, Settings } from "../db/entities";
+import { LimitService } from "../today/limit.service";
 import { LoansService } from "./loans.service";
 import { PlanEntriesService } from "./plan-entries.service";
 import { PlanService } from "./plan.service";
@@ -69,6 +70,7 @@ export class PlanController {
     @Inject(PlanService) private readonly plan: PlanService,
     @Inject(LoansService) private readonly loans: LoansService,
     @Inject(PlanEntriesService) private readonly entries: PlanEntriesService,
+    @Inject(LimitService) private readonly limit: LimitService,
   ) {}
 
   // --- expected incomes -----------------------------------------------------
@@ -242,14 +244,18 @@ export class PlanController {
   @Post("loans")
   async createLoan(@Body() body: unknown) {
     const repo = this.ds.getRepository(Loan);
-    return badCase(await repo.save(repo.create(parse(loanInput, body))));
+    const row = await repo.save(repo.create(parse(loanInput, body)));
+    await this.limit.invalidate("loan");
+    return badCase(row);
   }
 
   @Patch("loans/:id")
   async patchLoan(@Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
     const data = parse(loanPatch, body);
     const patch = data.repaid_at === undefined ? data : { ...data, repaid_at: data.repaid_at === null ? null : new Date(data.repaid_at) };
-    return badCase(await patchRow(this.ds.getRepository(Loan), id, patch));
+    const row = await patchRow(this.ds.getRepository(Loan), id, patch);
+    await this.limit.invalidate("loan");
+    return badCase(row);
   }
 
   @Get("loans/history")
@@ -273,42 +279,60 @@ export class PlanController {
   }
 
   // --- manual balances ------------------------------------------------------
+  // Binance and the like are own money and count in the day's limit at once; a balance set aside
+  // (`counts_as_own: false`, task Б19) is outside the limit, so changing it leaves the day's row alone.
   @Get("manual-balances")
   listBalances(): Promise<ManualBalance[]> {
     return this.ds.getRepository(ManualBalance).find({ order: { id: "ASC" } });
   }
 
   @Post("manual-balances")
-  createBalance(@Body() body: unknown): Promise<ManualBalance> {
+  async createBalance(@Body() body: unknown): Promise<ManualBalance> {
     const repo = this.ds.getRepository(ManualBalance);
-    return repo.save(repo.create(parse(manualBalanceInput, body)));
+    const row = await repo.save(repo.create(parse(manualBalanceInput, body)));
+    if (row.counts_as_own) await this.limit.invalidate("binance");
+    return row;
   }
 
   @Patch("manual-balances/:id")
-  patchBalance(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<ManualBalance> {
-    return patchRow(this.ds.getRepository(ManualBalance), id, parse(manualBalancePatch, body));
+  async patchBalance(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<ManualBalance> {
+    const repo = this.ds.getRepository(ManualBalance);
+    const before = await repo.findOneBy({ id });
+    if (!before) throw new NotFoundException();
+    const row = await patchRow(repo, id, parse(manualBalancePatch, body));
+    if (before.counts_as_own || row.counts_as_own) await this.limit.invalidate("binance");
+    return row;
   }
 
   @Delete("manual-balances/:id")
-  deleteBalance(@Param("id", ParseIntPipe) id: number) {
-    return removeRow(this.ds.getRepository(ManualBalance), id);
+  async deleteBalance(@Param("id", ParseIntPipe) id: number) {
+    const repo = this.ds.getRepository(ManualBalance);
+    const before = await repo.findOneBy({ id });
+    const done = await removeRow(repo, id);
+    if (before?.counts_as_own) await this.limit.invalidate("binance");
+    return done;
   }
 }
 
 @Controller("settings")
 export class SettingsController {
-  constructor(@Inject(DataSource) private readonly ds: DataSource) {}
+  constructor(
+    @Inject(DataSource) private readonly ds: DataSource,
+    @Inject(LimitService) private readonly limit: LimitService,
+  ) {}
 
   @Get()
   get(): Promise<Settings | null> {
     return this.ds.getRepository(Settings).findOneBy({ id: 1 });
   }
 
+  /** A new cap, food floor or tax figure is in the day's limit at once; the look of the limit is not money. */
   @Patch()
   async patch(@Body() body: unknown): Promise<Settings | null> {
     const data = parse(settingsPatch, body);
     const repo = this.ds.getRepository(Settings);
     if (Object.keys(data).length > 0) await repo.update(1, data);
+    if (Object.keys(data).some((k) => k !== "limit_visual")) await this.limit.invalidate("settings");
     return repo.findOneBy({ id: 1 });
   }
 }

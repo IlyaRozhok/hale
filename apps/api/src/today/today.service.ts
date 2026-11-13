@@ -130,27 +130,48 @@ export class TodayService {
    * The one place the day's row is written (task Б3). Writes the row once (concurrent calls share it) and keeps
    * its `mode` current: that is how the day the shortage came on is known, today and later. An existing row's
    * limit is never rewritten here: only choosing a bridge plan, closing one (by hand or because the shortage is
-   * over), or setting an income date replaces it (design §5.2). Called by the 15-minute job, the night jobs,
-   * and after a plan is confirmed or cancelled; a read never calls it.
+   * over), or a change by the person's own hand through `LimitService.invalidate` (task Б4) replaces it
+   * (design §5.2). Called by the 15-minute job, the night jobs, and after a plan is confirmed or cancelled;
+   * a read never calls it.
    */
   async ensureSnapshot(): Promise<void> {
+    await this.ds.transaction((m) => this.fixDay(m, false));
+  }
+
+  /**
+   * The day fixed afresh from the current facts, because the person changed something the limit is made of
+   * (task Б4): the row is replaced in one statement, so there is never a moment without it, and inside the
+   * caller's transaction when it gives its manager, so the change and the new limit are seen together or not
+   * at all. Only `LimitService` calls this.
+   */
+  async refix(m?: EntityManager): Promise<void> {
+    if (m) await this.fixDay(m, true);
+    else await this.ds.transaction((t) => this.fixDay(t, true));
+  }
+
+  private async fixDay(m: EntityManager, fresh: boolean): Promise<void> {
     const now = this.clock.now();
-    const f = await this.load(kyivDate(now), now);
-    await this.ds.transaction(async (m) => {
-      const r = await this.resolve(m, f);
-      if (r.closePlan) {
-        await m.query(`UPDATE bridge_plans SET closed_on=$1 WHERE id=$2 AND closed_on IS NULL`, [f.date, r.closePlan.id]);
-        // The bridge limit no longer applies: the day gets a fresh normal limit.
-        await m.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [f.date]);
-      } else if (r.replan) {
-        await m.query(`UPDATE bridge_plans SET credit_plan=$2, basis=$3 WHERE id=$1`, [r.replan.id, r.replan.creditPlan, r.replan.basis]);
-      }
+    const f = await this.load(kyivDate(now), now, m);
+    const r = await this.resolve(m, f);
+    if (r.closePlan) {
+      await m.query(`UPDATE bridge_plans SET closed_on=$1 WHERE id=$2 AND closed_on IS NULL`, [f.date, r.closePlan.id]);
+    } else if (r.replan) {
+      await m.query(`UPDATE bridge_plans SET credit_plan=$2, basis=$3 WHERE id=$1`, [r.replan.id, r.replan.creditPlan, r.replan.basis]);
+    }
+    if (fresh || r.closePlan) {
+      // The facts changed by the person's hand, or the bridge limit no longer applies: the day gets its fresh limit.
       await m.query(
-        `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3) ON CONFLICT (local_date) DO NOTHING`,
+        `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3)
+         ON CONFLICT (local_date) DO UPDATE SET daily_limit=EXCLUDED.daily_limit, mode=EXCLUDED.mode`,
         [f.date, r.morning.dailyLimit, r.mark],
       );
-      await m.query(`UPDATE daily_snapshots SET mode=$2 WHERE local_date=$1 AND mode<>$2`, [f.date, r.mark]);
-    });
+      return;
+    }
+    await m.query(
+      `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3) ON CONFLICT (local_date) DO NOTHING`,
+      [f.date, r.morning.dailyLimit, r.mark],
+    );
+    await m.query(`UPDATE daily_snapshots SET mode=$2 WHERE local_date=$1 AND mode<>$2`, [f.date, r.mark]);
   }
 
   /**
@@ -359,8 +380,8 @@ export class TodayService {
         `UPDATE bridge_plans SET closed_on=$1 WHERE closed_on IS NULL RETURNING id`,
         [date],
       );
-      // TypeORM returns [rows, count] for an UPDATE on Postgres.
-      if ((closed[1] as number) > 0) await m.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [date]);
+      // TypeORM returns [rows, count] for an UPDATE on Postgres. The day is fixed afresh in the same transaction.
+      if ((closed[1] as number) > 0) await this.fixDay(m, true);
     });
     await this.ensureSnapshot();
     return this.getToday();
@@ -401,8 +422,7 @@ export class TodayService {
   }
 
   // --- reading the database ---------------------------------------------------
-  private async load(date: string, now: Date): Promise<Facts> {
-    const m = this.ds.manager;
+  private async load(date: string, now: Date, m: EntityManager = this.ds.manager): Promise<Facts> {
     const nowIso = now.toISOString();
     const q = quarterOf(date);
 

@@ -15,6 +15,7 @@ import { kyivDate } from "../domain/money";
 import { estimateDueOn, precedingQuarter, quarterBounds, quarterOf } from "../domain/quarter";
 import { taxReserve } from "../domain/tax";
 import { Clock } from "../today/clock";
+import { LimitService } from "../today/limit.service";
 import { quarterTaxFacts } from "../today/tax-facts";
 import { INTEREST_TEXT, SHORT_LOAN_TEXT } from "./short-loan";
 import { ScheduledPayment, type IncomeEvent } from "../db/entities";
@@ -50,6 +51,7 @@ export class PlanService implements OnApplicationBootstrap {
   constructor(
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(Clock) private readonly clock: Clock,
+    @Inject(LimitService) private readonly limit: LimitService,
   ) {}
 
   /** Catch up after downtime; the unique key makes this safe to repeat. */
@@ -74,10 +76,10 @@ export class PlanService implements OnApplicationBootstrap {
 
   /**
    * Generation, safe to repeat. A template that gets its first rows here (just seeded, say) was not in
-   * the day's limit if a job fixed it in the meantime, so the limit is recomputed. Later months' rows
+   * the day's limit if a job fixed it in the meantime, so the limit is fixed afresh. Later months' rows
    * leave the fixed limit alone.
    */
-  private async generate(): Promise<void> {
+  private async generate(fixLimit = true): Promise<void> {
     const today = kyivDate(this.clock.now());
     const [{ fresh }] = (await this.ds.query(
       `SELECT EXISTS (SELECT 1 FROM expected_incomes x WHERE NOT EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id))
@@ -86,12 +88,12 @@ export class PlanService implements OnApplicationBootstrap {
     await this.generateEvents(today);
     await this.generateRecurring(today);
     await this.linkTaxTransactions();
-    if (fresh) await this.ds.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [today]);
+    if (fresh && fixLimit) await this.limit.invalidate("plan");
   }
 
-  /** The owner just added something to the plan: its dates are needed now. */
+  /** The owner just added something to the plan: its dates are needed now. The caller fixes the limit afterwards. */
   refresh(): Promise<void> {
-    return this.generate();
+    return this.generate(false);
   }
 
   /** Just after midnight on the first day of a quarter this is what keeps the reserve in place. */
@@ -107,7 +109,7 @@ export class PlanService implements OnApplicationBootstrap {
   /**
    * The quarter that just ended, if the owner has entered no tax rows for it, gets one estimated row
    * with its accrual: the money stays reserved over the rollover. Safe to repeat. Returns true when a
-   * row was created; the day's limit may already have been fixed without it, so it is recomputed.
+   * row was created; the day's limit may already have been fixed without it, so it is fixed afresh.
    */
   async ensureTaxEstimate(today: string = kyivDate(this.clock.now())): Promise<boolean> {
     const label = precedingQuarter(today);
@@ -138,7 +140,7 @@ export class PlanService implements OnApplicationBootstrap {
       [`Налог за ${label.slice(6)} кв. ${label.slice(0, 4)} (оценка)`, amount, estimateDueOn(label), label],
     );
     if (made.length === 0) return false;
-    await this.ds.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [today]);
+    await this.limit.invalidate("tax_estimate");
     return true;
   }
 
@@ -228,14 +230,14 @@ export class PlanService implements OnApplicationBootstrap {
     const found = await this.ds.query(`SELECT 1 FROM income_events WHERE id=$1`, [id]);
     if (found.length === 0) throw new NotFoundException("income event not found");
     await this.ds.query(`UPDATE income_events SET expected_on=$2 WHERE id=$1`, [id, date]);
-    // A new date is used at once (design §5.2): today's fixed limit is recomputed on the next request.
-    await this.ds.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [kyivDate(this.clock.now())]);
+    // A new date is used at once (design §5.2).
+    await this.limit.invalidate("income");
     return this.eventView(this.ds.manager, id);
   }
 
   /**
    * "It arrived": marks the event received and, for USDC, adds the expected amount to the
-   * Binance manual balance. A second call changes nothing.
+   * Binance manual balance. The money counts in the day's limit at once. A second call changes nothing.
    */
   async confirmEvent(id: number): Promise<IncomeEvent> {
     return this.ds.transaction(async (m) => {
@@ -250,6 +252,7 @@ export class PlanService implements OnApplicationBootstrap {
             [BINANCE, balanceDelta],
           );
         }
+        await this.limit.invalidate("income", m);
       }
       return this.eventView(m, id);
     });
@@ -300,6 +303,8 @@ export class PlanService implements OnApplicationBootstrap {
         `UPDATE transactions SET type='own_transfer', category='own', type_source='owner', needs_label=false, usdc_checked=true WHERE id=$1`,
         [tx.id],
       );
+      // The money counted twice until now: the day's limit drops at once.
+      await this.limit.invalidate("income", m);
       return this.eventView(m, eventId);
     });
   }
@@ -311,9 +316,11 @@ export class PlanService implements OnApplicationBootstrap {
     return { usdc_checked: true };
   }
 
-  /** Manual path: the owner says it was paid. Idempotent. */
+  /** Manual path: the owner says it was paid, and its money is free in the day's limit at once. Idempotent. */
   async markPaid(id: number): Promise<ScheduledPayment> {
-    await this.ds.query(`UPDATE scheduled_payments SET paid_at = COALESCE(paid_at, now()) WHERE id=$1`, [id]);
+    const paid = (await this.ds.query(`UPDATE scheduled_payments SET paid_at = now() WHERE id=$1 AND paid_at IS NULL`, [id])) as [unknown[], number];
+    // TypeORM returns [rows, count] for an UPDATE on Postgres.
+    if (paid[1] > 0) await this.limit.invalidate("payment_paid");
     const rows: ScheduledPayment[] = await this.ds.query(
       `SELECT id, kind, name, amount::float8 AS amount, currency, due_on::text AS due_on, paid_at,
               transaction_id, match_hint, overpayment FROM scheduled_payments WHERE id=$1`,
