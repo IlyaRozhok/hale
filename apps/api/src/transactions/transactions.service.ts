@@ -15,14 +15,17 @@ import { DataSource, type EntityManager } from "typeorm";
 import { isCounterpartyName } from "../domain/counterparty";
 import { creditPart } from "../domain/credit";
 import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
-import { spendGroupSql } from "../domain/ledger";
+import { limitSql, spendGroupSql } from "../domain/ledger";
 import { PlanService } from "../plan/plan.service";
 import { cardCashSql, cardTransferSql } from "../cash/wallet";
 import { counterKeySql } from "./counter-key";
 import { PLAN_TYPES, ReclassifyService } from "./reclassify.service";
 
 const KEY = counterKeySql("t");
+/** The row counts against the day limit: one definition, domain/ledger.ts, evaluated in the database. */
+const IN_LIMIT = `(${limitSql("t", "a")})`;
 const COLUMNS = `
+  ${IN_LIMIT} AS in_limit,
   t.id, t.occurred_at, to_char(t.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS ts,
   t.local_date::text AS local_date, t.description, t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah,
   t.fx_rate::float8 AS fx_rate, a.currency, t.type, t.category, t.hold, t.needs_label,
@@ -58,6 +61,7 @@ interface Row {
   payment_name: string | null;
   balance_after: number | null;
   credit_limit_at: number | null;
+  in_limit: boolean;
 }
 
 /** A stored answer about a recipient. */
@@ -95,6 +99,7 @@ const view = (r: Row, rules: readonly AnswerRule[]): TransactionDto => ({
   cashOut: r.card_cash,
   paymentName: r.payment_name,
   creditPart: creditPart({ amount: r.amount, balanceAfter: r.balance_after, creditLimit: r.credit_limit_at, currency: r.currency }),
+  inLimit: r.in_limit,
 });
 
 const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6})\|(\d{1,10})$/;
@@ -173,19 +178,24 @@ export class TransactionsService {
     );
     const page = rows.slice(0, q.limit);
     const rules = await this.answerRules();
+    // Under «Траты» the totals are the limit's (Б2): the sum and count of the rows that count against it,
+    // the same figure as «потрачено» on «Сегодня» and in the calendar. Payments, taxes, debts, loans out
+    // and jar rows stay on the list, marked by inLimit, but do not add up. «Все» and «Доходы» sum every row.
+    const counted = q.group === "spend" ? IN_LIMIT : "true";
     return {
       items: page.map((r) => view(r, rules)),
       nextCursor: rows.length > q.limit ? encodeCursor(page[page.length - 1]!) : null,
-      dayTotals: await this.dayTotals([...new Set(page.map((r) => r.local_date))], filters, filterArgs),
-      summary: q.category || q.from || q.to ? await this.summary(filters, filterArgs) : null,
+      dayTotals: await this.dayTotals([...new Set(page.map((r) => r.local_date))], filters, filterArgs, counted),
+      summary: q.category || q.from || q.to ? await this.summary(filters, filterArgs, counted) : null,
     };
   }
 
-  /** The sum and count of everything under the filters, ignoring the cursor. */
-  private async summary(filters: string[], args: unknown[]): Promise<{ total: number; count: number }> {
+  /** The sum and count of the `counted` rows under the filters, ignoring the cursor. */
+  private async summary(filters: string[], args: unknown[], counted: string): Promise<{ total: number; count: number }> {
     const r = (
       await this.ds.query(
-        `SELECT COALESCE(SUM(t.amount_uah), 0)::float8 AS total, COUNT(*)::int AS count ${FROM} ${filters.length ? `WHERE ${filters.join(" AND ")}` : ""}`,
+        `SELECT COALESCE(SUM(t.amount_uah) FILTER (WHERE ${counted}), 0)::float8 AS total, COUNT(*) FILTER (WHERE ${counted})::int AS count
+           ${FROM} ${filters.length ? `WHERE ${filters.join(" AND ")}` : ""}`,
         args,
       )
     )[0] as { total: number; count: number };
@@ -193,16 +203,16 @@ export class TransactionsService {
   }
 
   /**
-   * Totals for whole days, ignoring the cursor, so a day split across pages still adds up. A day
-   * with no known hryvnia amount has no total at all rather than a misleading zero.
+   * Totals of the `counted` rows for whole days, ignoring the cursor, so a day split across pages still adds
+   * up. A day with no counted row with a known hryvnia amount has no total at all rather than a misleading zero.
    */
-  private async dayTotals(dates: string[], filters: string[], args: unknown[]): Promise<Record<string, number>> {
+  private async dayTotals(dates: string[], filters: string[], args: unknown[], counted: string): Promise<Record<string, number>> {
     if (dates.length === 0) return {};
     const rows: { local_date: string; total: number }[] = await this.ds.query(
-      `SELECT t.local_date::text AS local_date, COALESCE(SUM(t.amount_uah), 0)::float8 AS total ${FROM}
+      `SELECT t.local_date::text AS local_date, COALESCE(SUM(t.amount_uah) FILTER (WHERE ${counted}), 0)::float8 AS total ${FROM}
         WHERE ${[...filters, `t.local_date = ANY($${args.length + 1}::date[])`].join(" AND ")}
         GROUP BY t.local_date
-       HAVING COUNT(t.amount_uah) > 0`,
+       HAVING COUNT(t.amount_uah) FILTER (WHERE ${counted}) > 0`,
       [...args, dates],
     );
     return Object.fromEntries(rows.map((r) => [r.local_date, r.total]));
