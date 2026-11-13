@@ -7,6 +7,7 @@ import { applySeed, parseSeed } from "../../../scripts/seed-private";
 import { PlanService } from "../src/plan/plan.service";
 import { Clock } from "../src/today/clock";
 import { TodayService } from "../src/today/today.service";
+import { ReclassifyService } from "../src/transactions/reclassify.service";
 
 let app: INestApplication;
 let ds: DataSource;
@@ -425,6 +426,27 @@ describe("tax reserve and own money", () => {
     await tx(fop, -20_000, "tax", { date: "2026-10-25" });
     const paid = await today();
     expect(paid.state.free).toBe(1_000_000 + 500_000 - (60_000 - 20_000) - 223_932);
+  });
+
+  it("a bank refund on the fop account is classified as a refund and does not raise the tax base (Б5)", async () => {
+    await account("black", 1_000_000);
+    const fop = await account("fop", 500_000);
+    await income("usdc", "2026-11-12");
+    await tx(fop, 1_000_000, "income", { date: "2026-10-20" });
+    const base = await today();
+    expect(base.state.free).toBe(1_000_000 + 500_000 - 60_000);
+    // A refund of a purchase paid from the fop card, as the bank sends it: untyped until classified.
+    const refund = (
+      await ds.query(
+        `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, mcc, raw)
+         VALUES ('tx-refund',$1,'2026-10-28T10:00:00Z','2026-10-28','Повернення платежу skay.ua',200000,200000,4829,'{}') RETURNING id`,
+        [fop],
+      )
+    )[0].id as number;
+    await app.get(ReclassifyService).reclassifyIds([refund]);
+    // The reserve is still 6% of 1,000,000, not of 1,200,000.
+    expect((await today()).state.free).toBe(base.state.free);
+    expect(await ds.query(`SELECT type, category FROM transactions WHERE id=$1`, [refund])).toEqual([{ type: "spend", category: "refund" }]);
   });
 
   describe("a prior quarter's tax paid this quarter", () => {
