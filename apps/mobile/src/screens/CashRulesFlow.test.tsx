@@ -69,6 +69,15 @@ describe("the owner's rules in Settings", () => {
     expect(alert.mock.calls.at(-1)![1]).toBe("Сейчас под ним нет операций.");
   });
 
+  it("a rule with a type this app does not know reads as an undefined type, not as «undefined»", async () => {
+    const unknown = { ...rules[0]!, id: 5, title: "новое правило", type: "something_new" as never };
+    await renderWith(<Settings onClose={noop} />, fakeApi({ rules: jest.fn(async () => [unknown, { ...unknown, id: 6, title: "с категорией", category: "groceries" }]) }));
+    await press("Мои правила");
+    expect(await screen.findByText("Не определён · 1 операция")).toBeTruthy();
+    expect(screen.getByText("Не определён · Продукты · 1 операция")).toBeTruthy();
+    expect(screen.queryByText(/undefined/)).toBeNull();
+  });
+
   it("says when there are none", async () => {
     await renderWith(<Settings onClose={noop} />, fakeApi());
     await press("Мои правила");
