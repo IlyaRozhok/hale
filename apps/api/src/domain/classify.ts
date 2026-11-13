@@ -209,17 +209,19 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
   if (incoming && mcc === 4829 && CASH_DEPOSIT.test(d)) return done("cash_in");
   if (incoming && CASHBACK.test(d)) return done("income", "rule", "refund");
 
-  if (tx.accountKind === "fop") {
-    if (incoming) return done("income");
-    if (mcc === null || TRANSFER_MCCS.has(mcc)) return done("person_transfer", "auto", "transfer", hasName);
-  }
-
-  // A bank refund text is a refund whatever its MCC (transfer MCC 4829 included); a refund of a
-  // transfer is not, and stays with the people rules below.
+  // A bank refund text is a refund whatever its MCC (transfer MCC 4829 included) and whatever the
+  // account: on the fop account it is checked before "incoming is income", so a refund does not
+  // enter the tax base. A refund of a transfer is not a refund, and stays with the fop and people
+  // rules below.
   if (incoming && REFUND.test(d) && !REFUND_OF_TRANSFER.test(d)) {
     // A shop we do not know is still a refund: it lowers that day's spending and asks nothing.
     const known = categoryByMerchant(d) ?? categoryByMcc(mcc);
     return done("spend", "auto", known === "uncategorized" ? "refund" : known);
+  }
+
+  if (tx.accountKind === "fop") {
+    if (incoming) return done("income");
+    if (mcc === null || TRANSFER_MCCS.has(mcc)) return done("person_transfer", "auto", "transfer", hasName);
   }
 
   // 3. MCC and chains

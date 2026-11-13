@@ -120,6 +120,41 @@ describe("refunds", () => {
   });
 });
 
+describe("refunds on the fop account", () => {
+  it("a bank refund on the fop account is a refund, not income (it must not enter the tax base)", () => {
+    for (const description of ["Повернення платежу skay.ua", "Скасування. Some Shop"]) {
+      expect(classify(tx({ accountKind: "fop", description, amount: 52_950, mcc: 4829 }), ctx())).toMatchObject({
+        type: "spend",
+        category: "refund",
+        source: "auto",
+        needsLabel: false,
+      });
+    }
+    // A known shop keeps its category, exactly as on other accounts.
+    expect(classify(tx({ accountKind: "fop", description: "Скасування. Uklon", amount: 9_000, mcc: 4829 }), ctx())).toMatchObject({
+      type: "spend",
+      category: "transport",
+    });
+  });
+
+  it("ordinary incoming money on the fop account is still income", () => {
+    expect(classify(tx({ accountKind: "fop", description: "Payment from client", amount: 1_000_000, mcc: 4829 }), ctx()).type).toBe(
+      "income",
+    );
+    expect(classify(tx({ accountKind: "fop", description: "Оплата послуг", amount: 500_000, mcc: null }), ctx()).type).toBe("income");
+  });
+
+  it("a refund of a transfer on the fop account stays income, as before", () => {
+    const r = classify(tx({ accountKind: "fop", description: "Скасування. Переказ на карту", amount: 9_000, mcc: 4829 }), ctx());
+    expect(r).toMatchObject({ type: "income", category: "income" });
+  });
+
+  it("cashback on the fop account is still income with the refund category", () => {
+    const r = classify(tx({ accountKind: "fop", description: "Виведення кешбеку", amount: 3_000, mcc: 4829 }), ctx());
+    expect(r).toMatchObject({ type: "income", category: "refund" });
+  });
+});
+
 describe("cash", () => {
   it("atm withdrawal is cash_out, cash deposit is cash_in", () => {
     expect(classify(tx({ description: "Банкомат 12345", mcc: 6011 }), ctx()).type).toBe("cash_out");
