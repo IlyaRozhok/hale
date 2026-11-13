@@ -4,6 +4,8 @@ import { ScheduleModule } from "@nestjs/schedule";
 import { APP_CONFIG } from "../config.module";
 import type { AppConfig } from "../config";
 import { FxService } from "./fx.service";
+import { HoldCheckController } from "./hold-check.controller";
+import { HoldCheckService } from "./hold-check.service";
 import { ImportService } from "./import.service";
 import { JOB_CLOCK, JobRunner } from "./jobs/job-runner";
 import { MonoClient } from "./mono.client";
@@ -40,9 +42,10 @@ import { WebhookService } from "./webhook.service";
     WebhookService,
     ReconcileService,
     FxService,
+    HoldCheckService,
     { provide: APP_FILTER, useClass: WebhookBodyErrorFilter },
   ],
-  controllers: [WebhookController, MonoController],
+  controllers: [WebhookController, MonoController, HoldCheckController],
   exports: [MonoClient, RateGate, ImportService, JobRunner, ReclassifyService],
 })
 export class MonoModule {}
