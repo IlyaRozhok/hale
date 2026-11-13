@@ -4,8 +4,8 @@
 // services can filter in the database without a second copy of the rule.
 //
 // This encodes the rule the server uses as of 13 November 2026. «Сегодня» and the calendar count the limit
-// with limitSql (Б1 PR 2; test/ledger.e2e.test.ts checks it against ledgerEffect in Postgres). The «Траты»
-// group in transactions.service.ts still has its own GROUP_TYPES.spend until Б1 PR 3.
+// with limitSql (Б1 PR 2) and the «Траты» group of the list with its day totals and summary is filtered by
+// spendGroupSql (Б1 PR 3); test/ledger.e2e.test.ts checks both against ledgerEffect in Postgres.
 import type { TxType } from "./classify";
 import type { Minor } from "./money";
 
@@ -29,7 +29,7 @@ export const LIMIT_EXCLUDED_ACCOUNT_KIND: AccountKind = "jar";
 /**
  * Types the «Траты» list group shows today. It differs from the limit on purpose for now: payments,
  * taxes, debts and loans out are listed but not counted, and neither jars nor rows without a hryvnia
- * amount are filtered out. The audit wants the tab to match the limit (Б1 PR 3 or Б2).
+ * amount are filtered out. The audit wants the tab to match the limit (Б2).
  */
 export const SPEND_GROUP_TYPES = [
   "spend", "obligation", "tax", "debt_payment", "person_transfer", "cash_out", "loan_out",

@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { TxType } from "./classify";
 import {
@@ -220,28 +218,24 @@ describe("rule data", () => {
   });
 });
 
-// today.service.ts counts the limit with limitSql; test/ledger.e2e.test.ts runs it in Postgres against
-// ledgerEffect. transactions.service.ts still lists the «Траты» group itself until Б1 PR 3, so that one is
-// read from its source here.
+// today.service.ts counts the limit with limitSql and transactions.service.ts lists the «Траты» group with
+// spendGroupSql; test/ledger.e2e.test.ts runs both in Postgres against ledgerEffect. Here only the shape.
 describe("SQL built from the same data", () => {
-  const source = (file: string) => readFileSync(join(__dirname, "..", file), "utf8");
-
   it("limitSql takes other table aliases", () => {
     expect(limitSql("x", "y")).toContain("y.kind <> 'jar' AND x.amount_uah IS NOT NULL");
     expect(limitSql("x", "y")).not.toMatch(/\bt\./);
   });
 
-  it("the «Траты» group has the types transactions.service.ts lists and the same cash_out condition", () => {
-    const src = source("transactions/transactions.service.ts");
-    const types = /spend: \[([^\]]+)\]/.exec(src);
-    expect(types, "GROUP_TYPES.spend not found in transactions.service.ts").not.toBeNull();
-    const listed = types![1]!.split(",").map((s) => s.trim().replace(/"/g, ""));
-    expect([...SPEND_GROUP_TYPES].sort()).toEqual(listed.sort());
-    expect(src).toContain(
-      "`NOT (t.type = 'cash_out' AND COALESCE(t.local_date >= (SELECT cash_start FROM settings WHERE id=1), false))`",
-    );
-    expect(spendGroupSql()).toContain("NOT (t.type = 'cash_out' AND COALESCE(t.local_date >= (SELECT cash_start FROM settings WHERE id=1), false))");
+  it("limitSql leaves out rows without a hryvnia amount: a listing by it would show them otherwise", () => {
+    // A SUM skips NULL by itself, so the e2e over sums cannot tell when this clause goes missing.
+    expect(limitSql()).toContain("t.amount_uah IS NOT NULL");
+  });
+
+  it("spendGroupSql names every group type and the withdrawal rule, and takes another alias", () => {
+    expect(spendGroupSql()).toContain(`NOT (t.type = 'cash_out' AND COALESCE(t.local_date >= ${CASH_START_SQL}, false))`);
     for (const t of SPEND_GROUP_TYPES) expect(spendGroupSql()).toContain(`'${t}'`);
+    expect(spendGroupSql("x")).not.toMatch(/\bt\./);
+    expect(spendGroupSql("x")).toContain("x.type IN (");
   });
 
   it("the constants are what the rule says", () => {

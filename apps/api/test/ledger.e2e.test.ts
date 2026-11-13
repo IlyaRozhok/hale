@@ -4,12 +4,13 @@ import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import type { TxType } from "../src/domain/classify";
-import { type AccountKind, type LedgerContext, type LedgerRow, ACCOUNT_KINDS, limitSpentByDay } from "../src/domain/ledger";
+import { type AccountKind, type LedgerContext, type LedgerRow, ACCOUNT_KINDS, ledgerEffect, limitSpentByDay } from "../src/domain/ledger";
 import { Clock } from "../src/today/clock";
 
-// «Потрачено» in the calendar and today's spent are counted in Postgres by the limit SQL. These tests
-// seed rows of every kind into the real database and check that what the service returns is exactly
-// what ledgerEffect says about the same rows, read back after the service ran.
+// «Потрачено» in the calendar and today's spent are counted in Postgres by the limit SQL, and the «Траты»
+// group of the list is filtered by the spend-group SQL. These tests seed rows of every kind into the real
+// database and check that what the services return is exactly what ledgerEffect says about the same rows,
+// read back after the service ran.
 
 let app: INestApplication;
 let ds: DataSource;
@@ -82,13 +83,22 @@ async function seed(rows: readonly Seed[], cashStart: string | null): Promise<vo
   }
 }
 
+interface StoredRow extends LedgerRow {
+  id: number;
+}
+
 /** The rows as they are in the database now, in the ledger's terms. */
-async function storedRows(): Promise<LedgerRow[]> {
+async function storedRows(): Promise<StoredRow[]> {
   const rows = (await ds.query(
-    `SELECT t.type, a.kind, t.amount_uah::float8 AS amount_uah, t.local_date::text AS date, t.category
+    `SELECT t.id, t.type, a.kind, t.amount_uah::float8 AS amount_uah, t.local_date::text AS date, t.category
        FROM transactions t JOIN accounts a ON a.id=t.account_id`,
-  )) as { type: TxType | null; kind: AccountKind; amount_uah: number | null; date: string; category: string | null }[];
-  return rows.map((r) => ({ type: r.type, accountKind: r.kind, amountUah: r.amount_uah, localDate: r.date, category: r.category }));
+  )) as { id: number; type: TxType | null; kind: AccountKind; amount_uah: number | null; date: string; category: string | null }[];
+  return rows.map((r) => ({ id: r.id, type: r.type, accountKind: r.kind, amountUah: r.amount_uah, localDate: r.date, category: r.category }));
+}
+
+async function context(): Promise<LedgerContext> {
+  const cashStart = ((await ds.query(`SELECT cash_start::text AS s FROM settings WHERE id=1`)) as { s: string | null }[])[0]!.s;
+  return { cashStart };
 }
 
 /** What the service says: the calendar's spent for every day up to today, and today's spent on «Сегодня». */
@@ -100,14 +110,15 @@ async function served(): Promise<{ calendar: Map<string, number>; today: number 
   const days = c.body.days as { date: string; spent: number }[];
   return {
     calendar: new Map(days.map((d) => [d.date, d.spent])),
+    // dailyLimit − leftToday is today's spent only because nothing else moves leftToday here:
+    // no daily_snapshots and no bridge_plans are seeded.
     today: t.body.state.dailyLimit - t.body.state.leftToday,
   };
 }
 
 /** The ledger over the stored rows, laid out on the calendar's days. */
 async function expected(): Promise<Map<string, number>> {
-  const cashStart = ((await ds.query(`SELECT cash_start::text AS s FROM settings WHERE id=1`)) as { s: string | null }[])[0]!.s;
-  const ctx: LedgerContext = { cashStart };
+  const ctx = await context();
   const byDay = limitSpentByDay(await storedRows(), ctx);
   const out = new Map<string, number>();
   for (let d = 1; d <= 12; d++) {
@@ -194,6 +205,106 @@ describe("the limit in the database is the ledger's", () => {
       const want = await expected();
       expect(got.calendar, `seed ${s}`).toEqual(want);
       expect(got.today, `seed ${s}`).toBe(want.get(TODAY));
+    }
+  });
+});
+
+interface SpendGroup {
+  /** Ids on the list, sorted. */
+  ids: number[];
+  /** The total of every listed day; a day whose rows all lack a hryvnia amount has none. */
+  dayTotals: Record<string, number>;
+  /** The period summary over the whole month. */
+  summary: { total: number; count: number };
+}
+
+const sortedIds = (ids: readonly number[]) => [...ids].sort((a, b) => a - b);
+const pageIds = (body: { items: { id: number }[] }) => sortedIds(body.items.map((i) => i.id));
+
+/** What the list says for «Траты»: one page of everything, its day totals, and the summary over the month. */
+async function servedSpendGroup(): Promise<SpendGroup> {
+  const page = await get("/transactions?group=spend&limit=200");
+  expect(page.status).toBe(200);
+  expect(page.body.nextCursor).toBeNull();
+  expect(page.body.summary).toBeNull();
+  const period = await get(`/transactions?group=spend&limit=200&from=${MONTH}-01&to=${MONTH}-12`);
+  expect(period.status).toBe(200);
+  expect(period.body.nextCursor).toBeNull();
+  // The period covers every seeded day, so the page is the same and the summary is over all of it.
+  expect(pageIds(period.body)).toEqual(pageIds(page.body));
+  expect(period.body.dayTotals).toEqual(page.body.dayTotals);
+  return {
+    ids: pageIds(page.body),
+    dayTotals: page.body.dayTotals as Record<string, number>,
+    summary: period.body.summary as { total: number; count: number },
+  };
+}
+
+/** The ledger over the stored rows: the rows in the group, their day sums, their sum and count. */
+async function expectedSpendGroup(): Promise<SpendGroup> {
+  const ctx = await context();
+  const rows = (await storedRows()).filter((r) => ledgerEffect(r, ctx).inSpendGroup);
+  const dayTotals: Record<string, number> = {};
+  for (const r of rows) {
+    if (r.amountUah === null) continue;
+    dayTotals[r.localDate] = (dayTotals[r.localDate] ?? 0) + r.amountUah;
+  }
+  return {
+    ids: sortedIds(rows.map((r) => r.id)),
+    dayTotals,
+    summary: { total: rows.reduce((s, r) => s + (r.amountUah ?? 0), 0), count: rows.length },
+  };
+}
+
+/** Checks the list against the ledger and returns the listed rows. */
+async function checkSpendGroup(): Promise<StoredRow[]> {
+  const got = await servedSpendGroup();
+  const want = await expectedSpendGroup();
+  expect(got.ids).toEqual(want.ids);
+  expect(got.dayTotals).toEqual(want.dayTotals);
+  expect(got.summary).toEqual(want.summary);
+  return (await storedRows()).filter((r) => want.ids.includes(r.id));
+}
+
+describe("the «Траты» group in the database is the ledger's", () => {
+  const ofType = (rows: readonly StoredRow[], type: TxType | null) => rows.filter((r) => r.type === type);
+  const onEveryKind = (date: string) => Array<string>(ACCOUNT_KINDS.length).fill(date);
+
+  it("with a cash wallet: the list, its day totals and the summary equal inSpendGroup over the same rows", async () => {
+    await seed(coverRows(), "2026-11-10");
+    const listed = await checkSpendGroup();
+    // The group is wider than the limit, as on the server today (Б2 decides whether it stays so): payments,
+    // taxes, debts and loans out are listed; jars and rows without a hryvnia amount are not filtered out.
+    for (const type of ["obligation", "tax", "debt_payment", "loan_out"] as const) expect(ofType(listed, type).length, type).toBe(ACCOUNT_KINDS.length);
+    const outside: readonly (TxType | null)[] = ["income", "person_in", "cash_in", "own_transfer", "loan_in", "goal_contribution", null];
+    for (const type of outside) expect(ofType(listed, type), String(type)).toEqual([]);
+    expect(listed.some((r) => r.accountKind === "jar" && r.type === "spend" && r.amountUah === -70_000)).toBe(true);
+    expect(listed.some((r) => r.type === "person_transfer" && r.amountUah === null && r.localDate === "2026-11-05")).toBe(true);
+    // A withdrawal is listed before the wallet start and not on or after it, on every kind.
+    const cashOut = ofType(listed, "cash_out").filter((r) => r.amountUah === -50_000);
+    expect(cashOut.map((r) => r.localDate)).toEqual(onEveryKind("2026-11-09"));
+  });
+
+  it("without a cash wallet every withdrawal is listed", async () => {
+    await seed(coverRows(), null);
+    const listed = await checkSpendGroup();
+    const cashOut = ofType(listed, "cash_out").filter((r) => r.amountUah === -50_000);
+    expect(cashOut.map((r) => r.localDate).sort()).toEqual(["2026-11-09", "2026-11-10", "2026-11-11"].flatMap(onEveryKind));
+  });
+
+  it("random row sets (20 seeds) give the same list in the database and in the ledger", async () => {
+    for (let s = 1; s <= 20; s++) {
+      await ds.query(`TRUNCATE transactions, accounts RESTART IDENTITY CASCADE`);
+      const r = rng(s);
+      const dates = Array.from({ length: 12 }, (_, d) => `${MONTH}-${String(d + 1).padStart(2, "0")}`);
+      const rows: Seed[] = Array.from({ length: 10 + Math.floor(r() * 30) }, () => ({
+        type: pick(r, ALL_TYPES),
+        kind: pick(r, ACCOUNT_KINDS),
+        amountUah: r() < 0.1 ? null : Math.round((r() - 0.8) * 1_000_000),
+        date: pick(r, dates),
+      }));
+      await seed(rows, r() < 0.3 ? null : pick(r, dates));
+      expect(await servedSpendGroup(), `seed ${s}`).toEqual(await expectedSpendGroup());
     }
   });
 });
