@@ -15,6 +15,7 @@ import { DataSource, type EntityManager } from "typeorm";
 import { isCounterpartyName } from "../domain/counterparty";
 import { creditPart } from "../domain/credit";
 import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
+import { spendGroupSql } from "../domain/ledger";
 import { PlanService } from "../plan/plan.service";
 import { cardCashSql, cardTransferSql } from "../cash/wallet";
 import { counterKeySql } from "./counter-key";
@@ -126,11 +127,11 @@ const LABEL_TYPE: Record<RecipientLabelName, TxType> = {
 /** Types an answer can have given a recipient's outgoing rows, so that it can be changed. */
 const ANSWERED_TYPES = ["person_transfer", "obligation", "debt_payment", "spend", "loan_out", "own_transfer"];
 
-/** Which types each list group shows. own_transfer, loan_in, goal_contribution and untyped rows are only in "all". */
-const GROUP_TYPES: Record<"spend" | "income", readonly string[]> = {
-  spend: ["spend", "obligation", "tax", "debt_payment", "person_transfer", "cash_out", "loan_out"],
-  income: ["income", "person_in", "cash_in"],
-};
+/**
+ * Types the «Доходы» list group shows. The «Траты» group is spendGroupSql in domain/ledger.ts.
+ * own_transfer, loan_in, goal_contribution and untyped rows are only in "all".
+ */
+const INCOME_GROUP_TYPES: readonly string[] = ["income", "person_in", "cash_in"];
 
 export class InvalidCursorError extends Error {}
 
@@ -148,11 +149,9 @@ export class TransactionsService {
     const arg = (v: unknown) => `$${args.push(v)}`;
     if (q.type) where.push(`t.type = ${arg(q.type)}`);
     if (q.needsLabel !== undefined) where.push(`t.needs_label = ${arg(q.needsLabel)}`);
-    if (q.group && q.group !== "all") where.push(`t.type = ANY(${arg(GROUP_TYPES[q.group])}::text[])`);
-    // Once the cash wallet keeps records, a withdrawal only moves money into it: not spending.
-    if (q.group === "spend") {
-      where.push(`NOT (t.type = 'cash_out' AND COALESCE(t.local_date >= (SELECT cash_start FROM settings WHERE id=1), false))`);
-    }
+    // The «Траты» group is the ledger's: its types and the withdrawal rule live in domain/ledger.ts.
+    if (q.group === "spend") where.push(spendGroupSql("t"));
+    if (q.group === "income") where.push(`t.type = ANY(${arg(INCOME_GROUP_TYPES)}::text[])`);
     if (q.category) where.push(`t.category = ${arg(q.category)}`);
     if (q.from) where.push(`t.local_date >= ${arg(q.from)}::date`);
     if (q.to) where.push(`t.local_date <= ${arg(q.to)}::date`);
