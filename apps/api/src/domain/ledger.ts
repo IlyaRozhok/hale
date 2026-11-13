@@ -3,8 +3,9 @@
 // Pure: no Nest, no I/O, no clock. The SQL helpers below are built from the same constants so the
 // services can filter in the database without a second copy of the rule.
 //
-// This encodes the rule the server uses as of 13 November 2026 (today.service.ts COUNTS_AGAINST_LIMIT,
-// transactions.service.ts GROUP_TYPES.spend). Nothing calls it yet; Б1 PR 2 and PR 3 switch over.
+// This encodes the rule the server uses as of 13 November 2026. «Сегодня» and the calendar count the limit
+// with limitSql (Б1 PR 2; test/ledger.e2e.test.ts checks it against ledgerEffect in Postgres). The «Траты»
+// group in transactions.service.ts still has its own GROUP_TYPES.spend until Б1 PR 3.
 import type { TxType } from "./classify";
 import type { Minor } from "./money";
 
@@ -83,7 +84,11 @@ export interface LedgerEffect {
   limitSpend: Minor;
   /** Shown in the «Траты» list group. */
   inSpendGroup: boolean;
-  /** Change to own money (cards, fop and wallet together); null without a hryvnia amount. */
+  /**
+   * Change to own money (cards, fop and wallet together); null without a hryvnia amount.
+   * It is a per-row view at the rate of the operation day (amount_uah). «Сегодня» converts foreign-currency
+   * balances at today's rate and adds manual_balances (Binance), so a sum of ownMoney will not reproduce it.
+   */
   ownMoney: Minor | null;
   /** The stored category, unchanged. */
   category: string | null;

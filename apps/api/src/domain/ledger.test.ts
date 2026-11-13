@@ -140,6 +140,12 @@ describe("ledgerEffect: own money", () => {
     expect(ledgerEffect(row({ type: "cash_out", amountUah: -100_000, localDate: CASH_START }), WITH_WALLET).ownMoney).toBe(0);
   });
 
+  it("a withdrawal from a jar on or after the wallet start is not own money and does not reach the wallet", () => {
+    for (const localDate of [CASH_START, "2026-11-11"]) {
+      expect(ledgerEffect(row({ type: "cash_out", accountKind: "jar", amountUah: -100_000, localDate }), WITH_WALLET).ownMoney).toBe(0);
+    }
+  });
+
   it("a withdrawal before the wallet start leaves own money", () => {
     expect(ledgerEffect(row({ type: "cash_out", amountUah: -100_000, localDate: "2026-11-09" }), WITH_WALLET).ownMoney).toBe(-100_000);
     expect(ledgerEffect(row({ type: "cash_out", amountUah: -100_000 }), NO_WALLET).ownMoney).toBe(-100_000);
@@ -214,17 +220,11 @@ describe("rule data", () => {
   });
 });
 
-// PR 2 switches the services to these helpers. Until then the predicates in the services are the truth,
-// and these tests read them from source, so a change on either side fails here. PR 2 removes them.
+// today.service.ts counts the limit with limitSql; test/ledger.e2e.test.ts runs it in Postgres against
+// ledgerEffect. transactions.service.ts still lists the «Траты» group itself until Б1 PR 3, so that one is
+// read from its source here.
 describe("SQL built from the same data", () => {
-  const squash = (s: string) => s.replace(/\s+/g, " ").trim();
   const source = (file: string) => readFileSync(join(__dirname, "..", file), "utf8");
-
-  it("limitSql is exactly the predicate today.service.ts uses", () => {
-    const m = /const COUNTS_AGAINST_LIMIT = `([^`]+)`/.exec(source("today/today.service.ts"));
-    expect(m, "COUNTS_AGAINST_LIMIT not found in today.service.ts").not.toBeNull();
-    expect(squash(limitSql())).toBe(squash(m![1]!));
-  });
 
   it("limitSql takes other table aliases", () => {
     expect(limitSql("x", "y")).toContain("y.kind <> 'jar' AND x.amount_uah IS NOT NULL");
@@ -359,7 +359,7 @@ describe("properties (300 seeded cases each)", () => {
     }
   });
 
-  it("a refund lowers the day by exactly its amount, never more", () => {
+  it("a refund lowers the day by exactly its amount", () => {
     for (const seed of SEEDS) {
       const { rows, ctx } = randomCase(seed);
       const r = rng(seed * 31);
@@ -369,6 +369,13 @@ describe("properties (300 seeded cases each)", () => {
       const refund = row({ type: "spend", accountKind: pick(r, ["black", "white", "fop", "cash", "other"] as const), amountUah: amount, localDate: day });
       expect(limitSpentByDay([...rows, refund], ctx).get(day), `seed ${seed}`).toBe(before - amount);
     }
+  });
+
+  // Pins today's behaviour, not a decision: whether a refund may take a day below zero is an open question.
+  it("a day with only a refund on it goes below zero", () => {
+    const refund = row({ type: "spend", amountUah: 5_000, localDate: "2026-11-03" });
+    expect(limitSpentByDay([refund], WITH_WALLET).get("2026-11-03")).toBe(-5_000);
+    expect(limitSpent([refund], WITH_WALLET)).toBe(-5_000);
   });
 
   it("a row that does not count changes no day", () => {
