@@ -79,6 +79,23 @@ interface Facts {
   now: Date;
 }
 
+/**
+ * What the day's facts say should be on record, decided once for the reader and the writer alike
+ * (task Б3, invariant 8 of the audit): the writer persists it, the reader answers from it without saving.
+ */
+interface Resolved {
+  /** The plan in force after today's decisions: null once it has ended. */
+  plan: Plan | null;
+  state: DailyState;
+  /** The limit the day starts with: today's spending added back, nothing of the day counted yet. */
+  morning: DailyState;
+  mark: DayMark;
+  /** The open plan whose shortage is over: it is closed and the day fixed afresh. */
+  closePlan: Plan | null;
+  /** The open plan's payments or income date changed: its credit need is recomputed once. */
+  replan: { id: number; creditPlan: number; basis: string } | null;
+}
+
 const fmt = (kopecks: number) => `₴${Math.round(kopecks / 100).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
 
 const fmtDay = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
@@ -103,48 +120,88 @@ export class TodayService {
   @Cron("5 0 * * *", { timeZone: "Europe/Kyiv" })
   async snapshotJob(): Promise<void> {
     try {
-      await this.getToday();
+      await this.ensureSnapshot();
     } catch (e) {
       this.log.warn(`daily snapshot failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
+  /**
+   * The one place the day's row is written (task Б3). Writes the row once (concurrent calls share it) and keeps
+   * its `mode` current: that is how the day the shortage came on is known, today and later. An existing row's
+   * limit is never rewritten here: only choosing a bridge plan, closing one (by hand or because the shortage is
+   * over), or setting an income date replaces it (design §5.2). Called by the 15-minute job, the night jobs,
+   * and after a plan is confirmed or cancelled; a read never calls it.
+   */
+  async ensureSnapshot(): Promise<void> {
+    const now = this.clock.now();
+    const f = await this.load(kyivDate(now), now);
+    await this.ds.transaction(async (m) => {
+      const r = await this.resolve(m, f);
+      if (r.closePlan) {
+        await m.query(`UPDATE bridge_plans SET closed_on=$1 WHERE id=$2 AND closed_on IS NULL`, [f.date, r.closePlan.id]);
+        // The bridge limit no longer applies: the day gets a fresh normal limit.
+        await m.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [f.date]);
+      } else if (r.replan) {
+        await m.query(`UPDATE bridge_plans SET credit_plan=$2, basis=$3 WHERE id=$1`, [r.replan.id, r.replan.creditPlan, r.replan.basis]);
+      }
+      await m.query(
+        `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3) ON CONFLICT (local_date) DO NOTHING`,
+        [f.date, r.morning.dailyLimit, r.mark],
+      );
+      await m.query(`UPDATE daily_snapshots SET mode=$2 WHERE local_date=$1 AND mode<>$2`, [f.date, r.mark]);
+    });
+  }
+
+  /**
+   * Reads only: no row of `daily_snapshots` or `bridge_plans` is written here. With the day's row present the
+   * limit is the fixed one; without it (the first request after midnight, before any writer ran) the figures are
+   * the ones `ensureSnapshot` will persist from the same facts, computed the same way and not saved.
+   */
   async getToday(): Promise<TodayDto> {
     const now = this.clock.now();
     const f = await this.load(kyivDate(now), now);
+    const r = await this.resolve(this.ds.manager, f);
+    // A plan that has ended takes the day's row with it when the writer runs: until then the row does not count.
+    const row = r.closePlan ? null : await this.storedLimit(this.ds.manager, f.date);
+    const limit = row ?? r.morning.dailyLimit;
+    // In the shortage mode the engine's limit is the one a new day starts with: the plan's, or the recommended one.
+    // While the day still runs on another limit, that one is named as tomorrow's; otherwise it is already in force.
+    const shortageStart =
+      r.mark === "bridge_start" ? (r.state.dailyLimit !== limit ? { nextLimit: r.state.dailyLimit } : {}) : undefined;
+    const leftToday = limit - f.spentToday;
+    const state: DailyState = {
+      ...r.state,
+      dailyLimit: limit,
+      leftToday,
+      level: limit > 0 ? Math.min(1, Math.max(0, leftToday / limit)) : 0,
+    };
+    return this.dto(f, state, r.plan, shortageStart);
+  }
+
+  /** Today's decisions from the facts, the same for the reader and the writer; writes nothing. */
+  private async resolve(m: EntityManager, f: Facts): Promise<Resolved> {
     let plan = f.plan;
+    let closePlan: Plan | null = null;
+    let replan: Resolved["replan"] = null;
 
     let state = this.compute(f, plan);
     if (plan && state.mode === "normal") {
-      await this.ds.query(`UPDATE bridge_plans SET closed_on=$1 WHERE id=$2 AND closed_on IS NULL`, [f.date, plan.id]);
-      // The bridge limit no longer applies: the day gets a fresh normal limit.
-      await this.ds.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [f.date]);
+      closePlan = plan;
       plan = null;
     } else if (plan && state.mode === "bridge" && plan.basis !== f.basis) {
       // Payments or the income date changed: the plan is recomputed once, then fixed again.
       const needed = this.compute(f, { ...plan, creditPlan: 0 }, null).bridge!.creditNeeded;
-      await this.ds.query(`UPDATE bridge_plans SET credit_plan=$2, basis=$3 WHERE id=$1`, [plan.id, needed, f.basis]);
+      replan = { id: plan.id, creditPlan: needed, basis: f.basis };
       plan = { ...plan, creditPlan: needed, basis: f.basis };
       state = this.compute(f, plan);
     }
 
     const morning = this.compute(f, plan, 0, f.spentToday);
-    // The row's mode follows the day: it is how the day the shortage came on is known, today and later.
-    const mark = dayMark({ live: state.mode, ...(await this.storedMarks(this.ds.manager, f.date)) });
-    const limit = await this.snapshot(f.date, morning, mark);
-    await this.ds.query(`UPDATE daily_snapshots SET mode=$2 WHERE local_date=$1 AND mode<>$2`, [f.date, mark]);
-    // In the shortage mode the engine's limit is the one a new day starts with: the plan's, or the recommended one.
-    // While the day still runs on another limit, that one is named as tomorrow's; otherwise it is already in force.
-    const shortageStart =
-      mark === "bridge_start" ? (state.dailyLimit !== limit ? { nextLimit: state.dailyLimit } : {}) : undefined;
-    const leftToday = limit - f.spentToday;
-    state = {
-      ...state,
-      dailyLimit: limit,
-      leftToday,
-      level: limit > 0 ? Math.min(1, Math.max(0, leftToday / limit)) : 0,
-    };
-    return this.dto(f, state, plan, shortageStart);
+    // The row's mode follows the day. A plan that has ended takes the day's row with it, so its mark is not stored.
+    const stored = await this.storedMarks(m, f.date);
+    const mark = dayMark({ live: state.mode, ...(closePlan ? { ...stored, stored: null } : stored) });
+    return { plan, state, morning, mark, closePlan, replan };
   }
 
   async previewBridge(dailyAmount: number): Promise<BridgePreviewDto> {
@@ -289,6 +346,8 @@ export class TodayService {
         [f.date, dailyAmount, mark],
       );
     });
+    // The plan is on record: the writer fixes the day on it before the answer is read.
+    await this.ensureSnapshot();
     return this.getToday();
   }
 
@@ -303,6 +362,7 @@ export class TodayService {
       // TypeORM returns [rows, count] for an UPDATE on Postgres.
       if ((closed[1] as number) > 0) await m.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [date]);
     });
+    await this.ensureSnapshot();
     return this.getToday();
   }
 
@@ -332,23 +392,12 @@ export class TodayService {
     return { stored: rows.find((r) => r.date === date)?.mode ?? null, previous: rows.find((r) => r.date < date)?.mode ?? null };
   }
 
-  /**
-   * Writes the day's row once (concurrent first requests share it) and returns its limit. An existing
-   * row's limit is never rewritten here: only choosing a bridge plan, closing one, or setting an income
-   * date replaces it (design §5.2). The row's `mode` is another matter: `getToday` rewrites it to the
-   * day's current mark right after this call.
-   */
-  private async snapshot(date: string, morning: DailyState, mark: DayMark): Promise<number> {
-    return this.ds.transaction(async (m) => {
-      await m.query(
-        `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3) ON CONFLICT (local_date) DO NOTHING`,
-        [date, morning.dailyLimit, mark],
-      );
-      const row = (await m.query(`SELECT daily_limit::float8 AS daily_limit FROM daily_snapshots WHERE local_date=$1`, [date]))[0] as {
-        daily_limit: number;
-      };
-      return row.daily_limit;
-    });
+  /** The limit fixed for the day, if its row is there. */
+  private async storedLimit(m: EntityManager, date: string): Promise<number | null> {
+    const row = (await m.query(`SELECT daily_limit::float8 AS daily_limit FROM daily_snapshots WHERE local_date=$1`, [date]))[0] as
+      | { daily_limit: number }
+      | undefined;
+    return row?.daily_limit ?? null;
   }
 
   // --- reading the database ---------------------------------------------------

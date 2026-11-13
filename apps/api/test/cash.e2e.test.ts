@@ -4,6 +4,7 @@ import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import { Clock } from "../src/today/clock";
+import { TodayService } from "../src/today/today.service";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
 
 let app: INestApplication;
@@ -67,7 +68,11 @@ async function bankTx(
   )[0].id;
 }
 const wallet = async () => (await api.get("/cash").expect(200)).body;
-const today = async () => (await api.get("/today").expect(200)).body;
+/** What the owner sees: the 15-minute job has fixed the day (a read writes nothing, task Б3), then the app read it. */
+const today = async () => {
+  await app.get(TodayService).ensureSnapshot();
+  return (await api.get("/today").expect(200)).body;
+};
 const start = (amount = 500_000, date?: string) => api.post("/cash/start", date ? { amount, date } : { amount });
 const op = (body: object) => api.post("/cash/operations", body);
 const row = async (sql: string, args: unknown[] = []) => (await ds.query(sql, args))[0];

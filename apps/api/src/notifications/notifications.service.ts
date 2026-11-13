@@ -56,6 +56,8 @@ export class NotificationsService {
 
   private async loadState(now: Date): Promise<NotifyState> {
     const date = kyivDate(now);
+    // This job is the writer that keeps the day's row current between the night jobs (task Б3).
+    await this.today.ensureSnapshot();
     const t = await this.today.getToday();
     const taxes: { id: number; name: string; amount: number; currency: string; due_on: string }[] = await this.ds.query(
       `SELECT id, name, amount::float8 AS amount, currency, due_on::text AS due_on

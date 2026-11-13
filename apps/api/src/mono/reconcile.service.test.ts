@@ -8,6 +8,7 @@ import { JobRunner } from "./jobs/job-runner";
 import type { MonoClient } from "./mono.client";
 import type { MonoStatementItem } from "./mono.schemas";
 import { ReconcileService } from "./reconcile.service";
+import type { TodayService } from "../today/today.service";
 
 const NOW_MS = Date.UTC(2026, 10, 2, 12, 0, 0);
 const clock = { now: () => NOW_MS };
@@ -51,8 +52,9 @@ function make(
   };
   const runner = new JobRunner(ds, clock);
   const imports = new ImportService(ds, client as unknown as MonoClient, runner, clock);
-  const service = new ReconcileService(ds, client as unknown as MonoClient, imports, clock, cfg as never);
-  return { client, service, imports };
+  const today = { ensureSnapshot: vi.fn(async () => {}) };
+  const service = new ReconcileService(ds, client as unknown as MonoClient, imports, clock, cfg as never, today as unknown as TodayService);
+  return { client, service, imports, today };
 }
 
 describe("ReconcileService.runDaily", () => {
@@ -106,10 +108,20 @@ describe("ReconcileService.runDaily", () => {
   });
 
   it("does not record last_sync_at when a statement call fails, and reports the failure", async () => {
-    const { service } = make({ statement: async () => { throw new Error("boom"); } });
+    const { service, today } = make({ statement: async () => { throw new Error("boom"); } });
     await expect(service.runDaily()).rejects.toThrow(/boom/);
     const [s] = await ds.query("SELECT last_sync_at FROM settings");
     expect(s.last_sync_at).toBeNull();
+    expect(today.ensureSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("fixes the day's row once the night's facts are in, not without a token (Б3)", async () => {
+    const ok = make();
+    await ok.service.runDaily();
+    expect(ok.today.ensureSnapshot).toHaveBeenCalledTimes(1);
+    const none = make({}, { MONO_WEBHOOK_SECRET: SECRET, PUBLIC_URL: "https://x.example" });
+    await none.service.runDaily();
+    expect(none.today.ensureSnapshot).not.toHaveBeenCalled();
   });
 });
 
