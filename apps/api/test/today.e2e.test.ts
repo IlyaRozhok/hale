@@ -686,9 +686,27 @@ describe("bridge mode", () => {
     expect(r.state.dailyLimit).toBeGreaterThan(100_000);
   });
 
-  it("refuses an unaffordable plan or a plan outside bridge mode", async () => {
+  it("confirms a plan the credit limit does not cover: the day's limit is the chosen amount (А22)", async () => {
     await setup();
-    await api.post("/bridge", { dailyAmount: 200_000 }).expect(422);
+    // 18 * 200,000 + 1,197,000 = 4,797,000 needed, 3,000,000 of credit: 1,797,000 short
+    const saved = await api.post("/bridge", { dailyAmount: 200_000 }).expect(201);
+    expect(saved.body.state).toMatchObject({ dailyLimit: 200_000, leftToday: 200_000 });
+    expect(saved.body.state.bridge).toMatchObject({ confirmed: true, shortfall: 1_797_000 });
+    expect(await plans()).toEqual([{ daily_amount: 200_000, credit_plan: 4_797_000, closed_on: null }]);
+    expect((await today()).state.dailyLimit).toBe(200_000);
+  });
+
+  it("confirms a plan when the account has no credit limit at all (А22)", async () => {
+    await setup();
+    await ds.query(`UPDATE accounts SET credit_limit=0, balance=1032500`); // the same own money, no credit
+    const saved = await api.post("/bridge", { dailyAmount: 10_000 }).expect(201);
+    expect(saved.body.state.dailyLimit).toBe(10_000);
+    expect(saved.body.state.bridge).toMatchObject({ confirmed: true, shortfall: 1_197_000 + 18 * 10_000 });
+    expect((await today()).state.dailyLimit).toBe(10_000);
+  });
+
+  it("refuses a malformed plan or a plan outside bridge mode", async () => {
+    await setup();
     await api.post("/bridge", { dailyAmount: 0 }).expect(400);
     await api.post("/bridge", { dailyAmount: 1.5 }).expect(400);
     expect(await plans()).toHaveLength(0);

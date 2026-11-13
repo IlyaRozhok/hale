@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable, Logger, UnprocessableEntityException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, Logger } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import type { BridgePreviewDto, CalendarDto, SettingsPreviewDto, TodayDto } from "@hale/contracts";
 import { DataSource, type EntityManager } from "typeorm";
@@ -268,9 +268,8 @@ export class TodayService {
     const f = await this.load(kyivDate(now), now);
     const b = this.compute(f, f.plan, null, undefined, dailyAmount).bridge;
     if (!b) throw new ConflictException("bridge mode is not active: free money is not negative");
-    if (b.shortfall > 0) {
-      throw new UnprocessableEntityException(`the plan exceeds the credit limit by ${b.shortfall}`);
-    }
+    // A plan the credit limit does not cover is confirmed too (owner's decision, task А22): the day still
+    // gets its limit, and the app says how much is missing. `shortfall` stays in the state for that.
     await this.ds.transaction(async (m) => {
       const open = await m.query(`SELECT id FROM bridge_plans WHERE closed_on IS NULL ORDER BY id DESC LIMIT 1 FOR UPDATE`);
       if (open[0]) {
