@@ -4,7 +4,6 @@ import { tokens } from "@hale/tokens";
 import type { LoanRowDto } from "@hale/contracts";
 import { useDeleteLoan, useLoanHistory, useRepayOldLoans } from "../api/queries";
 import { formatMoney, shortDate } from "../format";
-import { askDeleteLoan } from "./BadCaseCard";
 import { ErrorText } from "./ErrorText";
 import { ManualLoanSheet } from "./ManualLoan";
 import { PrimaryButton } from "./PrimaryButton";
@@ -14,6 +13,14 @@ import { Sheet } from "./Sheet";
 const { color, radius, space, touchMin, type } = tokens;
 
 const nameOf = (l: LoanRowDto) => l.title ?? "Займ";
+
+/** Removing a loan is only for a mistaken entry, so it asks first. */
+function askDeleteLoan(text: string, onDelete: () => void): void {
+  Alert.alert("Удалить ошибочную запись?", `${text}. Если займ настоящий, отметьте его погашенным.`, [
+    { text: "Оставить", style: "cancel" },
+    { text: "Удалить", style: "destructive", onPress: onDelete },
+  ]);
+}
 
 function detail(l: LoanRowDto): string {
   const base = `${formatMoney(l.amount)} от ${shortDate(l.receivedOn)}`;

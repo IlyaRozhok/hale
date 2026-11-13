@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, SectionList, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { RouteProp } from "@react-navigation/native";
 import { tokens } from "@hale/tokens";
 import type { TransactionDto } from "@hale/contracts";
 import { useTransactions } from "../api/queries";
@@ -34,11 +35,14 @@ const SEARCH_DELAY_MS = 300;
 /** A row an answer can be about: already answered, or still a plain transfer out. */
 const isTransferToSomeone = (t: TransactionDto) => t.amount < 0 && (t.recipientLabel !== null || t.type === "person_transfer");
 
+/** What a move to the operations may carry: `day` asks for that one day's operations; `at` differs on every arrival. */
+type ActivityParams = { day?: string; at?: number } | undefined;
+
 type Props = {
   /** Test seam for the current moment. */
   now?: () => Date;
-  /** From the navigator. `day` asks for the operations of that one day; `at` differs on every arrival. */
-  route?: { params?: { day?: string; at?: number } };
+  /** From the navigator; tests pass only `params`. */
+  route?: Pick<RouteProp<{ Activity: ActivityParams }, "Activity">, "params">;
 };
 
 /** The operations list by day, newest first, pages by cursor. Transfers between own accounts only show under "Все". */
@@ -251,13 +255,11 @@ const styles = StyleSheet.create({
   root: { flex: 1, paddingHorizontal: space.xl, gap: space.md },
   list: { marginHorizontal: -space.xl },
   title: { ...type.title, color: color.fg.default },
-  filters: { flexDirection: "row", gap: space.sm },
   head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   searchButton: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
   day: { flexDirection: "row", justifyContent: "space-between", gap: space.md, paddingTop: space.lg, paddingBottom: space.sm },
   dayText: { ...type.caption, color: color.fg.subtle, fontVariant: ["tabular-nums"] },
   stack: { gap: space.md },
-  text: { ...type.body, color: color.fg.default },
   muted: { ...type.body, color: color.fg.muted },
   footer: { paddingVertical: space.lg },
   button: {

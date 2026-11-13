@@ -8,7 +8,7 @@ import {
   formatSignedOriginal,
   goalPercent,
   longDate,
-  dueLabel, formatMoney, formatOriginal, kyivDate, formatMoneyWithUsd, formatStamp, formatUsd, isIsoDate, parseBalance, parseHryvnias, shiftDate, shortDate, taxQuarterOfDue,
+  dueLabel, formatMoney, formatOriginal, kyivDate, formatStamp, formatUsd, isIsoDate, parseBalance, parseHryvnias, shiftDate, shortDate, taxQuarterOfDue,
 } from "./format";
 
 describe("formatMoney", () => {
@@ -25,7 +25,7 @@ describe("formatMoney", () => {
   });
 });
 
-describe("formatUsd / formatMoneyWithUsd", () => {
+describe("formatUsd", () => {
   it("converts kopecks to dollars at the UAH-per-USD rate", () => {
     expect(formatUsd(1032500, 41.25)).toBe("$250");
     expect(formatUsd(-1650000, 41.25)).toBe("−$400");
@@ -33,11 +33,6 @@ describe("formatUsd / formatMoneyWithUsd", () => {
 
   it("is null when no rate is known", () => {
     expect(formatUsd(1032500, 0)).toBeNull();
-    expect(formatMoneyWithUsd(1032500, 0)).toEqual({ uah: "₴10,325", usd: null });
-  });
-
-  it("returns both parts", () => {
-    expect(formatMoneyWithUsd(1032500, 41.25)).toEqual({ uah: "₴10,325", usd: "$250" });
   });
 });
 

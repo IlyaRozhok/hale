@@ -337,7 +337,7 @@ export interface TodayDto {
   rateStale: boolean;
   /** `cash` is the wallet, already inside `own`; 0 until the wallet is started. */
   accounts: { own: number; credit: number; fop: number; binance: number; cash: number };
-  /** `amount` in hryvnias; `currency` is the payment's own. */
+  /** `amount` in kopecks, already converted to hryvnias; `currency` is the payment's own. */
   upcoming: { id: string; name: string; amount: number; dueOn: string; kind: string; currency: string }[];
   questions: {
     id: string;
@@ -377,7 +377,7 @@ export interface RunwayDto {
   /** The day the money ends: its spending or payment takes the balance below zero. */
   zeroOn: string | null;
   points: { date: string; balance: number }[];
-  /** Unpaid payments inside the stretch, in hryvnias; an overdue one stands on today. `id` is the one in `upcoming`. */
+  /** Unpaid payments inside the stretch, amounts in kopecks converted to hryvnias; an overdue one stands on today. `id` is the one in `upcoming`. */
   events: { id: string; date: string; name: string; amount: number }[];
 }
 

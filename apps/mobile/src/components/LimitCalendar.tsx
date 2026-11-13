@@ -59,7 +59,7 @@ type Props = {
   onOpenDay: (date: string) => void;
 };
 
-/** A month of days coloured by how they went against the limit, with the current streak. */
+/** A month of days, each with a dot for how it went against the limit, and the current streak. */
 export function LimitCalendar({ today, streak, onClose, onOpenDay }: Props) {
   const thisMonth = today.slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
   arrow: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
   row: { flexDirection: "row", flexWrap: "wrap" },
   weekday: { width: "14.28%", textAlign: "center", ...type.caption, color: color.fg.subtle, paddingBottom: space.xs },
-  slot: { width: "14.28%", height: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
+  slot: { width: "14.28%", minHeight: touchMin, alignItems: "center", justifyContent: "center" },
   day: { alignSelf: "stretch", flex: 1, margin: INSET, alignItems: "center", justifyContent: "center", borderRadius: radius.md },
   ringToday: { borderWidth: 1, borderColor: color.fg.subtle },
   ringPicked: { borderWidth: 1, borderColor: color.fg.default },
