@@ -2,8 +2,7 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { ExpectedIncomePatch, InstallmentInput, InstallmentPatch, RecurringPatch } from "@hale/contracts";
 import { DataSource } from "typeorm";
 import { ExpectedIncome, RecurringPayment } from "../db/entities";
-import { kyivDate } from "../domain/money";
-import { Clock } from "../today/clock";
+import { LimitService } from "../today/limit.service";
 import { PlanService } from "./plan.service";
 
 /** The same day of a later month, or that month's last day. */
@@ -16,23 +15,19 @@ function monthsLater(date: string, n: number): string {
 
 /**
  * The owner's changes to the plan. Each reaches the rows already generated from it (what was paid or
- * received stays as it was) and applies at once: the day's limit is recomputed on the next request.
+ * received stays as it was) and applies at once: the day's limit is fixed afresh before the answer.
  */
 @Injectable()
 export class PlanEntriesService {
   constructor(
     @Inject(DataSource) private readonly ds: DataSource,
-    @Inject(Clock) private readonly clock: Clock,
     @Inject(PlanService) private readonly plan: PlanService,
+    @Inject(LimitService) private readonly limit: LimitService,
   ) {}
 
-  private today(): string {
-    return kyivDate(this.clock.now());
-  }
-
-  /** Today's fixed limit no longer holds. */
-  async freshLimit(): Promise<void> {
-    await this.ds.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [this.today()]);
+  /** Today's fixed limit no longer holds: the day is fixed afresh now. */
+  freshLimit(): Promise<void> {
+    return this.limit.invalidate("plan");
   }
 
   /** Dates for something just added, so that it counts now and not at the next hourly job. */

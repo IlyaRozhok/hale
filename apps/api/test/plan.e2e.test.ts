@@ -27,6 +27,17 @@ beforeAll(async () => {
   const login = await request(http()).post("/auth/login").send({ password: TEST_PASSWORD, deviceName: "t" });
   auth = `Bearer ${login.body.token as string}`;
 });
+/** A row the day cannot have come by honestly: any recompute replaces it. */
+const plantSnapshot = (date: string) =>
+  ds.query(`INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1, 1, 'normal') ON CONFLICT (local_date) DO UPDATE SET daily_limit=1`, [date]);
+/** The day was fixed afresh at once (task Б4): its row is there, not the planted one, and it is what the app reads. */
+const fixedAfresh = async (date: string) => {
+  const r = (await ds.query(`SELECT daily_limit::int AS l FROM daily_snapshots WHERE local_date=$1`, [date]))[0] as { l: number } | undefined;
+  expect(r).toBeDefined();
+  expect(r!.l).not.toBe(1);
+  expect((await api.get("/today").expect(200)).body.state.dailyLimit).toBe(r!.l);
+};
+
 afterAll(async () => {
   await app.close();
   await ds.destroy();
@@ -296,18 +307,16 @@ describe("repaying and reviewing loans", () => {
     expect((await history()).repaid[0]).toMatchObject({ id, title: "Кредит готівкою", manual: false });
   });
 
-  it("marking a loan repaid or deleting a mistaken one gives the day a fresh limit", async () => {
+  it("marking a loan repaid or deleting a mistaken one gives the day a fresh limit at once", async () => {
     const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv" }).format(new Date());
-    const snapshot = () => ds.query(`INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1, 1, 'normal') ON CONFLICT (local_date) DO UPDATE SET daily_limit=1`, [date]);
-    const has = async () => (await ds.query(`SELECT 1 FROM daily_snapshots WHERE local_date=$1`, [date])).length;
     const paid = await manual(100_000);
     const wrong = await manual(1_000);
-    await snapshot();
+    await plantSnapshot(date);
     await api.post(`/plan/loans/${paid}/repay`, { amount: 100_000, date: "2026-11-02" }).expect(201);
-    expect(await has()).toBe(0);
-    await snapshot();
+    await fixedAfresh(date);
+    await plantSnapshot(date);
     await api.del(`/plan/loans/${wrong}`).expect(200);
-    expect(await has()).toBe(0);
+    await fixedAfresh(date);
   });
 
   it("separates loans from before tracking began: not owed in the limit, still reviewable", async () => {
@@ -387,8 +396,8 @@ describe("editing the plan from the phone", () => {
     ds.query(`SELECT name, amount::float8 AS amount, currency, due_on::text AS due_on, paid_at IS NOT NULL AS paid, recurring_id FROM scheduled_payments WHERE ${where} ORDER BY due_on, id`);
   const series = async (over: object = {}) =>
     (await api.post("/plan/recurring", { name: "Квартира", amount: 100_000, currency: "UAH", day_of_month: 28, ...over }).expect(201)).body.id as number;
-  const snapshot = () => ds.query(`INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1, 1, 'normal') ON CONFLICT (local_date) DO UPDATE SET daily_limit=1`, [today()]);
-  const snapshots = async () => (await ds.query(`SELECT 1 FROM daily_snapshots WHERE local_date=$1`, [today()])).length;
+  const snapshot = () => plantSnapshot(today());
+  const refixed = () => fixedAfresh(today());
 
   beforeEach(() => ds.query(`DELETE FROM daily_snapshots`));
 
@@ -407,7 +416,7 @@ describe("editing the plan from the phone", () => {
         expect.objectContaining({ name: "Квартира", amount: 100_000, paid: true }),
         expect.objectContaining({ name: "Аренда", amount: 120_000, paid: false }),
       ]);
-      expect(await snapshots()).toBe(0);
+      await refixed();
     });
 
     it("a new day moves the unpaid rows, within each month", async () => {
@@ -422,7 +431,7 @@ describe("editing the plan from the phone", () => {
       await snapshot();
       await api.del(`/plan/recurring/${id}`).expect(200);
       expect(await rows()).toEqual([expect.objectContaining({ due_on: monthsAhead(0, 28), paid: true, recurring_id: null })]);
-      expect(await snapshots()).toBe(0);
+      await refixed();
       await api.del(`/plan/recurring/${id}`).expect(404);
     });
   });
@@ -431,13 +440,13 @@ describe("editing the plan from the phone", () => {
     it("adding, changing and deleting one gives the day a fresh limit", async () => {
       await snapshot();
       const { id } = (await api.post("/plan/payments", { kind: "obligation", name: "Страховка", amount: 500, currency: "UAH", due_on: monthsAhead(0, 28) }).expect(201)).body as { id: number };
-      expect(await snapshots()).toBe(0);
+      await refixed();
       await snapshot();
       await api.patch(`/plan/payments/${id}`, { amount: 600 }).expect(200);
-      expect(await snapshots()).toBe(0);
+      await refixed();
       await snapshot();
       await api.del(`/plan/payments/${id}`).expect(200);
-      expect(await snapshots()).toBe(0);
+      await refixed();
     });
   });
 
@@ -465,7 +474,7 @@ describe("editing the plan from the phone", () => {
       await snapshot();
       await api.patch(`/plan/installments/${encodeURIComponent("Телефон")}`, { amount: 150_000, name: "iPhone" }).expect(200);
       expect((await rows()).map((r: { name: string; amount: number }) => [r.name, r.amount])).toEqual([["Телефон", 200_000], ["iPhone", 150_000], ["iPhone", 150_000]]);
-      expect(await snapshots()).toBe(0);
+      await refixed();
     });
 
     it("deleting takes away the payments still to make and leaves the paid ones", async () => {
@@ -500,7 +509,7 @@ describe("editing the plan from the phone", () => {
       const id = await add();
       await snapshot();
       await api.patch(`/plan/expected-incomes/${id}`, { amount: 200_000 }).expect(200);
-      expect(await snapshots()).toBe(0);
+      await refixed();
     });
 
     it("a change leaves dates the owner set alone", async () => {
@@ -514,7 +523,7 @@ describe("editing the plan from the phone", () => {
       const id = await add();
       await snapshot();
       await api.del(`/plan/expected-incomes/${id}`).expect(200);
-      expect(await snapshots()).toBe(0);
+      await refixed();
     });
   });
 });

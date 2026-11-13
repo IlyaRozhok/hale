@@ -3,6 +3,7 @@ import type { LoanHistoryDto, LoanRepayInput, LoanRowDto } from "@hale/contracts
 import { DataSource } from "typeorm";
 import { kyivDate } from "../domain/money";
 import { Clock } from "../today/clock";
+import { LimitService } from "../today/limit.service";
 import { LOAN_COST_TEXT } from "./short-loan";
 
 /** Closing, removing and reviewing loans. */
@@ -11,11 +12,12 @@ export class LoansService {
   constructor(
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(Clock) private readonly clock: Clock,
+    @Inject(LimitService) private readonly limit: LimitService,
   ) {}
 
   /**
    * The owner repaid a loan. Less than what is owed leaves it open with the rest still owed; more
-   * counts the excess as the cost of the loan. The day's limit is recomputed, as what is owed changed.
+   * counts the excess as the cost of the loan. The day's limit is fixed afresh at once, as what is owed changed.
    */
   async repay(id: number, { amount, date }: LoanRepayInput): Promise<LoanRowDto> {
     const today = kyivDate(this.clock.now());
@@ -38,7 +40,7 @@ export class LoansService {
           WHERE id=$1`,
         [id, total, amount - pay, date],
       );
-      await m.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [today]);
+      await this.limit.invalidate("loan", m);
     });
     return (await this.rows(`l.id=$1`, [id]))[0]!;
   }
@@ -58,7 +60,6 @@ export class LoansService {
 
   /** A mistaken manual entry goes away; a loan from a bank row would come back with the next sync. */
   async remove(id: number): Promise<{ deleted: true }> {
-    const today = kyivDate(this.clock.now());
     return this.ds.transaction(async (m) => {
       const loan = (await m.query(`SELECT source_transaction_id FROM loans WHERE id=$1 FOR UPDATE`, [id]))[0] as
         | { source_transaction_id: number | null }
@@ -66,7 +67,7 @@ export class LoansService {
       if (!loan) throw new NotFoundException();
       if (loan.source_transaction_id !== null) throw new ConflictException("loan comes from a bank operation");
       await m.query(`DELETE FROM loans WHERE id=$1`, [id]);
-      await m.query(`DELETE FROM daily_snapshots WHERE local_date=$1`, [today]);
+      await this.limit.invalidate("loan", m);
       return { deleted: true as const };
     });
   }

@@ -277,8 +277,9 @@ describe("a planned payment paid in cash", () => {
     ]))[0].id as number;
 
   it("closes the payment, takes it from the wallet and leaves the limit alone", async () => {
-    await start(2_000_000).expect(201);
+    // The payment is in the day's limit from the start: starting the wallet fixes the day at once (task Б4).
     const id = await plan(1_700_000);
+    await start(2_000_000).expect(201);
     const before = (await today()).state.leftToday;
     expect((await api.post(`/cash/payments/${id}`).expect(201)).body.balance).toBe(300_000);
     expect((await today()).state.leftToday).toBe(before);
