@@ -252,6 +252,10 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
             creditLimit={data.accounts.credit}
             confirming={chooseBridge.isPending}
             zeroOn={data.runway?.zeroOn ?? null}
+            today={data.date}
+            onMove={() => {
+              if (chooseBridge.isError) chooseBridge.reset();
+            }}
             confirmFailed={chooseBridge.error ? (chooseBridge.error instanceof ApiError && chooseBridge.error.status === 422 ? "refused" : "failed") : null}
             onConfirm={(amount) => chooseBridge.mutate(amount, { onSuccess: () => closeIfOpen("bridge") })}
             onCancel={() => cancelBridge.mutate(undefined, {

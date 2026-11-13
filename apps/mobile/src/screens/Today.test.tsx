@@ -841,14 +841,15 @@ describe("Today, bridge", () => {
 
   describe("when the money is short even with the credit limit (А22)", () => {
     /** No credit limit at all: everything missing is short. The money runs out on 17 November. */
-    const shortToday = (bridge: Partial<BridgeStateDto> = {}) => {
-      const fixture = todayFixture({ state: bridgeState({ shortfall: 2007000, maxDailyWithinCredit: 0, ...bridge }) });
+    const shortToday = (bridge: Partial<BridgeStateDto> = {}, zeroOn = "2026-11-17", over: Partial<DailyStateDto> = {}) => {
+      const fixture = todayFixture({ state: { ...bridgeState({ shortfall: 2007000, maxDailyWithinCredit: 0, ...bridge }), ...over } });
       return jest.fn(async () => ({
         ...fixture,
         accounts: { ...fixture.accounts, credit: 0 },
-        runway: { ...fixture.runway!, zeroOn: "2026-11-17" },
+        runway: { ...fixture.runway!, zeroOn },
       }));
     };
+    const NO_DATE = "Не хватает ₴20,070. План можно подтвердить: лимит на день будет.";
     const LINE = "Не хватает ₴20,070. План можно подтвердить: лимит на день будет, а недостающее понадобится к 17 ноября.";
 
     it("says so in sand, without a word about credit, and lets the plan be confirmed", async () => {
@@ -885,6 +886,57 @@ describe("Today, bridge", () => {
       expect(await screen.findByText(/План подтверждён/)).toBeTruthy();
       expect(StyleSheet.flatten(screen.getByText("Недостающее понадобится к 17 ноября.").props.style).color).toBe(tokens.color.limit.low);
       expect(screen.queryByText(LINE)).toBeNull();
+    });
+
+    it("names no date when the money runs out today: it is not ahead", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: shortToday({}, "2026-11-02") }));
+      await openBridge();
+      expect(await screen.findByText(NO_DATE)).toBeTruthy();
+      expect(screen.queryByText(/понадобится к/)).toBeNull();
+    });
+
+    it("once confirmed, says nothing of a date that is not ahead", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: shortToday({ confirmed: true }, "2026-11-02") }));
+      await openBridge();
+      expect(await screen.findByText(/План подтверждён/)).toBeTruthy();
+      expect(screen.queryByText(/понадобится/)).toBeNull();
+    });
+
+    it("names no date on the day the shortage came on: the runway is drawn for the morning limit", async () => {
+      const today = shortToday({}, "2026-11-17", { dailyLimit: 200000, leftToday: 60000, level: 0.3, shortageStart: { nextLimit: 45300 } });
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today }));
+      await openBridge();
+      expect(await screen.findByText(NO_DATE)).toBeTruthy();
+      expect(screen.queryByText(/понадобится к/)).toBeNull();
+    });
+
+    it("with a confirmed plan and the slider moved, says only what is missing: the day already has a limit", async () => {
+      const api = fakeApi({
+        today: shortToday({ confirmed: true }),
+        previewBridge: jest.fn(async (d: number) => ({ dailyAmount: d, creditNeeded: 2997000, shortfall: 2997000 })),
+      });
+      await renderWith(<Today onOpenActivity={noop} />, api);
+      await openBridge();
+      await fireEvent(await screen.findByLabelText("Сумма в день"), "valueChange", 100000);
+      await tick(310);
+      const line = await screen.findByText("Не хватает ₴29,970.");
+      expect(StyleSheet.flatten(line.props.style).color).toBe(tokens.color.limit.low);
+      expect(screen.queryByText(/План можно подтвердить/)).toBeNull();
+      expect(screen.getByText("Подтвердить ₴1,000 в день")).toBeTruthy();
+    });
+
+    it("a failed confirm's line goes away once the slider moves", async () => {
+      const chooseBridge = jest.fn(async () => {
+        throw new ApiError(422);
+      });
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: shortToday(), chooseBridge }));
+      await openBridge();
+      await fireEvent.press(await screen.findByRole("button", { name: "Подтвердить план" }));
+      await tick(0);
+      await screen.findByText(/пока не получилось/);
+      await fireEvent(screen.getByLabelText("Сумма в день"), "valueChange", 50000);
+      await tick(0);
+      expect(screen.queryByText(/пока не получилось/)).toBeNull();
     });
 
     it("an older server that refuses such a plan gets a calm line, and the plan stays unconfirmed", async () => {

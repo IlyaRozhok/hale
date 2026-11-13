@@ -26,6 +26,10 @@ type Props = {
    * absent when there is none, or from an older server.
    */
   zeroOn?: string | null;
+  /** Today's date: a zero day that is not after it is no date to name. */
+  today?: string;
+  /** The slider moved: an earlier failed confirm no longer applies. */
+  onMove?: () => void;
   /** Why the last confirm did not go through: an older server refuses a plan the credit limit does not cover. */
   confirmFailed?: "refused" | "failed" | null;
 };
@@ -39,7 +43,7 @@ const dayMonth = (iso: string) => dateLabel(iso).replace(/ \d{4}$/, "");
  * credit limit does not cover is confirmed too (owner's decision, А22): the day gets its limit, and
  * a sand line says how much is missing and by when it is needed.
  */
-export function BridgePlan({ state, usdRate, creditLimit = 0, onConfirm, onCancel, confirming, zeroOn = null, confirmFailed = null }: Props) {
+export function BridgePlan({ state, usdRate, creditLimit = 0, onConfirm, onCancel, confirming, zeroOn = null, today, onMove, confirmFailed = null }: Props) {
   const base = state.bridge;
   // Unmoved, the slider shows the server's exact amount, so the numbers beside it are the server's too.
   // On the day the shortage came on the day still runs on its morning limit; the plan is the new one.
@@ -58,16 +62,20 @@ export function BridgePlan({ state, usdRate, creditLimit = 0, onConfirm, onCance
   const needsAction = !base.confirmed || changed;
   const canConfirm = fresh && !confirming && !preview.failed;
   const short = !preview.failed && fresh && shown.shortfall > 0;
-  // The zero day is drawn for the day's limit: it holds only while the slider shows that amount.
-  const neededOn = zeroOn && value === state.dailyLimit ? dayMonth(zeroOn) : null;
+  // The zero day is drawn for the day's limit: it holds only while the slider shows that amount,
+  // and it is named only while it is still ahead.
+  const neededOn = zeroOn && today && zeroOn > today && value === state.dailyLimit ? dayMonth(zeroOn) : null;
   // One amount missing on the screen: the same one as in «Не хватает до дохода», never the part beyond the credit limit.
-  const shortLine = !short
-    ? null
-    : needsAction
-      ? `Не хватает ${formatMoney(shown.creditNeeded)}. ${neededOn ? `План можно подтвердить: лимит на день будет, а недостающее понадобится к ${neededOn}.` : "План можно подтвердить: лимит на день будет."}`
-      : neededOn
-        ? `Недостающее понадобится к ${neededOn}.`
-        : null;
+  const shortLine = (): string | null => {
+    if (!short) return null;
+    const missing = `Не хватает ${formatMoney(shown.creditNeeded)}.`;
+    // A confirmed plan already gives the day a limit: only what is missing is news.
+    if (base.confirmed) return changed ? missing : neededOn ? `Недостающее понадобится к ${neededOn}.` : null;
+    return neededOn
+      ? `${missing} План можно подтвердить: лимит на день будет, а недостающее понадобится к ${neededOn}.`
+      : `${missing} План можно подтвердить: лимит на день будет.`;
+  };
+  const shortText = shortLine();
   const askCancel = () =>
     Alert.alert("Отменить план?", "Лимит на сегодня будет посчитан заново.", [
       { text: "Оставить", style: "cancel" },
@@ -99,7 +107,10 @@ export function BridgePlan({ state, usdRate, creditLimit = 0, onConfirm, onCance
         maximumValue={max}
         step={STEP}
         value={value}
-        onValueChange={(v: number) => setMoved(roundToStep(v))}
+        onValueChange={(v: number) => {
+          setMoved(roundToStep(v));
+          onMove?.();
+        }}
         minimumTrackTintColor={color.fg.default}
         maximumTrackTintColor={color.data.track}
         thumbTintColor={color.fg.default}
@@ -112,7 +123,7 @@ export function BridgePlan({ state, usdRate, creditLimit = 0, onConfirm, onCance
           </Pressable>
         </View>
       )}
-      {shortLine && <Text style={styles.short}>{shortLine}</Text>}
+      {shortText && <Text style={styles.short}>{shortText}</Text>}
       {needsAction ? (
         <Pressable
           accessibilityRole="button"
