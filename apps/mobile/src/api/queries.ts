@@ -109,10 +109,16 @@ export function useManualBalances() {
 /** Corrects the Binance balance, creating the row the first time. */
 export function useSaveBinanceBalance() {
   const api = useApi();
+  return useManualBalanceMutation(({ id, amount }: { id: number | null; amount: number }) =>
+    id === null ? api.createManualBalance({ name: "Binance", amount, currency: "USD" }) : api.patchManualBalance(id, { amount }),
+  );
+}
+
+/** Changes to the balances kept by hand show in the plan and, for those counted as own money, on Today. */
+function useManualBalanceMutation<V>(mutationFn: (vars: V) => Promise<unknown>) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, amount }: { id: number | null; amount: number }) =>
-      id === null ? api.createManualBalance({ name: "Binance", amount, currency: "USD" }) : api.patchManualBalance(id, amount),
+    mutationFn,
     onSuccess: () =>
       Promise.all([
         client.invalidateQueries({ queryKey: MANUAL_BALANCES_KEY }),
@@ -120,6 +126,24 @@ export function useSaveBinanceBalance() {
         client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY }),
       ]),
   });
+}
+
+/** Money set aside (a coin, a deposit): kept in dollars by hand, outside own money and the limit. */
+export function useCreateSetAside() {
+  const api = useApi();
+  return useManualBalanceMutation(({ name, amount }: { name: string; amount: number }) =>
+    api.createManualBalance({ name, amount, currency: "USD", counts_as_own: false }),
+  );
+}
+
+export function usePatchManualBalance() {
+  const api = useApi();
+  return useManualBalanceMutation(({ id, patch }: { id: number; patch: { name?: string; amount?: number } }) => api.patchManualBalance(id, patch));
+}
+
+export function useDeleteManualBalance() {
+  const api = useApi();
+  return useManualBalanceMutation((id: number) => api.deleteManualBalance(id));
 }
 
 export function useSetIncomeDate() {
