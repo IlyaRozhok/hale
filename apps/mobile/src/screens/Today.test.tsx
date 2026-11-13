@@ -634,13 +634,57 @@ describe("Today, questions", () => {
     expect(screen.getByText("Кто это: Иван?")).toBeTruthy();
   });
 
-  it("a USDC arrival is confirmed with one tap and the card goes away", async () => {
+  const USDC_ARRIVED = { id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?", expectedAmount: 270_000 };
+
+  it("a USDC arrival of the expected amount is confirmed with one tap, without an amount, and the card goes away", async () => {
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions: [USDC_ARRIVED] })) });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await openQuestions();
+    expect(await screen.findByText("Пришло на Binance?")).toBeTruthy();
+    expect(screen.queryByText("Да, пришло")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Да, $2,700" }));
+    await waitFor(() => expect(api.confirmIncome).toHaveBeenCalledTimes(1));
+    expect(api.confirmIncome.mock.calls[0]).toEqual([12]);
+    await waitFor(() => expect(screen.queryByText("Пришло на Binance?")).toBeNull());
+  });
+
+  it("«Пришло другое» asks how much came, sends that amount in cents, and the card goes away", async () => {
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions: [USDC_ARRIVED] })) });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await openQuestions();
+    await fireEvent.press(await screen.findByRole("button", { name: "Пришло другое" }));
+    expect(await screen.findByText("Сколько пришло на Binance?")).toBeTruthy();
+    expect(screen.getByText("Ожидали $2,700. Если пришло другое — поправьте.")).toBeTruthy();
+    const field = screen.getByLabelText("Пришло, $");
+    expect(field.props.value).toBe("2700");
+    await fireEvent.changeText(field, "2600");
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(api.confirmIncome).toHaveBeenCalledWith(12, 260_000));
+    await waitFor(() => expect(screen.queryByText("Сколько пришло на Binance?")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Пришло на Binance?")).toBeNull());
+  });
+
+  it("«Пришло другое» refuses a bad amount with a calm word and sends nothing", async () => {
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions: [USDC_ARRIVED] })) });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await openQuestions();
+    await fireEvent.press(await screen.findByRole("button", { name: "Пришло другое" }));
+    await fireEvent.changeText(await screen.findByLabelText("Пришло, $"), "abc");
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Проверьте сумму.")).toBeTruthy();
+    expect(api.confirmIncome).not.toHaveBeenCalled();
+    expect(screen.getByText("Пришло на Binance?")).toBeTruthy();
+  });
+
+  it("with an older server that sends no expected amount, «Да, пришло» alone confirms as before", async () => {
     const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
     const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions })) });
     await renderWith(<Today onOpenActivity={noop} />, api);
     await openQuestions();
+    expect(screen.queryByRole("button", { name: "Пришло другое" })).toBeNull();
     await fireEvent.press(await screen.findByText("Да, пришло"));
-    await waitFor(() => expect(api.confirmIncome).toHaveBeenCalledWith(12));
+    await waitFor(() => expect(api.confirmIncome).toHaveBeenCalledTimes(1));
+    expect(api.confirmIncome.mock.calls[0]).toEqual([12]);
     await waitFor(() => expect(screen.queryByText("Пришло на Binance?")).toBeNull());
   });
 

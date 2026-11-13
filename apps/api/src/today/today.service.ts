@@ -698,13 +698,15 @@ export class TodayService {
   private async dto(f: Facts, state: DailyState, plan: Plan | null, shortageStart?: { nextLimit?: number }): Promise<TodayDto> {
     const m = this.ds.manager;
     const questions: TodayDto["questions"] = [];
-    const usdc: { id: number }[] = await m.query(
-      `SELECT e.id FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id
+    const usdc: { id: number; expected_amount: number }[] = await m.query(
+      `SELECT e.id, x.amount::float8 AS expected_amount FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id
         WHERE x.source='usdc' AND e.status <> 'received' AND e.period=$1
           AND $2::int BETWEEN x.window_start_day AND x.window_end_day ORDER BY e.id`,
       [f.date.slice(0, 7), Number(f.date.slice(8, 10))],
     );
-    for (const e of usdc) questions.push({ id: `usdc_arrived:${e.id}`, kind: "usdc_arrived", text: "Пришло на Binance?" });
+    for (const e of usdc) {
+      questions.push({ id: `usdc_arrived:${e.id}`, kind: "usdc_arrived", text: "Пришло на Binance?", expectedAmount: e.expected_amount });
+    }
     for (const q of await this.usdcMatchQuestions(m, f)) questions.push(q);
     for (const q of await this.cashSourceQuestions(m, f)) questions.push(q);
     for (const q of await this.cashCardQuestions(m, f)) questions.push(q);

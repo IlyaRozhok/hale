@@ -597,6 +597,51 @@ describe("income events", () => {
     expect((await row("SELECT amount::int AS amount FROM manual_balances WHERE name='Binance'")).amount).toBe(540_000);
   });
 
+  describe("confirming USDC with the amount that arrived (Б18)", () => {
+    const event = async () => {
+      await usdc(); // $2,700 expected
+      await app.get(PlanService).generateEvents("2026-11-02");
+      return (await api.get("/plan/incomes")).body[0].id as number;
+    };
+    const binance = async () => (await row("SELECT amount::int AS amount FROM manual_balances WHERE name='Binance'"))?.amount;
+    const event_uah = async (ev: number) => (await row("SELECT status, amount_uah::int AS amount_uah FROM income_events WHERE id=$1", [ev]));
+
+    it("adds the given amount to Binance, not the expected one, and records it in hryvnias at today's rate", async () => {
+      await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', now(), 40)`);
+      const ev = await event();
+      const r = await api.post(`/plan/incomes/${ev}/confirm`, { amount: 260_000 }).expect(201);
+      expect(r.body.status).toBe("received");
+      expect(await binance()).toBe(260_000);
+      expect(await event_uah(ev)).toEqual({ status: "received", amount_uah: 260_000 * 40 });
+    });
+
+    it("without a body still adds the expected amount (an older app)", async () => {
+      await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', now(), 40)`);
+      const ev = await event();
+      await api.post(`/plan/incomes/${ev}/confirm`).expect(201);
+      expect(await binance()).toBe(270_000);
+      expect(await event_uah(ev)).toEqual({ status: "received", amount_uah: 270_000 * 40 });
+    });
+
+    it("a second confirm, with or without another amount, changes nothing", async () => {
+      const ev = await event();
+      await api.post(`/plan/incomes/${ev}/confirm`, { amount: 260_000 }).expect(201);
+      await api.post(`/plan/incomes/${ev}/confirm`, { amount: 100_000 }).expect(201);
+      await api.post(`/plan/incomes/${ev}/confirm`).expect(201);
+      expect(await binance()).toBe(260_000);
+    });
+
+    it("refuses a zero, negative, fractional, huge or non-numeric amount with 400 and touches nothing", async () => {
+      const ev = await event();
+      for (const amount of [0, -1, 12.5, "2600", 100_000_000_001, null]) {
+        await api.post(`/plan/incomes/${ev}/confirm`, { amount }).expect(400);
+      }
+      await api.post(`/plan/incomes/${ev}/confirm`, { amount: 260_000, extra: 1 }).expect(400);
+      expect(await binance()).toBeUndefined();
+      expect((await event_uah(ev)).status).toBe("expected");
+    });
+  });
+
   it("fop event is received only once incomes reach half the expected amount", async () => {
     await fopIncome(); // $5,000
     await app.get(PlanService).generateEvents("2026-11-02");

@@ -13,6 +13,7 @@ import {
   Query,
 } from "@nestjs/common";
 import {
+  confirmIncomeInput,
   expectedIncomeInput,
   expectedIncomePatch,
   goalInput,
@@ -115,8 +116,9 @@ export class PlanController {
   }
 
   @Post("incomes/:eventId/confirm")
-  confirm(@Param("eventId", ParseIntPipe) id: number) {
-    return this.plan.confirmEvent(id);
+  confirm(@Param("eventId", ParseIntPipe) id: number, @Body() body: unknown) {
+    // An older app sends no body at all; Nest then gives an empty object.
+    return this.plan.confirmEvent(id, parse(confirmIncomeInput, body ?? {}).amount);
   }
 
   @Post("incomes/:eventId/date")

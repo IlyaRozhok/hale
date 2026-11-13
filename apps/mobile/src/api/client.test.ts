@@ -34,6 +34,8 @@ describe("api client", () => {
   it("sends the USDC answers and the manual balance calls to their routes", async () => {
     const fetchImpl = vi.fn(async () => json({}));
     const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await api.confirmIncome(12);
+    await api.confirmIncome(12, 260_000);
     await api.matchUsdc(12, 34);
     await api.dismissUsdcMatch(34);
     await api.manualBalances();
@@ -43,6 +45,8 @@ describe("api client", () => {
     await api.deleteManualBalance(8);
     const calls = (fetchImpl.mock.calls as unknown as [string, RequestInit][]).map(([url, init]) => [init.method, url.replace("https://api.example.test", ""), init.body]);
     expect(calls).toEqual([
+      ["POST", "/plan/incomes/12/confirm", undefined], // «Да, $2,700»: no body, as an older app sends it
+      ["POST", "/plan/incomes/12/confirm", JSON.stringify({ amount: 260_000 })],
       ["POST", "/plan/incomes/12/match-transaction", JSON.stringify({ transactionId: 34 })],
       ["POST", "/plan/transactions/34/not-usdc", undefined],
       ["GET", "/plan/manual-balances", undefined],

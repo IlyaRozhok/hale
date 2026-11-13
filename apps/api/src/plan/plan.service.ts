@@ -236,15 +236,17 @@ export class PlanService implements OnApplicationBootstrap {
   }
 
   /**
-   * "It arrived": marks the event received and, for USDC, adds the expected amount to the
-   * Binance manual balance. The money counts in the day's limit at once. A second call changes nothing.
+   * "It arrived": marks the event received and, for USDC, adds the amount that arrived (`amount`, in the
+   * income's minor units; the expected amount when the app did not say) to the Binance manual balance.
+   * The money counts in the day's limit at once. A second call changes nothing.
    */
-  async confirmEvent(id: number): Promise<IncomeEvent> {
+  async confirmEvent(id: number, amount?: number): Promise<IncomeEvent> {
     return this.ds.transaction(async (m) => {
       const ev = await this.lockEvent(m, id);
       if (ev.status !== "received") {
-        const balanceDelta = ev.source === "usdc" ? ev.expected_amount : 0;
-        await this.markReceived(m, ev, null);
+        const received = amount ?? ev.expected_amount;
+        const balanceDelta = ev.source === "usdc" ? received : 0;
+        await this.markReceived(m, { ...ev, expected_amount: received }, null);
         if (balanceDelta > 0) {
           await m.query(
             `INSERT INTO manual_balances (name, amount, currency, counts_as_own) VALUES ($1,$2,'USD',true)
@@ -531,6 +533,7 @@ export class PlanService implements OnApplicationBootstrap {
     return ev;
   }
 
+  /** Marks the event received; without `amountUah`, a USD income is recorded as `ev.expected_amount` at today's rate. */
   private async markReceived(
     m: EntityManager,
     ev: { id: number; expected_amount: number; currency: string },

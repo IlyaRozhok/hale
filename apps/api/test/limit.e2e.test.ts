@@ -223,6 +223,17 @@ describe("income events", () => {
     expect((await today()).state.dailyLimit).toBe(limit);
   });
 
+  it("«Пришло другое» counts the amount that arrived at once, not the expected one (Б18)", async () => {
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-02T08:00:00Z', 40)`);
+    const eventId = await income("2026-11-12", "usdc"); // $1,000 expected
+    await account("black", 4_000_000, { creditLimit: 3_000_000 });
+    await fixed("2026-11-01", 100_000, "normal");
+    await plant();
+    await api.post(`/plan/incomes/${eventId}/confirm`, { amount: 90_000 }).expect(201);
+    // $900 at 40 on Binance plus ₴10,000 own on the card, no income date left: ₴46,000 over 30 days.
+    await fixedNow(Math.floor(4_600_000 / 30));
+  });
+
   it("matching a bank credit to a Binance withdrawal lowers the limit at once", async () => {
     await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-02T08:00:00Z', 40)`);
     const eventId = await income("2026-11-12", "usdc");

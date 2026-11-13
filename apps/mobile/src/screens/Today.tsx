@@ -22,6 +22,7 @@ import { Runway } from "../components/Runway";
 import { Sheet } from "../components/Sheet";
 import { StaleBanner } from "../components/StaleBanner";
 import { TodaySkeleton } from "../components/TodaySkeleton";
+import { UsdcArrivedSheet } from "../components/UsdcArrivedSheet";
 import { usePullRefresh } from "../usePullRefresh";
 import { ApiError } from "../api/client";
 
@@ -62,6 +63,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
   const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | null>(null);
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
+  const [arriving, setArriving] = useState<{ id: string; eventId: number; expectedAmount: number } | null>(null);
   const [paying, setPaying] = useState<TodayDto["upcoming"][number] | null>(null);
 
   const hide = (id: string, on: boolean) =>
@@ -278,7 +280,8 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
                 onOpenActivity();
               }}
               onLabelRecipient={(counterKey) => setLabeling({ id: q.id, counterKey, name: q.subject ?? q.text.replace(/^Кто это:\s*/, "").replace(/\?$/, "") })}
-              onConfirmUsdc={(eventId) => answer(q.id, () => confirmIncome.mutateAsync(eventId))}
+              onConfirmUsdc={(eventId) => answer(q.id, () => confirmIncome.mutateAsync({ eventId }))}
+              onUsdcOther={(eventId, expectedAmount) => setArriving({ id: q.id, eventId, expectedAmount })}
               onMatchUsdc={(eventId, transactionId) => answer(q.id, () => matchUsdc.mutateAsync({ eventId, transactionId }))}
               onDismissUsdc={(transactionId) => answer(q.id, () => dismissUsdc.mutateAsync(transactionId))}
               onCashFromWallet={(transactionId) => answer(q.id, () => fromWallet.mutateAsync(transactionId))}
@@ -293,6 +296,18 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
               name={labeling.name}
               onClose={() => setLabeling(null)}
               onLabeled={() => hide(labeling.id, true)}
+            />
+          )}
+          {arriving && (
+            <UsdcArrivedSheet
+              eventId={arriving.eventId}
+              expectedAmount={arriving.expectedAmount}
+              onClose={() => setArriving(null)}
+              onSaved={() => {
+                // The same ending as a one-tap answer: the last card closes the list too.
+                if (questions.length <= 1) closeIfOpen("questions");
+                hide(arriving.id, true);
+              }}
             />
           )}
         </Sheet>

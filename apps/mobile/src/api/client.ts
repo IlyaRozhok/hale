@@ -74,7 +74,8 @@ export interface Api {
   previewBridge(dailyAmount: number): Promise<BridgePreviewDto>;
   chooseBridge(dailyAmount: number): Promise<TodayDto>;
   cancelBridge(): Promise<TodayDto>;
-  confirmIncome(eventId: number): Promise<void>;
+  /** «Пришло на Binance»: `amount` is what arrived, in cents; without it the server takes the expected amount. */
+  confirmIncome(eventId: number, amount?: number): Promise<void>;
   setIncomeDate(eventId: number, date: string): Promise<void>;
   matchUsdc(eventId: number, transactionId: number): Promise<void>;
   dismissUsdcMatch(transactionId: number): Promise<void>;
@@ -185,7 +186,9 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     previewBridge: (dailyAmount) => request("POST", "/bridge/preview", { dailyAmount }),
     chooseBridge: (dailyAmount) => request("POST", "/bridge", { dailyAmount }),
     cancelBridge: () => request("DELETE", "/bridge"),
-    confirmIncome: async (eventId) => void (await request("POST", `/plan/incomes/${eventId}/confirm`)),
+    // No body when the amount is the expected one: an older server knows no body here.
+    confirmIncome: async (eventId, amount) =>
+      void (await request("POST", `/plan/incomes/${eventId}/confirm`, amount === undefined ? undefined : { amount })),
     setIncomeDate: async (eventId, date) => void (await request("POST", `/plan/incomes/${eventId}/date`, { date })),
     matchUsdc: async (eventId, transactionId) => void (await request("POST", `/plan/incomes/${eventId}/match-transaction`, { transactionId })),
     dismissUsdcMatch: async (transactionId) => void (await request("POST", `/plan/transactions/${transactionId}/not-usdc`)),
