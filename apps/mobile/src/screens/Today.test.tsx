@@ -893,6 +893,23 @@ describe("Today, bridge", () => {
     expect(api.chooseBridge).toHaveBeenCalledWith(47300);
   });
 
+  it("on the day the shortage came on, opens on the new limit, not the morning one, and confirm sends it", async () => {
+    const state = { ...bridgeState(), dailyLimit: 200000, leftToday: 60000, level: 0.3, shortageStart: { nextLimit: 45300 } };
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ state })) });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await openBridge();
+    const slider = await screen.findByLabelText("Сумма в день");
+    expect(slider.props.value).toBe(45300);
+    expect(screen.getByText("₴453 · $11")).toBeTruthy();
+    expect(screen.queryByText(/₴2,000/)).toBeNull();
+    expect(screen.getByText("₴20,070")).toBeTruthy();
+    await tick(400);
+    expect(api.previewBridge).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByText("Подтвердить план"));
+    await tick(0);
+    expect(api.chooseBridge).toHaveBeenCalledWith(45300);
+  });
+
   it("a confirmed plan shows calm feedback and no button until the amount changes", async () => {
     const api = fakeApi({ today: bridgeToday({ confirmed: true }) });
     await renderWith(<Today onOpenActivity={noop} />, api);

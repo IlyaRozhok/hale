@@ -29,7 +29,9 @@ const roundToStep = (v: number) => Math.max(MIN, Math.round(v / STEP) * STEP);
 export function BridgePlan({ state, usdRate, creditLimit = 0, onConfirm, onCancel, confirming }: Props) {
   const base = state.bridge;
   // Unmoved, the slider shows the server's exact amount, so the numbers beside it are the server's too.
-  const current = state.dailyLimit > 0 ? state.dailyLimit : (base?.recommendedDaily ?? MIN);
+  // On the day the shortage came on the day still runs on its morning limit; the plan is the new one.
+  const nextLimit = state.shortageStart?.nextLimit;
+  const current = nextLimit !== undefined ? nextLimit : state.dailyLimit > 0 ? state.dailyLimit : (base?.recommendedDaily ?? MIN);
   const [moved, setMoved] = useState<number | null>(null);
   const value = moved ?? current;
   const changed = moved !== null && moved !== current;
