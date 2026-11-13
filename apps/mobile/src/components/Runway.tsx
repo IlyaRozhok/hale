@@ -4,6 +4,7 @@ import { tokens } from "@hale/tokens";
 import type { RunwayDto } from "@hale/contracts";
 import { dayMonth, formatMoney } from "../format";
 import { nearestDay, runwayChart } from "../runwayChart";
+import { runwayGesture, type RunwayGesture } from "../runwayGesture";
 import { Icon } from "./Icon";
 import { RunwayLine } from "./RunwayLine";
 
@@ -30,6 +31,7 @@ export function Runway({ runway, today, onPay }: { runway: RunwayDto; today: str
   const [width, setWidth] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const touched = useRef<number | null>(null);
+  const gesture = useRef<{ x: number; y: number; before: number | null; kind: RunwayGesture } | null>(null);
   const chart = useMemo(() => runwayChart(runway.points, runway.events, Math.max(0, width - EDGE * 2), HEIGHT, PAD), [runway.points, runway.events, width]);
 
   const title = runway.incomeOn ? "Запас к доходу" : "Запас на 30 дней";
@@ -41,16 +43,38 @@ export function Runway({ runway, today, onPay }: { runway: RunwayDto; today: str
     (runway.events.length > 0 ? ` Платежи: ${runway.events.map((e) => `${e.name} ${dateOf(e.date)}, ${formatMoney(e.amount)}`).join("; ")}.` : "");
 
   const dayAt = (e: GestureResponderEvent) => (chart.xs.length > 0 ? nearestDay(chart.xs, e.nativeEvent.locationX - EDGE) : null);
+  // A touch picks its day at once, as a tap. Once it moves past the slop it is read for good: sideways
+  // it scrubs the days and holds the touch; otherwise the page takes it to scroll or pull, and the
+  // day goes back to what it was before the touch, so a scroll never leaves a day chosen or put away.
   const onGrant = (e: GestureResponderEvent) => {
     const day = dayAt(e);
     touched.current = day;
+    gesture.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY, before: selected, kind: "wait" };
     setSelected((now) => (now === day ? null : day));
   };
+  const toPage = () => {
+    const g = gesture.current;
+    if (g === null || g.kind === "scrub") return;
+    g.kind = "scroll";
+    setSelected(g.before);
+  };
   const onMove = (e: GestureResponderEvent) => {
+    const g = gesture.current;
+    if (g === null || g.kind === "scroll") return;
+    if (g.kind === "wait") {
+      const kind = runwayGesture(e.nativeEvent.pageX - g.x, e.nativeEvent.pageY - g.y);
+      if (kind === "wait") return;
+      if (kind === "scroll") return toPage();
+      g.kind = "scrub";
+    }
     const day = dayAt(e);
     if (day === touched.current) return;
     touched.current = day;
     setSelected(day);
+  };
+  const onTerminate = () => {
+    toPage();
+    gesture.current = null;
   };
 
   const point = selected === null ? undefined : runway.points[selected];
@@ -82,6 +106,11 @@ export function Runway({ runway, today, onPay }: { runway: RunwayDto; today: str
             onStartShouldSetResponder={() => true}
             onResponderGrant={onGrant}
             onResponderMove={onMove}
+            onResponderTerminationRequest={() => gesture.current?.kind !== "scrub"}
+            onResponderTerminate={onTerminate}
+            onResponderRelease={() => {
+              gesture.current = null;
+            }}
           >
             {width > 0 && <RunwayLine chart={chart} width={width} height={HEIGHT} edge={EDGE} selected={selected} />}
             {crossX !== null && runway.zeroOn && (
