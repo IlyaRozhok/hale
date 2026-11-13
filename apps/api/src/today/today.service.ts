@@ -5,6 +5,7 @@ import { DataSource, type EntityManager } from "typeorm";
 import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
 import { type DailyInput, type DailyState, type DayMark, computeDaily, dayMark, sumDue } from "../domain/daily";
+import { limitSql } from "../domain/ledger";
 import { runway } from "../domain/runway";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
 import { quarterLabel, quarterOf } from "../domain/quarter";
@@ -32,11 +33,10 @@ const START: DayMark = "bridge_start";
 const QUESTION_WINDOW_DAYS = 30;
 
 /**
- * What counts against the limit: spend (refunds reduce it), person transfers, and cash out until the
- * cash wallet starts. From then a withdrawal only moves money into the wallet; purchases in cash spend.
+ * What counts against the limit, from the one rule in domain/ledger.ts: spend (refunds reduce it), person
+ * transfers, and cash out until the cash wallet starts; nothing on a jar, nothing without a hryvnia amount.
  */
-const COUNTS_AGAINST_LIMIT = `a.kind <> 'jar' AND t.amount_uah IS NOT NULL AND (t.type IN ('spend','person_transfer')
-  OR (t.type = 'cash_out' AND NOT COALESCE(t.local_date >= (SELECT cash_start FROM settings WHERE id=1), false)))`;
+const COUNTS_AGAINST_LIMIT = limitSql("t", "a");
 
 const CODE_BY_ALPHA = new Map(Object.entries(CURRENCY_ALPHA).map(([code, alpha]) => [alpha, Number(code)]));
 
