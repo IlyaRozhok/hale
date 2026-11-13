@@ -34,8 +34,12 @@ const shortRun = () =>
     ],
   });
 
-const touch = (x: number, type: "responderGrant" | "responderMove" = "responderGrant") =>
-  fireEvent(screen.getByTestId("runway-chart"), type, { nativeEvent: { locationX: x } });
+/** A finger on the chart at `x` (and `y` down from where the touches start): the chart is at the page's left edge. */
+const touch = (x: number, type: "responderGrant" | "responderMove" = "responderGrant", y = 0) =>
+  fireEvent(screen.getByTestId("runway-chart"), type, { nativeEvent: { locationX: x, pageX: x, pageY: y } });
+/** Whether the chart lets the page take the touch now (the page asks when it wants to scroll). */
+const yields = () => screen.getByTestId("runway-chart").props.onResponderTerminationRequest() as boolean;
+const giveUp = () => fireEvent(screen.getByTestId("runway-chart"), "responderTerminate");
 const measure = () => fireEvent(screen.getByTestId("runway-chart"), "layout", { nativeEvent: { layout: { width: 400, height: 112 } } });
 
 describe("Runway", () => {
@@ -149,6 +153,69 @@ describe("Runway", () => {
     expect(screen.getByText("12 ноя · ₴12,260")).toBeTruthy();
     await touch(100);
     expect(screen.queryByText(/12 ноя/)).toBeNull();
+  });
+
+  describe("sharing the touch with the page", () => {
+    it("a mostly vertical drag goes to the page and leaves no day chosen by it", async () => {
+      await render(<Runway runway={run()} today="2026-11-11" />);
+      await measure();
+      await touch(100);
+      expect(screen.getByText("12 ноя · ₴12,260")).toBeTruthy();
+      await touch(104, "responderMove", 40);
+      expect(yields()).toBe(true);
+      // The touch turned into a scroll: the day it picked on the way down is put back.
+      expect(screen.queryByText(/12 ноя/)).toBeNull();
+      // Sideways moves later in the same scroll do not scrub.
+      await touch(300, "responderMove", 60);
+      expect(screen.queryByText(/14 ноя/)).toBeNull();
+      await giveUp();
+      expect(screen.queryByText(/ноя ·/)).toBeNull();
+      expect(screen.getByText("Ближайший платёж")).toBeTruthy();
+    });
+
+    it("a scroll that starts on the chosen day does not put the day away", async () => {
+      await render(<Runway runway={run()} today="2026-11-11" />);
+      await measure();
+      await touch(100);
+      expect(screen.getByText("12 ноя · ₴12,260")).toBeTruthy();
+      // A second touch on the same day would put the note away, but it becomes a pull.
+      await touch(100);
+      expect(screen.queryByText(/12 ноя/)).toBeNull();
+      await touch(100, "responderMove", 50);
+      await giveUp();
+      expect(screen.getByText("12 ноя · ₴12,260")).toBeTruthy();
+    });
+
+    it("the page can take a touch that has not started scrubbing, and gets it whole", async () => {
+      await render(<Runway runway={run()} today="2026-11-11" />);
+      await measure();
+      await touch(200);
+      expect(yields()).toBe(true);
+      // The page took it before any move (iOS starts its own scroll): nothing the touch did stays.
+      await giveUp();
+      expect(screen.queryByText(/13 ноя ·/)).toBeNull();
+    });
+
+    it("a mostly horizontal drag scrubs the days and keeps the touch from the page", async () => {
+      await render(<Runway runway={run()} today="2026-11-11" />);
+      await measure();
+      await touch(100);
+      await touch(300, "responderMove", 20);
+      expect(screen.getByText("14 ноя · ₴5,260")).toBeTruthy();
+      expect(yields()).toBe(false);
+      // Once scrubbing, the finger may wander up and down.
+      await touch(200, "responderMove", 80);
+      expect(screen.getByText("13 ноя · ₴10,260")).toBeTruthy();
+    });
+
+    it("a finger's jitter on a tap does not move the day", async () => {
+      await render(<Runway runway={run()} today="2026-11-11" />);
+      await measure();
+      await touch(148);
+      expect(screen.getByText("12 ноя · ₴12,260")).toBeTruthy();
+      await touch(153, "responderMove", 3); // 153 is nearer the 13th, but it is only jitter
+      expect(screen.getByText("12 ноя · ₴12,260")).toBeTruthy();
+    });
   });
 
   it("the payment in the note opens how it was paid", async () => {
