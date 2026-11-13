@@ -75,6 +75,20 @@ describe("TxEditSheet: a spend from the credit limit (A16)", () => {
     expect(screen.queryByText("Оплачено из кредитного лимита")).toBeNull();
   });
 
+  it("a credit part that rounds to ₴0 draws no line", async () => {
+    const tx = txFixture({ amount: -10_030, amountUah: -10_030, creditPart: 30 });
+    await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi());
+    await screen.findByText("Тип");
+    expect(screen.queryByText(/кредитного лимита/)).toBeNull();
+  });
+
+  it("a credit part that rounds to the whole shown amount reads as wholly from the limit", async () => {
+    const tx = txFixture({ amount: -16_100, amountUah: -16_100, creditPart: 16_050 });
+    await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi());
+    expect(await screen.findByText("Оплачено из кредитного лимита")).toBeTruthy();
+    expect(screen.queryByText("₴161 — из кредитного лимита")).toBeNull();
+  });
+
   it("own money or an old row: no line", async () => {
     await renderWith(<TxEditSheet tx={txFixture({ creditPart: null })} onClose={noop} />, fakeApi());
     await screen.findByText("Тип");

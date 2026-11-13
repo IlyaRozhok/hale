@@ -30,8 +30,11 @@ function facts(tx: TransactionDto): string {
 
 /** How much of a spend came from the credit limit: a reference line, not a warning. Null when none. */
 function creditText(tx: TransactionDto): string | null {
-  if (tx.creditPart == null || tx.creditPart <= 0) return null;
-  return tx.creditPart >= Math.abs(tx.amount) ? "Оплачено из кредитного лимита" : `${formatMoney(tx.creditPart)} — из кредитного лимита`;
+  if (tx.creditPart == null) return null;
+  // Compared in whole hryvnias, as formatMoney shows them: never "₴0 — …", never "₴161 — …" under −₴161.
+  const part = Math.round(tx.creditPart / 100);
+  if (part <= 0) return null;
+  return part >= Math.round(Math.abs(tx.amount) / 100) ? "Оплачено из кредитного лимита" : `${formatMoney(tx.creditPart)} — из кредитного лимита`;
 }
 
 /**

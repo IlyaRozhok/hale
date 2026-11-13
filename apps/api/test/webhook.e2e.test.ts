@@ -188,6 +188,14 @@ describe("credit limit at the moment of the operation (A16)", () => {
     expect(await stored("c1")).toEqual({ b: 1_890_000, l: 2_000_000 });
   });
 
+  it("a webhook item processed over an hour after the operation keeps no limit: it may have changed since", async () => {
+    await ds.query("UPDATE accounts SET credit_limit=2000000");
+    const late = hookItem("late", { balance: 1_890_000, time: Math.floor(Date.now() / 1000) - 2 * 3600 });
+    await request(http()).post(`/mono/webhook/${SECRET}`).send(body("acc-1", late)).expect(200);
+    await app.get(JobRunner).runOnce();
+    expect(await stored("late")).toEqual({ b: 1_890_000, l: null });
+  });
+
   it("a row first seen by the daily check keeps its balance, but no limit: it may be days old", async () => {
     await reconcileWith([hookItem("r1", { balance: 1_890_000 })]);
     expect(await stored("r1")).toEqual({ b: 1_890_000, l: null });

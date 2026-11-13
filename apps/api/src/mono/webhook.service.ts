@@ -8,6 +8,11 @@ import { monoStatementItemSchema } from "./mono.schemas";
 import { markSynced } from "./sync-status";
 
 export const WEBHOOK_JOB_KIND = "webhook.item";
+/**
+ * The account's stored limit counts as the limit at the moment of the operation only this soon after it.
+ * A job that ran later (a backlog, a retry) keeps no limit. Our own threshold: client-info refreshes hourly.
+ */
+export const LIVE_LIMIT_MS = 60 * 60 * 1000;
 
 export const webhookBodySchema = z.object({
   type: z.literal("StatementItem"),
@@ -69,7 +74,8 @@ export class WebhookService implements OnModuleInit {
     if (!account) {
       throw new Error(`webhook item for unknown account ${externalId}, even after refreshing accounts`);
     }
-    await this.imports.upsertStatementItem(account.id, statementItem, { live: true });
+    const live = this.clock.now() - statementItem.time * 1000 < LIVE_LIMIT_MS;
+    await this.imports.upsertStatementItem(account.id, statementItem, { live });
     // The item carries the balance after it. A late or re-delivered item must not undo a newer one.
     const at = new Date(statementItem.time * 1000);
     await this.ds.query(

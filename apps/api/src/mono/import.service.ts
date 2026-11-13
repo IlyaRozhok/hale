@@ -175,6 +175,8 @@ export class ImportService implements OnModuleInit {
     const occurredAt = new Date(item.time * 1000);
 
     // type, category, type_source and credit_limit_at are only set on insert; later syncs never overwrite them.
+    // balance_after follows the bank on every sync, like amount: the bank's balance after an item is not
+    // expected to change, and if it ever does, the bank's latest word is the one to keep.
     await this.ds.query(
       `INSERT INTO transactions
          (external_id, account_id, occurred_at, local_date, description, comment, mcc,
