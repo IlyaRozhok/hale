@@ -122,8 +122,12 @@ export class CashService {
       await this.manualRow(m, id);
       // A planned payment paid with this row is unpaid again, and back in the day's limit at once.
       const reopened = (await m.query(`UPDATE scheduled_payments SET paid_at=NULL WHERE transaction_id=$1`, [id])) as [unknown[], number];
+      // One it helped pay through payment_links loses it with the row (ON DELETE CASCADE), and opens again
+      // when the rest no longer cover it (task Б26).
+      const linked: { payment_id: number }[] = await m.query(`SELECT payment_id FROM payment_links WHERE transaction_id=$1`, [id]);
       await m.query(`DELETE FROM transactions WHERE id=$1`, [id]);
-      if (reopened[1] > 0) await this.limit.invalidate("payment_paid", m);
+      const uncovered = await this.plan.reopenUncovered(m, linked.map((l) => l.payment_id));
+      if (reopened[1] > 0 || uncovered) await this.limit.invalidate("payment_paid", m);
     });
     return { deleted: true };
   }
@@ -278,9 +282,11 @@ export class CashService {
       );
       const cover = paymentCover(p.amount, await linkedSum(m, paymentId));
       if (cover.closed) {
+        // Closed by its links: it opens again if it loses one and the rest no longer cover it (task Б26).
         await m.query(
-          `UPDATE scheduled_payments SET paid_at = (SELECT max(t.occurred_at) FROM payment_links l JOIN transactions t ON t.id = l.transaction_id
-                                                     WHERE l.payment_id = $1) WHERE id=$1`,
+          `UPDATE scheduled_payments SET closed_by_links = true,
+                  paid_at = (SELECT max(t.occurred_at) FROM payment_links l JOIN transactions t ON t.id = l.transaction_id
+                              WHERE l.payment_id = $1) WHERE id=$1`,
           [paymentId],
         );
       }

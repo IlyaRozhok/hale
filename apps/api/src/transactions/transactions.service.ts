@@ -263,7 +263,8 @@ export class TransactionsService {
       const scope = p.applyToSimilar ? similarScope(id, base, ruleType!) : { id };
       const undone = p.type ? await this.undoCashAnswers(m, scope, p.type) : false;
       const ids = await this.apply(m, scope, p.type ?? null, p.category ?? null);
-      if (undone) await this.limit.invalidate("cash", m);
+      const freed = p.type ? await this.unsettle(m, ids, p.type) : false;
+      if (undone || freed) await this.limit.invalidate(freed ? "payment_paid" : "cash", m);
       return ids;
     });
     if (p.type) await this.settle(changed, p.type);
@@ -349,7 +350,9 @@ export class TransactionsService {
         await this.dropNameAnswer(m, sample);
         await this.saveRule(m, rule.kind === "merchant" ? "recipient" : rule.kind, rule.value, type, null, label, "out");
       }
-      return this.apply(m, { key: counterKey, relabel: true }, type, null);
+      const ids = await this.apply(m, { key: counterKey, relabel: true }, type, null);
+      if (await this.unsettle(m, ids, type)) await this.limit.invalidate("payment_paid", m);
+      return ids;
     });
     await this.settle(changed, type);
     return { updated: changed.length };
@@ -408,20 +411,29 @@ export class TransactionsService {
   }
 
   /**
-   * Planned payments follow the new type: a row that no longer settles one frees it (a payment
-   * marked paid by hand has no transaction and stays paid); otherwise the row is matched as after
-   * classification.
+   * Rows retyped to a type that settles nothing free their planned payments, in the edit's transaction. A
+   * payment closed through the row itself (transaction_id) opens again. A row linked through payment_links
+   * is unlinked, and its payment opens again only if those links closed it and the rest no longer cover it
+   * (task Б26); a payment marked paid by hand stays paid. True when a payment opened: the caller fixes the
+   * day afresh.
    */
+  private async unsettle(m: EntityManager, ids: readonly number[], type: string): Promise<boolean> {
+    if (ids.length === 0 || SETTLING_TYPES.has(type)) return false;
+    const unlinked: { payment_id: number }[] = await m.query(
+      `WITH d AS (DELETE FROM payment_links WHERE transaction_id = ANY($1::int[]) RETURNING payment_id) SELECT DISTINCT payment_id FROM d`,
+      [ids],
+    );
+    const freed = (await m.query(
+      `UPDATE scheduled_payments SET transaction_id = NULL, paid_at = NULL, closed_by_links = false WHERE transaction_id = ANY($1::int[])`,
+      [ids],
+    )) as [unknown[], number];
+    const reopened = await this.plan.reopenUncovered(m, unlinked.map((u) => u.payment_id));
+    return freed[1] > 0 || reopened;
+  }
+
+  /** Rows given a type the plan cares about are matched to planned payments as after classification. */
   private async settle(ids: readonly number[], type: string): Promise<void> {
-    if (ids.length === 0) return;
-    if (!SETTLING_TYPES.has(type)) {
-      await this.ds.query(`DELETE FROM payment_links WHERE transaction_id = ANY($1::int[])`, [ids]);
-      await this.ds.query(
-        `UPDATE scheduled_payments SET transaction_id = NULL, paid_at = NULL WHERE transaction_id = ANY($1::int[])`,
-        [ids],
-      );
-    }
-    if (!PLAN_TYPES.has(type as TxType)) return;
+    if (ids.length === 0 || !PLAN_TYPES.has(type as TxType)) return;
     for (const id of ids) await this.plan.onClassified(id, type);
   }
 

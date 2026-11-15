@@ -1,8 +1,10 @@
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { DataSource as DS, type DataSource } from "typeorm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
+import { PlanService } from "../src/plan/plan.service";
+import { Clock } from "../src/today/clock";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
 
 let app: INestApplication;
@@ -807,5 +809,65 @@ describe("filters by category and period", () => {
     expect((await api.get("/transactions").expect(200)).body.summary).toBeNull();
     await api.get("/transactions?from=2026-11-10&to=2026-11-01").expect(400);
     await api.get("/transactions?from=10.11.2026").expect(400);
+  });
+});
+
+describe("a tax closed by its operations, one of them retyped (Б26)", () => {
+  // 14 November: Q3 tax is due on the 20th and is paid in two payments.
+  const plan = () => app.get(PlanService);
+  const taxRow = async (amount: number, over: { paid?: string; estimate?: boolean } = {}) =>
+    (
+      await row(
+        `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, paid_at, tax_quarter, is_estimate)
+         VALUES ('tax','Q3',$1,'UAH','2026-11-20',$2,'2026-Q3',$3) RETURNING id`,
+        [amount, over.paid ?? null, over.estimate ?? false],
+      )
+    ).id as number;
+  const state = (id: number) => row(`SELECT paid_at IS NOT NULL AS paid, closed_by_links FROM scheduled_payments WHERE id=$1`, [id]);
+  const links = async (id: number) =>
+    ((await ds.query(`SELECT transaction_id FROM payment_links WHERE payment_id=$1 ORDER BY transaction_id`, [id])) as { transaction_id: number }[]).map(
+      (r) => r.transaction_id,
+    );
+  const taxTx = (a: number, amount: number) => tx(a, { amount: -amount, type: "tax", category: "tax", at: "2026-11-14T10:00:00.000Z" });
+  const dayLimit = async () => (await row(`SELECT daily_limit::int AS l FROM daily_snapshots WHERE local_date='2026-11-14'`)).l as number;
+  beforeEach(async () => {
+    app.get(Clock).fixed = new Date("2026-11-14T10:00:00Z");
+    await ds.query(`TRUNCATE daily_snapshots`);
+  });
+  afterEach(() => {
+    app.get(Clock).fixed = null;
+  });
+
+  it("opens the tax again when one of its two payments is retyped; the other stays linked and the day is fixed afresh", async () => {
+    const a = await account();
+    const id = await taxRow(795_000);
+    const first = await taxTx(a, 571_000);
+    await plan().onClassified(first, "tax");
+    const second = await taxTx(a, 224_000);
+    await plan().onClassified(second, "tax");
+    expect(await state(id)).toEqual({ paid: true, closed_by_links: true });
+    expect(await links(id)).toEqual([first, second]);
+    await ds.query(
+      `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ('2026-11-14', 1, 'normal') ON CONFLICT (local_date) DO UPDATE SET daily_limit=1`,
+    );
+
+    await api.patch(`/transactions/${second}`, { type: "spend" }).expect(200);
+    expect(await state(id)).toEqual({ paid: false, closed_by_links: false });
+    expect(await links(id)).toEqual([first]);
+    expect(await dayLimit()).not.toBe(1);
+  });
+
+  it("a tax closed by hand and linked to its two payments later (14 November) stays closed", async () => {
+    const a = await account();
+    const id = await taxRow(760_000, { estimate: true, paid: "2026-11-14T12:00:00Z" });
+    const first = await taxTx(a, 571_000);
+    const second = await taxTx(a, 224_000);
+    await plan().linkTaxTransactions();
+    expect(await links(id)).toEqual([first, second]);
+    expect(await state(id)).toEqual({ paid: true, closed_by_links: false });
+
+    await api.patch(`/transactions/${first}`, { type: "spend" }).expect(200);
+    expect(await state(id)).toEqual({ paid: true, closed_by_links: false });
+    expect(await links(id)).toEqual([second]);
   });
 });
