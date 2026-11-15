@@ -498,6 +498,164 @@ describe("tax reserve and own money", () => {
     });
   });
 
+  describe("a tax paid in two payments or off the estimate (Б24)", () => {
+    // 14 November: Q3 tax (ESV and single tax) is due on the 20th; Q4 is accruing on 1,000,000 of income.
+    const plan = () => app.get(PlanService);
+    const row = async (sql: string, args: unknown[] = []) => (await ds.query(sql, args))[0];
+    const taxRow = async (amount: number, over: { paid?: string; estimate?: boolean; due?: string; quarter?: string; name?: string } = {}) =>
+      (
+        await ds.query(
+          `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, paid_at, tax_quarter, is_estimate)
+           VALUES ('tax',$1,$2,'UAH',$3,$4,$5,$6) RETURNING id`,
+          [over.name ?? "Q3", amount, over.due ?? "2026-11-20", over.paid ?? null, over.quarter ?? "2026-Q3", over.estimate ?? false],
+        )
+      )[0].id as number;
+    const state = (id: number) =>
+      row(`SELECT paid_at IS NOT NULL AS paid, paid_at::date::text AS paid_on, transaction_id FROM scheduled_payments WHERE id=$1`, [id]);
+    const links = async (id: number) =>
+      ((await ds.query(`SELECT transaction_id FROM payment_links WHERE payment_id=$1 ORDER BY transaction_id`, [id])) as { transaction_id: number }[]).map(
+        (r) => r.transaction_id,
+      );
+    let card: number;
+    let fop: number;
+    const setup = async () => {
+      at("2026-11-14T10:00:00Z");
+      card = await account("black", 2_000_000);
+      fop = await account("fop", 0);
+      await income("usdc", "2026-11-25");
+      await tx(fop, 1_000_000, "income", { date: "2026-10-05" }); // Q4 accrual: 6% = 60,000
+    };
+    /** A tax payment leaves the card; the balance follows it, as a sync would. */
+    let spent = 0;
+    const pay = async (amount: number, date = "2026-11-14") => {
+      spent += amount;
+      await setBalance(card, 2_000_000 - spent);
+      const t = await tx(card, -amount, "tax", { date });
+      await plan().onClassified(t, "tax");
+      return t;
+    };
+    beforeEach(() => {
+      spent = 0;
+    });
+
+    it("two payments that add up close the row, both linked; free money counts each once", async () => {
+      await setup();
+      const id = await taxRow(795_000);
+      const before = (await today()).state.free;
+      expect(before).toBe(2_000_000 - 60_000 - 795_000);
+      const first = await pay(571_000);
+      expect(await state(id)).toMatchObject({ paid: false, transaction_id: null });
+      expect(await links(id)).toEqual([first]);
+      // While partly paid the whole row stays reserved: the first payment is not also taken off Q4.
+      expect((await today()).state.free).toBe(before - 571_000);
+      const second = await pay(224_000);
+      expect(await state(id)).toMatchObject({ paid: true, paid_on: "2026-11-14", transaction_id: null });
+      expect(await links(id)).toEqual([first, second]);
+      expect((await today()).state.free).toBe(before);
+      // Nothing is linked twice when the rows are seen again.
+      await plan().onClassified(second, "tax");
+      await plan().linkTaxTransactions();
+      expect(await ds.query(`SELECT 1 FROM payment_links`)).toHaveLength(2);
+      expect((await today()).state.free).toBe(before);
+    });
+
+    it("closing the row gives the day a fresh limit at once", async () => {
+      await setup();
+      await taxRow(795_000);
+      await pay(571_000);
+      await ds.query(`INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ('2026-11-14', 1, 'normal')`);
+      await pay(224_000);
+      const r = await row(`SELECT daily_limit::int AS l FROM daily_snapshots WHERE local_date='2026-11-14'`);
+      expect(r.l).not.toBe(1);
+    });
+
+    it("one payment within 10% closes the estimate", async () => {
+      await setup();
+      const id = await taxRow(760_000, { estimate: true });
+      const before = (await today()).state.free;
+      const t = await pay(795_000);
+      expect(await state(id)).toMatchObject({ paid: true });
+      expect(await links(id)).toEqual([t]);
+      expect((await today()).state.free).toBe(before - 795_000 + 760_000);
+    });
+
+    it("a payment from before the quarter ended does not close the row", async () => {
+      await setup();
+      const id = await taxRow(795_000);
+      await pay(795_500, "2026-09-30");
+      expect(await state(id)).toMatchObject({ paid: false, transaction_id: null });
+      expect(await links(id)).toEqual([]);
+    });
+
+    it("a payment far off the row does not close it", async () => {
+      await setup();
+      const id = await taxRow(795_000);
+      const t = await pay(2_000_000);
+      expect(await state(id)).toMatchObject({ paid: false, transaction_id: null });
+      expect(await links(id)).toEqual([]);
+      // It counts against this quarter, as before.
+      expect(await row(`SELECT 1 AS x FROM payment_links WHERE transaction_id=$1`, [t])).toBeUndefined();
+    });
+
+    it("after a row closes, the next tax payment goes to the next open row; never to next quarter's", async () => {
+      await setup();
+      const esv = await taxRow(300_000, { name: "ЄСВ" });
+      const single = await taxRow(500_000, { name: "ЄП", due: "2026-11-21" });
+      const q4 = await taxRow(600_000, { name: "Q4", due: "2027-02-20", quarter: "2026-Q4" });
+      const a = await pay(200_000);
+      const b = await pay(100_000);
+      expect(await state(esv)).toMatchObject({ paid: true });
+      expect(await links(esv)).toEqual([a, b]);
+      const c = await pay(100_000);
+      expect(await links(esv)).toEqual([a, b]);
+      expect(await links(single)).toEqual([c]);
+      expect(await state(single)).toMatchObject({ paid: false });
+      expect(await links(q4)).toEqual([]);
+    });
+
+    describe("rows already loaded on 14 November, Q3 closed by hand", () => {
+      it("links the two bank rows to the hand-closed row by their sum, keeping its paid date; the Q4 reserve is whole again", async () => {
+        await setup();
+        const id = await taxRow(760_000, { estimate: true, paid: "2026-11-14T12:00:00Z" });
+        // Already loaded and classified, before this rule existed: unlinked.
+        const a = await tx(card, -571_000, "tax", { date: "2026-11-14" });
+        const b = await tx(card, -224_000, "tax", { date: "2026-11-14" });
+        await setBalance(card, 2_000_000 - 795_000);
+        // Unlinked, they are taken off Q4's accrual: the reserve falls to 0 (it never goes below).
+        const stale = (await today()).state.free;
+        expect(stale).toBe(2_000_000 - 795_000);
+        await plan().linkTaxTransactions();
+        expect(await links(id)).toEqual([a, b]);
+        expect(await state(id)).toMatchObject({ paid: true, paid_on: "2026-11-14", transaction_id: null });
+        expect((await today()).state.free).toBe(stale - 60_000);
+        await plan().linkTaxTransactions();
+        expect(await ds.query(`SELECT 1 FROM payment_links`)).toHaveLength(2);
+      });
+
+      it("two hand-closed rows each take the payment that fits them", async () => {
+        await setup();
+        const esv = await taxRow(570_702, { paid: "2026-11-14T12:00:00Z", name: "ЄСВ" });
+        const single = await taxRow(224_000, { paid: "2026-11-14T12:00:00Z", name: "ЄП" });
+        const a = await tx(card, -571_000, "tax", { date: "2026-11-14" });
+        const b = await tx(card, -224_000, "tax", { date: "2026-11-14" });
+        await plan().linkTaxTransactions();
+        expect(await links(esv)).toEqual([a]);
+        // The exact amount keeps the old link through the row itself.
+        expect(await state(single)).toMatchObject({ paid: true, transaction_id: b });
+      });
+
+      it("leaves the bank rows alone when the hand-closed row is outside the tolerance", async () => {
+        await setup();
+        const id = await taxRow(500_000, { paid: "2026-11-14T12:00:00Z" });
+        await tx(card, -571_000, "tax", { date: "2026-11-14" });
+        await tx(card, -224_000, "tax", { date: "2026-11-14" });
+        await plan().linkTaxTransactions();
+        expect(await links(id)).toEqual([]);
+        expect(await state(id)).toMatchObject({ paid: true, transaction_id: null });
+      });
+    });
+  });
+
   describe("quarter rollover", () => {
     const ESV = 570_702;
     const plan = () => app.get(PlanService);

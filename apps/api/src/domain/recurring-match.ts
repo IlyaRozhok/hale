@@ -18,6 +18,10 @@ export interface Payment {
   match_hint: string | null;
   /** "2026-Q3" for a quarterly tax row; null for anything else. */
   tax_quarter?: string | null;
+  /** The app's own estimate of a quarter's tax, not the owner's figure. */
+  is_estimate?: boolean;
+  /** Minor units already paid by operations in `payment_links`; 0 or absent when none. */
+  linked?: number;
 }
 
 export interface PayableTx {
@@ -84,7 +88,7 @@ export function matchPayment(
   const today = dayNumber(tx.localDate);
   let best: { p: Payment; dist: number } | null = null;
   for (const p of payments) {
-    if (p.kind !== kind || p.paid_at !== null || p.transaction_id !== null) continue;
+    if (p.kind !== kind || p.paid_at !== null || p.transaction_id !== null || (p.linked ?? 0) > 0) continue;
     const dist = Math.abs(dayNumber(p.due_on) - today);
     const sameMonth = isObligationRow && p.due_on.slice(0, 7) === tx.localDate.slice(0, 7);
     if (dist > MATCH_TOLERANCE_DAYS && !sameMonth) continue;
@@ -109,13 +113,93 @@ export function matchTaxPayment(tx: PayableTx, payments: readonly Payment[]): Pa
   const today = dayNumber(tx.localDate);
   let best: { p: Payment; dist: number } | null = null;
   for (const p of payments) {
-    if (p.kind !== "tax" || p.transaction_id !== null || !exactFit(tx, p)) continue;
+    if (p.kind !== "tax" || p.transaction_id !== null || (p.linked ?? 0) > 0 || !exactFit(tx, p)) continue;
     if (tx.localDate <= quarterBounds(p.tax_quarter ?? precedingQuarter(p.due_on)).end) continue;
     const dist = Math.abs(dayNumber(p.due_on) - today);
     const closer = !best || dist < best.dist || (dist === best.dist && best.p.paid_at !== null && p.paid_at === null);
     if (closer) best = { p, dist };
   }
   return best ? best.p : null;
+}
+
+/** A real tax row (the owner's figure) closes on payments that differ from it by up to ₴20 in all. */
+export const TAX_EXACT_TOLERANCE = 2_000;
+/** The app's estimate closes on payments within 10% of it: the estimate is a guess at the owner's figure. */
+export const TAX_ESTIMATE_TOLERANCE = 0.1;
+/** A payment more than 30 days after the row's due date is not taken as paying it. */
+export const TAX_WINDOW_DAYS = 30;
+
+/** How far the payments may be from a tax row, in minor units, and still settle it. */
+export function taxTolerance(p: Pick<Payment, "amount" | "is_estimate">): number {
+  return p.is_estimate ? Math.round(p.amount * TAX_ESTIMATE_TOLERANCE) : TAX_EXACT_TOLERANCE;
+}
+
+export interface TaxShare {
+  payment: Payment;
+  /** Operations to link to the payment through payment_links: this one, and its pair if any. */
+  ids: number[];
+  /** The payment was open and is now paid. */
+  closes: boolean;
+  /** The operations linked before as a part are let go: this payment alone settles the row. */
+  release: boolean;
+}
+
+/** Hryvnia paid by an outgoing row, positive; null when unknown. */
+function paidUah(tx: PayableTx): number | null {
+  const uah = tx.amountUah ?? (tx.currency === "UAH" ? tx.amount : null);
+  return uah === null ? null : Math.abs(uah);
+}
+
+/** An outgoing tax row that may pay this tax row: after its quarter ended and not long after its due date. */
+function inTaxWindow(tx: PayableTx, p: Payment): boolean {
+  if (tx.type !== "tax" || tx.amount >= 0) return false;
+  if (tx.localDate <= quarterBounds(p.tax_quarter ?? precedingQuarter(p.due_on)).end) return false;
+  return dayNumber(tx.localDate) - dayNumber(p.due_on) <= TAX_WINDOW_DAYS;
+}
+
+/**
+ * A tax paid in parts or with a sum off the row (task Б24), for rows the exact match left. The
+ * tolerance is `taxTolerance` on the total; candidates are hryvnia tax rows not settled through
+ * `transaction_id`, whose quarter ended before the payment, at most TAX_WINDOW_DAYS after their due
+ * date; a row whose links already add up to it takes nothing more. The first that applies, oldest due
+ * date first within each step:
+ * 1. with the parts already linked to a row, this payment completes it;
+ * 2. this payment alone settles a row (parts guessed before are let go);
+ * 3. this payment and one unlinked tax payment from `others` together settle a row with nothing linked;
+ * 4. an open row it does not settle yet takes it as a part, without closing; the row stays reserved.
+ * A row the owner marked paid takes payments that add up to it (1-3), never a lone part. When in doubt,
+ * nothing is linked and the payment counts against the current quarter as before.
+ */
+export function matchTaxShare(tx: PayableTx, payments: readonly Payment[], others: readonly PayableTx[]): TaxShare | null {
+  const x = paidUah(tx);
+  if (tx.type !== "tax" || tx.amount >= 0 || x === null) return null;
+  const tol = (p: Payment) => taxTolerance(p);
+  const linked = (p: Payment) => p.linked ?? 0;
+  const rows = payments
+    .filter((p) => p.kind === "tax" && p.currency === "UAH" && p.transaction_id === null && inTaxWindow(tx, p))
+    .filter((p) => !(linked(p) > 0 && linked(p) >= p.amount - tol(p)))
+    .sort((a, b) => (a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : a.id - b.id));
+  const fits = (p: Payment, sum: number) => Math.abs(sum - p.amount) <= tol(p);
+  const share = (p: Payment, ids: number[], release = false): TaxShare => ({ payment: p, ids, closes: p.paid_at === null, release });
+
+  for (const p of rows) if (linked(p) > 0 && fits(p, linked(p) + x)) return share(p, [tx.id]);
+  for (const p of rows) if (fits(p, x)) return share(p, [tx.id], linked(p) > 0);
+  const today = dayNumber(tx.localDate);
+  for (const p of rows) {
+    if (linked(p) > 0) continue;
+    const partner = others
+      .filter((o) => o.id !== tx.id && inTaxWindow(o, p))
+      .filter((o) => {
+        const y = paidUah(o);
+        return y !== null && fits(p, x + y);
+      })
+      .sort((a, b) => Math.abs(dayNumber(a.localDate) - today) - Math.abs(dayNumber(b.localDate) - today) || a.id - b.id)[0];
+    if (partner) return share(p, [tx.id, partner.id]);
+  }
+  for (const p of rows) {
+    if (p.paid_at === null && linked(p) + x < p.amount - tol(p)) return { payment: p, ids: [tx.id], closes: false, release: false };
+  }
+  return null;
 }
 
 export interface ExpectedForEvents {
