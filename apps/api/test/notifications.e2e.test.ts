@@ -7,6 +7,7 @@ import { NotificationsService } from "../src/notifications/notifications.service
 import { EXPO_FETCH, type FetchLike } from "../src/notifications/expo-push";
 import { PlanService } from "../src/plan/plan.service";
 import { Clock } from "../src/today/clock";
+import { TodayService } from "../src/today/today.service";
 
 let app: INestApplication;
 let ds: DataSource;
@@ -215,6 +216,40 @@ describe("fix round 1", () => {
     expect(await logged()).toEqual(["usdc:2:2026-11-16", "over_limit:2026-11-16"]);
     await svc.tick();
     expect(await logged()).toHaveLength(2);
+  });
+
+  it("keeps quiet about an overspend on the day the shortage came on, and speaks up the next day (Б17)", async () => {
+    await device("a", "ExponentPushToken[a]");
+    await ds.query(`TRUNCATE income_events, expected_incomes RESTART IDENTITY CASCADE`);
+    const fop = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop',500000,'UAH',15,25) RETURNING id`))[0].id;
+    await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-11','2026-11-12','expected')`, [fop]);
+    const card = (await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance, credit_limit) VALUES ('acc-s','black','UAH',4000000,3000000) RETURNING id`))[0].id;
+    const evening = async (day: string) => {
+      at(`${day}T19:00:00Z`); // 21:00 Kyiv
+      // Several passes: one ordinary notice a pass, and the over-limit one may come after another.
+      for (let i = 0; i < 4; i++) await svc.tick();
+    };
+    at("2026-11-01T08:00:00Z");
+    await svc.tick();
+    at("2026-11-02T08:00:00Z");
+    await svc.tick();
+    expect((await app.get(TodayService).getToday()).state).toMatchObject({ mode: "normal", dailyLimit: 100_000 });
+    // Spending far over the day's ₴1,000 brings on the shortage the same day.
+    await spendTx(card, -1_100_000, "spend", "2026-11-02");
+    await ds.query(`UPDATE accounts SET balance=2900000 WHERE id=$1`, [card]);
+    await evening("2026-11-02");
+    expect((await app.get(TodayService).getToday()).state).toMatchObject({ mode: "bridge", leftToday: -1_000_000, shortageStart: { nextLimit: 45_000 } });
+    expect((await logged()).filter((k) => k.startsWith("over_limit:"))).toEqual([]);
+    // The next day is judged by its own limit as usual.
+    at("2026-11-03T08:00:00Z");
+    await svc.tick();
+    await spendTx(card, -100_000, "spend", "2026-11-03");
+    await ds.query(`UPDATE accounts SET balance=2800000 WHERE id=$1`, [card]);
+    await evening("2026-11-03");
+    const next = (await app.get(TodayService).getToday()).state;
+    expect(next.shortageStart).toBeUndefined();
+    expect(next.leftToday).toBeLessThan(0);
+    expect((await logged()).filter((k) => k.startsWith("over_limit:"))).toEqual(["over_limit:2026-11-03"]);
   });
 
   it("a tax payment closed by a matched transaction gets no further reminders", async () => {

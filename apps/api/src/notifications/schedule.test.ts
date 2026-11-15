@@ -13,7 +13,7 @@ const tax = (over: Partial<TaxPayment> = {}): TaxPayment => ({
 
 const base = (over: Partial<NotifyState> = {}): NotifyState => ({
   taxes: [], leftToday: 10_000, dailyLimit: 100_000, badCases: [], questions: [],
-  syncedAt: null, sentKeys: new Set(), ordinarySentToday: false, ...over,
+  syncedAt: null, sentKeys: new Set(), ordinarySentToday: false, shortageStart: false, ...over,
 });
 
 const keys = (s: NotifyState, d: string, t: string) => dueNotifications(s, kyiv(d, t)).map((n) => n.key);
@@ -85,6 +85,18 @@ describe("over limit", () => {
   it("mentions the amount over", () => {
     const [n] = dueNotifications(over, kyiv("2026-11-05", "21:00"));
     expect(n!.body).toContain("₴250");
+  });
+
+  it("stays silent on the day the shortage came on, and comes the next day if that one is over too", () => {
+    // Decision 6.7 of the audit: the transition day is not judged by any limit.
+    expect(keys({ ...over, shortageStart: true }, "2026-11-05", "21:00")).toEqual([]);
+    expect(keys({ ...over, shortageStart: true }, "2026-11-05", "23:45")).toEqual([]);
+    expect(keys(over, "2026-11-06", "21:00")).toEqual(["over_limit:2026-11-06"]);
+  });
+
+  it("on the transition day lets the next ordinary candidate through instead", () => {
+    const s = base({ leftToday: -25_000, shortageStart: true, syncedAt: "2026-11-01T08:00:00Z", ordinarySentToday: false });
+    expect(keys(s, "2026-11-05", "21:00")).toEqual(["sync_broken:2026-11-01"]);
   });
 });
 
