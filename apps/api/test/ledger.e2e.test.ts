@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import type { TxType } from "../src/domain/classify";
 import { type AccountKind, type LedgerContext, type LedgerRow, ACCOUNT_KINDS, countsAgainstLimit, ledgerEffect, limitSpentByDay } from "../src/domain/ledger";
-import { Clock } from "../src/today/clock";
+import { Clock } from "../src/time/clock";
 
 // «Потрачено» in the calendar and today's spent are counted in Postgres by the limit SQL, and the «Траты»
 // group of the list is filtered by the spend-group SQL while its day totals, its summary and the inLimit

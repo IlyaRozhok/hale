@@ -4,7 +4,7 @@ import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import { PlanService } from "../src/plan/plan.service";
-import { Clock } from "../src/today/clock";
+import { Clock } from "../src/time/clock";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
 
 let app: INestApplication;

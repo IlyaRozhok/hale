@@ -6,7 +6,7 @@ import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import { NotificationsService } from "../src/notifications/notifications.service";
 import { EXPO_FETCH, type FetchLike } from "../src/notifications/expo-push";
 import { PlanService } from "../src/plan/plan.service";
-import { Clock } from "../src/today/clock";
+import { Clock } from "../src/time/clock";
 import { TodayService } from "../src/today/today.service";
 
 let app: INestApplication;

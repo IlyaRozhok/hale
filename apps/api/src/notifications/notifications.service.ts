@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { DataSource } from "typeorm";
 import { addDays, kyivDate } from "../domain/money";
-import { Clock } from "../today/clock";
+import { Clock, KYIV_TZ, kyivDaySql } from "../time/clock";
 import { TodayService } from "../today/today.service";
 import { ExpoPush } from "./expo-push";
 import { dueNotifications, type Notification, type NotifyState } from "./schedule";
@@ -22,7 +22,7 @@ export class NotificationsService {
     @Inject(ExpoPush) private readonly push: ExpoPush,
   ) {}
 
-  @Cron("*/15 * * * *", { timeZone: "Europe/Kyiv" })
+  @Cron("*/15 * * * *", { timeZone: KYIV_TZ })
   async cron(): Promise<void> {
     try {
       await this.tick();
@@ -72,7 +72,7 @@ export class NotificationsService {
     const badCases = t.badCases.filter((b) => !b.id.startsWith("loan:") || recentIds.has(b.id));
     const keys: { key: string }[] = await this.ds.query(`SELECT key FROM notifications_log`);
     const ordinary = await this.ds.query(
-      `SELECT 1 FROM notifications_log WHERE kind <> 'tax' AND (sent_at AT TIME ZONE 'Europe/Kyiv')::date = $1::date LIMIT 1`,
+      `SELECT 1 FROM notifications_log WHERE kind <> 'tax' AND ${kyivDaySql("sent_at")} = $1::date LIMIT 1`,
       [date],
     );
     return {

@@ -17,7 +17,7 @@ import { isAnswerableDeposit } from "../domain/cash-answer";
 import { kyivDate } from "../domain/money";
 import { paymentCover } from "../domain/payment-cover";
 import { PlanService } from "../plan/plan.service";
-import { Clock } from "../today/clock";
+import { Clock, kyivInstantSql } from "../time/clock";
 import { LimitService } from "../today/limit.service";
 import { TransactionsService } from "../transactions/transactions.service";
 import { counterKeySql } from "../transactions/counter-key";
@@ -315,7 +315,7 @@ export class CashService {
 
   /** Today keeps the moment of entry, so the list shows it on top; an earlier day sits at its noon. */
   private occurredSql(dateArg: string): string {
-    return `(${dateArg}::date + time '12:00') AT TIME ZONE 'Europe/Kyiv'`;
+    return kyivInstantSql(`(${dateArg}::date + time '12:00')`);
   }
 
   private async insert(m: EntityManager, account: number, op: Row): Promise<number> {

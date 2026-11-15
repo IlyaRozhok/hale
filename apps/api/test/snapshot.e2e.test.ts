@@ -4,7 +4,7 @@ import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import { NotificationsService } from "../src/notifications/notifications.service";
-import { Clock } from "../src/today/clock";
+import { Clock } from "../src/time/clock";
 import { TodayService } from "../src/today/today.service";
 
 /**

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import type { DataSource } from "typeorm";
 import { createMigratedDatabase } from "../../test/app";
 import { createDataSource } from "../db/data-source";
+import { kyivDaySql } from "../time/clock";
 import { HoldCheckService } from "./hold-check.service";
 import { SPLIT_THRESHOLD } from "./import.service";
 import { kyivMidnight } from "./mono.controller";
@@ -47,7 +48,7 @@ beforeEach(async () => {
 async function insertHold(id: string, time: number, account = "acc-1", over: { hold?: boolean; amount?: number } = {}) {
   await ds.query(
     `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, mcc, amount, amount_uah, hold, raw)
-     SELECT $1, id, to_timestamp($2), (to_timestamp($2) AT TIME ZONE 'Europe/Kyiv')::date, 'Uklon', 4121, $3, $3, $4, '{}'
+     SELECT $1, id, to_timestamp($2), ${kyivDaySql("to_timestamp($2)")}, 'Uklon', 4121, $3, $3, $4, '{}'
        FROM accounts WHERE external_id=$5`,
     [id, time, over.amount ?? -15_000, over.hold ?? true, account],
   );

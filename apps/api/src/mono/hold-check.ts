@@ -1,3 +1,4 @@
+import { kyivDate } from "../domain/money";
 import type { MonoStatementItem } from "./mono.schemas";
 
 /**
@@ -59,16 +60,9 @@ export const NEARBY_DAYS_AFTER = 3;
 export const CANCEL_LOOKBACK_DAYS = 30;
 const CANCEL_PREFIX = "скасування";
 
-const kyivYmd = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Europe/Kyiv",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
 /** Days since the epoch of the Kyiv calendar day that holds this moment. */
 export function kyivDayNumber(sec: number): number {
-  const [y, m, d] = kyivYmd.format(new Date(sec * 1000)).split("-").map(Number) as [number, number, number];
+  const [y, m, d] = kyivDate(new Date(sec * 1000)).split("-").map(Number) as [number, number, number];
   return Math.round(Date.UTC(y, m - 1, d) / 86_400_000);
 }
 

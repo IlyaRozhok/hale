@@ -24,7 +24,7 @@ import {
 import { kyivDate } from "../domain/money";
 import { estimateDueOn, precedingQuarter, quarterBounds, quarterOf } from "../domain/quarter";
 import { taxReserve } from "../domain/tax";
-import { Clock } from "../today/clock";
+import { Clock, KYIV_TZ } from "../time/clock";
 import { LimitService } from "../today/limit.service";
 import { quarterTaxFacts } from "../today/tax-facts";
 import { INTEREST_TEXT, SHORT_LOAN_TEXT } from "./short-loan";
@@ -35,13 +35,6 @@ import { BINANCE } from "./binance";
 export { BINANCE } from "./binance";
 const MATCH_DAYS = 3;
 const PLANNED_RECIPIENT_LABELS = ["close_regular", "shared_budget"];
-
-/** Today's date in Kyiv, YYYY-MM-DD. */
-export function kyivToday(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Kyiv", year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(now);
-}
 
 interface TxRow {
   id: number;
@@ -77,7 +70,7 @@ export class PlanService implements OnApplicationBootstrap {
   }
 
   /** Hourly, so that a seed or a new template reaches the limit the same day. */
-  @Cron("0 * * * *", { timeZone: "Europe/Kyiv" })
+  @Cron("0 * * * *", { timeZone: KYIV_TZ })
   async hourlyJob(): Promise<void> {
     try {
       await this.generate();
@@ -109,7 +102,7 @@ export class PlanService implements OnApplicationBootstrap {
   }
 
   /** Just after midnight on the first day of a quarter this is what keeps the reserve in place. */
-  @Cron("1 0 * * *", { timeZone: "Europe/Kyiv" })
+  @Cron("1 0 * * *", { timeZone: KYIV_TZ })
   async dailyTaxEstimateJob(): Promise<void> {
     try {
       await this.ensureTaxEstimate();
@@ -191,7 +184,7 @@ export class PlanService implements OnApplicationBootstrap {
   }
 
   /** Creates this and next month's payment for every active recurring series. Returns new rows. */
-  async generateRecurring(today: string = kyivToday()): Promise<number> {
+  async generateRecurring(today: string = kyivDate(this.clock.now())): Promise<number> {
     const series: { id: number; kind: string; name: string; amount: number; currency: string; day_of_month: number; match_hint: string | null }[] =
       await this.ds.query(
         `SELECT id, kind, name, amount::float8 AS amount, currency, day_of_month, match_hint
@@ -216,7 +209,7 @@ export class PlanService implements OnApplicationBootstrap {
   }
 
   /** Creates this and next month's events. Returns how many were new. */
-  async generateEvents(today: string = kyivToday()): Promise<number> {
+  async generateEvents(today: string = kyivDate(this.clock.now())): Promise<number> {
     const expected: { id: number; source: "fop" | "usdc"; window_start_day: number; window_end_day: number }[] =
       await this.ds.query(`SELECT id, source, window_start_day, window_end_day FROM expected_incomes ORDER BY id`);
     let created = 0;

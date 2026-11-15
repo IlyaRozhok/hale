@@ -3,6 +3,7 @@ import request from "supertest";
 import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
+import { kyivDate } from "../src/domain/money";
 import { PlanService } from "../src/plan/plan.service";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
 import { DayTermCashLoans1795132800000 } from "../src/db/migrations/0019-day-term-cash-loans";
@@ -309,7 +310,7 @@ describe("repaying and reviewing loans", () => {
   });
 
   it("marking a loan repaid or deleting a mistaken one gives the day a fresh limit at once", async () => {
-    const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv" }).format(new Date());
+    const date = kyivDate(new Date());
     const paid = await manual(100_000);
     const wrong = await manual(1_000);
     await plantSnapshot(date);
@@ -477,7 +478,7 @@ describe("repaying and reviewing loans", () => {
 });
 
 describe("editing the plan from the phone", () => {
-  const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Kyiv" }).format(new Date());
+  const today = () => kyivDate(new Date());
   const monthsAhead = (n: number, day: number) => {
     const t = today();
     const d = new Date(Date.UTC(Number(t.slice(0, 4)), Number(t.slice(5, 7)) - 1 + n, 1));
