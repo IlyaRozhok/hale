@@ -186,3 +186,22 @@ export function limitSql(t = "t", a = "a"): string {
 export function spendGroupSql(t = "t"): string {
   return `(${t}.type IN (${sqlList(SPEND_GROUP_TYPES)}) AND NOT (${cashOutFromStartSql(t)}))`;
 }
+
+/**
+ * SQL for what counted against the limit per Kyiv day between two date parameters (e.g. "$1", "$2"): rows
+ * (date text, spent float8), a day only when one of its rows counts. The calendar, the streak and the ledger check
+ * run exactly this query.
+ */
+export function spentByDaySql(from: string, to: string): string {
+  return `SELECT t.local_date::text AS date, SUM(-t.amount_uah)::float8 AS spent FROM transactions t JOIN accounts a ON a.id=t.account_id
+        WHERE ${limitSql("t", "a")} AND t.local_date BETWEEN ${from} AND ${to} GROUP BY t.local_date`;
+}
+
+/**
+ * SQL for what counted against the limit between two date parameters, one row (s float8): «потрачено» on «Сегодня»
+ * and the average day. The ledger check runs it for every day it looks at.
+ */
+export function spentSql(from: string, to: string): string {
+  return `SELECT COALESCE(SUM(-t.amount_uah),0)::float8 AS s FROM transactions t JOIN accounts a ON a.id=t.account_id
+        WHERE ${limitSql("t", "a")} AND t.local_date BETWEEN ${from} AND ${to}`;
+}

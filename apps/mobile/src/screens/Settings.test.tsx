@@ -197,7 +197,7 @@ describe("Settings, ledger check (Б11)", () => {
     };
     await one(bank({ accountKind: "white", amount: 20_000 }), "На белой карте не сходится ₴200 с 8 ноя.");
     await one(bank({ accountKind: "fop" }), "На счёте ФОП не сходится ₴320 с 8 ноя.");
-    await one(bank({ accountKind: "jar", accountTitle: "Отпуск" }), "На банке «Отпуск» не сходится ₴320 с 8 ноя.");
+    await one(bank({ accountKind: "jar", accountTitle: "Отпуск" }), "В банке «Отпуск» не сходится ₴320 с 8 ноя.");
     await one(bank({ accountKind: "other", currency: "USD", amount: -1_050 }), "На одном из счетов не сходится $10.50 с 8 ноя.");
     await one({ kind: "own_transfers", amount: 0, currency: "UAH", since: "2026-11-03", count: 3 }, "У 3 переводов между своими счетами нет второй части, с 3 ноя.");
     await one({ kind: "own_transfers", amount: 0, currency: "UAH", since: "2026-11-03", count: 1 }, "У 1 перевода между своими счетами нет второй части, с 3 ноя.");

@@ -93,10 +93,62 @@ describe("bankBalanceCheck (invariant 1)", () => {
   });
 });
 
+describe("bankBalanceCheck and the credit limit (invariant 1)", () => {
+  // monobank's balances include the credit limit: a new limit moves them with no operation behind it.
+  const limited = (r: ChainRow, creditLimitAt: number | null): ChainRow => ({ ...r, creditLimitAt });
+  const card = (rows: ChainRow[], balance: number, creditLimit: number): ChainAccount => ({ ...account(rows, balance), creditLimit });
+
+  it("a limit raised between two operations whose limits are known is not a difference", () => {
+    // ₴20,000 raised to ₴25,000 between 5 and 8 November, nothing lost.
+    const rows = [limited(row("2026-11-05", -10_000, 1_990_000), 2_000_000), limited(row("2026-11-08", -1_000, 2_489_000), 2_500_000)];
+    expect(bankBalanceCheck(card(rows, 2_489_000, 2_500_000))).toEqual({ amount: 0, since: null });
+  });
+
+  it("a limit stored late (until the next account sync) cancels out over the next operation", () => {
+    const rows = [
+      limited(row("2026-11-05", -10_000, 1_990_000), 2_000_000),
+      limited(row("2026-11-08", -1_000, 2_489_000), 2_000_000), // the bank already counts ₴25,000, the base still had ₴20,000
+      limited(row("2026-11-09", -1_000, 2_488_000), 2_500_000),
+    ];
+    expect(bankBalanceCheck(card(rows, 2_488_000, 2_500_000))).toEqual({ amount: 0, since: null });
+  });
+
+  it("compares the bank's balance now with the last operation through the account's limit now", () => {
+    const rows = [limited(row("2026-11-05", -10_000, 1_990_000), 2_000_000)];
+    expect(bankBalanceCheck(card(rows, 2_490_000, 2_500_000))).toEqual({ amount: 0, since: null });
+    expect(bankBalanceCheck(card(rows, 2_480_000, 2_500_000))).toEqual({ amount: -10_000, since: "2026-11-12" });
+  });
+
+  it("still finds a lost operation between operations whose limits are known", () => {
+    const rows = [limited(row("2026-11-05", -10_000, 1_990_000), 2_000_000), limited(row("2026-11-08", -1_000, 1_957_000), 2_000_000)];
+    expect(bankBalanceCheck(card(rows, 1_957_000, 2_000_000))).toEqual({ amount: -32_000, since: "2026-11-08" });
+  });
+
+  it("on a credit account, skips a link where the limit is not known on one side rather than alarm", () => {
+    const rows = [limited(row("2026-11-05", -10_000, 1_990_000), null), limited(row("2026-11-08", -1_000, 2_489_000), 2_500_000)];
+    expect(bankBalanceCheck(card(rows, 2_489_000, 2_500_000))).toEqual({ amount: 0, since: null });
+    const last = [limited(row("2026-11-05", -10_000, 1_990_000), null)];
+    expect(bankBalanceCheck(card(last, 2_490_000, 2_500_000))).toEqual({ amount: 0, since: null });
+  });
+
+  it("on an account that never had a limit, an unknown limit changes nothing", () => {
+    const rows = [limited(row("2026-11-05", -10_000, 90_000), null), limited(row("2026-11-08", -5_000, 53_000), null)];
+    expect(bankBalanceCheck(card(rows, 53_000, 0))).toEqual({ amount: -32_000, since: "2026-11-08" });
+  });
+});
+
 describe("loneLegsCheck (invariant 2)", () => {
+  const leg = (localDate: string, amount = -10_000, description = "На білу картку") => ({ localDate, amount, description });
+
   it("counts the legs and names the oldest day", () => {
     expect(loneLegsCheck([])).toEqual({ count: 0, since: null });
-    expect(loneLegsCheck(["2026-11-09", "2026-11-03", "2026-11-07"])).toEqual({ count: 3, since: "2026-11-03" });
+    expect(loneLegsCheck([leg("2026-11-09"), leg("2026-11-03"), leg("2026-11-07")])).toEqual({ count: 3, since: "2026-11-03" });
+  });
+
+  it("leaves out money coming in from the owner's account at another bank: its other leg is never here", () => {
+    expect(loneLegsCheck([leg("2026-11-02", 50_000, "Від: Іван Петренко"), leg("2026-11-04", 50_000, "  від: Іван Петренко")])).toEqual({ count: 0, since: null });
+    // Going out with such a text, or coming in without it, still counts.
+    expect(loneLegsCheck([leg("2026-11-02", -50_000, "Від: Іван Петренко"), leg("2026-11-04", 50_000, "З білої картки")])).toEqual({ count: 2, since: "2026-11-02" });
   });
 });
 

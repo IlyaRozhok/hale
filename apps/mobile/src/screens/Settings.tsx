@@ -41,7 +41,7 @@ function issueSentence(issue: LedgerCheckIssueDto, ranAt: string): string | null
         case "fop":
           return `На счёте ФОП не сходится ${amount} с ${date}.`;
         case "jar":
-          return issue.accountTitle ? `На банке «${issue.accountTitle}» не сходится ${amount} с ${date}.` : `На банке не сходится ${amount} с ${date}.`;
+          return issue.accountTitle ? `В банке «${issue.accountTitle}» не сходится ${amount} с ${date}.` : `В банке не сходится ${amount} с ${date}.`;
         default:
           return `На одном из счетов не сходится ${amount} с ${date}.`;
       }

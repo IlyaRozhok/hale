@@ -89,7 +89,8 @@ const CASH_DEPOSIT = /^(термінал|city\s*\d)/i;
 const CASHBACK = /^виведення кешбеку/i;
 const REFUND = /^(скасування|повернення платежу)/i;
 const REFUND_OF_TRANSFER = /переказ/i;
-const FROM_PREFIX = /^від:/i;
+/** «Від: <name>»: money in from a card at another bank. The ledger check (ledger-check.ts) reads it too. */
+export const FROM_PREFIX = /^від:/i;
 /** A business's refund of an order, as the sender writes it in the transfer comment (Б13). */
 const ORDER_REFUND_COMMENT = /^повернення\s+коштів/iu;
 /** Only a sole trader or a company: a friend returning a debt must not become a purchase refund. */

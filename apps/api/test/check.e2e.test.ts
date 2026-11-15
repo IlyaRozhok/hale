@@ -3,7 +3,9 @@ import request from "supertest";
 import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
+import type { EntityManager } from "typeorm";
 import { LedgerCheckService } from "../src/check/check.service";
+import { ScreenSpent } from "../src/check/screen-spent";
 import { Clock, kyivDaySql } from "../src/time/clock";
 import { counterKeySql } from "../src/transactions/counter-key";
 
@@ -13,6 +15,8 @@ import { counterKeySql } from "../src/transactions/counter-key";
 
 let on: INestApplication;
 let off: INestApplication;
+/** On, with a «Сегодня» that shows ₴5 more spent on 7 November than the ledger. */
+let odd: INestApplication;
 let ds: DataSource;
 let auth: string;
 
@@ -30,13 +34,21 @@ beforeAll(async () => {
   await ds.initialize();
   on = await createTestApp(url, { config: { LEDGER_CHECK_ENABLED: true } });
   off = await createTestApp(url);
-  on.get(Clock).fixed = NOW;
-  off.get(Clock).fixed = NOW;
+  const skewed = {
+    byDay: async (m: EntityManager, from: string, to: string) => {
+      const maps = await new ScreenSpent().byDay(m, from, to);
+      maps[1]!.set("2026-11-07", (maps[1]!.get("2026-11-07") ?? 0) + 500);
+      return maps;
+    },
+  };
+  odd = await createTestApp(url, { config: { LEDGER_CHECK_ENABLED: true }, overrides: [[ScreenSpent, skewed]] });
+  for (const app of [on, off, odd]) app.get(Clock).fixed = NOW;
   auth = await login(on);
 });
 afterAll(async () => {
   await on.close();
   await off.close();
+  await odd.close();
   await ds.destroy();
 });
 
@@ -44,10 +56,10 @@ let black: number;
 let white: number;
 let cash: number;
 
-async function account(externalId: string, kind: string, balance: number | null): Promise<number> {
+async function account(externalId: string, kind: string, balance: number | null, creditLimit = 0): Promise<number> {
   const r = await ds.query(
-    `INSERT INTO accounts (external_id, kind, currency, balance, balance_at) VALUES ($1,$2,'UAH',$3,$4) RETURNING id`,
-    [externalId, kind, balance ?? 0, balance === null ? null : "2026-11-12T09:00:00Z"],
+    `INSERT INTO accounts (external_id, kind, currency, balance, credit_limit, balance_at) VALUES ($1,$2,'UAH',$3,$4,$5) RETURNING id`,
+    [externalId, kind, balance ?? 0, creditLimit, balance === null ? null : "2026-11-12T09:00:00Z"],
   );
   return r[0].id as number;
 }
@@ -61,12 +73,13 @@ async function tx(
   category: string | null,
   balanceAfter: number | null,
   description = "Операция",
+  creditLimitAt: number | null = null,
 ): Promise<number> {
   seq++;
   const r = await ds.query(
-    `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, category, balance_after, raw)
-     VALUES ($1,$2,$3,${kyivDaySql("$3::timestamptz")},$4,$5,$5,$6,$7,$8,'{}') RETURNING id`,
-    [`c-${seq}`, accountId, at, description, amount, type, category, balanceAfter],
+    `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, category, balance_after, credit_limit_at, raw)
+     VALUES ($1,$2,$3,${kyivDaySql("$3::timestamptz")},$4,$5,$5,$6,$7,$8,$9,'{}') RETURNING id`,
+    [`c-${seq}`, accountId, at, description, amount, type, category, balanceAfter, creditLimitAt],
   );
   return r[0].id as number;
 }
@@ -94,7 +107,8 @@ beforeEach(async () => {
   await tx(cash, "2026-11-06T12:00:00Z", -20_000, "spend", "groceries", null, "Рынок");
 });
 
-const run = () => request(http(on)).post("/check/run").set("Authorization", auth);
+const run = (app = on) => request(http(app)).post("/check/run").set("Authorization", auth);
+const nightly = (app = on) => app.get(LedgerCheckService).scheduledRun();
 const latest = (app = on) => request(http(app)).get("/check/latest").set("Authorization", auth);
 
 /** A fingerprint of every table but the check's own. */
@@ -117,7 +131,6 @@ describe("POST /check/run and GET /check/latest", () => {
     expect(r.status).toBe(200);
     expect(r.body).toEqual({ ranAt: NOW.toISOString(), issues: [] });
     expect(await accountingChecksum()).toEqual(before);
-    expect((await latest()).body).toEqual({ ranAt: NOW.toISOString(), issues: [] });
     const rows: { invariant: string; ok: boolean; account_id: number | null }[] = await ds.query(
       `SELECT invariant, ok, account_id FROM ledger_checks ORDER BY id`,
     );
@@ -130,6 +143,17 @@ describe("POST /check/run and GET /check/latest", () => {
       { invariant: "day_spent", ok: true, account_id: null },
       { invariant: "cash_wallet", ok: true, account_id: null },
     ]);
+    expect(await nightly()).toBe(true);
+    expect(await accountingChecksum()).toEqual(before);
+    expect((await latest()).body).toEqual({ ranAt: NOW.toISOString(), issues: [] });
+  });
+
+  it("a card's raised credit limit, known on both sides, is not a difference", async () => {
+    // ₴20,000 raised to ₴25,000 between two webhook operations; monobank's balances include the limit.
+    const credit = await account("credit", "black", 2_489_000, 2_500_000);
+    await tx(credit, "2026-11-05T08:00:00Z", -10_000, "spend", "cafe", 1_990_000, "Кофейня", 2_000_000);
+    await tx(credit, "2026-11-08T08:00:00Z", -1_000, "spend", "cafe", 2_489_000, "Кофейня", 2_500_000);
+    expect((await run()).body.issues).toEqual([]);
   });
 
   it("a deleted operation breaks the bank balance by its amount from the next operation's day", async () => {
@@ -150,6 +174,8 @@ describe("POST /check/run and GET /check/latest", () => {
 
   it("counts a leg of a transfer between own accounts with no other leg, with the oldest day", async () => {
     await ds.query(`DELETE FROM transactions WHERE id=$1`, [fromBlack]);
+    // Money in from the owner's card at another bank never has its other leg here: not counted.
+    await tx(white, "2026-11-03T08:00:00Z", 20_000, "own_transfer", "own", null, "Від: Іван Петренко");
     const r = await run();
     expect(r.body.issues).toEqual([{ kind: "own_transfers", amount: 0, currency: "UAH", since: "2026-11-08", count: 1 }]);
   });
@@ -171,21 +197,40 @@ describe("POST /check/run and GET /check/latest", () => {
     expect(r.body.issues).toEqual([{ kind: "categories", amount: 1_000, currency: "UAH", since: "2026-11-10" }]);
   });
 
-  it("returns only the latest run, and a run at the same moment replaces the earlier one", async () => {
-    await run();
+  it("a screen that shows another spent for a day than the ledger breaks invariant 4 on that day", async () => {
+    const r = await run(odd);
+    expect(r.body.issues).toEqual([{ kind: "day_spent", amount: 500, currency: "UAH", since: "2026-11-07" }]);
+  });
+
+  it("gives out only the latest nightly run, and a nightly run at the same moment replaces the earlier one", async () => {
+    await nightly();
     await ds.query(`DELETE FROM transactions WHERE id=$1`, [silpo]);
     on.get(Clock).fixed = new Date("2026-11-12T11:00:00Z");
     try {
-      await run();
+      await nightly();
+      await tx(cash, "2026-11-12T09:00:00Z", -40_000, "spend", "groceries", null, "Рынок"); // a second problem, seen only by hand
+      expect((await run()).body.issues).toHaveLength(2);
+      const r = await latest();
+      expect(r.body.ranAt).toBe("2026-11-12T11:00:00.000Z");
+      expect(r.body.issues).toHaveLength(1);
     } finally {
       on.get(Clock).fixed = NOW;
     }
-    const r = await latest();
-    expect(r.body.ranAt).toBe("2026-11-12T11:00:00.000Z");
-    expect(r.body.issues).toHaveLength(1);
-    await run(); // at NOW again
-    const runs: { n: number }[] = await ds.query(`SELECT count(DISTINCT ran_at)::int AS n FROM ledger_checks`);
-    expect(runs[0]!.n).toBe(2);
+    await nightly(); // at NOW again
+    const runs: { n: number }[] = await ds.query(`SELECT count(DISTINCT (ran_at, scheduled))::int AS n FROM ledger_checks`);
+    expect(runs[0]!.n).toBe(3);
+  });
+
+  it("gives out nothing once the latest nightly run is more than two days old", async () => {
+    await nightly();
+    try {
+      on.get(Clock).fixed = new Date("2026-11-14T09:00:00Z");
+      expect((await latest()).body.ranAt).toBe(NOW.toISOString());
+      on.get(Clock).fixed = new Date("2026-11-14T11:00:00Z");
+      expect((await latest()).text).toBe("");
+    } finally {
+      on.get(Clock).fixed = NOW;
+    }
   });
 
   it("keeps 30 days of runs", async () => {
@@ -205,7 +250,7 @@ describe("POST /check/run and GET /check/latest", () => {
 
 describe("the LEDGER_CHECK_ENABLED flag", () => {
   it("off: the nightly run does nothing and the latest result is not given out", async () => {
-    expect(await off.get(LedgerCheckService).scheduledRun()).toBe(false);
+    expect(await nightly(off)).toBe(false);
     expect(await ds.query(`SELECT * FROM ledger_checks`)).toEqual([]);
     // A run by hand still works, but the app is shown nothing while the check is off.
     const r = await request(http(off)).post("/check/run").set("Authorization", auth);
@@ -216,8 +261,14 @@ describe("the LEDGER_CHECK_ENABLED flag", () => {
   });
 
   it("on: the nightly run stores a result", async () => {
-    expect(await on.get(LedgerCheckService).scheduledRun()).toBe(true);
+    expect(await nightly()).toBe(true);
     expect((await latest()).body).toEqual({ ranAt: NOW.toISOString(), issues: [] });
+  });
+
+  it("on: a run by hand (made while the check was off, or now) is never what the app is shown", async () => {
+    expect((await run(off)).status).toBe(200);
+    expect((await run()).status).toBe(200);
+    expect((await latest()).text).toBe("");
   });
 
   it("on, before any run: nothing to show", async () => {

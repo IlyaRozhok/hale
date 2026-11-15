@@ -4,7 +4,8 @@ import { LedgerCheckService } from "./check.service";
 
 /**
  * Task Б11: the ledger check. Owner-authenticated by the global guard (not `@Public()`). A run by hand works with
- * the nightly check off (for the owner to try it once); the latest result is given out only while it is on.
+ * the nightly check off (for the owner to try it once) and answers with its result; `latest` gives out only the
+ * latest nightly result, only while the check is on and only while it is fresh.
  */
 @Controller("check")
 export class CheckController {

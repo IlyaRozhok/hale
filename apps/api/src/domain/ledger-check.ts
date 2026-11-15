@@ -1,6 +1,7 @@
 // The nightly ledger check (task Б11, audit 6.5 step 2): invariants 1-4 and 7, as pure functions over what the
 // service read. They only compare; nothing here changes how money or the limit is counted. Each result is an
 // amount and the first day it applies, enough for one sentence in Settings; `since` is null when all is well.
+import { FROM_PREFIX } from "./classify";
 import { type LedgerContext, type LedgerRow, ledgerEffect } from "./ledger";
 import type { Minor } from "./money";
 
@@ -24,6 +25,8 @@ export interface ChainRow {
   amount: Minor;
   /** The balance right after the operation, as the bank sent it; null on rows stored before it was kept. */
   balanceAfter: Minor | null;
+  /** The account's credit limit stored when the row arrived by webhook (credit_limit_at); null when not known. */
+  creditLimitAt?: Minor | null;
 }
 
 export interface ChainAccount {
@@ -32,6 +35,8 @@ export interface ChainAccount {
   balanceAt: number;
   /** Kyiv day of `balanceAt`. */
   balanceDate: string;
+  /** The account's credit limit now (accounts.credit_limit); monobank's balances include it. */
+  creditLimit?: Minor;
   rows: readonly ChainRow[];
 }
 
@@ -63,10 +68,18 @@ function chainOrder(rows: readonly ChainRow[], start: Minor | null): ChainRow[] 
  * The amount is the bank's balance minus ours; `since` is the first operation (or the bank's balance) at which
  * the present difference shows. Operations after the moment of the bank's balance are left out. Null when no
  * row carries a bank balance: there is nothing to start from.
+ *
+ * monobank's balances include the credit limit, so a new limit moves them with no operation behind it. Between
+ * two points whose limits are known (credit_limit_at on webhook rows, the account's limit now) the change of the
+ * limit is taken out of the gap; a limit stored late cancels out at the next known point. On an account that has
+ * or had a limit, a link where the limit is not known on one side is skipped: a difference there may be only a
+ * new limit, and the check does not alarm on a guess.
  */
 export function bankBalanceCheck(account: ChainAccount): Divergence | null {
   const rows = account.rows.filter((r) => r.at <= account.balanceAt);
+  const hasCredit = (account.creditLimit ?? 0) > 0 || rows.some((r) => (r.creditLimitAt ?? 0) > 0);
   let running: Minor | null = null;
+  let runningLimit: Minor | null = null;
   let diff = 0;
   let since: string | null = null;
   const gap = (amount: Minor, date: string) => {
@@ -76,27 +89,47 @@ export function bankBalanceCheck(account: ChainAccount): Divergence | null {
     if (diff === 0) since = null;
     else if (before === 0) since = date;
   };
+  /** A link from a point with limit `from` to one with limit `to`; skipped when a limit change cannot be ruled out. */
+  const link = (raw: Minor, from: Minor | null, to: Minor | null, date: string) => {
+    if (from !== null && to !== null) gap(raw - (to - from), date);
+    else if (!hasCredit) gap(raw, date);
+  };
   for (const r of chainOrder(rows, null)) {
     if (running === null) {
       running = r.balanceAfter;
+      runningLimit = r.creditLimitAt ?? null;
       continue;
     }
     if (r.balanceAfter === null) {
       running += r.amount;
       continue;
     }
-    gap(r.balanceAfter - (running + r.amount), r.localDate);
+    link(r.balanceAfter - (running + r.amount), runningLimit, r.creditLimitAt ?? null, r.localDate);
     running = r.balanceAfter;
+    runningLimit = r.creditLimitAt ?? null;
   }
   if (running === null) return null;
-  gap(account.balance - running, account.balanceDate);
+  link(account.balance - running, runningLimit, account.creditLimit ?? 0, account.balanceDate);
   return { amount: diff, since };
 }
 
-/** Invariant 2: legs of transfers between own accounts with no other leg here, by Kyiv day. */
-export function loneLegsCheck(dates: readonly string[]): { count: number; since: string | null } {
-  const since = dates.reduce<string | null>((min, d) => (min === null || d < min ? d : min), null);
-  return { count: dates.length, since };
+/** A transfer between own accounts with no other leg here. */
+export interface LoneLeg {
+  localDate: string;
+  /** Signed; positive is money in. */
+  amount: Minor;
+  description: string;
+}
+
+/**
+ * Invariant 2: legs of transfers between own accounts with no other leg here, counted with the oldest Kyiv day.
+ * Money coming in from the owner's account at another bank («Від: …», as classify reads it) is left out: its
+ * other leg is never in the base. Everything else counts.
+ */
+export function loneLegsCheck(legs: readonly LoneLeg[]): { count: number; since: string | null } {
+  const counted = legs.filter((l) => !(l.amount > 0 && FROM_PREFIX.test(l.description.trim())));
+  const since = counted.reduce<string | null>((min, l) => (min === null || l.localDate < min ? l.localDate : min), null);
+  return { count: counted.length, since };
 }
 
 /**
