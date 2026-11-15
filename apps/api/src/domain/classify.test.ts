@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classify, findOwnPairs, isWeakRuleValue, type ClassifyContext, type ClassifyInput } from "./classify";
+import { classify, findOwnPairs, hasThirdParty, isWeakRuleValue, type ClassifyContext, type ClassifyInput } from "./classify";
 
 const ctx = (over: Partial<ClassifyContext> = {}): ClassifyContext => ({
   ownIbans: new Set(["UA00OWN0001"]),
@@ -327,6 +327,30 @@ describe("people", () => {
     expect(classify(tx({ description: "Від: Тест Тестовий", amount: 10000, mcc: 4829 }), ctx())).toMatchObject({
       type: "person_in",
     });
+  });
+});
+
+describe("hasThirdParty (Б10)", () => {
+  it.each([
+    ["money from a named person", { amount: 200_000, description: "Від: Анна Петренко" }],
+    ["money from a named counterparty", { amount: 200_000, description: "Переказ", counterName: "Анна Петренко" }],
+    ["a transfer to a masked card", { description: "545708****1111" }],
+    ["a transfer to a masked card in the counter name", { description: "Переказ на картку", counterName: "5457 08** **** 1111" }],
+    ["a transfer to a foreign IBAN", { description: "Переказ", counterIban: "UA213223130000026007233566001" }],
+    ["a transfer to a named counterparty", { description: "Переказ", counterName: "Анна Петренко" }],
+  ])("someone else is on the other side: %s", (_n, over) => {
+    expect(hasThirdParty(tx(over), ctx())).toBe(true);
+  });
+
+  it.each([
+    ["money from the owner", { amount: 200_000, description: "Від: Test Owner" }],
+    ["money with only a bank text", { amount: 200_000, description: "Переказ з картки" }],
+    ["money with a description that is not a sender", { amount: 200_000, description: "Payment from client" }],
+    ["a transfer to an own IBAN", { description: "Переказ", counterIban: "UA00OWN0001" }],
+    ["a transfer with only a bank text", { description: "Переказ на картку" }],
+    ["an exchange text", { description: "Обмін валюти" }],
+  ])("no one else: %s", (_n, over) => {
+    expect(hasThirdParty(tx(over), ctx())).toBe(false);
   });
 });
 

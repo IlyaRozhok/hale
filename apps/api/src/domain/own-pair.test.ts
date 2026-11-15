@@ -8,6 +8,8 @@ const leg = (over: Partial<PairLeg> = {}): PairLeg => ({
   at: 0,
   amount: -410_000,
   amountUah: -410_000,
+  exactPartner: false,
+  thirdParty: false,
   ...over,
 });
 /** $100 bought for ₴4,100 at a rate of 41: the dollar leg's hryvnia amount is at the rate of the day. */
@@ -52,7 +54,7 @@ describe("isOwnPair (Б10)", () => {
     expect(isOwnPair(leg(), usd({ accountKind: "jar" }))).toBe(false);
     expect(isOwnPair(leg({ accountKind: "jar" }), usd())).toBe(false);
     expect(isOwnPair(leg({ accountKind: "cash" }), usd())).toBe(false);
-    expect(isOwnPair(leg({ accountKind: "white" }), usd({ accountKind: "fop" }))).toBe(true);
+    expect(isOwnPair(leg({ accountKind: "fop" }), usd({ accountKind: "white" }))).toBe(true);
   });
 
   it("never on the same account", () => {
@@ -64,5 +66,27 @@ describe("isOwnPair (Б10)", () => {
     expect(isOwnPair(leg(), usd({ at: OWN_PAIR_WINDOW_MS }))).toBe(true);
     expect(isOwnPair(leg(), usd({ at: OWN_PAIR_WINDOW_MS + 1 }))).toBe(false);
     expect(isOwnPair(leg({ at: OWN_PAIR_WINDOW_MS + 1 }), leg({ accountId: 2, amount: 410_000, amountUah: 410_000 }))).toBe(false);
+  });
+
+  it("money coming in on the fop account is income, never one leg of an exchange", () => {
+    const fopIncome = usd({ accountKind: "fop", amount: 100_000, amountUah: 4_120_000 });
+    expect(isOwnPair(leg({ accountKind: "fop", amount: -4_080_000, amountUah: -4_080_000 }), fopIncome)).toBe(false);
+    expect(isOwnPair(fopIncome, leg({ amount: -4_080_000, amountUah: -4_080_000 }))).toBe(false);
+    // Money going out of the fop account may still be an exchange, and an exact pair still pairs.
+    expect(isOwnPair(usd({ accountKind: "fop", amount: -10_000, amountUah: -410_000 }), leg({ amount: 405_000, amountUah: 405_000 }))).toBe(true);
+    expect(isOwnPair(leg({ accountId: 3, accountKind: "fop", amount: 410_000, amountUah: 410_000 }), leg())).toBe(true);
+  });
+
+  it("a row that already has its exact other leg is not an exchange leg", () => {
+    expect(isOwnPair(leg({ exactPartner: true }), usd())).toBe(false);
+    expect(isOwnPair(leg(), usd({ exactPartner: true }))).toBe(false);
+    expect(isOwnPair(leg({ exactPartner: true }), leg({ accountId: 2, amount: 410_000, amountUah: 410_000, exactPartner: true }))).toBe(true);
+  });
+
+  it("a row with someone else on the other side is not an exchange leg", () => {
+    expect(isOwnPair(leg({ thirdParty: true }), usd())).toBe(false);
+    expect(isOwnPair(leg(), usd({ thirdParty: true }))).toBe(false);
+    // The exact rule is as before.
+    expect(isOwnPair(leg({ thirdParty: true }), leg({ accountId: 2, amount: 410_000, amountUah: 410_000 }))).toBe(true);
   });
 });

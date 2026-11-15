@@ -2,7 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { DataSource } from "typeorm";
 import { createDataSource } from "../db/data-source";
 import { createMigratedDatabase } from "../../test/app";
-import { isOwnPair, ownPairSql, type PairLeg } from "../domain/own-pair";
+import { hasThirdParty } from "../domain/classify";
+import { exactPartnerSql, isOwnPair, ownPairSql, type PairLeg } from "../domain/own-pair";
 import { JobRunner } from "../mono/jobs/job-runner";
 import { RECLASSIFY_JOB_KIND, ReclassifyService } from "./reclassify.service";
 
@@ -25,6 +26,8 @@ async function insertTx(
     type?: string | null;
     type_source?: string | null;
     category?: string | null;
+    counterName?: string;
+    counterIban?: string;
   } = {},
 ): Promise<number> {
   seq++;
@@ -32,8 +35,8 @@ async function insertTx(
   const rows: { id: number }[] = await ds.query(
     `INSERT INTO transactions
        (external_id, account_id, occurred_at, local_date, description, mcc, amount, amount_uah,
-        type, category, type_source, raw)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$11,$8,$9,$10,'{}') RETURNING id`,
+        type, category, type_source, counter_name, counter_iban, raw)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$11,$8,$9,$10,$12,$13,'{}') RETURNING id`,
     [
       `tx-${seq}`,
       accountId,
@@ -46,6 +49,8 @@ async function insertTx(
       over.category ?? null,
       over.type_source === undefined ? "auto" : over.type_source,
       over.amountUah === undefined ? (over.amount ?? -5000) : over.amountUah,
+      over.counterName ?? null,
+      over.counterIban ?? null,
     ],
   );
   return rows[0]!.id;
@@ -135,12 +140,44 @@ describe("reclassify", () => {
   describe("an exchange between own accounts in different currencies (Б10)", () => {
     let usd = 0;
     let usdJar = 0;
+    let fopUsd = 0;
     beforeEach(async () => {
       const ins = async (ext: string, kind: string) =>
         (await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ($1,$2,'USD',0) RETURNING id`, [ext, kind]))[0]
           .id as number;
       usd = await ins("u", "black");
       usdJar = await ins("uj", "jar");
+      fopUsd = await ins("fu", "fop");
+    });
+    const after = (at: number, s: number) => new Date(at + s * 1000);
+
+    /** The owner's income, all inside ten minutes: dollars in, sold to the fop hryvnia account, sent on to the card. */
+    const fopIncomeChain = async (t0: number) => ({
+      income: await insertTx(fopUsd, { amount: 100_000, amountUah: 4_120_000, mcc: 4829, description: "Payment from client", at: after(t0, 0) }),
+      sold: await insertTx(fopUsd, { amount: -100_000, amountUah: -4_120_000, mcc: 4829, description: "На гривневий рахунок ФОП", at: after(t0, 60) }),
+      hryvnia: await insertTx(fop, { amount: 4_080_000, mcc: 4829, description: "З валютного рахунку ФОП", at: after(t0, 61) }),
+      forward: await insertTx(fop, { amount: -4_080_000, mcc: 4829, description: "Переказ на картку", at: after(t0, 120) }),
+      card: await insertTx(black, { amount: 4_080_000, mcc: 4829, description: "Переказ з картки", at: after(t0, 121) }),
+    });
+    /** Dollars sent to someone's card, and money from a person a few minutes later: 3% apart by chance. */
+    const strangers = async (t0: number) => ({
+      out: await insertTx(usd, { amount: -5_000, amountUah: -206_000, mcc: 4829, description: "545708****1111", at: after(t0, 0) }),
+      inn: await insertTx(black, { amount: 200_000, mcc: 4829, description: "Від: Анна Петренко", at: after(t0, 200) }),
+    });
+
+    it("fop income stays income when its hryvnia is sent on within ten minutes", async () => {
+      const chain = await fopIncomeChain(NOW - 3_600_000);
+      await service().reclassifyPending();
+      expect((await get(chain.income)).type).toBe("income");
+      expect((await get(chain.forward)).type).toBe("own_transfer");
+      expect((await get(chain.card)).type).toBe("own_transfer");
+    });
+
+    it("money to someone's card and money from a person do not pair, however close the sums", async () => {
+      const p = await strangers(NOW - 3_600_000);
+      await service().reclassifyPending();
+      expect((await get(p.out)).type).toBe("person_transfer");
+      expect((await get(p.inn)).type).toBe("person_in");
     });
     const buy = (acc: number, uah: number, usdCents: number, usdUah: number, at: Date) =>
       Promise.all([
@@ -176,37 +213,47 @@ describe("reclassify", () => {
       expect((await get(out)).type).toBe("own_transfer");
     });
 
-    it("the SQL form of the pair rule agrees with isOwnPair on every pair of rows", async () => {
-      const t0 = NOW - 3_600_000;
-      // [account, amount, hryvnia amount (undefined: the amount itself), seconds after the first × 1000]
-      const legs: [number, number, number | null | undefined, number][] = [
-        [black, -413_000, undefined, 0],
-        [usd, 10_000, 410_000, 40_000], // within 3%
-        [usd, 10_000, 395_500, 60_000], // 4% apart
-        [usd, 10_000, null, 70_000], // no rate
-        [white, 413_000, undefined, 80_000], // exact opposite
-        [usdJar, 10_000, 412_000, 90_000], // a jar
-        [usd, 10_000, 410_000, 700_000], // outside the window from the first
-        [black, 0, undefined, 100_000],
-        [usd, 0, 0, 110_000],
+    it("once rows are classified, the SQL form of the pair rule agrees with isOwnPair on every pair of rows", async () => {
+      const t0 = NOW - 7_200_000;
+      // [account, amount, hryvnia amount (undefined: the amount itself), milliseconds after the first, description]
+      const legs: [number, number, number | null | undefined, number, string][] = [
+        [black, -413_000, undefined, 0, "Переказ на картку"],
+        [usd, 10_000, 410_000, 40_000, "З гривневого рахунку"], // within 3%
+        [usd, 10_000, 395_500, 60_000, "З гривневого рахунку"], // 4% apart
+        [usd, 10_000, null, 70_000, "З гривневого рахунку"], // no rate
+        [usdJar, 10_000, 412_000, 90_000, "Поповнення банки"], // a jar
+        [usd, 10_000, 410_000, 700_000, "З гривневого рахунку"], // outside the window from the first
+        [white, -50_000, undefined, 800_000, "Переказ на картку"],
+        [black, 50_000, undefined, 810_000, "Переказ з картки"], // exact opposite
+        [usd, 0, 0, 820_000, "Переказ"],
+        [white, 0, undefined, 830_000, "Переказ"],
       ];
-      for (const [acc, amount, amountUah, dt] of legs) {
-        await insertTx(acc, { amount, amountUah, at: new Date(t0 + dt) });
+      for (const [acc, amount, amountUah, dt, description] of legs) {
+        await insertTx(acc, { amount, amountUah, mcc: 4829, description, at: new Date(t0 + dt) });
       }
-      const rows: (PairLeg & { id: number })[] = await ds.query(
-        `SELECT t.id, t.account_id AS "accountId", a.kind AS "accountKind", a.currency, extract(epoch FROM t.occurred_at)::float8 * 1000 AS at,
-                t.amount::float8 AS amount, t.amount_uah::float8 AS "amountUah"
-           FROM transactions t JOIN accounts a ON a.id = t.account_id`,
-      );
+      await fopIncomeChain(t0 + 3_600_000);
+      await strangers(t0 + 5_400_000);
+      await service().reclassifyPending();
+
+      const own = { ownNames: ["Test Owner"], ownIbans: new Set<string>() };
+      const rows: (Omit<PairLeg, "thirdParty"> & { id: number; description: string; counterName: string | null; counterIban: string | null })[] =
+        await ds.query(
+          `SELECT t.id, t.account_id AS "accountId", a.kind AS "accountKind", a.currency, extract(epoch FROM t.occurred_at)::float8 * 1000 AS at,
+                  t.amount::float8 AS amount, t.amount_uah::float8 AS "amountUah", ${exactPartnerSql("t")} AS "exactPartner",
+                  t.description, t.counter_name AS "counterName", t.counter_iban AS "counterIban"
+             FROM transactions t JOIN accounts a ON a.id = t.account_id`,
+        );
+      const legsTs = rows.map((r) => ({ ...r, thirdParty: hasThirdParty(r, own) }));
       const sql: { t: number; o: number }[] = await ds.query(
         `SELECT t.id AS t, o.id AS o FROM transactions t JOIN accounts ta ON ta.id = t.account_id
            JOIN transactions o ON o.id <> t.id JOIN accounts oa ON oa.id = o.account_id
           WHERE ${ownPairSql("t", "ta", "o", "oa")}`,
       );
       const fromSql = sql.map((p) => `${p.t}-${p.o}`).sort();
-      const fromTs = rows.flatMap((a) => rows.filter((b) => b.id !== a.id && isOwnPair(a, b)).map((b) => `${a.id}-${b.id}`)).sort();
+      const fromTs = legsTs.flatMap((a) => legsTs.filter((b) => b.id !== a.id && isOwnPair(a, b)).map((b) => `${a.id}-${b.id}`)).sort();
       expect(fromSql).toEqual(fromTs);
-      expect(fromTs.length).toBeGreaterThan(0);
+      // The genuine exchange is among them.
+      expect(fromTs).toContain(`${rows.find((r) => r.amount === -413_000)!.id}-${rows.find((r) => r.amountUah === 410_000 && r.at === t0 + 40_000)!.id}`);
     });
   });
 

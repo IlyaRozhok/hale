@@ -144,6 +144,24 @@ function mentionsOwnName(text: string, ownNames: readonly string[]): boolean {
   });
 }
 
+/**
+ * Someone other than the owner is on the other side of the row (Б10), so it cannot be one leg of an
+ * exchange between own accounts: money from a named sender who is not the owner; money sent to a
+ * masked card, a foreign IBAN or a named counterparty who is not the owner. Only the bank's
+ * counterparty field and «Від: …» name a sender: a bare description may be a bank text.
+ */
+export function hasThirdParty(
+  tx: Pick<ClassifyInput, "amount" | "description" | "counterIban" | "counterName">,
+  ctx: Pick<ClassifyContext, "ownNames" | "ownIbans">,
+): boolean {
+  const d = tx.description.trim();
+  const named = tx.counterName?.trim() || "";
+  const someone = (name: string) => name !== "" && isCounterpartyName(name) && !mentionsOwnName(name, ctx.ownNames);
+  if (tx.amount > 0) return someone(named || (FROM_PREFIX.test(d) ? d.replace(FROM_PREFIX, "").trim() : ""));
+  const iban = tx.counterIban?.trim();
+  return cardTail(named || d) !== null || (!!iban && !ctx.ownIbans.has(iban)) || someone(named);
+}
+
 export const typeCategory = (type: TxType): Category => {
   switch (type) {
     case "tax": return "tax";

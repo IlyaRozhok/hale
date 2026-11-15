@@ -2,12 +2,13 @@ import { Inject, Injectable, Optional, type OnModuleInit } from "@nestjs/common"
 import { DataSource } from "typeorm";
 import {
   classify,
+  hasThirdParty,
   type ClassifyContext,
   type ClassifyInput,
   type ClassifyRule,
   type TxType,
 } from "../domain/classify";
-import { isOwnPair, OWN_PAIR_WINDOW_S, type PairLeg } from "../domain/own-pair";
+import { exactPartnerSql, isOwnPair, OWN_PAIR_WINDOW_S, type PairLeg } from "../domain/own-pair";
 import { JobRunner } from "../mono/jobs/job-runner";
 import { PlanService } from "../plan/plan.service";
 
@@ -35,23 +36,29 @@ interface Row {
   counter_name: string | null;
 }
 
-/** One row and a row on another account that may be its other leg, as the pair rule reads them. */
-interface LegRow {
-  id: number;
-  other_id: number;
+/** One side of a possible pair, as the pair rule reads it. */
+interface LegFacts {
   account_id: number;
   kind: string;
   currency: string;
   at: number;
   amount: number;
   amount_uah: number | null;
-  o_account_id: number;
-  o_kind: string;
-  o_currency: string;
-  o_at: number;
-  o_amount: number;
-  o_amount_uah: number | null;
+  exact: boolean;
+  description: string;
+  counter_name: string | null;
+  counter_iban: string | null;
 }
+
+/** SQL columns of LegFacts for the transaction `x` and its account `xa`, each prefixed with `p`. */
+const legColumns = (x: string, xa: string, p: string): string =>
+  `${x}.account_id AS ${p}account_id, ${xa}.kind AS ${p}kind, ${xa}.currency AS ${p}currency,
+   extract(epoch FROM ${x}.occurred_at)::float8 * 1000 AS ${p}at, ${x}.amount::float8 AS ${p}amount,
+   ${x}.amount_uah::float8 AS ${p}amount_uah, ${exactPartnerSql(x)} AS ${p}exact, ${x}.description AS ${p}description,
+   ${x}.counter_name AS ${p}counter_name, ${x}.counter_iban AS ${p}counter_iban`;
+
+const prefixed = (r: Record<string, unknown>, p: string): LegFacts =>
+  Object.fromEntries(Object.entries(r).filter(([k]) => k.startsWith(p)).map(([k, v]) => [k.slice(p.length), v])) as unknown as LegFacts;
 
 /**
  * Applies classify() to rows that are untyped or were typed by a rule or automatically.
@@ -97,7 +104,7 @@ export class ReclassifyService implements OnModuleInit {
     // In the order they happened: a loan opens before the repayment that closes it.
     const all = (
       (await this.ds.query(`SELECT id FROM transactions WHERE id = ANY($1) ORDER BY occurred_at, id`, [
-        await this.withOppositeLegs(ids),
+        await this.withOppositeLegs(ids, ctx),
       ])) as { id: number }[]
     ).map((r) => r.id);
     let n = 0;
@@ -111,7 +118,7 @@ export class ReclassifyService implements OnModuleInit {
           ORDER BY t.occurred_at, t.id`,
         [chunk],
       );
-      const pairs = await this.ownPairs(chunk);
+      const pairs = await this.ownPairs(chunk, ctx);
       for (const r of rows) {
         const out = classify(
           {
@@ -142,10 +149,10 @@ export class ReclassifyService implements OnModuleInit {
    * A transfer between own accounts is two rows. Whichever arrives second makes the first one
    * recognisable, so the opposite legs of the given rows are reclassified with them.
    */
-  private async withOppositeLegs(ids: readonly number[]): Promise<number[]> {
+  private async withOppositeLegs(ids: readonly number[], ctx: ClassifyContext): Promise<number[]> {
     const out = new Set(ids);
     for (let i = 0; i < ids.length; i += CHUNK) {
-      for (const others of (await this.ownPairs(ids.slice(i, i + CHUNK))).values()) for (const id of others) out.add(id);
+      for (const others of (await this.ownPairs(ids.slice(i, i + CHUNK), ctx)).values()) for (const id of others) out.add(id);
     }
     return [...out];
   }
@@ -154,13 +161,9 @@ export class ReclassifyService implements OnModuleInit {
    * For each of the given rows that has one, the rows that are its other leg (isOwnPair). SQL only
    * narrows the candidates to opposite signs on other accounts within the window; the rule decides.
    */
-  private async ownPairs(ids: readonly number[]): Promise<Map<number, number[]>> {
-    const rows: LegRow[] = await this.ds.query(
-      `SELECT t.id, o.id AS other_id,
-              t.account_id, a.kind, a.currency, extract(epoch FROM t.occurred_at)::float8 * 1000 AS at,
-              t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah,
-              o.account_id AS o_account_id, oa.kind AS o_kind, oa.currency AS o_currency,
-              extract(epoch FROM o.occurred_at)::float8 * 1000 AS o_at, o.amount::float8 AS o_amount, o.amount_uah::float8 AS o_amount_uah
+  private async ownPairs(ids: readonly number[], ctx: ClassifyContext): Promise<Map<number, number[]>> {
+    const rows: ({ id: number; other_id: number } & Record<string, unknown>)[] = await this.ds.query(
+      `SELECT t.id, o.id AS other_id, ${legColumns("t", "a", "t_")}, ${legColumns("o", "oa", "o_")}
          FROM transactions t JOIN accounts a ON a.id = t.account_id
          JOIN transactions o ON o.account_id <> t.account_id AND sign(o.amount) = -sign(t.amount)
           AND o.occurred_at BETWEEN t.occurred_at - make_interval(secs => $2) AND t.occurred_at + make_interval(secs => $2)
@@ -168,13 +171,19 @@ export class ReclassifyService implements OnModuleInit {
         WHERE t.id = ANY($1)`,
       [ids, OWN_PAIR_WINDOW_S],
     );
+    const leg = (f: LegFacts): PairLeg => ({
+      accountId: f.account_id,
+      accountKind: f.kind,
+      currency: f.currency,
+      at: f.at,
+      amount: f.amount,
+      amountUah: f.amount_uah,
+      exactPartner: f.exact,
+      thirdParty: hasThirdParty({ amount: f.amount, description: f.description, counterName: f.counter_name, counterIban: f.counter_iban }, ctx),
+    });
     const out = new Map<number, number[]>();
     for (const r of rows) {
-      const leg: PairLeg = { accountId: r.account_id, accountKind: r.kind, currency: r.currency, at: r.at, amount: r.amount, amountUah: r.amount_uah };
-      const other: PairLeg = {
-        accountId: r.o_account_id, accountKind: r.o_kind, currency: r.o_currency, at: r.o_at, amount: r.o_amount, amountUah: r.o_amount_uah,
-      };
-      if (!isOwnPair(leg, other)) continue;
+      if (!isOwnPair(leg(prefixed(r, "t_")), leg(prefixed(r, "o_")))) continue;
       const list = out.get(r.id);
       if (list) list.push(r.other_id);
       else out.set(r.id, [r.other_id]);
