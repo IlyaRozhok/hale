@@ -512,11 +512,13 @@ export class TodayService {
     const end = next && next >= date ? next : addDays(date, HORIZON_DAYS);
     const pays: {
       id: number; name: string; kind: string; amount: number; currency: string; due_on: string; paid: boolean;
-      tax_quarter: string | null; is_estimate: boolean;
+      tax_quarter: string | null; is_estimate: boolean; linked: number;
     }[] =
       await m.query(
         `SELECT id, name, kind, amount::float8 AS amount, currency, due_on::text AS due_on, (paid_at IS NOT NULL) AS paid,
-                tax_quarter, is_estimate
+                tax_quarter, is_estimate,
+                (SELECT COALESCE(SUM(-COALESCE(x.amount_uah, x.amount)), 0) FROM payment_links l
+                   JOIN transactions x ON x.id = l.transaction_id WHERE l.payment_id = scheduled_payments.id)::float8 AS linked
            FROM scheduled_payments WHERE due_on < $1 OR paid_at IS NULL ORDER BY due_on, id`,
         [end],
       );
@@ -535,7 +537,8 @@ export class TodayService {
         .join(",") + `|${next ?? ""}`;
     const upcoming = unpaid
       .filter((p) => p.due_on < end)
-      .map((p) => ({ id: String(p.id), name: p.name, amount: uah(p.amount, p.currency), dueOn: p.due_on, kind: p.kind, currency: p.currency }));
+      // `paid`: what operations linked to the open payment already paid (task Б9); its whole amount stays reserved.
+      .map((p) => ({ id: String(p.id), name: p.name, amount: uah(p.amount, p.currency), dueOn: p.due_on, kind: p.kind, currency: p.currency, paid: p.linked }));
 
     // tax reserve
     const { fopIncome, paidUnmatched: paidTax } = await quarterTaxFacts(m, q.start, q.end);
