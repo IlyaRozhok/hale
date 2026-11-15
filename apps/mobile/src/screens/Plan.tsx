@@ -76,8 +76,9 @@ export function Plan() {
       <PlanGroup
         title="Деньги"
         rows={[
-          ...(placed("cash") ? [] : [cashRow]),
-          ...(placed("binance") ? [] : [binanceRow]),
+          // Not before «Сегодня» is known, or they would show and then go into the list; on an error they stay.
+          ...(today.isPending || placed("cash") ? [] : [cashRow]),
+          ...(today.isPending || placed("binance") ? [] : [binanceRow]),
           ...noSetAside,
         ]}
       >

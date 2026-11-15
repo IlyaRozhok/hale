@@ -109,8 +109,30 @@ describe("Plan, money place by place (task Б25)", () => {
     ];
     await renderWith(<Plan />, fakeApi(withItems(items)));
     expect(await screen.findByText("−₴20,000")).toBeTruthy();
-    expect(screen.getByText("из кредитного лимита ₴30,000")).toBeTruthy();
+    expect(screen.getByText("потрачено из кредитного лимита ₴30,000")).toBeTruthy();
     expect(screen.getByText("₴5,000")).toBeTruthy();
+  });
+
+  it("rounds the places so they add up to the big figure to the hryvnia", async () => {
+    const items = [
+      { kind: "white" as const, name: "Белая карта", own: 1_431_350 },
+      { kind: "fop" as const, name: "Счёт ФОП", own: 300_050 },
+      { kind: "black" as const, name: "Чёрная карта", own: -3_000_000, creditLimit: 3_000_000 },
+    ];
+    await renderWith(<Plan />, fakeApi(withItems(items)));
+    expect(await screen.findByText("−₴12,686")).toBeTruthy();
+    // Each rounded alone they would be ₴14,314 + ₴3,001 − ₴30,000 = −₴12,685.
+    expect(screen.getByText("₴14,314")).toBeTruthy();
+    expect(screen.getByText("₴3,000")).toBeTruthy();
+    expect(screen.getByText("−₴30,000")).toBeTruthy();
+  });
+
+  it("shows no separate cash or Binance rows while «Сегодня» is loading", async () => {
+    await renderWith(<Plan />, fakeApi({ ...withItems(), today: jest.fn(() => new Promise<never>(() => undefined)) }));
+    await waitFor(() => expect(screen.getByText("Деньги")).toBeTruthy());
+    await act(async () => new Promise<void>((r) => setTimeout(r, 50)));
+    expect(screen.queryByRole("button", { name: "Наличные" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Binance" })).toBeNull();
   });
 
   it("shows the FOP account as its own place", async () => {
@@ -121,13 +143,16 @@ describe("Plan, money place by place (task Б25)", () => {
 
   it("opens the cash window from the cash place", async () => {
     await renderWith(<Plan />, fakeApi(withItems()));
-    await fireEvent.press(await screen.findByRole("button", { name: "Наличные" }));
+    // Wait for «Сегодня»: the place in the list is the row to press, not one that goes away on load.
+    await screen.findByText("₴20,362");
+    await fireEvent.press(screen.getByRole("button", { name: "Наличные" }));
     expect(await screen.findByText("Пересчитайте наличные и введите, сколько на самом деле.")).toBeTruthy();
   });
 
   it("opens the Binance window from the Binance place", async () => {
     await renderWith(<Plan />, fakeApi(withItems()));
-    await fireEvent.press(await screen.findByRole("button", { name: "Binance" }));
+    await screen.findByText("₴20,362");
+    await fireEvent.press(screen.getByRole("button", { name: "Binance" }));
     expect(await screen.findByText("Баланс Binance")).toBeTruthy();
   });
 

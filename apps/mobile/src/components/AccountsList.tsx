@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import { formatDollars, formatMoney, formatOriginal } from "../format";
 import { accountLabel } from "../labels";
+import { wholeShares } from "../ownMoney";
 import { Line } from "./Line";
 
 const { color, space, touchMin, type } = tokens;
@@ -26,7 +27,7 @@ export function AccountLines({ accounts }: Props) {
 /** A quiet line under a place: what a card in credit stands for, or a hand-kept balance in its own currency. */
 function caption(item: OwnMoneyItemDto): string | null {
   if (item.own < 0 && item.creditLimit) {
-    return item.own <= -item.creditLimit ? "кредитный лимит потрачен весь" : `из кредитного лимита ${formatMoney(item.creditLimit)}`;
+    return item.own <= -item.creditLimit ? "кредитный лимит потрачен весь" : `потрачено из кредитного лимита ${formatMoney(item.creditLimit)}`;
   }
   if (item.amount !== undefined && item.currency && item.currency !== "UAH") {
     return item.currency === "USD" ? formatDollars(item.amount) : formatOriginal(item.amount, item.currency);
@@ -42,6 +43,8 @@ type MoneyProps = { own: number; items: OwnMoneyItemDto[]; onCash: () => void; o
  */
 export function OwnMoney({ own, items, onCash, onBinance }: MoneyProps) {
   const ordered = [...items.filter((i) => i.own >= 0), ...items.filter((i) => i.own < 0)];
+  // Rounded together, not one by one, so the rows add up to the figure above them to the hryvnia.
+  const whole = wholeShares(own, ordered.map((i) => i.own));
   return (
     <>
       <View style={styles.head}>
@@ -50,15 +53,14 @@ export function OwnMoney({ own, items, onCash, onBinance }: MoneyProps) {
       </View>
       {ordered.map((item, i) => {
         const press = item.kind === "cash" ? onCash : item.kind === "binance" ? onBinance : undefined;
-        return <Place key={`${item.kind}:${i}`} label={accountLabel(item.kind) ?? item.name} item={item} onPress={press} />;
+        return <Place key={`${item.kind}:${i}`} label={accountLabel(item.kind) ?? item.name} item={item} amount={formatMoney(whole[i]! * 100)} onPress={press} />;
       })}
     </>
   );
 }
 
-function Place({ label, item, onPress }: { label: string; item: OwnMoneyItemDto; onPress?: () => void }) {
+function Place({ label, item, amount, onPress }: { label: string; item: OwnMoneyItemDto; amount: string; onPress?: () => void }) {
   const note = caption(item);
-  const amount = formatMoney(item.own);
   const body = (
     <>
       <View style={styles.text}>
