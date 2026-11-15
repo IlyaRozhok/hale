@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Alert, StyleSheet } from "react-native";
 import { Plan } from "./Plan";
 import { Today } from "./Today";
-import { balanceFixture, fakeApi, goalFixture, loanFixture, loanHistoryFixture, makeClient, openPlanPart, pickDate, renderWith, taxFixture, todayFixture } from "../testing";
+import { balanceFixture, fakeApi, goalFixture, loanFixture, loanHistoryFixture, makeClient, openPlanPart, ownItemsFixture, pickDate, renderWith, taxFixture, todayFixture, todayWithItems } from "../testing";
 import { dateLabel, kyivDate, shiftDate } from "../format";
 import { LAYOUT } from "../components/layout";
 import { NetworkError } from "../api/client";
@@ -72,8 +72,100 @@ describe("Plan, a dollar installment before «Сегодня» has loaded", () =
   });
 });
 
+describe("Plan, money place by place (task Б25)", () => {
+  const withItems = (items = ownItemsFixture()) => ({
+    today: jest.fn(async () => todayWithItems(items)),
+    cash: jest.fn(async () => ({ started: true, start: "2026-11-01", balance: 3_025_000 })),
+    manualBalances: jest.fn(async () => [balanceFixture({ amount: 12_600 })]),
+  });
+
+  it("shows own money as one figure and, under it, the places that add up to it, with no separate lines", async () => {
+    await renderWith(<Plan />, fakeApi(withItems()));
+    expect(await screen.findByText("₴20,362")).toBeTruthy();
+    expect(screen.getByText("свои деньги — сумма строк ниже")).toBeTruthy();
+    // Places with money first, the card in credit last.
+    const order = screen.getAllByText(/^(Белая карта|Наличные|Binance|Чёрная карта)$/).map((t) => t.props.children);
+    expect(order).toEqual(["Белая карта", "Наличные", "Binance", "Чёрная карта"]);
+    expect(screen.getByText("₴14,313")).toBeTruthy();
+    expect(screen.getByText("₴30,250")).toBeTruthy();
+    expect(screen.getByText("₴5,799")).toBeTruthy();
+    expect(screen.getByText("$126")).toBeTruthy();
+    for (const old of ["Свои", "Кредитные", "в том числе ФОП", "₴30,000"]) expect(screen.queryByText(old)).toBeNull();
+    // Cash and Binance are in the list once, not again as rows of their own.
+    expect(screen.getAllByRole("button", { name: "Наличные" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Binance" })).toHaveLength(1);
+  });
+
+  it("puts a spent credit limit on its card with a real minus sign and says it in words", async () => {
+    await renderWith(<Plan />, fakeApi(withItems()));
+    expect(await screen.findByText("−₴30,000")).toBeTruthy();
+    expect(screen.getByText("кредитный лимит потрачен весь")).toBeTruthy();
+  });
+
+  it("says how much of the credit limit a partly used card stands for", async () => {
+    const items = [
+      { kind: "black" as const, name: "Чёрная карта", own: -2_000_000, creditLimit: 3_000_000 },
+      { kind: "white" as const, name: "Белая карта", own: 2_500_000 },
+    ];
+    await renderWith(<Plan />, fakeApi(withItems(items)));
+    expect(await screen.findByText("−₴20,000")).toBeTruthy();
+    expect(screen.getByText("потрачено из кредитного лимита ₴30,000")).toBeTruthy();
+    expect(screen.getByText("₴5,000")).toBeTruthy();
+  });
+
+  it("rounds the places so they add up to the big figure to the hryvnia", async () => {
+    const items = [
+      { kind: "white" as const, name: "Белая карта", own: 1_431_350 },
+      { kind: "fop" as const, name: "Счёт ФОП", own: 300_050 },
+      { kind: "black" as const, name: "Чёрная карта", own: -3_000_000, creditLimit: 3_000_000 },
+    ];
+    await renderWith(<Plan />, fakeApi(withItems(items)));
+    expect(await screen.findByText("−₴12,686")).toBeTruthy();
+    // Each rounded alone they would be ₴14,314 + ₴3,001 − ₴30,000 = −₴12,685.
+    expect(screen.getByText("₴14,314")).toBeTruthy();
+    expect(screen.getByText("₴3,000")).toBeTruthy();
+    expect(screen.getByText("−₴30,000")).toBeTruthy();
+  });
+
+  it("shows no separate cash or Binance rows while «Сегодня» is loading", async () => {
+    await renderWith(<Plan />, fakeApi({ ...withItems(), today: jest.fn(() => new Promise<never>(() => undefined)) }));
+    await waitFor(() => expect(screen.getByText("Деньги")).toBeTruthy());
+    await act(async () => new Promise<void>((r) => setTimeout(r, 50)));
+    expect(screen.queryByRole("button", { name: "Наличные" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Binance" })).toBeNull();
+  });
+
+  it("shows the FOP account as its own place", async () => {
+    await renderWith(<Plan />, fakeApi(withItems([{ kind: "fop", name: "Счёт ФОП", own: 412_500 }])));
+    expect(await screen.findByText("Счёт ФОП")).toBeTruthy();
+    expect(screen.getAllByText("₴4,125")).toHaveLength(2);
+  });
+
+  it("opens the cash window from the cash place", async () => {
+    await renderWith(<Plan />, fakeApi(withItems()));
+    // Wait for «Сегодня»: the place in the list is the row to press, not one that goes away on load.
+    await screen.findByText("₴20,362");
+    await fireEvent.press(screen.getByRole("button", { name: "Наличные" }));
+    expect(await screen.findByText("Пересчитайте наличные и введите, сколько на самом деле.")).toBeTruthy();
+  });
+
+  it("opens the Binance window from the Binance place", async () => {
+    await renderWith(<Plan />, fakeApi(withItems()));
+    await screen.findByText("₴20,362");
+    await fireEvent.press(screen.getByRole("button", { name: "Binance" }));
+    expect(await screen.findByText("Баланс Binance")).toBeTruthy();
+  });
+
+  it("folds Binance into «Ещё» when it is not set, and keeps an unstarted wallet as today", async () => {
+    await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => todayWithItems([{ kind: "white", name: "Белая карта", own: 500_000 }])) }));
+    expect(await screen.findByRole("button", { name: /^Ещё: Binance/ })).toBeTruthy();
+    expect((await screen.findByRole("button", { name: "Наличные" })).props.accessibilityHint).toBe("не начат");
+    expect(screen.getAllByText("₴5,000")).toHaveLength(2);
+  });
+});
+
 describe("Plan, money", () => {
-  it("shows own and credit money separately, with the title", async () => {
+  it("shows own and credit money separately, with the title, when an older server sends no places", async () => {
     await renderWith(<Plan />, fakeApi());
     expect(screen.getByText("План")).toBeTruthy();
     expect(await screen.findByText("Свои")).toBeTruthy();

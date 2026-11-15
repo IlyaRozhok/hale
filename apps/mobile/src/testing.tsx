@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
-import type { CalendarDto, GoalDto, LoanHistoryDto, LoanRowDto, ManualBalanceDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@hale/contracts";
+import type { CalendarDto, GoalDto, LoanHistoryDto, LoanRowDto, ManualBalanceDto, OwnMoneyItemDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@hale/contracts";
 import { ApiProvider } from "./api/context";
 import type { Api } from "./api/client";
 import { dateLabel, kyivDate } from "./format";
@@ -88,6 +88,25 @@ export function settingsFixture(over: Partial<SettingsDto> = {}): SettingsDto {
 
 export function taxFixture(over: Partial<ScheduledPaymentDto> = {}): ScheduledPaymentDto {
   return { id: 1, kind: "tax", name: "Налог за 3 кв.", amount: 1_200_000, currency: "UAH", due_on: "2026-11-20", paid_at: null, recurring_id: null, tax_quarter: "2026-Q3", is_estimate: false, ...over };
+}
+
+/**
+ * Own money place by place, as a newer server sends it (task Б25): the white card, the wallet, Binance
+ * and the black card with its whole credit limit spent. They add up to ₴20,362.
+ */
+export function ownItemsFixture(): OwnMoneyItemDto[] {
+  return [
+    { kind: "black", name: "Чёрная карта", own: -3_000_000, creditLimit: 3_000_000 },
+    { kind: "white", name: "Белая карта", own: 1_431_300 },
+    { kind: "cash", name: "Наличные", own: 3_025_000 },
+    { kind: "binance", name: "Binance", own: 579_900, currency: "USD", amount: 12_600 },
+  ];
+}
+
+/** A Today response whose money comes with its places; `own` is their sum, as the server makes it. */
+export function todayWithItems(items: OwnMoneyItemDto[] = ownItemsFixture()): TodayDto {
+  const own = items.reduce((s, i) => s + i.own, 0);
+  return todayFixture({ accounts: { own, credit: 3_000_000, fop: 0, binance: 0, cash: 0, items } });
 }
 
 export function balanceFixture(over: Partial<ManualBalanceDto> = {}): ManualBalanceDto {

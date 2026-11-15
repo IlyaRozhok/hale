@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePullRefresh } from "../usePullRefresh";
 import { tokens } from "@hale/tokens";
 import { useCash, useExpectedIncomes, useGoals, useIncomeEvents, useLoanHistory, useManualBalances, usePayments, useToday } from "../api/queries";
-import { AccountLines } from "../components/AccountsList";
+import { AccountLines, OwnMoney } from "../components/AccountsList";
 import { BinanceSheet } from "../components/BinanceBalance";
 import { CashSheet } from "../components/CashSheet";
 import { Icon } from "../components/Icon";
@@ -54,6 +54,12 @@ export function Plan() {
   const setAsideBalances = balances.data?.filter((b) => !b.counts_as_own) ?? [];
   // With nothing set aside there is no group, only one quiet part folded into «Ещё» of «Деньги».
   const noSetAside: PlanRow[] = balances.data && setAsideBalances.length === 0 ? [{ label: "Отложено", detail: "нет", onPress: () => openAside("new") }] : [];
+  // A newer server lists own money place by place (task Б25): cash and Binance with money in them are
+  // places in that list, not rows of their own; an unstarted wallet or an unset Binance stays a row.
+  const items = today.data?.accounts.items;
+  const placed = (kind: "cash" | "binance") => items?.some((i) => i.kind === kind) ?? false;
+  const cashRow: PlanRow = { label: "Наличные", detail: cash.data ? (cash.data.started ? formatMoney(cash.data.balance) : "не начат") : undefined, onPress: () => setOpen("cash") };
+  const binanceRow: PlanRow = { label: "Binance", detail: balances.data ? (binance ? formatDollars(binance.amount) : "не задан") : undefined, onPress: () => setOpen("binance") };
 
   return (
     <ScrollView
@@ -70,12 +76,17 @@ export function Plan() {
       <PlanGroup
         title="Деньги"
         rows={[
-          { label: "Наличные", detail: cash.data ? (cash.data.started ? formatMoney(cash.data.balance) : "не начат") : undefined, onPress: () => setOpen("cash") },
-          { label: "Binance", detail: balances.data ? (binance ? formatDollars(binance.amount) : "не задан") : undefined, onPress: () => setOpen("binance") },
+          // Not before «Сегодня» is known, or they would show and then go into the list; on an error they stay.
+          ...(today.isPending || placed("cash") ? [] : [cashRow]),
+          ...(today.isPending || placed("binance") ? [] : [binanceRow]),
           ...noSetAside,
         ]}
       >
-        {today.data ? <AccountLines accounts={today.data.accounts} /> : null}
+        {today.data && items ? (
+          <OwnMoney own={today.data.accounts.own} items={items} onCash={() => setOpen("cash")} onBinance={() => setOpen("binance")} />
+        ) : today.data ? (
+          <AccountLines accounts={today.data.accounts} />
+        ) : null}
       </PlanGroup>
       {setAsideBalances.length > 0 && (
         <PlanGroup
