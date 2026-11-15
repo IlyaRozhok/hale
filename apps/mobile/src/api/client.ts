@@ -16,6 +16,7 @@ import type {
   IncomeEventDto,
   InstallmentInput,
   InstallmentPatch,
+  LedgerCheckDto,
   LoanHistoryDto,
   LoanInput,
   LoanRepayInput,
@@ -140,6 +141,8 @@ export interface Api {
   similarCount(transactionId: number, type?: TxTypeDto): Promise<number>;
   rules(): Promise<RuleDto[]>;
   deleteRule(id: number): Promise<void>;
+  /** The latest ledger check (task Б11); null when there is none to show or the server is older. */
+  ledgerCheck(): Promise<LedgerCheckDto | null>;
 }
 
 export type TransactionsFilter = {
@@ -265,5 +268,13 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     patchInstallment: async (name, patch) => void (await request("PATCH", `/plan/installments/${encodeURIComponent(name)}`, patch)),
     deleteInstallment: async (name) => void (await request("DELETE", `/plan/installments/${encodeURIComponent(name)}`)),
     registerPushToken: async (token) => void (await request("POST", "/devices/push-token", { token })),
+    ledgerCheck: async () => {
+      try {
+        return (await request<LedgerCheckDto | undefined>("GET", "/check/latest")) ?? null;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null; // an older server has no check
+        throw e;
+      }
+    },
   };
 }

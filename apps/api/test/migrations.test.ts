@@ -10,6 +10,7 @@ const TABLES = [
   "scheduled_payments", "recurring_payments", "manual_balances", "loans", "settings", "bridge_plans",
   "daily_snapshots", "fx_rates",
       "goals", "jobs", "devices", "notifications_log", "loan_repayments", "payment_links", "cash_cards", "payment_dismissals", "cash_answers",
+  "ledger_checks",
 ];
 
 async function listTables(url: string): Promise<string[]> {
@@ -89,7 +90,8 @@ describe("migrations", () => {
       { name: "part", closed_by_links: false },
       { name: "byHand", closed_by_links: false },
     ]);
-    await ds.undoLastMigration();
+    // Back down through 0022, whatever came after it.
+    for (let i = migrations.indexOf(PaymentClosedByLinks1795392000000); i < migrations.length; i++) await ds.undoLastMigration();
     expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE column_name='closed_by_links'`)).toEqual([]);
     await ds.destroy();
   });

@@ -23,6 +23,7 @@ import { DayTermCashLoans1795132800000 } from "./migrations/0019-day-term-cash-l
 import { PaymentDismissals1795219200000 } from "./migrations/0020-payment-dismissals";
 import { CashAnswers1795305600000 } from "./migrations/0021-cash-answers";
 import { PaymentClosedByLinks1795392000000 } from "./migrations/0022-payment-closed-by-links";
+import { LedgerChecks1795478400000 } from "./migrations/0023-ledger-checks";
 
 export const migrations = [
   Init1793577600000,
@@ -47,6 +48,7 @@ export const migrations = [
   PaymentDismissals1795219200000,
   CashAnswers1795305600000,
   PaymentClosedByLinks1795392000000,
+  LedgerChecks1795478400000,
 ];
 
 export function createDataSource(url: string): DataSource {

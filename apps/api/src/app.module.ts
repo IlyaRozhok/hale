@@ -11,6 +11,8 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { PlanModule } from "./plan/plan.module";
 import { TodayModule } from "./today/today.module";
 import { TransactionsModule } from "./transactions/transactions.module";
+// Last: it reaches into today/ and cash/, which must load in their usual order first.
+import { CheckModule } from "./check/check.module";
 
 @Module({})
 export class AppModule {
@@ -32,6 +34,7 @@ export class AppModule {
         PlanModule,
         TodayModule,
         TransactionsModule,
+        CheckModule,
       ],
       controllers: [HealthController],
     };

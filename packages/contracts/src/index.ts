@@ -681,3 +681,27 @@ export interface CashWalletDto {
   /** Kopecks in the pocket, as recorded. */
   balance: number;
 }
+
+/**
+ * One discrepancy the nightly ledger check found (task Б11). `amount` is in minor units of `currency`, signed:
+ * bank_balance — the bank's balance minus ours on that account; own_transfers — 0, see `count`; categories —
+ * spending in no category; day_spent — one screen minus the ledger on the day `since`; cash_wallet — the wallet now.
+ * `since` is the first Kyiv day it applies ('YYYY-MM-DD'). A newer server may send a kind this app does not know.
+ */
+export interface LedgerCheckIssueDto {
+  kind: "bank_balance" | "own_transfers" | "categories" | "day_spent" | "cash_wallet" | (string & {});
+  amount: number;
+  currency: string;
+  since: string | null;
+  /** bank_balance: the account's kind (black, white, fop, jar, other) and, for a jar, its title. */
+  accountKind?: string;
+  accountTitle?: string | null;
+  /** own_transfers: how many legs have no other leg here. */
+  count?: number;
+}
+
+/** The latest ledger check: when it ran and what did not add up; no issues means all is well. */
+export interface LedgerCheckDto {
+  ranAt: string;
+  issues: LedgerCheckIssueDto[];
+}

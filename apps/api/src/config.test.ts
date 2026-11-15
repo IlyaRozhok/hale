@@ -66,3 +66,18 @@ describe("loadConfig webhook settings", () => {
     expect(() => loadConfig({ ...valid, PUBLIC_URL: "not a url" })).toThrow(/PUBLIC_URL/);
   });
 });
+
+describe("loadConfig ledger check (Б11)", () => {
+  it("keeps the nightly check off unless LEDGER_CHECK_ENABLED says true", () => {
+    expect(loadConfig(valid).LEDGER_CHECK_ENABLED).toBeUndefined(); // unset: off, as the service reads it
+    expect(loadConfig({ ...valid, LEDGER_CHECK_ENABLED: "" }).LEDGER_CHECK_ENABLED).toBe(false);
+    expect(loadConfig({ ...valid, LEDGER_CHECK_ENABLED: "false" }).LEDGER_CHECK_ENABLED).toBe(false);
+    expect(loadConfig({ ...valid, LEDGER_CHECK_ENABLED: "0" }).LEDGER_CHECK_ENABLED).toBe(false);
+    expect(loadConfig({ ...valid, LEDGER_CHECK_ENABLED: "true" }).LEDGER_CHECK_ENABLED).toBe(true);
+    expect(loadConfig({ ...valid, LEDGER_CHECK_ENABLED: "1" }).LEDGER_CHECK_ENABLED).toBe(true);
+  });
+
+  it("rejects a value it cannot read rather than guess", () => {
+    expect(() => loadConfig({ ...valid, LEDGER_CHECK_ENABLED: "yes please" })).toThrow(/LEDGER_CHECK_ENABLED/);
+  });
+});

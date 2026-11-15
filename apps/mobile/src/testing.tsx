@@ -202,6 +202,7 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     similarCount: jest.fn(async () => 1),
     rules: jest.fn(async () => []),
     deleteRule: jest.fn(async () => undefined),
+    ledgerCheck: jest.fn(async () => null),
     ...over,
   } as never;
 }

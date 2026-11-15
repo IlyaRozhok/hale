@@ -1,4 +1,6 @@
-import { Alert } from "react-native";
+import { Alert, StyleSheet } from "react-native";
+import type { LedgerCheckDto, LedgerCheckIssueDto } from "@hale/contracts";
+import { tokens } from "@hale/tokens";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { SessionProvider } from "../session";
 import { Settings } from "./Settings";
@@ -156,6 +158,87 @@ describe("Settings, bank connection", () => {
     await screen.findByLabelText("Потолок трат в месяц");
     expect(screen.queryByText(/Банк обновлялся/)).toBeNull();
     expect(screen.queryByText(/Синхронизации с банком/)).toBeNull();
+  });
+});
+
+describe("Settings, ledger check (Б11)", () => {
+  const ranAt = "2026-11-12T03:00:00.000Z";
+  const bank = (over: Partial<LedgerCheckIssueDto> = {}): LedgerCheckIssueDto => ({
+    kind: "bank_balance",
+    amount: -32_000,
+    currency: "UAH",
+    since: "2026-11-08",
+    accountKind: "black",
+    accountTitle: null,
+    ...over,
+  });
+  const show = async (check: LedgerCheckDto | null) => {
+    const view = await renderWith(<Settings onClose={noop} />, fakeApi({ ledgerCheck: jest.fn(async () => check) }));
+    await screen.findByText(/Банк обновлялся/);
+    return view;
+  };
+
+  it("says all is well when nothing differs", async () => {
+    await show({ ranAt, issues: [] });
+    expect(await screen.findByText("Сверка: всё сходится.")).toBeTruthy();
+  });
+
+  it("says what differs, where and since when, for one problem", async () => {
+    await show({ ranAt, issues: [bank()] });
+    expect(await screen.findByText("На чёрной карте не сходится ₴320 с 8 ноя.")).toBeTruthy();
+    expect(screen.queryByText(/Ещё/)).toBeNull();
+  });
+
+  it("names the other kinds of problems in whole sentences", async () => {
+    const one = async (issue: LedgerCheckIssueDto, text: string) => {
+      const view = await show({ ranAt, issues: [issue] });
+      expect(await screen.findByText(text)).toBeTruthy();
+      await view.unmount();
+    };
+    await one(bank({ accountKind: "white", amount: 20_000 }), "На белой карте не сходится ₴200 с 8 ноя.");
+    await one(bank({ accountKind: "fop" }), "На счёте ФОП не сходится ₴320 с 8 ноя.");
+    await one(bank({ accountKind: "jar", accountTitle: "Отпуск" }), "На банке «Отпуск» не сходится ₴320 с 8 ноя.");
+    await one(bank({ accountKind: "other", currency: "USD", amount: -1_050 }), "На одном из счетов не сходится $10.50 с 8 ноя.");
+    await one({ kind: "own_transfers", amount: 0, currency: "UAH", since: "2026-11-03", count: 3 }, "У 3 переводов между своими счетами нет второй части, с 3 ноя.");
+    await one({ kind: "own_transfers", amount: 0, currency: "UAH", since: "2026-11-03", count: 1 }, "У 1 перевода между своими счетами нет второй части, с 3 ноя.");
+    await one({ kind: "categories", amount: 1_000, currency: "UAH", since: "2026-11-10" }, "С 10 ноя траты по категориям не сходятся с общей суммой на ₴10.");
+    await one({ kind: "day_spent", amount: -50_000, currency: "UAH", since: "2026-11-06" }, "Потрачено за 6 ноя не везде одинаково: разница ₴500.");
+    await one({ kind: "cash_wallet", amount: -10_000, currency: "UAH", since: "2026-11-09" }, "В кошельке наличных −₴100 с 9 ноя.");
+  });
+
+  it("shows the first problem and how many more there are", async () => {
+    const cash = { kind: "cash_wallet", amount: -10_000, currency: "UAH", since: "2026-11-09" };
+    let view = await show({ ranAt, issues: [bank(), cash] });
+    expect(await screen.findByText("На чёрной карте не сходится ₴320 с 8 ноя. Ещё 1 расхождение.")).toBeTruthy();
+    await view.unmount();
+    view = await show({ ranAt, issues: [bank(), cash, cash] });
+    expect(await screen.findByText("На чёрной карте не сходится ₴320 с 8 ноя. Ещё 2 расхождения.")).toBeTruthy();
+    await view.unmount();
+    await show({ ranAt, issues: [bank(), ...Array.from({ length: 5 }, () => cash)] });
+    expect(await screen.findByText("На чёрной карте не сходится ₴320 с 8 ноя. Ещё 5 расхождений.")).toBeTruthy();
+  });
+
+  it("starts with a problem it can name when a newer server sends one it cannot", async () => {
+    await show({ ranAt, issues: [{ kind: "something_new", amount: 1, currency: "UAH", since: null }, bank()] });
+    expect(await screen.findByText("На чёрной карте не сходится ₴320 с 8 ноя. Ещё 1 расхождение.")).toBeTruthy();
+  });
+
+  it("shows nothing when the server has no result: the check is off, it never ran, or the server is older", async () => {
+    await show(null);
+    expect(screen.queryByText(/Сверка/)).toBeNull();
+    expect(screen.queryByText(/не сходится/)).toBeNull();
+  });
+
+  it("shows nothing when the check cannot be loaded", async () => {
+    await renderWith(<Settings onClose={noop} />, fakeApi({ ledgerCheck: jest.fn(async () => Promise.reject(new NetworkError())) }));
+    await screen.findByText(/Банк обновлялся/);
+    expect(screen.queryByText(/Сверка/)).toBeNull();
+  });
+
+  it("is plain muted text, no warning colour", async () => {
+    await show({ ranAt, issues: [bank()] });
+    const line = await screen.findByText("На чёрной карте не сходится ₴320 с 8 ноя.");
+    expect(StyleSheet.flatten(line.props.style).color).toBe(tokens.color.fg.muted);
   });
 });
 

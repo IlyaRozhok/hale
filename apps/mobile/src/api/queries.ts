@@ -19,6 +19,7 @@ export const EXPECTED_INCOMES_KEY = ["expected-incomes"] as const;
 export const INCOME_EVENTS_KEY = ["income-events"] as const;
 export const RECURRING_KEY = ["recurring"] as const;
 export const CASH_KEY = ["cash"] as const;
+export const LEDGER_CHECK_KEY = ["ledger-check"] as const;
 /** Debounce between the last slider move and the preview request. */
 export const PREVIEW_DELAY_MS = 300;
 
@@ -206,6 +207,12 @@ export function useLabelRecipient() {
 export function useSettings() {
   const api = useApi();
   return useQuery({ queryKey: SETTINGS_KEY, queryFn: () => api.settings() });
+}
+
+/** The latest ledger check (task Б11), for one line in Settings; null when there is nothing to show. */
+export function useLedgerCheck() {
+  const api = useApi();
+  return useQuery({ queryKey: LEDGER_CHECK_KEY, queryFn: () => api.ledgerCheck() });
 }
 
 /**
