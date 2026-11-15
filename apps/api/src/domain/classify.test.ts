@@ -286,6 +286,58 @@ describe("purchases and refunds", () => {
   });
 });
 
+describe("a cafe by its name (Б14)", () => {
+  const cat = (description: string, mcc: number | null = 5499, c = ctx()) => classify(tx({ description, mcc }), c).category;
+
+  it("a cafe, restaurant, sushi or bar word in the name is a cafe whatever the mcc", () => {
+    expect(cat('Кафе "Mango"')).toBe("cafe");
+    expect(cat("Суши-тай бар Манго")).toBe("cafe");
+    expect(cat("Ресторан Пузата хата", 5411)).toBe("cafe");
+    expect(cat("СУШІ Майстер", 5999)).toBe("cafe");
+    expect(cat("Mango Cafe")).toBe("cafe");
+    expect(cat("RESTAURANT Kyiv")).toBe("cafe");
+    expect(cat("Sushi Wok")).toBe("cafe");
+    expect(cat("Lviv Bar")).toBe("cafe");
+    expect(cat("Кафе Mango", null)).toBe("cafe");
+  });
+
+  it("a known grocery chain stays groceries even with such a word in its name", () => {
+    expect(cat("Сільпо")).toBe("groceries");
+    expect(cat("Сільпо кафе")).toBe("groceries");
+    expect(cat("Silpo bar")).toBe("groceries");
+    expect(cat("АТБ Суші")).toBe("groceries");
+  });
+
+  it("the word inside another word does not count", () => {
+    expect(cat("Барвінок")).toBe("groceries");
+    expect(cat("Бармаглот")).toBe("groceries");
+    expect(cat("Барбершоп Борода", 7230)).toBe("uncategorized");
+    expect(cat("Кафетерій", 5499)).toBe("groceries");
+    expect(cat("Barbershop", 5499)).toBe("groceries");
+    expect(cat("Sushiman", 5499)).toBe("groceries");
+    expect(cat("Ресторанчик", 5499)).toBe("groceries");
+  });
+
+  it("an owner rule still wins over the name", () => {
+    const c = ctx({ rules: [{ matchKind: "merchant", matchValue: "Mango", type: "spend", category: "groceries" }] });
+    expect(classify(tx({ description: 'Кафе "Mango"', mcc: 5499 }), c)).toMatchObject({
+      category: "groceries",
+      source: "owner",
+    });
+  });
+});
+
+describe("games are leisure (Б15)", () => {
+  it("mcc 5816 is leisure; 5815, 5817 and 5818 stay subscriptions", () => {
+    const cat = (description: string, mcc: number) => classify(tx({ description, mcc }), ctx()).category;
+    expect(cat("Steam", 5816)).toBe("leisure");
+    expect(cat("PlayStation Network", 5816)).toBe("leisure");
+    expect(cat("Digital goods", 5815)).toBe("subscriptions");
+    expect(cat("Digital media", 5817)).toBe("subscriptions");
+    expect(cat("Digital store", 5818)).toBe("subscriptions");
+  });
+});
+
 describe("people", () => {
   it("unknown transfer recipient is person_transfer and needs a label", () => {
     expect(classify(tx({ description: "Тест Тестовий", mcc: 4829 }), ctx())).toMatchObject({

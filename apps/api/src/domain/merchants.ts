@@ -36,6 +36,10 @@ export const MERCHANTS: readonly { pattern: RegExp; category: Category }[] = [
   { pattern: /(netflix|spotify|youtube|apple\.com|google|icloud|megogo|nvidia|openai|anthropic|github|notion)/i, category: "subscriptions" },
   { pattern: /(аптека|apteka|подорожник|фармація)/i, category: "health" },
   { pattern: /(rozetka|розетка|епіцентр|epicentr|comfy|foxtrot|фокстрот|citrus|цитрус)/i, category: "shopping" },
+  // Б14: a cafe often comes with a grocery MCC (5499); the word in its name wins over the code.
+  // Last, so a known chain above keeps its category even with «кафе» or «бар» in its name.
+  // JS \b is ASCII-only, so Cyrillic word edges use lookarounds.
+  { pattern: /(?<!\p{L})(кафе|ресторан|суши|суші|бар|cafe|café|restaurant|sushi|bar)(?!\p{L})/iu, category: "cafe" },
 ];
 
 /** MCC to category, exact codes first, then ranges. */
@@ -44,6 +48,8 @@ export function categoryByMcc(mcc: number | null): Category {
   if (mcc === 5411 || mcc === 5499 || mcc === 5422 || mcc === 5441 || mcc === 5451 || mcc === 5462) return "groceries";
   if (mcc >= 5811 && mcc <= 5814) return "cafe";
   if (mcc === 4121 || mcc === 4111 || mcc === 4131 || mcc === 4789 || mcc === 4112 || mcc === 4011) return "transport";
+  // Б15: 5816 is games (Steam, PlayStation): leisure, not a subscription.
+  if (mcc === 5816) return "leisure";
   if ((mcc >= 5815 && mcc <= 5818) || mcc === 5734 || mcc === 5968 || mcc === 7372 || mcc === 5192) return "subscriptions";
   if (mcc === 4814 || mcc === 4816 || mcc === 4899) return "telecom";
   if (mcc === 4900) return "utilities";
