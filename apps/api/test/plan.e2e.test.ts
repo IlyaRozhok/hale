@@ -442,6 +442,22 @@ describe("repaying and reviewing loans", () => {
     expect((await history()).stats).toEqual({ borrowed: 100_000, repaid: 100_000, serviceCost: 300, stillOpen: 0 });
   });
 
+  it("a repayment does not pay a loan taken after it, however often it is read again (Б23)", async () => {
+    const a = await account("black");
+    const at = async (description: string, amount: number, time: string) => {
+      const id = await tx(a, { amount, description, date: "2026-11-14", mcc: 4829 });
+      await ds.query(`UPDATE transactions SET occurred_at=$2 WHERE id=$1`, [id, `2026-11-14T${time}:00+02:00`]);
+      return id;
+    };
+    const repay = await at("Погашення Кредит До завтра на 9 днів", -50_300, "10:00");
+    const loan = await at("Кредит До завтра на 9 днів", 50_000, "18:00");
+    await reclassify([repay]);
+    await reclassify([loan]);
+    await reclassify([repay]);
+    await reclassify([repay, loan]);
+    expect(await ds.query(`SELECT repaid_amount::int AS repaid, repaid_at IS NULL AS open FROM loans`)).toEqual([{ repaid: 0, open: true }]);
+  });
+
   it("a cash loan without a day term stays a loan paid monthly: its payment does not close it", async () => {
     const a = await account("white");
     const ids = [
@@ -659,6 +675,30 @@ describe("day-term cash loans opened before Б23 (migration)", () => {
     await app.get(ReclassifyService).reclassifyPending();
     expect(await loans()).toEqual(after);
     expect((await history()).stats).toEqual(stats);
+  });
+
+  it("marks every old day-term repayment done, so one with no loan does not pay another loan later", async () => {
+    const a = await account("white");
+    const tomorrow = await loan(await typed(a, "Кредит До завтра на 9 днів", 50_000, "2026-11-10", "loan_in"), 50_000, "2026-11-10", "short");
+    const four = await loan(await typed(a, "Кредит готівкою на 4 дні", 100_000, "2026-11-14", "loan_in", "10:05"), 100_000, "2026-11-14", "other");
+    await typed(a, "Погашення Кредит готівкою на 2 дні", -100_300, "2026-11-12", "debt_payment");
+    await typed(a, "Погашення Кредит готівкою на 4 дні", -100_300, "2026-11-14", "debt_payment", "19:01");
+    await migrate();
+    await app.get(ReclassifyService).reclassifyPending();
+    expect(await ds.query(`SELECT id, repaid_amount::int AS repaid, repaid_at IS NOT NULL AS closed FROM loans ORDER BY id`)).toEqual([
+      { id: tomorrow, repaid: 0, closed: false },
+      { id: four, repaid: 100_000, closed: true },
+    ]);
+  });
+
+  it("a part the owner repaid by hand, with no bank repayment, stays", async () => {
+    const a = await account("white");
+    const id = await loan(await typed(a, "Кредит готівкою на 4 дні", 100_000, "2026-11-14", "loan_in"), 100_000, "2026-11-14", "other");
+    await api.post(`/plan/loans/${id}/repay`, { amount: 30_000, date: "2026-11-14" }).expect(201);
+    await migrate();
+    expect(await row(`SELECT kind, repaid_amount::int AS repaid, repaid_at IS NULL AS open FROM loans`)).toEqual({
+      kind: "short", repaid: 30_000, open: true,
+    });
   });
 
   it("a loan the owner closed that no bank repayment covers stays closed as he left it", async () => {
