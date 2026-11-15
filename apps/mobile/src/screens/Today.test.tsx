@@ -742,6 +742,53 @@ describe("Today, questions", () => {
     expect(await screen.findByText(USDC_MATCH.text)).toBeTruthy();
   });
 
+  const PAYMENT_PAID = {
+    id: "payment_paid:7:91",
+    kind: "payment_paid" as const,
+    text: "Это оплата «Аренда» ₴17,000?",
+    detail: "Іван П. · 01.11",
+  };
+
+  it("asks whether an operation paid a planned payment, with the operation under it and two answers", async () => {
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions: [PAYMENT_PAID] })) });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await openQuestions();
+    expect(await screen.findByText("Это оплата «Аренда» ₴17,000?")).toBeTruthy();
+    expect(screen.getByText("Іван П. · 01.11")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Да" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Нет" })).toBeTruthy();
+  });
+
+  it("«Да» links the operation to the payment the way «Оплачено» does, and the card goes away", async () => {
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions: [PAYMENT_PAID] })) });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await openQuestions();
+    await fireEvent.press(await screen.findByRole("button", { name: "Да" }));
+    await waitFor(() => expect(api.payWith).toHaveBeenCalledWith(7, [91]));
+    expect(api.dismissPaymentMatch).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText(PAYMENT_PAID.text)).toBeNull());
+  });
+
+  it("«Нет» tells the server this operation did not pay it, and the card goes away", async () => {
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions: [PAYMENT_PAID] })) });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await openQuestions();
+    await fireEvent.press(await screen.findByRole("button", { name: "Нет" }));
+    await waitFor(() => expect(api.dismissPaymentMatch).toHaveBeenCalledWith(7, 91));
+    expect(api.payWith).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText(PAYMENT_PAID.text)).toBeNull());
+  });
+
+  it("a payment question without both ids is the plain card that opens the operations", async () => {
+    const onOpenActivity = jest.fn();
+    const questions = [{ ...PAYMENT_PAID, id: "payment_paid:7" }];
+    await renderWith(<Today onOpenActivity={onOpenActivity} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    await openQuestions();
+    await fireEvent.press(await screen.findByText(PAYMENT_PAID.text));
+    expect(onOpenActivity).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Да" })).toBeNull();
+  });
+
   it("hides a date question with no income event, even from an older cached answer", async () => {
     const questions = [{ id: "income_date", kind: "income_date" as const, text: "Когда ожидается следующий доход?" }];
     await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));

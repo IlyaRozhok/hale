@@ -511,6 +511,16 @@ export function usePayWith() {
   });
 }
 
+/** «Это оплата?» answered no: the pair is not asked again; nothing about money changes. */
+export function useDismissPaymentMatch() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ paymentId, transactionId }: { paymentId: number; transactionId: number }) => api.dismissPaymentMatch(paymentId, transactionId),
+    onSuccess: () => client.invalidateQueries({ queryKey: TODAY_KEY }),
+  });
+}
+
 export function useAnswerCashCard() {
   const api = useApi();
   return useCashMutation(({ id, answer }: { id: number; answer: CashCardAnswer }) => api.answerCashCard(id, answer));

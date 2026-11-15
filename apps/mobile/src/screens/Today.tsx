@@ -7,7 +7,20 @@ import { LimitBar } from "../metal";
 import { limitState } from "../limitState";
 import { formatMoney, formatStamp, kyivDate, longDate, shiftDate, streakLabel } from "../format";
 import { dayPhrase, type PhraseAction } from "../dayPhrase";
-import { useCalendar, useCancelBridge, useChooseBridge, useConfirmIncome, useAnswerCashCard, useDepositFromWallet, useDismissUsdcMatch, useMatchUsdc, useSetIncomeDate, useToday } from "../api/queries";
+import {
+  useAnswerCashCard,
+  useCalendar,
+  useCancelBridge,
+  useChooseBridge,
+  useConfirmIncome,
+  useDepositFromWallet,
+  useDismissPaymentMatch,
+  useDismissUsdcMatch,
+  useMatchUsdc,
+  usePayWith,
+  useSetIncomeDate,
+  useToday,
+} from "../api/queries";
 import { PaymentPaidSheet } from "../components/PaymentPaidSheet";
 import { ErrorText } from "../components/ErrorText";
 import { BadCaseCard } from "../components/BadCaseCard";
@@ -57,6 +70,8 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const dismissUsdc = useDismissUsdcMatch();
   const fromWallet = useDepositFromWallet();
   const cashCard = useAnswerCashCard();
+  const payWith = usePayWith();
+  const notPaidBy = useDismissPaymentMatch();
   const chooseBridge = useChooseBridge();
   const cancelBridge = useCancelBridge();
   const pull = usePullRefresh(today.refetch);
@@ -286,6 +301,8 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
               onDismissUsdc={(transactionId) => answer(q.id, () => dismissUsdc.mutateAsync(transactionId))}
               onCashFromWallet={(transactionId) => answer(q.id, () => fromWallet.mutateAsync(transactionId))}
               onCashCard={(transactionId, reply) => answer(q.id, () => cashCard.mutateAsync({ id: transactionId, answer: reply }))}
+              onPayWith={(paymentId, transactionId) => answer(q.id, () => payWith.mutateAsync({ paymentId, transactionIds: [transactionId] }))}
+              onNotPaidBy={(paymentId, transactionId) => answer(q.id, () => notPaidBy.mutateAsync({ paymentId, transactionId }))}
               onSetDate={(eventId, date) => answer(q.id, () => setIncomeDate.mutateAsync({ eventId, date }))}
             />
           ))}

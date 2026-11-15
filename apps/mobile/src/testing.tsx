@@ -195,6 +195,7 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     payFromWallet: jest.fn(async () => ({ started: true, start: kyivDate(), balance: 0 })),
     paymentCandidates: jest.fn(async () => []),
     payWith: jest.fn(async () => undefined),
+    dismissPaymentMatch: jest.fn(async () => undefined),
     answerCashCard: jest.fn(async () => ({ started: true, start: kyivDate(), balance: 0 })),
     setCardCash: jest.fn(async () => ({ started: true, start: kyivDate(), balance: 0 })),
     similarCount: jest.fn(async () => 1),

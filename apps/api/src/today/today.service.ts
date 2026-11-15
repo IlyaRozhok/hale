@@ -12,6 +12,7 @@ import { quarterLabel, quarterOf } from "../domain/quarter";
 import { runOutDate } from "../domain/run-out";
 import { taxReserve } from "../domain/tax";
 import { usdcMatchRows } from "../domain/usdc-match";
+import { PAID_QUESTION_DAYS, type PayableTx, type Payment, paidQuestions } from "../domain/recurring-match";
 import { BINANCE } from "../plan/plan.service";
 import { isCounterpartyName, transfersWord } from "../domain/counterparty";
 import { counterKeySql } from "../transactions/counter-key";
@@ -711,6 +712,47 @@ export class TodayService {
     }));
   }
 
+  /**
+   * «Это оплата?» (task Б8): a payment long overdue while an operation of its amount sits unlinked.
+   * The operations are the ones the «Оплачено» sheet offers for the payment; paidQuestions narrows them.
+   */
+  private async paymentPaidQuestions(m: EntityManager, f: Facts): Promise<TodayDto["questions"]> {
+    const payments: Payment[] = await m.query(
+      `SELECT id, kind, name, amount::float8 AS amount, currency, due_on::text AS due_on, paid_at, transaction_id, match_hint
+         FROM scheduled_payments
+        WHERE paid_at IS NULL AND transaction_id IS NULL AND kind <> 'tax' AND due_on < $1::date - ${PAID_QUESTION_DAYS}
+          AND NOT EXISTS (SELECT 1 FROM payment_links l WHERE l.payment_id = scheduled_payments.id)
+        ORDER BY due_on, id`,
+      [f.date],
+    );
+    if (payments.length === 0) return [];
+    const candidates = new Map<number, PayableTx[]>();
+    const texts = new Map<number, string>();
+    for (const p of payments) {
+      const ids = await paymentCandidateIds(m, p.id, f.date);
+      if (ids.length === 0) continue;
+      const rows: (PayableTx & { description: string })[] = await m.query(
+        `SELECT t.id, t.type, t.amount::float8 AS amount, a.currency, t.amount_uah::float8 AS "amountUah", t.local_date::text AS "localDate",
+                '' AS text, t.description
+           FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.id = ANY($1::int[])`,
+        [ids],
+      );
+      for (const r of rows) texts.set(r.id, r.description);
+      candidates.set(p.id, rows);
+    }
+    const dismissed: { pair: string }[] = await m.query(
+      `SELECT payment_id || ':' || transaction_id AS pair FROM payment_dismissals WHERE payment_id = ANY($1::int[])`,
+      [payments.map((p) => p.id)],
+    );
+    return paidQuestions(payments, candidates, new Set(dismissed.map((d) => d.pair)), f.date).map(({ payment, tx }) => ({
+      id: `payment_paid:${payment.id}:${tx.id}`,
+      kind: "payment_paid" as const,
+      // Only hryvnia payments are offered operations today; a foreign one would be named by what left the card.
+      text: `Это оплата «${payment.name}» ${fmt(payment.currency === "UAH" ? payment.amount : Math.abs(tx.amountUah ?? tx.amount))}?`,
+      detail: `${texts.get(tx.id) ?? ""} · ${fmtDay(tx.localDate)}`,
+    }));
+  }
+
   // --- the response -------------------------------------------------------------
   private async dto(f: Facts, state: DailyState, plan: Plan | null, shortageStart?: { nextLimit?: number }): Promise<TodayDto> {
     const m = this.ds.manager;
@@ -727,6 +769,7 @@ export class TodayService {
     for (const q of await this.usdcMatchQuestions(m, f)) questions.push(q);
     for (const q of await this.cashSourceQuestions(m, f)) questions.push(q);
     for (const q of await this.cashCardQuestions(m, f)) questions.push(q);
+    for (const q of await this.paymentPaidQuestions(m, f)) questions.push(q);
     if (state.needsIncomeDate) {
       const ev = (await m.query(`SELECT id FROM income_events WHERE status <> 'received' ORDER BY expected_on, id LIMIT 1`))[0] as
         | { id: number }
