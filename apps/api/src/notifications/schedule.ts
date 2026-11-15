@@ -1,4 +1,5 @@
 import { addDays, kyivDate } from "../domain/money";
+import { KYIV_TZ } from "../time/clock";
 
 export type NotificationKind = "tax" | "over_limit" | "bad_case" | "usdc" | "income_date" | "sync_broken";
 
@@ -45,7 +46,7 @@ const OVER_LIMIT_HOUR = 21;
 const SYNC_BROKEN_MS = 24 * 3_600_000;
 
 const kyivHourFormat = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/Kyiv",
+  timeZone: KYIV_TZ,
   hour: "2-digit",
   hourCycle: "h23",
 });

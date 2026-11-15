@@ -3,7 +3,7 @@ import request from "supertest";
 import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
-import { Clock } from "../src/today/clock";
+import { Clock } from "../src/time/clock";
 import { TodayService } from "../src/today/today.service";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
 import { PlanService } from "../src/plan/plan.service";

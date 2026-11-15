@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import { applySeed, parseSeed } from "../../../scripts/seed-private";
 import { PlanService } from "../src/plan/plan.service";
-import { Clock } from "../src/today/clock";
+import { Clock } from "../src/time/clock";
 import { TodayService } from "../src/today/today.service";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
 

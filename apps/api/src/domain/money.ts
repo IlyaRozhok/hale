@@ -2,6 +2,8 @@
 // All dates are 'YYYY-MM-DD' strings and are handled with UTC arithmetic so
 // DST changes can never shift a day.
 
+import { KYIV_TZ } from "../time/clock";
+
 /** Integer kopecks (or cents). */
 export type Minor = number;
 
@@ -60,7 +62,7 @@ export function addDays(date: string, days: number): string {
 }
 
 const kyivFormat = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Europe/Kyiv",
+  timeZone: KYIV_TZ,
   year: "numeric",
   month: "2-digit",
   day: "2-digit",

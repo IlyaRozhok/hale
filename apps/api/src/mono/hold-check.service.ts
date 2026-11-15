@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { DataSource } from "typeorm";
+import { kyivDate } from "../domain/money";
 import { type AccountStatement, type HoldCounters, type HoldRow, checkHolds } from "./hold-check";
 import { SPLIT_THRESHOLD } from "./import.service";
 import { JOB_CLOCK, type JobClock } from "./jobs/job-runner";
@@ -42,16 +43,9 @@ interface Progress {
   windowsUnread: number;
 }
 
-const kyivYmd = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Europe/Kyiv",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
 /** Kyiv midnight of the Kyiv day before the one that holds `at`. */
 function kyivDayBefore(at: Date): Date {
-  const [y, m, d] = kyivYmd.format(at).split("-").map(Number) as [number, number, number];
+  const [y, m, d] = kyivDate(at).split("-").map(Number) as [number, number, number];
   const prev = new Date(Date.UTC(y, m - 1, d) - 86_400_000);
   const ymd = prev.toISOString().slice(0, 10);
   return kyivMidnight(ymd) ?? new Date(at.getTime() - 86_400_000);
@@ -126,7 +120,7 @@ export class HoldCheckService {
         status: "done",
         result: {
           ...counters,
-          period: { from: kyivYmd.format(from), to: kyivYmd.format(now) },
+          period: { from: kyivDate(from), to: kyivDate(now) },
           accounts: accounts.length,
           windowsPlanned: progress.windowsPlanned,
           windowsSplit: progress.windowsSplit,

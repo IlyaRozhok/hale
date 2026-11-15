@@ -5,7 +5,7 @@ import { JOB_CLOCK, type JobClock, JobRunner, isFinalFailure } from "./jobs/job-
 import { MonoClient } from "./mono.client";
 import type { MonoClientInfo, MonoStatementItem } from "./mono.schemas";
 import { ReclassifyService } from "../transactions/reclassify.service";
-import { CURRENCY_ALPHA } from "../domain/money";
+import { CURRENCY_ALPHA, kyivDate } from "../domain/money";
 import { planWindows, splitWindow } from "./windows";
 
 export const WINDOW_JOB_KIND = "history.window";
@@ -16,13 +16,6 @@ export const WINDOW_JOB_KIND = "history.window";
 export const SPLIT_THRESHOLD = 500;
 
 const ACCOUNT_KINDS = new Set(["black", "white", "fop"]);
-
-const kyivDate = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Europe/Kyiv",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
 
 export interface WindowPayload {
   accountId: string; // monobank id (accounts.external_id)
@@ -198,7 +191,7 @@ export class ImportService implements OnModuleInit {
         item.id,
         accountId,
         occurredAt,
-        kyivDate.format(occurredAt),
+        kyivDate(occurredAt),
         item.description,
         item.comment ?? null,
         item.mcc,

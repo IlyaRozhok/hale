@@ -19,7 +19,7 @@ import { TRANSFER_MCCS } from "../domain/merchants";
 import { counterKeySql } from "../transactions/counter-key";
 import { paymentCandidateIds } from "../cash/candidates";
 import { cardTransferSql, walletBalance } from "../cash/wallet";
-import { Clock } from "./clock";
+import { Clock, KYIV_TZ, kyivDaySql } from "../time/clock";
 import { quarterTaxFacts } from "./tax-facts";
 
 const STALE_SYNC_MS = 6 * 3_600_000;
@@ -122,7 +122,7 @@ export class TodayService {
   ) {}
 
   /** Fixes the day's limit even if the app is not opened. */
-  @Cron("5 0 * * *", { timeZone: "Europe/Kyiv" })
+  @Cron("5 0 * * *", { timeZone: KYIV_TZ })
   async snapshotJob(): Promise<void> {
     try {
       await this.ensureSnapshot();
@@ -497,7 +497,7 @@ export class TodayService {
     // income dates and loans
     const next = (await m.query(`SELECT min(expected_on)::text AS d FROM income_events WHERE status <> 'received'`))[0].d as string | null;
     const lastIncome = (
-      await m.query(`SELECT ((max(received_at) AT TIME ZONE 'Europe/Kyiv')::date)::text AS d FROM income_events WHERE status = 'received'`)
+      await m.query(`SELECT (${kyivDaySql("max(received_at)")})::text AS d FROM income_events WHERE status = 'received'`)
     )[0].d as string | null;
     // Loans since the last received income, within the tracked period (earlier ones are history):
     // they are what was borrowed in this cycle, less what short-loan repayments already covered.

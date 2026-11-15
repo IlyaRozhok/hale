@@ -2,7 +2,7 @@ import { ConflictException, Inject, Injectable, NotFoundException, Unprocessable
 import type { LoanHistoryDto, LoanRepayInput, LoanRowDto } from "@hale/contracts";
 import { DataSource } from "typeorm";
 import { kyivDate } from "../domain/money";
-import { Clock } from "../today/clock";
+import { Clock, kyivDaySql, kyivInstantSql } from "../time/clock";
 import { LimitService } from "../today/limit.service";
 import { LOAN_COST_TEXT } from "./short-loan";
 
@@ -36,7 +36,7 @@ export class LoansService {
       const total = loan.repaid_amount + pay;
       await m.query(
         `UPDATE loans SET repaid_amount=$2::bigint, service_cost = service_cost + $3::bigint,
-                repaid_at = CASE WHEN $2::bigint >= amount THEN ($4::date)::timestamp AT TIME ZONE 'Europe/Kyiv' END
+                repaid_at = CASE WHEN $2::bigint >= amount THEN ${kyivInstantSql("($4::date)::timestamp")} END
           WHERE id=$1`,
         [id, total, amount - pay, date],
       );
@@ -110,7 +110,7 @@ export class LoansService {
   private async rows(where: string, args: unknown[]): Promise<LoanRowDto[]> {
     const rows: (Omit<LoanRowDto, "title"> & { title: string | null })[] = await this.ds.query(
       `SELECT l.id, l.amount::float8 AS amount, (l.amount - l.repaid_amount)::float8 AS remaining, l.received_on::text AS "receivedOn",
-              ((l.repaid_at AT TIME ZONE 'Europe/Kyiv')::date)::text AS "repaidOn", NOT l.repaid_date_unknown AS "repaidDateKnown", l.repaid_amount::float8 AS "repaidAmount",
+              (${kyivDaySql("l.repaid_at")})::text AS "repaidOn", NOT l.repaid_date_unknown AS "repaidDateKnown", l.repaid_amount::float8 AS "repaidAmount",
               l.service_cost::float8 AS "serviceCost", l.source_transaction_id IS NULL AS manual,
               CASE WHEN l.source_transaction_id IS NULL THEN l.note ELSE t.description END AS title
          FROM loans l LEFT JOIN transactions t ON t.id = l.source_transaction_id

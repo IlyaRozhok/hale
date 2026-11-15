@@ -9,6 +9,7 @@ import { JOB_CLOCK, type JobClock } from "./jobs/job-runner";
 import { MonoClient } from "./mono.client";
 import { markContact, markSynced } from "./sync-status";
 import { TodayService } from "../today/today.service";
+import { KYIV_TZ } from "../time/clock";
 
 export const RECONCILE_DAYS = 7;
 const DAY_S = 86_400;
@@ -32,7 +33,7 @@ export class ReconcileService implements OnApplicationBootstrap {
     void this.installWebhookOnly();
   }
 
-  @Cron("0 4 * * *", { timeZone: "Europe/Kyiv" })
+  @Cron("0 4 * * *", { timeZone: KYIV_TZ })
   async scheduledRun(): Promise<void> {
     try {
       await this.runDaily();
@@ -42,7 +43,7 @@ export class ReconcileService implements OnApplicationBootstrap {
   }
 
   /** A quiet day has no webhook items: this keeps balances fresh and shows the bank is still in touch. */
-  @Cron("30 * * * *", { timeZone: "Europe/Kyiv" })
+  @Cron("30 * * * *", { timeZone: KYIV_TZ })
   async hourlyRefresh(): Promise<void> {
     try {
       await this.refreshBalances();
