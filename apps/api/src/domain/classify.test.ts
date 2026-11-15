@@ -294,9 +294,18 @@ describe("people", () => {
     });
   });
 
-  it.each(["Переказ на картку", "545708****4563", "Поповнення «На свято»"])("an unnamed transfer stays person_transfer without a question: %s", (description) => {
-    expect(classify(tx({ description, mcc: 4829 }), ctx())).toMatchObject({ type: "person_transfer", needsLabel: false });
-    expect(classify(tx({ description, mcc: 4829, accountKind: "fop" }), ctx())).toMatchObject({ type: "person_transfer", needsLabel: false });
+  // Б10: it may be the owner's own card at another bank, so it is asked about rather than spent in silence.
+  it.each(["Переказ на картку", "545708****4563", "Поповнення «На свято»"])("an unnamed outgoing transfer is person_transfer and asks: %s", (description) => {
+    expect(classify(tx({ description, mcc: 4829 }), ctx())).toMatchObject({ type: "person_transfer", needsLabel: true });
+    expect(classify(tx({ description, mcc: 6012 }), ctx())).toMatchObject({ type: "person_transfer", needsLabel: true });
+    expect(classify(tx({ description, mcc: 4829, accountKind: "fop" }), ctx())).toMatchObject({ type: "person_transfer", needsLabel: true });
+  });
+
+  it("an unnamed fop payment with no MCC is not a transfer and does not ask", () => {
+    expect(classify(tx({ description: "Переказ на картку", mcc: null, accountKind: "fop" }), ctx())).toMatchObject({
+      type: "person_transfer",
+      needsLabel: false,
+    });
   });
 
   it("the bank's counterparty name decides over a generic description", () => {

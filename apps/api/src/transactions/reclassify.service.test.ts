@@ -16,6 +16,8 @@ async function insertTx(
   accountId: number,
   over: {
     amount?: number;
+    /** Defaults to amount (a hryvnia account). */
+    amountUah?: number | null;
     description?: string;
     mcc?: number | null;
     at?: Date;
@@ -30,7 +32,7 @@ async function insertTx(
     `INSERT INTO transactions
        (external_id, account_id, occurred_at, local_date, description, mcc, amount, amount_uah,
         type, category, type_source, raw)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$9,$10,'{}') RETURNING id`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$11,$8,$9,$10,'{}') RETURNING id`,
     [
       `tx-${seq}`,
       accountId,
@@ -42,6 +44,7 @@ async function insertTx(
       over.type ?? null,
       over.category ?? null,
       over.type_source === undefined ? "auto" : over.type_source,
+      over.amountUah === undefined ? (over.amount ?? -5000) : over.amountUah,
     ],
   );
   return rows[0]!.id;
@@ -126,6 +129,51 @@ describe("reclassify", () => {
     await svc.reclassifyIds([second]);
     expect((await get(first)).type).toBe("own_transfer");
     expect((await get(second)).type).toBe("own_transfer");
+  });
+
+  describe("an exchange between own accounts in different currencies (Б10)", () => {
+    let usd = 0;
+    let usdJar = 0;
+    beforeEach(async () => {
+      const ins = async (ext: string, kind: string) =>
+        (await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ($1,$2,'USD',0) RETURNING id`, [ext, kind]))[0]
+          .id as number;
+      usd = await ins("u", "black");
+      usdJar = await ins("uj", "jar");
+    });
+    const buy = (acc: number, uah: number, usdCents: number, usdUah: number, at: Date) =>
+      Promise.all([
+        insertTx(black, { amount: -uah, mcc: 4829, description: "Переказ на картку", at }),
+        insertTx(acc, { amount: usdCents, amountUah: usdUah, mcc: 4829, description: "З гривневого рахунку", at: new Date(at.getTime() + 30_000) }),
+      ]);
+
+    it("pairs a hryvnia debit with a dollar credit whose hryvnia amounts are within 3%", async () => {
+      const [out, inn] = await buy(usd, 412_000, 10_000, 405_000, new Date(NOW - 3_600_000));
+      await service().reclassifyPending();
+      expect((await get(out)).type).toBe("own_transfer");
+      expect((await get(inn)).type).toBe("own_transfer");
+    });
+
+    it("does not pair when the hryvnia amounts are 4% apart, or with a jar", async () => {
+      const [out, inn] = await buy(usd, 412_000, 10_000, 395_500, new Date(NOW - 3_600_000));
+      const [toJar] = await buy(usdJar, 300_000, 7_300, 299_300, new Date(NOW - 7_200_000));
+      await service().reclassifyPending();
+      expect((await get(out)).type).toBe("person_transfer");
+      expect((await get(inn)).type).toBe("person_in");
+      expect((await get(toJar)).type).toBe("person_transfer");
+    });
+
+    it("the leg that arrives second makes the first one an own transfer", async () => {
+      const at = new Date(NOW - 3_600_000);
+      const svc = service();
+      const inn = await insertTx(usd, { amount: 10_000, amountUah: 410_000, mcc: 4829, description: "З гривневого рахунку", at });
+      await svc.reclassifyIds([inn]);
+      expect((await get(inn)).type).toBe("person_in");
+      const out = await insertTx(black, { amount: -413_000, mcc: 4829, description: "Переказ на картку", at });
+      await svc.reclassifyIds([out]);
+      expect((await get(inn)).type).toBe("own_transfer");
+      expect((await get(out)).type).toBe("own_transfer");
+    });
   });
 
   it("loads own ibans and jar titles from accounts (production context)", async () => {

@@ -7,6 +7,7 @@ import {
   type ClassifyRule,
   type TxType,
 } from "../domain/classify";
+import { isOwnPair, OWN_PAIR_WINDOW_S, type PairLeg } from "../domain/own-pair";
 import { JobRunner } from "../mono/jobs/job-runner";
 import { PlanService } from "../plan/plan.service";
 
@@ -15,7 +16,6 @@ export const OWN_IDENTITY = Symbol("OWN_IDENTITY");
 const CHUNK = 500;
 /** Types the planned-data matcher cares about; other rows skip its per-row transaction. */
 export const PLAN_TYPES: ReadonlySet<TxType> = new Set<TxType>(["obligation", "debt_payment", "tax", "loan_in", "income", "spend", "person_transfer"]);
-const PAIR_WINDOW_S = 600;
 
 /** What the bank statements cannot tell us about who "me" is. */
 export interface OwnIdentity {
@@ -33,7 +33,24 @@ interface Row {
   amount: number;
   counter_iban: string | null;
   counter_name: string | null;
-  paired: boolean;
+}
+
+/** One row and a row on another account that may be its other leg, as the pair rule reads them. */
+interface LegRow {
+  id: number;
+  other_id: number;
+  account_id: number;
+  kind: string;
+  currency: string;
+  at: number;
+  amount: number;
+  amount_uah: number | null;
+  o_account_id: number;
+  o_kind: string;
+  o_currency: string;
+  o_at: number;
+  o_amount: number;
+  o_amount_uah: number | null;
 }
 
 /**
@@ -85,19 +102,16 @@ export class ReclassifyService implements OnModuleInit {
     ).map((r) => r.id);
     let n = 0;
     for (let i = 0; i < all.length; i += CHUNK) {
+      const chunk = all.slice(i, i + CHUNK);
       const rows: Row[] = await this.ds.query(
         `SELECT t.id, a.kind AS account_kind, t.description, t.comment, t.mcc, t.amount::float8 AS amount,
-                t.counter_iban, t.counter_name,
-                EXISTS (
-                  SELECT 1 FROM transactions o
-                   WHERE o.account_id <> t.account_id AND o.amount = -t.amount
-                     AND abs(extract(epoch FROM (o.occurred_at - t.occurred_at))) <= $2
-                ) AS paired
+                t.counter_iban, t.counter_name
            FROM transactions t JOIN accounts a ON a.id = t.account_id
           WHERE t.id = ANY($1) AND t.type_source IS DISTINCT FROM 'owner'
           ORDER BY t.occurred_at, t.id`,
-        [all.slice(i, i + CHUNK), PAIR_WINDOW_S],
+        [chunk],
       );
+      const pairs = await this.ownPairs(chunk);
       for (const r of rows) {
         const out = classify(
           {
@@ -108,7 +122,7 @@ export class ReclassifyService implements OnModuleInit {
             counterIban: r.counter_iban,
             counterName: r.counter_name,
             accountKind: r.account_kind,
-            pairedOwnTransfer: r.paired,
+            pairedOwnTransfer: pairs.has(r.id),
           },
           ctx,
         );
@@ -131,16 +145,41 @@ export class ReclassifyService implements OnModuleInit {
   private async withOppositeLegs(ids: readonly number[]): Promise<number[]> {
     const out = new Set(ids);
     for (let i = 0; i < ids.length; i += CHUNK) {
-      const rows: { id: number }[] = await this.ds.query(
-        `SELECT DISTINCT o.id FROM transactions t JOIN transactions o
-           ON o.account_id <> t.account_id AND o.amount = -t.amount
-          AND abs(extract(epoch FROM (o.occurred_at - t.occurred_at))) <= $2
-          WHERE t.id = ANY($1)`,
-        [ids.slice(i, i + CHUNK), PAIR_WINDOW_S],
-      );
-      for (const r of rows) out.add(r.id);
+      for (const others of (await this.ownPairs(ids.slice(i, i + CHUNK))).values()) for (const id of others) out.add(id);
     }
     return [...out];
+  }
+
+  /**
+   * For each of the given rows that has one, the rows that are its other leg (isOwnPair). SQL only
+   * narrows the candidates to opposite signs on other accounts within the window; the rule decides.
+   */
+  private async ownPairs(ids: readonly number[]): Promise<Map<number, number[]>> {
+    const rows: LegRow[] = await this.ds.query(
+      `SELECT t.id, o.id AS other_id,
+              t.account_id, a.kind, a.currency, extract(epoch FROM t.occurred_at)::float8 * 1000 AS at,
+              t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah,
+              o.account_id AS o_account_id, oa.kind AS o_kind, oa.currency AS o_currency,
+              extract(epoch FROM o.occurred_at)::float8 * 1000 AS o_at, o.amount::float8 AS o_amount, o.amount_uah::float8 AS o_amount_uah
+         FROM transactions t JOIN accounts a ON a.id = t.account_id
+         JOIN transactions o ON o.account_id <> t.account_id AND sign(o.amount) = -sign(t.amount)
+          AND o.occurred_at BETWEEN t.occurred_at - make_interval(secs => $2) AND t.occurred_at + make_interval(secs => $2)
+         JOIN accounts oa ON oa.id = o.account_id
+        WHERE t.id = ANY($1)`,
+      [ids, OWN_PAIR_WINDOW_S],
+    );
+    const out = new Map<number, number[]>();
+    for (const r of rows) {
+      const leg: PairLeg = { accountId: r.account_id, accountKind: r.kind, currency: r.currency, at: r.at, amount: r.amount, amountUah: r.amount_uah };
+      const other: PairLeg = {
+        accountId: r.o_account_id, accountKind: r.o_kind, currency: r.o_currency, at: r.o_at, amount: r.o_amount, amountUah: r.o_amount_uah,
+      };
+      if (!isOwnPair(leg, other)) continue;
+      const list = out.get(r.id);
+      if (list) list.push(r.other_id);
+      else out.set(r.id, [r.other_id]);
+    }
+    return out;
   }
 
   private async loadContext(): Promise<ClassifyContext> {

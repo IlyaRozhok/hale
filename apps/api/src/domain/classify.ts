@@ -34,7 +34,7 @@ export interface ClassifyInput {
   counterIban?: string | null;
   counterName?: string | null;
   accountKind: "black" | "white" | "fop" | "jar" | "other";
-  /** Caller found an opposite row of the same amount on another own account (see findOwnPairs). */
+  /** Caller found the other leg of a move between own accounts (see isOwnPair in own-pair.ts). */
   pairedOwnTransfer?: boolean;
 }
 
@@ -179,6 +179,9 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
   ): ClassifyResult => ({ type, category, source, needsLabel });
   // A question needs someone to ask about: a bank template stays a plain transfer.
   const hasName = isCounterpartyName(tx.counterName?.trim() || d);
+  // Б10: an outgoing transfer with no other leg here and no name (a masked card, a bank template) may
+  // be the owner's own card at another bank, so it is asked about too rather than spent in silence.
+  const asks = hasName || (!incoming && mcc !== null && TRANSFER_MCCS.has(mcc));
 
   // 1. Owner rules. A withdrawal stays a withdrawal unless the rule itself says cash_out: a rule
   // made from a purchase in a shop must not swallow the cash taken at its till.
@@ -238,7 +241,7 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
 
   if (tx.accountKind === "fop") {
     if (incoming) return done("income");
-    if (mcc === null || TRANSFER_MCCS.has(mcc)) return done("person_transfer", "auto", "transfer", hasName);
+    if (mcc === null || TRANSFER_MCCS.has(mcc)) return done("person_transfer", "auto", "transfer", asks);
   }
 
   // 3. MCC and chains
@@ -249,7 +252,7 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
 
   // Money movement left over: people
   if (incoming) return done("person_in", "auto", "transfer", mcc === null);
-  return done("person_transfer", "auto", "transfer", hasName);
+  return done("person_transfer", "auto", "transfer", asks);
 }
 
 export interface PairCandidate {
