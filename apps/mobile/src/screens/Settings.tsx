@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import Slider from "@react-native-community/slider";
+import type { LedgerCheckDto, LedgerCheckIssueDto } from "@hale/contracts";
 import { tokens } from "@hale/tokens";
 import { ErrorText } from "../components/ErrorText";
-import { formatMoney, formatStamp } from "../format";
-import { useCapPreview, useSaveSettings, useSettings, useToday } from "../api/queries";
+import { dayMonth, formatMoney, formatOriginal, formatStamp, kyivDate, pluralIndex } from "../format";
+import { useCapPreview, useLedgerCheck, useSaveSettings, useSettings, useToday } from "../api/queries";
 import { Glass } from "../components/Glass";
 import { Icon } from "../components/Icon";
 import { ActionRow } from "../components/ActionRow";
@@ -21,11 +22,62 @@ const CAP_STEP = 5_000;
 const DEFAULT_CAP_KOPECKS = 10_000_000;
 const SAVE_FAILED = "Не удалось сохранить. Значение возвращено.";
 
+/** An amount of a discrepancy, without its sign: whole hryvnias, or the account's own currency with cents. */
+const checkAmount = (minor: number, currency: string): string =>
+  currency === "UAH" && Math.abs(minor) >= 100 ? formatMoney(Math.abs(minor)) : formatOriginal(Math.abs(minor), currency);
+
+/** One discrepancy as a whole sentence with its values put in; null for a kind this app has no words for. */
+function issueSentence(issue: LedgerCheckIssueDto, ranAt: string): string | null {
+  const { day, month } = dayMonth(issue.since ?? kyivDate(new Date(ranAt)));
+  const date = `${day} ${month}`;
+  const amount = checkAmount(issue.amount, issue.currency);
+  switch (issue.kind) {
+    case "bank_balance":
+      switch (issue.accountKind) {
+        case "black":
+          return `На чёрной карте не сходится ${amount} с ${date}.`;
+        case "white":
+          return `На белой карте не сходится ${amount} с ${date}.`;
+        case "fop":
+          return `На счёте ФОП не сходится ${amount} с ${date}.`;
+        case "jar":
+          return issue.accountTitle ? `В банке «${issue.accountTitle}» не сходится ${amount} с ${date}.` : `В банке не сходится ${amount} с ${date}.`;
+        default:
+          return `На одном из счетов не сходится ${amount} с ${date}.`;
+      }
+    case "own_transfers": {
+      const n = issue.count ?? 0;
+      return `У ${n} ${["перевода", "переводов", "переводов"][pluralIndex(n)]} между своими счетами нет второй части, с ${date}.`;
+    }
+    case "categories":
+      return `С ${date} траты по категориям не сходятся с общей суммой на ${amount}.`;
+    case "day_spent":
+      return `Потрачено за ${date} не везде одинаково: разница ${amount}.`;
+    case "cash_wallet":
+      return `В кошельке наличных ${formatMoney(issue.amount)} с ${date}.`;
+    default:
+      return null;
+  }
+}
+
+/**
+ * The ledger check in Settings (task Б11): all is well, or the first discrepancy it can name and, as a sentence of
+ * its own, how many more there are.
+ */
+export function ledgerCheckText(check: LedgerCheckDto): string {
+  if (check.issues.length === 0) return "Сверка: всё сходится.";
+  const named = check.issues.map((i) => issueSentence(i, check.ranAt));
+  const first = named.find((s): s is string => s !== null) ?? "Сверка нашла расхождение.";
+  const more = check.issues.length - 1;
+  return more === 0 ? first : `${first} Ещё ${more} ${["расхождение", "расхождения", "расхождений"][pluralIndex(more)]}.`;
+}
+
 export function Settings({ onClose }: { onClose: () => void }) {
   const settings = useSettings();
   const save = useSaveSettings();
   // The cached Today answer already knows when the bank last answered; no request of its own kind.
   const today = useToday();
+  const check = useLedgerCheck();
   const signOut = useSignOut();
   const [draft, setDraft] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +106,15 @@ export function Settings({ onClose }: { onClose: () => void }) {
     <ScrollView
       style={styles.root}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={false} onRefresh={() => void settings.refetch()} />}
+      refreshControl={
+        <RefreshControl
+          refreshing={false}
+          onRefresh={() => {
+            void settings.refetch();
+            void check.refetch();
+          }}
+        />
+      }
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.head}>
@@ -109,6 +169,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
           {today.data.syncedAt ? `Банк обновлялся ${formatStamp(today.data.syncedAt)}` : "Синхронизации с банком ещё не было."}
         </Text>
       )}
+      {check.data && <Text style={styles.muted}>{ledgerCheckText(check.data)}</Text>}
       <Pressable accessibilityRole="button" accessibilityLabel="Выйти" onPress={confirmSignOut} style={styles.signOut}>
         <Text style={styles.signOutText}>Выйти</Text>
       </Pressable>

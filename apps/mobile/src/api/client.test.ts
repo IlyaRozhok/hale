@@ -57,6 +57,20 @@ describe("api client", () => {
     ]);
   });
 
+  it("reads the latest ledger check, and has none from an empty answer or an older server (Б11)", async () => {
+    const check = { ranAt: "2026-11-12T03:00:00.000Z", issues: [] };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(json(check))
+      .mockResolvedValueOnce(new Response("", { status: 200 }))
+      .mockResolvedValueOnce(json({ message: "Cannot GET /check/latest" }, 404));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await expect(api.ledgerCheck()).resolves.toEqual(check);
+    await expect(api.ledgerCheck()).resolves.toBeNull();
+    await expect(api.ledgerCheck()).resolves.toBeNull();
+    expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toBe("https://api.example.test/check/latest");
+  });
+
   it("login sends no token and returns the token string", async () => {
     const fetchImpl = vi.fn(async () => json({ token: "abc" }));
     const { api } = setup(fetchImpl as unknown as typeof fetch, null);

@@ -22,6 +22,16 @@ const schema = z.object({
     (v) => (typeof v === "string" ? v.split(";").map((n) => n.trim()).filter(Boolean) : []),
     z.array(z.string()),
   ),
+  // Task Б11: the nightly ledger check (05:00 Kyiv) runs only when this is "true" or "1". Off by default: the
+  // owner turns it on when he deploys. Unset stays undefined, which means off, so a config built in code (tests)
+  // may leave it out.
+  LEDGER_CHECK_ENABLED: z.preprocess(
+    (v) => (v === "" ? "false" : typeof v === "string" ? v.trim().toLowerCase() : v),
+    z
+      .enum(["true", "1", "false", "0"])
+      .transform((v) => v === "true" || v === "1")
+      .optional(),
+  ),
   PORT: z.coerce.number().int().min(0).max(65535).default(3000),
 });
 

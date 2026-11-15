@@ -17,17 +17,15 @@ import { isCounterpartyName } from "../domain/counterparty";
 import { creditPart } from "../domain/credit";
 import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
 import { binanceOnChange, cashAnswerOf } from "../domain/cash-answer";
-import { limitSql, spendGroupSql } from "../domain/ledger";
 import { PlanService } from "../plan/plan.service";
 import { LimitService } from "../today/limit.service";
 import { type CashAnswerRow, binanceEvent, cashAnswerColumnsSql, cashAnswerFacts, undoAnswer } from "../cash/cash-answer";
 import { cardCashSql, cardTransferSql } from "../cash/wallet";
 import { counterKeySql } from "./counter-key";
+import { IN_LIMIT, SPEND_TAB, dayTotalsSql } from "./day-totals";
 import { PLAN_TYPES, ReclassifyService } from "./reclassify.service";
 
 const KEY = counterKeySql("t");
-/** The row counts against the day limit: one definition, domain/ledger.ts, evaluated in the database. */
-const IN_LIMIT = `(${limitSql("t", "a")})`;
 const COLUMNS = `
   ${IN_LIMIT} AS in_limit,
   t.id, t.occurred_at, to_char(t.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS ts,
@@ -169,7 +167,7 @@ export class TransactionsService {
     if (q.type) where.push(`t.type = ${arg(q.type)}`);
     if (q.needsLabel !== undefined) where.push(`t.needs_label = ${arg(q.needsLabel)}`);
     // The «Траты» group is the ledger's: its types and the withdrawal rule live in domain/ledger.ts.
-    if (q.group === "spend") where.push(spendGroupSql("t"));
+    if (q.group === "spend") where.push(SPEND_TAB.filter);
     if (q.group === "income") where.push(`t.type = ANY(${arg(INCOME_GROUP_TYPES)}::text[])`);
     if (q.category) where.push(`t.category = ${arg(q.category)}`);
     if (q.from) where.push(`t.local_date >= ${arg(q.from)}::date`);
@@ -196,7 +194,7 @@ export class TransactionsService {
     // Under «Траты» the totals are the limit's (Б2): the sum and count of the rows that count against it,
     // the same figure as «потрачено» on «Сегодня» and in the calendar. Payments, taxes, debts, loans out
     // and jar rows stay on the list, marked by inLimit, but do not add up. «Все» and «Доходы» sum every row.
-    const counted = q.group === "spend" ? IN_LIMIT : "true";
+    const counted = q.group === "spend" ? SPEND_TAB.counted : "true";
     return {
       items: page.map((r) => view(r, rules, binanceOpen)),
       nextCursor: rows.length > q.limit ? encodeCursor(page[page.length - 1]!) : null,
@@ -219,17 +217,11 @@ export class TransactionsService {
 
   /**
    * Totals of the `counted` rows for whole days, ignoring the cursor, so a day split across pages still adds
-   * up. A day with no counted row with a known hryvnia amount has no total at all rather than a misleading zero.
+   * up. The query is dayTotalsSql (day-totals.ts), which the ledger check runs too.
    */
   private async dayTotals(dates: string[], filters: string[], args: unknown[], counted: string): Promise<Record<string, number>> {
     if (dates.length === 0) return {};
-    const rows: { local_date: string; total: number }[] = await this.ds.query(
-      `SELECT t.local_date::text AS local_date, COALESCE(SUM(t.amount_uah) FILTER (WHERE ${counted}), 0)::float8 AS total ${FROM}
-        WHERE ${[...filters, `t.local_date = ANY($${args.length + 1}::date[])`].join(" AND ")}
-        GROUP BY t.local_date
-       HAVING COUNT(t.amount_uah) FILTER (WHERE ${counted}) > 0`,
-      [...args, dates],
-    );
+    const rows: { local_date: string; total: number }[] = await this.ds.query(dayTotalsSql(filters, counted, `$${args.length + 1}`), [...args, dates]);
     return Object.fromEntries(rows.map((r) => [r.local_date, r.total]));
   }
 

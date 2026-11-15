@@ -5,7 +5,7 @@ import { DataSource, type EntityManager } from "typeorm";
 import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
 import { type DailyInput, type DailyState, type DayMark, computeDaily, dayMark, sumDue } from "../domain/daily";
-import { limitSql } from "../domain/ledger";
+import { spentByDaySql, spentSql } from "../domain/ledger";
 import { runway } from "../domain/runway";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
 import { quarterLabel, quarterOf } from "../domain/quarter";
@@ -37,11 +37,6 @@ const START: DayMark = "bridge_start";
 /** Older transfers are history: asking about them now changes nothing. */
 const QUESTION_WINDOW_DAYS = 30;
 
-/**
- * What counts against the limit, from the one rule in domain/ledger.ts: spend (refunds reduce it), person
- * transfers, and cash out until the cash wallet starts; nothing on a jar, nothing without a hryvnia amount.
- */
-const COUNTS_AGAINST_LIMIT = limitSql("t", "a");
 
 const CODE_BY_ALPHA = new Map(Object.entries(CURRENCY_ALPHA).map(([code, alpha]) => [alpha, Number(code)]));
 
@@ -331,11 +326,8 @@ export class TodayService {
   }
 
   private async spentByDay(m: EntityManager, from: string, to: string): Promise<Map<string, number>> {
-    const rows = (await m.query(
-      `SELECT t.local_date::text AS date, SUM(-t.amount_uah)::float8 AS spent FROM transactions t JOIN accounts a ON a.id=t.account_id
-        WHERE ${COUNTS_AGAINST_LIMIT} AND t.local_date BETWEEN $1 AND $2 GROUP BY t.local_date`,
-      [from, to],
-    )) as { date: string; spent: number }[];
+    // The one query for spent per day (domain/ledger.ts), which the ledger check runs too.
+    const rows = (await m.query(spentByDaySql("$1", "$2"), [from, to])) as { date: string; spent: number }[];
     return new Map(rows.map((r) => [r.date, r.spent]));
   }
 
@@ -621,11 +613,9 @@ export class TodayService {
 
   /** What counted against the limit between two dates: spend (refunds reduce it), cash out and person transfers. */
   private async spent(m: EntityManager, from: string, to: string): Promise<number> {
-    const r = await m.query(
-      `SELECT COALESCE(SUM(-t.amount_uah),0)::float8 AS s FROM transactions t JOIN accounts a ON a.id=t.account_id
-        WHERE ${COUNTS_AGAINST_LIMIT} AND t.local_date BETWEEN $1 AND $2`,
-      [from, to],
-    );
+    // What counts is the one rule of domain/ledger.ts (spend, refunds reducing it, person transfers, cash out until
+    // the wallet starts; nothing on a jar or without a hryvnia amount); the ledger check runs this query too.
+    const r = await m.query(spentSql("$1", "$2"), [from, to]);
     return r[0].s;
   }
 
