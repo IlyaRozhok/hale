@@ -444,21 +444,26 @@ export class PlanService implements OnApplicationBootstrap {
 
   /**
    * A repayment of a short loan (Кредит до завтра, МФО) pays the oldest open short loans first, up to
-   * its amount; a loan stays open (with `repaid_amount` growing) until fully covered. Applied once per row.
+   * its amount; a loan stays open (with `repaid_amount` growing) until fully covered. Applied once per row,
+   * and only once there is a loan to pay: a repayment seen before its loan waits for the next pass.
    */
   private async repayShortLoans(m: EntityManager, t: TxRow): Promise<void> {
     if (t.amount >= 0 || !SHORT_LOAN_TEXT.test(t.text) || INTEREST_TEXT.test(t.text)) return;
+    // A loan taken after the repayment (a rollover later that day) is not what it repaid.
+    const loans: { id: number; amount: number; repaid_amount: number }[] = await m.query(
+      `SELECT l.id, l.amount::float8 AS amount, l.repaid_amount::float8 AS repaid_amount
+         FROM loans l LEFT JOIN transactions s ON s.id = l.source_transaction_id
+        WHERE l.kind='short' AND l.repaid_at IS NULL AND l.received_on <= $1 AND (s.id IS NULL OR s.occurred_at <= $2)
+        ORDER BY l.received_on, l.id FOR UPDATE OF l`,
+      [t.local_date, t.occurred_at],
+    );
+    if (loans.length === 0) return;
     const fresh = await m.query(
       `INSERT INTO loan_repayments (transaction_id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING transaction_id`,
       [t.id],
     );
     if (fresh.length === 0) return;
     let left = Math.abs(t.amount_uah ?? t.amount);
-    const loans: { id: number; amount: number; repaid_amount: number }[] = await m.query(
-      `SELECT id, amount::float8 AS amount, repaid_amount::float8 AS repaid_amount FROM loans
-        WHERE kind='short' AND repaid_at IS NULL AND received_on <= $1 ORDER BY received_on, id FOR UPDATE`,
-      [t.local_date],
-    );
     for (const l of loans) {
       if (left <= 0) break;
       const pay = Math.min(left, l.amount - l.repaid_amount);

@@ -77,7 +77,12 @@ export class ReclassifyService implements OnModuleInit {
   async reclassifyIds(ids: readonly number[]): Promise<number> {
     if (ids.length === 0) return 0;
     const ctx = await this.loadContext();
-    const all = await this.withOppositeLegs(ids);
+    // In the order they happened: a loan opens before the repayment that closes it.
+    const all = (
+      (await this.ds.query(`SELECT id FROM transactions WHERE id = ANY($1) ORDER BY occurred_at, id`, [
+        await this.withOppositeLegs(ids),
+      ])) as { id: number }[]
+    ).map((r) => r.id);
     let n = 0;
     for (let i = 0; i < all.length; i += CHUNK) {
       const rows: Row[] = await this.ds.query(
@@ -89,7 +94,8 @@ export class ReclassifyService implements OnModuleInit {
                      AND abs(extract(epoch FROM (o.occurred_at - t.occurred_at))) <= $2
                 ) AS paired
            FROM transactions t JOIN accounts a ON a.id = t.account_id
-          WHERE t.id = ANY($1) AND t.type_source IS DISTINCT FROM 'owner'`,
+          WHERE t.id = ANY($1) AND t.type_source IS DISTINCT FROM 'owner'
+          ORDER BY t.occurred_at, t.id`,
         [all.slice(i, i + CHUNK), PAIR_WINDOW_S],
       );
       for (const r of rows) {
