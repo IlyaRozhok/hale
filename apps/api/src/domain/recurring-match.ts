@@ -196,6 +196,11 @@ export function taxTolerance(p: Pick<Payment, "amount" | "is_estimate">): number
   return p.is_estimate ? Math.round(p.amount * TAX_ESTIMATE_TOLERANCE) : TAX_EXACT_TOLERANCE;
 }
 
+/** The payments linked to a tax row (`linked`, minor units) add up to it within its tolerance, or more: it takes nothing more. */
+export function taxCovered(p: Pick<Payment, "amount" | "is_estimate">, linked: number): boolean {
+  return linked > 0 && linked >= p.amount - taxTolerance(p);
+}
+
 export interface TaxShare {
   payment: Payment;
   /** Operations to link to the payment through payment_links: this one, and its pair if any. */
@@ -239,7 +244,7 @@ export function matchTaxShare(tx: PayableTx, payments: readonly Payment[], other
   const linked = (p: Payment) => p.linked ?? 0;
   const rows = payments
     .filter((p) => p.kind === "tax" && p.currency === "UAH" && p.transaction_id === null && inTaxWindow(tx, p))
-    .filter((p) => !(linked(p) > 0 && linked(p) >= p.amount - tol(p)))
+    .filter((p) => !taxCovered(p, linked(p)))
     .sort((a, b) => (a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : a.id - b.id));
   const fits = (p: Payment, sum: number) => Math.abs(sum - p.amount) <= tol(p);
   const share = (p: Payment, ids: number[], release = false): TaxShare => ({ payment: p, ids, closes: p.paid_at === null, release });

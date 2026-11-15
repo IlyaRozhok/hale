@@ -10,7 +10,17 @@ import {
 import { Cron } from "@nestjs/schedule";
 import { DataSource, type EntityManager } from "typeorm";
 import { ruleMatches } from "../domain/classify";
-import { type PayableTx, type Payment, matchPayment, matchTaxPayment, matchTaxShare, monthlyDueDates, monthlyEvents } from "../domain/recurring-match";
+import { reopensOnUnlink } from "../domain/payment-cover";
+import {
+  type PayableTx,
+  type Payment,
+  type PaymentKind,
+  matchPayment,
+  matchTaxPayment,
+  matchTaxShare,
+  monthlyDueDates,
+  monthlyEvents,
+} from "../domain/recurring-match";
 import { kyivDate } from "../domain/money";
 import { estimateDueOn, precedingQuarter, quarterBounds, quarterOf } from "../domain/quarter";
 import { taxReserve } from "../domain/tax";
@@ -369,7 +379,11 @@ export class PlanService implements OnApplicationBootstrap {
 
   /** Manual path: the owner says it was paid, and its money is free in the day's limit at once. Idempotent. */
   async markPaid(id: number): Promise<ScheduledPayment> {
-    const paid = (await this.ds.query(`UPDATE scheduled_payments SET paid_at = now() WHERE id=$1 AND paid_at IS NULL`, [id])) as [unknown[], number];
+    // Closed by hand: losing a linked operation later does not open it again (task Б26).
+    const paid = (await this.ds.query(
+      `UPDATE scheduled_payments SET paid_at = now(), closed_by_links = false WHERE id=$1 AND paid_at IS NULL`,
+      [id],
+    )) as [unknown[], number];
     // TypeORM returns [rows, count] for an UPDATE on Postgres.
     if (paid[1] > 0) await this.limit.invalidate("payment_paid");
     const rows: ScheduledPayment[] = await this.ds.query(
@@ -477,8 +491,32 @@ export class PlanService implements OnApplicationBootstrap {
     if (share.release) await m.query(`DELETE FROM payment_links WHERE payment_id=$1`, [share.payment.id]);
     await m.query(`INSERT INTO payment_links (payment_id, transaction_id) SELECT $1, unnest($2::int[])`, [share.payment.id, share.ids]);
     if (!share.closes) return;
-    await m.query(`UPDATE scheduled_payments SET paid_at=COALESCE(paid_at, $2) WHERE id=$1`, [share.payment.id, occurredAt]);
+    // Closed by its links: it opens again if it loses one and the rest no longer cover it (task Б26).
+    await m.query(`UPDATE scheduled_payments SET paid_at=COALESCE(paid_at, $2), closed_by_links = true WHERE id=$1`, [share.payment.id, occurredAt]);
     await this.limit.invalidate("payment_paid", m);
+  }
+
+  /**
+   * These payments have just lost linked operations (task Б26). Those their links closed open again when what
+   * is still linked no longer covers them (reopensOnUnlink); one closed by hand stays closed. True when any
+   * opened: the caller fixes the day afresh in the same transaction.
+   */
+  async reopenUncovered(m: EntityManager, paymentIds: readonly number[]): Promise<boolean> {
+    if (paymentIds.length === 0) return false;
+    const rows: { id: number; kind: PaymentKind; amount: number; is_estimate: boolean; paid: boolean; closed_by_links: boolean; linked: number }[] =
+      await m.query(
+        `SELECT p.id, p.kind, p.amount::float8 AS amount, p.is_estimate, p.paid_at IS NOT NULL AS paid, p.closed_by_links,
+                (SELECT COALESCE(SUM(-COALESCE(x.amount_uah, x.amount)), 0) FROM payment_links l
+                   JOIN transactions x ON x.id = l.transaction_id WHERE l.payment_id = p.id)::float8 AS linked
+           FROM scheduled_payments p WHERE p.id = ANY($1::int[]) ORDER BY p.id FOR UPDATE OF p`,
+        [[...new Set(paymentIds)]],
+      );
+    const reopen = rows
+      .filter((r) => reopensOnUnlink({ kind: r.kind, amount: r.amount, isEstimate: r.is_estimate, paid: r.paid, closedByLinks: r.closed_by_links }, r.linked))
+      .map((r) => r.id);
+    if (reopen.length === 0) return false;
+    await m.query(`UPDATE scheduled_payments SET paid_at = NULL, closed_by_links = false WHERE id = ANY($1::int[])`, [reopen]);
+    return true;
   }
 
   /** The owner said this recipient is a close person, sent money regularly. */

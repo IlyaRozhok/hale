@@ -6,6 +6,7 @@ import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import { Clock } from "../src/today/clock";
 import { TodayService } from "../src/today/today.service";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
+import { PlanService } from "../src/plan/plan.service";
 
 let app: INestApplication;
 let ds: DataSource;
@@ -186,6 +187,21 @@ describe("operations entered by hand", () => {
     const bank = await bankTx(await card(), -1_000, "spend", "2026-11-10");
     await api.del(`/cash/operations/${bank}`).expect(409);
     await api.patch(`/cash/operations/${bank}`, { amount: 1 }).expect(409);
+  });
+
+  it("deleting one that helped close a tax opens the tax again; the other payment stays linked (Б26)", async () => {
+    const tax = (
+      await row(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, tax_quarter) VALUES ('tax','ЄСВ',800000,'UAH','2026-11-20','2026-Q3') RETURNING id`)
+    ).id as number;
+    const bank = await bankTx(await card(), -500_000, "tax", "2026-11-09");
+    await app.get(PlanService).onClassified(bank, "tax");
+    const { id } = (await op({ kind: "spend", amount: 300_000, category: "cafe" }).expect(201)).body as { id: number };
+    await api.patch(`/transactions/${id}`, { type: "tax" }).expect(200);
+    expect((await row(`SELECT paid_at FROM scheduled_payments WHERE id=$1`, [tax])).paid_at).not.toBeNull();
+
+    await api.del(`/cash/operations/${id}`).expect(200);
+    expect((await row(`SELECT paid_at FROM scheduled_payments WHERE id=$1`, [tax])).paid_at).toBeNull();
+    expect(await ds.query(`SELECT transaction_id FROM payment_links WHERE payment_id=$1`, [tax])).toEqual([{ transaction_id: bank }]);
   });
 
   it("is not retyped by the classifier and asks nothing about Binance", async () => {
@@ -500,6 +516,83 @@ describe("a planned payment paid with chosen operations", () => {
       await api.post(`/cash/payments/${id}`).expect(409);
       expect((await wallet()).balance).toBe(2_000_000);
       expect(await paidAt(id)).toBeNull();
+    });
+  });
+
+  describe("an operation retyped away from a payment it closed (Б26)", () => {
+    const paidAt = async (id: number) => (await row(`SELECT paid_at FROM scheduled_payments WHERE id=$1`, [id])).paid_at as Date | null;
+    const dailyLimit = async () => (await today()).state.dailyLimit as number;
+    const links = async (id: number) =>
+      ((await ds.query(`SELECT transaction_id FROM payment_links WHERE payment_id=$1 ORDER BY transaction_id`, [id])) as { transaction_id: number }[]).map(
+        (r) => r.transaction_id,
+      );
+
+    it("a payment closed by two operations opens again when one is retyped; the other stays linked and the day takes the payment back", async () => {
+      const c = await card();
+      const id = await plan(1_700_000);
+      const first = await bankTx(c, -1_000_000, "cash_out", "2026-11-07");
+      const second = await bankTx(c, -700_000, "person_transfer", "2026-11-08", { time: "12:00:00" });
+      await api.post(`/cash/payments/${id}/links`, { transactionIds: [first, second] }).expect(201);
+      expect(await paidAt(id)).not.toBeNull();
+      const closed = await dailyLimit();
+
+      await api.patch(`/transactions/${second}`, { type: "spend" }).expect(200);
+      expect(await paidAt(id)).toBeNull();
+      expect(await links(id)).toEqual([first]);
+      expect(await dailyLimit()).toBeLessThan(closed);
+      expect((await today()).upcoming).toMatchObject([{ id: String(id), amount: 1_700_000, paid: 1_000_000 }]);
+      // Open again, it takes the rest the usual way.
+      expect((await api.post(`/cash/payments/${id}/links`, { transactionIds: [second] }).expect(201)).body).toMatchObject({ closed: true });
+    });
+
+    it("stays closed when what is left still covers it", async () => {
+      const c = await card();
+      const id = await plan(1_700_000);
+      const a = await bankTx(c, -900_000, "cash_out", "2026-11-07");
+      const b = await bankTx(c, -900_000, "cash_out", "2026-11-08");
+      const extra = await bankTx(c, -300_000, "person_transfer", "2026-11-08", { time: "12:00:00" });
+      await api.post(`/cash/payments/${id}/links`, { transactionIds: [a, b, extra] }).expect(201);
+      const paid = await paidAt(id);
+      expect(paid).not.toBeNull();
+      await api.patch(`/transactions/${extra}`, { type: "spend" }).expect(200);
+      expect(await paidAt(id)).toEqual(paid);
+      expect(await links(id)).toEqual([a, b]);
+    });
+
+    it("a payment closed by hand stays closed when an operation linked to it is retyped", async () => {
+      const c = await card();
+      const id = await plan(1_700_000);
+      const part = await bankTx(c, -310_500, "cash_out", "2026-11-08");
+      await api.post(`/cash/payments/${id}/links`, { transactionIds: [part] }).expect(201);
+      await api.post(`/plan/payments/${id}/mark-paid`).expect(201);
+      await api.patch(`/transactions/${part}`, { type: "spend" }).expect(200);
+      expect(await paidAt(id)).not.toBeNull();
+      expect(await links(id)).toEqual([]);
+    });
+
+    it("a payment closed by its own operation opens again as before, and the day takes it back", async () => {
+      const c = await card();
+      const id = await plan(1_700_000);
+      const t = await bankTx(c, -1_700_000, "spend", "2026-11-06");
+      await api.patch(`/transactions/${t}`, { type: "obligation" }).expect(200);
+      expect((await row(`SELECT transaction_id FROM scheduled_payments WHERE id=$1`, [id])).transaction_id).toBe(t);
+      const closed = await dailyLimit();
+      await api.patch(`/transactions/${t}`, { type: "spend" }).expect(200);
+      expect(await row(`SELECT paid_at, transaction_id FROM scheduled_payments WHERE id=$1`, [id])).toEqual({ paid_at: null, transaction_id: null });
+      expect(await dailyLimit()).toBeLessThan(closed);
+    });
+
+    it("an answer about the recipient that retypes both operations opens the payment again", async () => {
+      const c = await card();
+      const id = await plan(1_700_000);
+      const first = await bankTx(c, -1_000_000, "person_transfer", "2026-11-07", { name: "Olena K", description: "Переказ" });
+      const second = await bankTx(c, -700_000, "person_transfer", "2026-11-08", { name: "Olena K", description: "Переказ" });
+      await api.post(`/cash/payments/${id}/links`, { transactionIds: [first, second] }).expect(201);
+      expect(await paidAt(id)).not.toBeNull();
+      const key = ((await api.get("/transactions").expect(200)).body.items as { id: number; counterKey: string }[]).find((t) => t.id === first)!.counterKey;
+      await api.post("/recipients/label", { counterKey: key, label: "help" }).expect(201);
+      expect(await paidAt(id)).toBeNull();
+      expect(await links(id)).toEqual([]);
     });
   });
 
