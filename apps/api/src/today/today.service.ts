@@ -16,6 +16,7 @@ import { PAID_QUESTION_DAYS, type PayableTx, type Payment, paidQuestions } from 
 import { BINANCE } from "../plan/plan.service";
 import { isCounterpartyName, transfersWord } from "../domain/counterparty";
 import { counterKeySql } from "../transactions/counter-key";
+import { paymentCandidateIds } from "../cash/candidates";
 import { cardTransferSql, walletBalance } from "../cash/wallet";
 import { Clock } from "./clock";
 import { quarterTaxFacts } from "./tax-facts";
