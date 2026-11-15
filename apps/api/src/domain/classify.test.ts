@@ -92,6 +92,8 @@ describe("debts and loans", () => {
     ["Кредит До завтра на 7 днів"],
     ["Від: Llc Moneyveo Shvydka Finansova"],
     ["Розстрочка на картку"],
+    ["Кредит готівкою на 4 дні"],
+    ["Кредит готівкою на 2 дні"],
   ])("incoming %s is loan_in", (description) => {
     expect(classify(tx({ description, amount: 500000, mcc: 4829 }), ctx())).toMatchObject({ type: "loan_in" });
   });
@@ -103,6 +105,8 @@ describe("debts and loans", () => {
     ["Погашення наступного платежу КТС - monomarket"],
     ["Списання відсотків за січень"],
     ["CreditKasa"],
+    ["Погашення Кредит готівкою на 4 дні"],
+    ["Погашення Кредит готівкою на 2 дні"],
   ])("outgoing %s is debt_payment", (description) => {
     expect(classify(tx({ description, mcc: 4829 }), ctx()).type).toBe("debt_payment");
   });
