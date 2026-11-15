@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { DataSource } from "typeorm";
 import { createDataSource } from "../db/data-source";
 import { createMigratedDatabase } from "../../test/app";
+import { isOwnPair, ownPairSql, type PairLeg } from "../domain/own-pair";
 import { JobRunner } from "../mono/jobs/job-runner";
 import { RECLASSIFY_JOB_KIND, ReclassifyService } from "./reclassify.service";
 
@@ -173,6 +174,39 @@ describe("reclassify", () => {
       await svc.reclassifyIds([out]);
       expect((await get(inn)).type).toBe("own_transfer");
       expect((await get(out)).type).toBe("own_transfer");
+    });
+
+    it("the SQL form of the pair rule agrees with isOwnPair on every pair of rows", async () => {
+      const t0 = NOW - 3_600_000;
+      // [account, amount, hryvnia amount (undefined: the amount itself), seconds after the first × 1000]
+      const legs: [number, number, number | null | undefined, number][] = [
+        [black, -413_000, undefined, 0],
+        [usd, 10_000, 410_000, 40_000], // within 3%
+        [usd, 10_000, 395_500, 60_000], // 4% apart
+        [usd, 10_000, null, 70_000], // no rate
+        [white, 413_000, undefined, 80_000], // exact opposite
+        [usdJar, 10_000, 412_000, 90_000], // a jar
+        [usd, 10_000, 410_000, 700_000], // outside the window from the first
+        [black, 0, undefined, 100_000],
+        [usd, 0, 0, 110_000],
+      ];
+      for (const [acc, amount, amountUah, dt] of legs) {
+        await insertTx(acc, { amount, amountUah, at: new Date(t0 + dt) });
+      }
+      const rows: (PairLeg & { id: number })[] = await ds.query(
+        `SELECT t.id, t.account_id AS "accountId", a.kind AS "accountKind", a.currency, extract(epoch FROM t.occurred_at)::float8 * 1000 AS at,
+                t.amount::float8 AS amount, t.amount_uah::float8 AS "amountUah"
+           FROM transactions t JOIN accounts a ON a.id = t.account_id`,
+      );
+      const sql: { t: number; o: number }[] = await ds.query(
+        `SELECT t.id AS t, o.id AS o FROM transactions t JOIN accounts ta ON ta.id = t.account_id
+           JOIN transactions o ON o.id <> t.id JOIN accounts oa ON oa.id = o.account_id
+          WHERE ${ownPairSql("t", "ta", "o", "oa")}`,
+      );
+      const fromSql = sql.map((p) => `${p.t}-${p.o}`).sort();
+      const fromTs = rows.flatMap((a) => rows.filter((b) => b.id !== a.id && isOwnPair(a, b)).map((b) => `${a.id}-${b.id}`)).sort();
+      expect(fromSql).toEqual(fromTs);
+      expect(fromTs.length).toBeGreaterThan(0);
     });
   });
 

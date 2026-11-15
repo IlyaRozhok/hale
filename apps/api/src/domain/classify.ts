@@ -1,4 +1,4 @@
-import { isCounterpartyName } from "./counterparty";
+import { cardTail, isCounterpartyName } from "./counterparty";
 import {
   CASH_MCCS,
   type Category,
@@ -179,9 +179,12 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
   ): ClassifyResult => ({ type, category, source, needsLabel });
   // A question needs someone to ask about: a bank template stays a plain transfer.
   const hasName = isCounterpartyName(tx.counterName?.trim() || d);
-  // Б10: an outgoing transfer with no other leg here and no name (a masked card, a bank template) may
-  // be the owner's own card at another bank, so it is asked about too rather than spent in silence.
-  const asks = hasName || (!incoming && mcc !== null && TRANSFER_MCCS.has(mcc));
+  // Б10: an outgoing transfer with no other leg here and no name, to one known destination (a masked
+  // card, an account number), may be the owner's own card at another bank: it is asked about rather
+  // than spent in silence. A bank template alone names no destination, and one answer about it would
+  // relabel every such transfer, so it stays unasked.
+  const knownDestination = !!tx.counterIban?.trim() || cardTail(tx.counterName?.trim() || d) !== null;
+  const asks = hasName || (!incoming && mcc !== null && TRANSFER_MCCS.has(mcc) && knownDestination);
 
   // 1. Owner rules. A withdrawal stays a withdrawal unless the rule itself says cash_out: a rule
   // made from a purchase in a shop must not swallow the cash taken at its till.

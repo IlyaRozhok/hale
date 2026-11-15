@@ -632,6 +632,26 @@ describe("the owner's card at another bank", () => {
     expect(await questions()).toEqual([]);
   });
 
+  it("does not ask about, or offer as a payment, an exchange between own accounts in different currencies (Б10)", async () => {
+    const c = await card();
+    seq++;
+    const dollars = (await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ($1,'black','USD',0) RETURNING id`, [`acc-${seq}`]))[0]
+      .id as number;
+    await start(0, "2026-11-09").expect(201);
+    // ₴4,130 left the card; the $100 that arrived is worth ₴4,100 at the day's rate.
+    const out = await send(c, 413_000, "2026-11-09", "Переказ на картку");
+    const inn = await bankTx(dollars, 10_000, "own_transfer", "2026-11-09", { time: "10:00:40" });
+    await ds.query(`UPDATE transactions SET amount_uah=410000 WHERE id=$1`, [inn]);
+    const toOtherBank = await send(c, 200_000, "2026-11-09", "545708****4563", "12:00:00");
+    expect((await questions()).map((q) => q.id)).toEqual([`cash_card:${toOtherBank}`]);
+    const payment = (
+      await ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Квартплата',1700000,'UAH','2026-11-10') RETURNING id`)
+    )[0].id as number;
+    const offered = ((await api.get(`/cash/payments/${payment}/candidates`).expect(200)).body as { id: number }[]).map((t) => t.id);
+    expect(offered).toEqual([toOtherBank]);
+    expect(offered).not.toContain(out);
+  });
+
   it("yes: the whole sum goes to the wallet, and later transfers to that card follow without a question", async () => {
     const c = await card();
     await start(100_000, "2026-11-09").expect(201);

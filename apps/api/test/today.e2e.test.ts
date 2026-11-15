@@ -1315,13 +1315,20 @@ describe("questions, upcoming and run-out", () => {
 
   describe("a transfer to the owner's account elsewhere (Б10)", () => {
     /** A row as the bank sends it: no type yet, classified by the server. */
-    const bankRow = async (accountId: number, amount: number, over: { amountUah?: number; description?: string; time?: string } = {}) => {
+    const bankRow = async (
+      accountId: number,
+      amount: number,
+      over: { amountUah?: number; description?: string; time?: string; counterIban?: string; needsLabel?: boolean } = {},
+    ) => {
       seq++;
       return (
         await ds.query(
-          `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, mcc, amount, amount_uah, type_source, raw)
-           VALUES ($1,$2,$3,'2026-11-16',$4,4829,$5,$6,'auto','{}') RETURNING id`,
-          [`tx-${seq}`, accountId, `2026-11-16T${over.time ?? "09:00:00"}Z`, over.description ?? "Переказ на картку", amount, over.amountUah ?? amount],
+          `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, mcc, amount, amount_uah, type_source, counter_iban, needs_label, raw)
+           VALUES ($1,$2,$3,'2026-11-16',$4,4829,$5,$6,'auto',$7,$8,'{}') RETURNING id`,
+          [
+            `tx-${seq}`, accountId, `2026-11-16T${over.time ?? "09:00:00"}Z`, over.description ?? "Переказ на картку", amount, over.amountUah ?? amount,
+            over.counterIban ?? null, over.needsLabel ?? false,
+          ],
         )
       )[0].id as number;
     };
@@ -1364,6 +1371,36 @@ describe("questions, upcoming and run-out", () => {
       const answered = await today();
       expect(answered.state.leftToday).toBe(before.state.dailyLimit);
       expect(people(answered)).toEqual([]);
+    });
+
+    it("asks about a transfer with only a bank text when the bank gives the account it went to", async () => {
+      const card = await account("black", 5_000_000);
+      at("2026-11-16T10:00:00Z");
+      await bankRow(card, -50_000, { counterIban: "UA213223130000026007233566001" });
+      await classifyAll();
+      expect(people(await today())).toEqual([
+        { id: expect.stringMatching(/^recipient_label:/), kind: "recipient_label", subject: "Переказ на картку", text: "Перевод ₴500 (16.11): Переказ на картку" },
+      ]);
+    });
+
+    it("does not ask about transfers with only a bank text and no account: one answer would relabel them all", async () => {
+      const card = await account("black", 5_000_000);
+      at("2026-11-16T10:00:00Z");
+      const before = await today();
+      const fresh = await bankRow(card, -50_000, { time: "08:00:00" });
+      const other = await bankRow(card, -70_000, { time: "09:00:00", description: "Поповнення «На свято»" });
+      await classifyAll();
+      expect(await ds.query(`SELECT type, needs_label FROM transactions WHERE id = ANY($1) ORDER BY id`, [[fresh, other]])).toEqual([
+        { type: "person_transfer", needs_label: false },
+        { type: "person_transfer", needs_label: false },
+      ]);
+      // A row an older classifier marked keeps its flag, and is still not asked about.
+      await bankRow(card, -30_000, { time: "09:30:00", needsLabel: true });
+      await ds.query(`UPDATE transactions SET type='person_transfer' WHERE type IS NULL`);
+      const r = await today();
+      expect(people(r)).toEqual([]);
+      // They count against the limit, as before.
+      expect(r.state.leftToday).toBe(before.state.dailyLimit - 150_000);
     });
   });
 

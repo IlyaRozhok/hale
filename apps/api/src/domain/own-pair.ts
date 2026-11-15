@@ -37,3 +37,21 @@ export function isOwnPair(a: PairLeg, b: PairLeg): boolean {
   const big = Math.max(Math.abs(ua), Math.abs(ub));
   return Math.abs(Math.abs(ua) - Math.abs(ub)) * 100 <= OWN_PAIR_FX_PERCENT * big;
 }
+
+/**
+ * isOwnPair as a SQL condition, for queries that must decide inside the database: `t` and `o` are
+ * transactions, `ta` and `oa` their accounts. The two must agree (reclassify.service.test.ts checks).
+ */
+export function ownPairSql(t: string, ta: string, o: string, oa: string): string {
+  const uah = (x: string, xa: string) => `(CASE WHEN ${xa}.currency = 'UAH' THEN ${x}.amount ELSE ${x}.amount_uah END)`;
+  const ut = uah(t, ta);
+  const uo = uah(o, oa);
+  const kinds = [...NOT_EXCHANGE_KINDS].map((k) => `'${k}'`).join(",");
+  const window = `interval '${OWN_PAIR_WINDOW_S} seconds'`;
+  return `(${o}.account_id <> ${t}.account_id
+    AND ${o}.occurred_at BETWEEN ${t}.occurred_at - ${window} AND ${t}.occurred_at + ${window}
+    AND (${o}.amount = -${t}.amount
+      OR (${oa}.currency <> ${ta}.currency AND ${ta}.kind NOT IN (${kinds}) AND ${oa}.kind NOT IN (${kinds})
+          AND ${ut} <> 0 AND sign(${uo}) = -sign(${ut})
+          AND abs(abs(${ut}) - abs(${uo})) * 100 <= ${OWN_PAIR_FX_PERCENT} * greatest(abs(${ut}), abs(${uo})))))`;
+}
