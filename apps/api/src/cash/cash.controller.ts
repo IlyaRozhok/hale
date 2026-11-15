@@ -3,6 +3,7 @@ import {
   cashCardAnswer,
   cashCardPatch,
   cashCountInput,
+  cashDepositAnswer,
   cashOperationInput,
   cashOperationPatch,
   cashStartInput,
@@ -83,5 +84,11 @@ export class CashController {
   @Post("deposits/:id/from-wallet")
   fromWallet(@Param("id", ParseIntPipe) id: number): Promise<CashWalletDto> {
     return this.cash.fromWallet(id);
+  }
+
+  /** A new answer to «Откуда наличные?» from the operation's card; the row as it is now. */
+  @Post("deposits/:id/answer")
+  changeDepositAnswer(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<TransactionDto> {
+    return this.cash.changeDepositAnswer(id, parse(cashDepositAnswer, body).answer);
   }
 }

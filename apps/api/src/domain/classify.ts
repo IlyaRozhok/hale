@@ -99,6 +99,10 @@ const BUSINESS_SENDER = /^(фоп|тов)\s/iu;
 export const isWithdrawal = (tx: Pick<ClassifyInput, "amount" | "description" | "mcc">): boolean =>
   tx.amount < 0 && (ATM.test(tx.description.trim()) || (tx.mcc !== null && CASH_MCCS.has(tx.mcc)));
 
+/** Cash paid in at a terminal, by the bank text and the transfer MCC. */
+export const isCashDeposit = (tx: Pick<ClassifyInput, "amount" | "description" | "mcc">): boolean =>
+  tx.amount > 0 && tx.mcc === 4829 && CASH_DEPOSIT.test(tx.description.trim());
+
 /** Trimmed, lower-cased, whitespace collapsed: the form recipient rules compare in. */
 export const normaliseText = (s: string): string => lc(s).trim().replace(/\s+/g, " ");
 
@@ -210,7 +214,7 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
   if (!incoming && (INSTALLMENT_PAYMENT.test(d) || INTEREST.test(d) || PENALTY.test(d))) return done("debt_payment");
   if (!incoming && mcc === 4829 && STORE_INSTALLMENT.test(d)) return done("spend", "rule", "shopping");
   if (withdrawal) return done("cash_out");
-  if (incoming && mcc === 4829 && CASH_DEPOSIT.test(d)) return done("cash_in");
+  if (isCashDeposit(tx)) return done("cash_in");
   if (incoming && CASHBACK.test(d)) return done("income", "rule", "refund");
 
   // A bank refund text is a refund whatever its MCC (transfer MCC 4829 included) and whatever the

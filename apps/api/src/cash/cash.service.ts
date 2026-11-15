@@ -2,6 +2,7 @@ import { ConflictException, Inject, Injectable, NotFoundException, Unprocessable
 import type {
   CashCardAnswer,
   CashCountInput,
+  CashDepositAnswerName,
   CashOperationInput,
   CashOperationKind,
   CashOperationPatch,
@@ -11,12 +12,15 @@ import type {
 } from "@hale/contracts";
 import { randomUUID } from "node:crypto";
 import { DataSource, type EntityManager } from "typeorm";
+import { isAnswerableDeposit } from "../domain/cash-answer";
 import { kyivDate } from "../domain/money";
+import { PlanService } from "../plan/plan.service";
 import { Clock } from "../today/clock";
 import { LimitService } from "../today/limit.service";
 import { TransactionsService } from "../transactions/transactions.service";
 import { counterKeySql } from "../transactions/counter-key";
 import { paymentCandidateIds } from "./candidates";
+import { answerOther, answerWallet, binanceEvent, lockAnswer, undoAnswer } from "./cash-answer";
 import { CASH_ACCOUNT_ID, cardTransferSql, walletBalance } from "./wallet";
 
 const DEFAULT_NOTE: Record<CashOperationKind, string> = {
@@ -48,6 +52,7 @@ export class CashService {
     @Inject(Clock) private readonly clock: Clock,
     @Inject(TransactionsService) private readonly tx: TransactionsService,
     @Inject(LimitService) private readonly limit: LimitService,
+    @Inject(PlanService) private readonly plan: PlanService,
   ) {}
 
   async wallet(m: EntityManager = this.ds.manager): Promise<CashWalletDto> {
@@ -156,21 +161,42 @@ export class CashService {
     });
   }
 
-  /** A cash deposit at a terminal paid from the wallet: an own transfer that lowers the wallet. */
+  /** A cash deposit at a terminal paid from the wallet: an own transfer that lowers the wallet. Asked again, nothing changes. */
   async fromWallet(id: number): Promise<CashWalletDto> {
     return this.ds.transaction(async (m) => {
       await this.startedAccount(m);
-      const t = (await m.query(`SELECT type, amount::float8 AS amount FROM transactions WHERE id=$1 FOR UPDATE`, [id]))[0] as
-        | { type: string | null; amount: number }
+      const t = (await m.query(`SELECT type, amount::float8 AS amount, from_wallet FROM transactions WHERE id=$1 FOR UPDATE`, [id]))[0] as
+        | { type: string | null; amount: number; from_wallet: boolean }
         | undefined;
       if (!t) throw new NotFoundException("transaction not found");
+      if (t.from_wallet) return this.wallet(m);
       if (t.type !== "cash_in" || t.amount <= 0) throw new UnprocessableEntityException("only a cash deposit can come from the wallet");
-      await m.query(
-        `UPDATE transactions SET type='own_transfer', category='own', type_source='owner', needs_label=false, usdc_checked=true, from_wallet=true WHERE id=$1`,
-        [id],
-      );
+      await answerWallet(m, id);
       return this.wallet(m);
     });
+  }
+
+  /**
+   * A new answer to «Откуда наличные?» from the operation's card (task Б21): the earlier answer is undone
+   * first (see undoAnswer), then the new one acts as it does from the question. The same answer again
+   * changes nothing. «Вывод с Binance» is matched to the latest received USDC income.
+   */
+  async changeDepositAnswer(id: number, answer: CashDepositAnswerName): Promise<TransactionDto> {
+    await this.ds.transaction(async (m) => {
+      await this.startedAccount(m);
+      const a = await lockAnswer(m, id);
+      if (!a) throw new NotFoundException("transaction not found");
+      if (!isAnswerableDeposit(a.facts)) throw new UnprocessableEntityException("only a cash deposit since the wallet start");
+      if (a.current?.answer === answer) return;
+      const event = answer === "binance" ? await binanceEvent(m) : null;
+      if (answer === "binance" && event === null) throw new UnprocessableEntityException("no received USDC income to match");
+      await undoAnswer(m, id);
+      if (answer === "wallet") await answerWallet(m, id);
+      if (answer === "binance") await this.plan.answerBinance(m, event!, id);
+      if (answer === "other") await answerOther(m, id);
+      await this.limit.invalidate("cash", m);
+    });
+    return this.tx.one(id);
   }
 
   /**

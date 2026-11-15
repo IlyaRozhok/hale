@@ -236,7 +236,7 @@ describe("GET /transactions", () => {
     const [x, y] = res.body.items;
     expect(Object.keys(x).sort()).toEqual(
       [
-        "accountKind", "amount", "cashOut", "amountUah", "category", "counterKey", "counterName", "currency", "description",
+        "accountKind", "amount", "cashAnswer", "cashOut", "amountUah", "category", "counterKey", "counterName", "currency", "description",
         "creditPart", "fxRate", "hold", "id", "inLimit", "localDate", "manual", "needsLabel", "occurredAt", "paymentName", "recipientLabel",
         "type",
       ].sort(),

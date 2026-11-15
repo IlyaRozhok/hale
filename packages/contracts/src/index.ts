@@ -548,6 +548,22 @@ export interface TransactionDto {
    * Absent from an older server.
    */
   inLimit?: boolean;
+  /**
+   * The answer to «Откуда наличные?» about a cash deposit since the wallet start, which the card can change;
+   * null on every other row and on a deposit not answered yet. Absent from an older server.
+   */
+  cashAnswer?: CashAnswerDto | null;
+}
+
+export interface CashAnswerDto {
+  answer: CashDepositAnswerName;
+  /** «Вывод с Binance» can be chosen: it is the answer, or a USDC income was received and the dollar rate is known. */
+  canBinance: boolean;
+  /**
+   * What changing a «Вывод с Binance» answer does to the Binance balance: "returns" exactly what the answer took
+   * off it; "untouched" for an answer given before the server kept it. null for the other answers.
+   */
+  binanceOnChange: "returns" | "untouched" | null;
 }
 
 export interface TransactionPageDto {
@@ -634,6 +650,12 @@ export type CashCardAnswer = z.infer<typeof cashCardAnswer>;
 /** How much of one such transfer was taken out as cash; 0 means none. */
 export const cashCardPatch = z.object({ amount: z.number().int().min(0).max(100_000_000_00) }).strict();
 export type CashCardPatch = z.infer<typeof cashCardPatch>;
+/** «Откуда наличные?» about a cash deposit: from the wallet, a withdrawal from Binance, or something else. */
+export const cashDepositAnswerName = z.enum(["wallet", "binance", "other"]);
+export type CashDepositAnswerName = z.infer<typeof cashDepositAnswerName>;
+/** A new answer to it from the operation's card: the earlier one is undone first. */
+export const cashDepositAnswer = z.object({ answer: cashDepositAnswerName }).strict();
+export type CashDepositAnswer = z.infer<typeof cashDepositAnswer>;
 
 export interface CashWalletDto {
   started: boolean;
