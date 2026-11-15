@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  type PayableTx,
   type Payment,
+  MAX_PAID_QUESTIONS,
+  PAID_QUESTION_DAYS,
   TAX_ESTIMATE_TOLERANCE,
   TAX_EXACT_TOLERANCE,
   TAX_WINDOW_DAYS,
@@ -9,6 +12,7 @@ import {
   matchTaxShare,
   monthlyEvents,
   monthlyDueDates,
+  paidQuestions,
   taxTolerance,
 } from "./recurring-match";
 
@@ -258,6 +262,86 @@ describe("matchTaxShare", () => {
     expect(matchTaxShare(paying(795_000), [row({ transaction_id: 3 })], [])).toBeNull();
     expect(matchTaxShare(paying(-795_000), [row()], [])).toBeNull();
     expect(matchTaxShare(paying(795_000, { type: "spend" }), [row()], [])).toBeNull();
+  });
+});
+
+describe("paidQuestions", () => {
+  const TODAY = "2026-11-20";
+  // Rent due 20 days ago, unpaid; a transfer of its amount went out the day before it was due.
+  const rent = (over: Partial<Payment> = {}): Payment => pay({ id: 1, kind: "obligation", name: "Аренда", amount: 1_700_000, due_on: "2026-10-31", ...over });
+  const out = (id: number, over: Partial<PayableTx> = {}): PayableTx => ({
+    id,
+    type: "person_transfer",
+    amount: -1_700_000,
+    currency: "UAH",
+    amountUah: -1_700_000,
+    localDate: "2026-10-30",
+    text: "Іван П.",
+    ...over,
+  });
+  const ask = (payments: Payment[], candidates: Record<number, PayableTx[]>, dismissed: string[] = [], today = TODAY, rates = {}) =>
+    paidQuestions(payments, new Map(Object.entries(candidates).map(([k, v]) => [Number(k), v])), new Set(dismissed), today, rates).map(
+      (q) => [q.payment.id, q.tx.id],
+    );
+
+  it("asks about a payment unpaid more than two weeks with an operation of its amount", () => {
+    expect(PAID_QUESTION_DAYS).toBe(14);
+    expect(ask([rent()], { 1: [out(10)] })).toEqual([[1, 10]]);
+  });
+
+  it("waits until the payment is more than 14 days overdue", () => {
+    expect(ask([rent({ due_on: "2026-11-10" })], { 1: [out(10)] })).toEqual([]);
+    expect(ask([rent({ due_on: "2026-11-06" })], { 1: [out(10)] })).toEqual([]);
+    expect(ask([rent({ due_on: "2026-11-05" })], { 1: [out(10)] })).toEqual([[1, 10]]);
+  });
+
+  it("needs the payment's amount: a different sum is not a question", () => {
+    expect(ask([rent()], { 1: [out(10, { amount: -1_600_000, amountUah: -1_600_000 })] })).toEqual([]);
+  });
+
+  it("takes a hryvnia debit within 5% of a foreign-currency payment, as matching does", () => {
+    const usd = rent({ currency: "USD", amount: 40_000 });
+    const near = out(10, { amount: -1_680_000, amountUah: -1_680_000 });
+    expect(ask([usd], { 1: [near] }, [], TODAY, { USD: 41.5 })).toEqual([[1, 10]]);
+    expect(ask([usd], { 1: [near] }, [], TODAY, { USD: 45 })).toEqual([]);
+    expect(ask([usd], { 1: [near] })).toEqual([]);
+  });
+
+  it("leaves out taxes, paid and linked payments, own transfers and incoming rows", () => {
+    expect(ask([rent({ kind: "tax" })], { 1: [out(10)] })).toEqual([]);
+    expect(ask([rent({ paid_at: "2026-11-01" })], { 1: [out(10)] })).toEqual([]);
+    expect(ask([rent({ transaction_id: 5 })], { 1: [out(10)] })).toEqual([]);
+    expect(ask([rent({ linked: 100 })], { 1: [out(10)] })).toEqual([]);
+    expect(ask([rent()], { 1: [out(10, { type: "own_transfer" })] })).toEqual([]);
+    expect(ask([rent()], { 1: [out(10, { amount: 1_700_000, amountUah: 1_700_000 })] })).toEqual([]);
+    expect(ask([rent()], {})).toEqual([]);
+  });
+
+  it("does not ask again about a pair the owner said no to, and offers the next operation instead", () => {
+    const later = out(11, { localDate: "2026-11-03" });
+    expect(ask([rent()], { 1: [out(10), later] }, ["1:10"])).toEqual([[1, 11]]);
+    expect(ask([rent()], { 1: [out(10)] }, ["1:10"])).toEqual([]);
+    expect(ask([rent()], { 1: [out(10)] }, ["2:10"])).toEqual([[1, 10]]);
+  });
+
+  it("picks the closest amount, then the closest date to the due date", () => {
+    const usd = rent({ currency: "USD", amount: 40_000 });
+    const closer = out(10, { amount: -1_662_000, amountUah: -1_662_000 });
+    const farther = out(11, { amount: -1_690_000, amountUah: -1_690_000 });
+    expect(ask([usd], { 1: [farther, closer] }, [], TODAY, { USD: 41.5 })).toEqual([[1, 10]]);
+    const early = out(12, { localDate: "2026-10-25" });
+    const onTime = out(13, { localDate: "2026-11-01" });
+    expect(ask([rent()], { 1: [early, onTime] })).toEqual([[1, 13]]);
+  });
+
+  it("asks one question per payment, offers an operation once, oldest due first, two at most", () => {
+    expect(MAX_PAID_QUESTIONS).toBe(2);
+    const a = rent({ id: 1, due_on: "2026-10-31" });
+    const b = rent({ id: 2, due_on: "2026-09-30" });
+    const c = rent({ id: 3, due_on: "2026-10-15" });
+    const shared = out(10);
+    expect(ask([a, b, c], { 1: [shared], 2: [shared, out(11)], 3: [out(12)] })).toEqual([[2, 10], [3, 12]]);
+    expect(ask([a, b], { 1: [shared], 2: [shared] })).toEqual([[2, 10]]);
   });
 });
 

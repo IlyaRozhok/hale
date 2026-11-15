@@ -362,10 +362,13 @@ export interface TodayDto {
   upcoming: { id: string; name: string; amount: number; dueOn: string; kind: string; currency: string }[];
   questions: {
     id: string;
-    kind: "usdc_arrived" | "usdc_match" | "income_date" | "recipient_label" | "cash_source" | "cash_card";
+    /** `payment_paid` (newer servers): id "payment_paid:<payment>:<operation>"; an older app shows it as a plain card. */
+    kind: "usdc_arrived" | "usdc_match" | "income_date" | "recipient_label" | "cash_source" | "cash_card" | "payment_paid";
     text: string;
     /** Who a recipient question is about. */
     subject?: string;
+    /** A second line under the text: for `payment_paid`, the operation ("Іван П. · 12.10"). */
+    detail?: string;
     /** For `usdc_arrived`: the expected amount in the income's minor units (cents). Absent on an older server. */
     expectedAmount?: number;
   }[];

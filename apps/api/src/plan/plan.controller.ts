@@ -191,6 +191,12 @@ export class PlanController {
     return this.plan.markPaid(id);
   }
 
+  /** «Это оплата?» answered no: the operation did not pay this payment (task Б8). */
+  @Post("payments/:id/not-paid-by")
+  notPaidBy(@Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
+    return this.plan.dismissPaymentMatch(id, parse(matchTransactionInput, body).transactionId);
+  }
+
   // --- recurring payments ---------------------------------------------------
   @Get("recurring")
   listRecurring(): Promise<RecurringPayment[]> {

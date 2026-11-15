@@ -129,6 +129,8 @@ export interface Api {
   /** Operations that could have paid a planned payment. */
   paymentCandidates(paymentId: number): Promise<TransactionDto[]>;
   payWith(paymentId: number, transactionIds: number[]): Promise<void>;
+  /** «Это оплата?» answered no: this operation did not pay this payment (task Б8). */
+  dismissPaymentMatch(paymentId: number, transactionId: number): Promise<void>;
   answerCashCard(transactionId: number, answer: CashCardAnswer): Promise<CashWalletDto>;
   setCardCash(transactionId: number, amount: number): Promise<CashWalletDto>;
   /** Rows an edit with "apply to similar" would change. */
@@ -202,6 +204,8 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     depositFromWallet: async (transactionId) => void (await request("POST", `/cash/deposits/${transactionId}/from-wallet`)),
     paymentCandidates: (paymentId) => request("GET", `/cash/payments/${paymentId}/candidates`),
     payWith: async (paymentId, transactionIds) => void (await request("POST", `/cash/payments/${paymentId}/links`, { transactionIds })),
+    dismissPaymentMatch: async (paymentId, transactionId) =>
+      void (await request("POST", `/plan/payments/${paymentId}/not-paid-by`, { transactionId })),
     answerCashCard: (transactionId, answer) => request("POST", `/cash/cards/${transactionId}`, answer),
     setCardCash: (transactionId, amount) => request("PATCH", `/cash/cards/${transactionId}`, { amount }),
     similarCount: async (transactionId, type) =>

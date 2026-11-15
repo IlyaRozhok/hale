@@ -319,6 +319,21 @@ export class PlanService implements OnApplicationBootstrap {
     return { usdc_checked: true };
   }
 
+  /**
+   * «Это оплата?» answered no (task Б8): this operation did not pay this payment, and the pair is not
+   * asked about again. Nothing about money changes. Idempotent.
+   */
+  async dismissPaymentMatch(paymentId: number, transactionId: number): Promise<{ dismissed: true }> {
+    const found: { payment: boolean; tx: boolean }[] = await this.ds.query(
+      `SELECT EXISTS (SELECT 1 FROM scheduled_payments WHERE id=$1) AS payment, EXISTS (SELECT 1 FROM transactions WHERE id=$2) AS tx`,
+      [paymentId, transactionId],
+    );
+    if (!found[0]!.payment) throw new NotFoundException("payment not found");
+    if (!found[0]!.tx) throw new NotFoundException("transaction not found");
+    await this.ds.query(`INSERT INTO payment_dismissals (payment_id, transaction_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [paymentId, transactionId]);
+    return { dismissed: true };
+  }
+
   /** Manual path: the owner says it was paid, and its money is free in the day's limit at once. Idempotent. */
   async markPaid(id: number): Promise<ScheduledPayment> {
     const paid = (await this.ds.query(`UPDATE scheduled_payments SET paid_at = now() WHERE id=$1 AND paid_at IS NULL`, [id])) as [unknown[], number];

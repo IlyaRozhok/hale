@@ -33,12 +33,29 @@ type Props = {
   onDismissUsdc: (transactionId: number) => void;
   onCashFromWallet: (transactionId: number) => void;
   onCashCard: (transactionId: number, answer: CashCardAnswer) => void;
+  /** «Это оплата?» answered yes: the operation pays the payment, as in the «Оплачено» sheet. */
+  onPayWith: (paymentId: number, transactionId: number) => void;
+  onNotPaidBy: (paymentId: number, transactionId: number) => void;
   onSetDate: (eventId: number, date: string) => void;
   onOpenActivity: () => void;
   onLabelRecipient: (counterKey: string) => void;
 };
 
-export function QuestionCard({ question, today, onConfirmUsdc, onUsdcOther, onMatchUsdc, onDismissUsdc, onCashFromWallet, onCashCard, onSetDate, onOpenActivity, onLabelRecipient }: Props) {
+export function QuestionCard({
+  question,
+  today,
+  onConfirmUsdc,
+  onUsdcOther,
+  onMatchUsdc,
+  onDismissUsdc,
+  onCashFromWallet,
+  onCashCard,
+  onPayWith,
+  onNotPaidBy,
+  onSetDate,
+  onOpenActivity,
+  onLabelRecipient,
+}: Props) {
   const eventId = eventIdOf(question.id);
   const text = <Text style={styles.text}>{question.text}</Text>;
 
@@ -90,6 +107,24 @@ export function QuestionCard({ question, today, onConfirmUsdc, onUsdcOther, onMa
             <Choice label="Из кошелька" onPress={() => onCashFromWallet(transactionId)} />
             {Number.isInteger(usdcEvent) && usdcEvent > 0 && <Choice label="Вывод с Binance" onPress={() => onMatchUsdc(usdcEvent, transactionId)} />}
             <Choice label="Другое" onPress={() => onDismissUsdc(transactionId)} />
+          </View>
+        </Glass>
+      );
+    }
+  }
+  if (question.kind === "payment_paid") {
+    // "payment_paid:<payment>:<operation>"
+    const transactionId = Number(question.id.split(":")[2]);
+    if (eventId !== null && Number.isInteger(transactionId) && transactionId > 0) {
+      return (
+        <Glass style={styles.stack}>
+          <View style={styles.lines}>
+            {text}
+            {question.detail ? <Text style={styles.hint}>{question.detail}</Text> : null}
+          </View>
+          <View style={styles.choices}>
+            <Choice label="Да" onPress={() => onPayWith(eventId, transactionId)} />
+            <Choice label="Нет" onPress={() => onNotPaidBy(eventId, transactionId)} />
           </View>
         </Glass>
       );
@@ -161,6 +196,7 @@ const styles = StyleSheet.create({
   stack: { gap: space.md },
   text: { ...type.body, color: color.fg.default },
   hint: { ...type.body, color: color.fg.muted },
+  lines: { gap: space.xs },
   choices: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
   choice: {
     minHeight: touchMin,

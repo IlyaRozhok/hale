@@ -122,6 +122,68 @@ export function matchTaxPayment(tx: PayableTx, payments: readonly Payment[]): Pa
   return best ? best.p : null;
 }
 
+/** A payment still unpaid this many days after its due date may be asked about (task Б8, invariant 6). */
+export const PAID_QUESTION_DAYS = 14;
+/** No more «Это оплата?» questions than this at once. */
+export const MAX_PAID_QUESTIONS = 2;
+
+export interface PaidQuestion {
+  payment: Payment;
+  tx: PayableTx;
+}
+
+/** How far the row is from the payment's amount, in hryvnia minor units: 0 when exact, null when it does not fit. */
+function amountGap(tx: PayableTx, p: Payment, rates: Readonly<Record<string, number>>): number | null {
+  if (exactFit(tx, p)) return 0;
+  if (!approxFit(tx, p, rates)) return null;
+  const uah = Math.abs(tx.amountUah ?? tx.amount);
+  return Math.abs(uah - p.amount * rates[p.currency]!);
+}
+
+/**
+ * «Это оплата?» (task Б8): a payment still unpaid more than PAID_QUESTION_DAYS after its due date,
+ * while an operation that could have paid it sits unlinked, keeps its money out of the limit for no
+ * reason. `candidates` are the operations the «Оплачено» sheet offers for each payment; of those, only
+ * an outgoing row that is not an own transfer, with the payment's amount (the same fit matchPayment
+ * uses), and not dismissed by the owner for this payment (`dismissed` holds "payment:operation").
+ * Taxes are left out: they close on their own (task Б24). One question per payment, with its closest
+ * amount, then the closest date to the due date; an operation is offered for one payment only. Oldest
+ * due date first, at most MAX_PAID_QUESTIONS.
+ */
+export function paidQuestions(
+  payments: readonly Payment[],
+  candidates: ReadonlyMap<number, readonly PayableTx[]>,
+  dismissed: ReadonlySet<string>,
+  today: string,
+  rates: Readonly<Record<string, number>> = {},
+): PaidQuestion[] {
+  const now = dayNumber(today);
+  const due = payments
+    .filter((p) => p.kind !== "tax" && p.paid_at === null && p.transaction_id === null && (p.linked ?? 0) === 0)
+    .filter((p) => now - dayNumber(p.due_on) > PAID_QUESTION_DAYS)
+    .sort((a, b) => (a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : a.id - b.id));
+  const used = new Set<number>();
+  const out: PaidQuestion[] = [];
+  for (const p of due) {
+    if (out.length >= MAX_PAID_QUESTIONS) break;
+    const dueDay = dayNumber(p.due_on);
+    let best: { tx: PayableTx; gap: number; dist: number } | null = null;
+    for (const tx of candidates.get(p.id) ?? []) {
+      if (tx.amount >= 0 || tx.type === "own_transfer" || used.has(tx.id) || dismissed.has(`${p.id}:${tx.id}`)) continue;
+      const gap = amountGap(tx, p, rates);
+      if (gap === null) continue;
+      const dist = Math.abs(dayNumber(tx.localDate) - dueDay);
+      if (!best || gap < best.gap || (gap === best.gap && (dist < best.dist || (dist === best.dist && tx.id < best.tx.id)))) {
+        best = { tx, gap, dist };
+      }
+    }
+    if (!best) continue;
+    used.add(best.tx.id);
+    out.push({ payment: p, tx: best.tx });
+  }
+  return out;
+}
+
 /** A real tax row (the owner's figure) closes on payments that differ from it by up to ₴20 in all. */
 export const TAX_EXACT_TOLERANCE = 2_000;
 /** The app's estimate closes on payments within 10% of it: the estimate is a guess at the owner's figure. */
