@@ -1,21 +1,21 @@
 import type { EntityManager } from "typeorm";
+import { ownPairSql } from "../domain/own-pair";
 import { counterKeySql } from "../transactions/counter-key";
 
 /** The wallet account's external id: it has no bank statement. */
 export const CASH_ACCOUNT_ID = "manual:cash";
 
-/** Seconds within which the other leg of a transfer between monobank accounts arrives. */
-const PAIR_WINDOW_S = 600;
-
 /**
  * SQL condition over `t` (transactions): a transfer between the owner's own accounts, both legs in
- * our base. Either the other leg arrived on another account within the window, or the counterparty
- * IBAN is one of our accounts. Nothing can be paid with such a transfer.
+ * our base. Either the other leg arrived on another account within the window (the pair rule of
+ * domain/own-pair.ts, an exchange between currencies included), or the counterparty IBAN is one of
+ * our accounts. Nothing can be paid with such a transfer.
  */
 export const internalTransferSql = (t = "t"): string =>
   `(${t}.type = 'own_transfer'
-    AND (EXISTS (SELECT 1 FROM transactions o WHERE o.account_id <> ${t}.account_id AND o.amount = -${t}.amount
-                   AND abs(extract(epoch FROM (o.occurred_at - ${t}.occurred_at))) <= ${PAIR_WINDOW_S})
+    AND (EXISTS (SELECT 1 FROM transactions pair_o JOIN accounts pair_oa ON pair_oa.id = pair_o.account_id
+                   JOIN accounts pair_ta ON pair_ta.id = ${t}.account_id
+                  WHERE ${ownPairSql(t, "pair_ta", "pair_o", "pair_oa")})
          OR EXISTS (SELECT 1 FROM accounts oa WHERE oa.iban IS NOT NULL AND oa.iban = ${t}.counter_iban)))`;
 
 /**

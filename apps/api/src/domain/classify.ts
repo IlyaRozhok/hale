@@ -1,4 +1,4 @@
-import { isCounterpartyName } from "./counterparty";
+import { cardTail, isCounterpartyName } from "./counterparty";
 import {
   CASH_MCCS,
   type Category,
@@ -34,7 +34,7 @@ export interface ClassifyInput {
   counterIban?: string | null;
   counterName?: string | null;
   accountKind: "black" | "white" | "fop" | "jar" | "other";
-  /** Caller found an opposite row of the same amount on another own account (see findOwnPairs). */
+  /** Caller found the other leg of a move between own accounts (see isOwnPair in own-pair.ts). */
   pairedOwnTransfer?: boolean;
 }
 
@@ -144,6 +144,24 @@ function mentionsOwnName(text: string, ownNames: readonly string[]): boolean {
   });
 }
 
+/**
+ * Someone other than the owner is on the other side of the row (Б10), so it cannot be one leg of an
+ * exchange between own accounts: money from a named sender who is not the owner; money sent to a
+ * masked card, a foreign IBAN or a named counterparty who is not the owner. Only the bank's
+ * counterparty field and «Від: …» name a sender: a bare description may be a bank text.
+ */
+export function hasThirdParty(
+  tx: Pick<ClassifyInput, "amount" | "description" | "counterIban" | "counterName">,
+  ctx: Pick<ClassifyContext, "ownNames" | "ownIbans">,
+): boolean {
+  const d = tx.description.trim();
+  const named = tx.counterName?.trim() || "";
+  const someone = (name: string) => name !== "" && isCounterpartyName(name) && !mentionsOwnName(name, ctx.ownNames);
+  if (tx.amount > 0) return someone(named || (FROM_PREFIX.test(d) ? d.replace(FROM_PREFIX, "").trim() : ""));
+  const iban = tx.counterIban?.trim();
+  return cardTail(named || d) !== null || (!!iban && !ctx.ownIbans.has(iban)) || someone(named);
+}
+
 export const typeCategory = (type: TxType): Category => {
   switch (type) {
     case "tax": return "tax";
@@ -179,6 +197,12 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
   ): ClassifyResult => ({ type, category, source, needsLabel });
   // A question needs someone to ask about: a bank template stays a plain transfer.
   const hasName = isCounterpartyName(tx.counterName?.trim() || d);
+  // Б10: an outgoing transfer with no other leg here and no name, to one known destination (a masked
+  // card, an account number), may be the owner's own card at another bank: it is asked about rather
+  // than spent in silence. A bank template alone names no destination, and one answer about it would
+  // relabel every such transfer, so it stays unasked.
+  const knownDestination = !!tx.counterIban?.trim() || cardTail(tx.counterName?.trim() || d) !== null;
+  const asks = hasName || (!incoming && mcc !== null && TRANSFER_MCCS.has(mcc) && knownDestination);
 
   // 1. Owner rules. A withdrawal stays a withdrawal unless the rule itself says cash_out: a rule
   // made from a purchase in a shop must not swallow the cash taken at its till.
@@ -238,7 +262,7 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
 
   if (tx.accountKind === "fop") {
     if (incoming) return done("income");
-    if (mcc === null || TRANSFER_MCCS.has(mcc)) return done("person_transfer", "auto", "transfer", hasName);
+    if (mcc === null || TRANSFER_MCCS.has(mcc)) return done("person_transfer", "auto", "transfer", asks);
   }
 
   // 3. MCC and chains
@@ -249,7 +273,7 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
 
   // Money movement left over: people
   if (incoming) return done("person_in", "auto", "transfer", mcc === null);
-  return done("person_transfer", "auto", "transfer", hasName);
+  return done("person_transfer", "auto", "transfer", asks);
 }
 
 export interface PairCandidate {

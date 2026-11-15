@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classify, findOwnPairs, isWeakRuleValue, type ClassifyContext, type ClassifyInput } from "./classify";
+import { classify, findOwnPairs, hasThirdParty, isWeakRuleValue, type ClassifyContext, type ClassifyInput } from "./classify";
 
 const ctx = (over: Partial<ClassifyContext> = {}): ClassifyContext => ({
   ownIbans: new Set(["UA00OWN0001"]),
@@ -294,9 +294,29 @@ describe("people", () => {
     });
   });
 
-  it.each(["Переказ на картку", "545708****4563", "Поповнення «На свято»"])("an unnamed transfer stays person_transfer without a question: %s", (description) => {
+  // Б10: a transfer with no name to one known destination (a card number, an account) may be the
+  // owner's own card at another bank, so it is asked about rather than spent in silence.
+  it.each([
+    ["a masked card", { description: "545708****4563" }],
+    ["a masked card as the counterparty", { description: "Переказ на картку", counterName: "5457 08** **** 4563" }],
+    ["a foreign IBAN", { description: "Переказ на картку", counterIban: "UA213223130000026007233566001" }],
+  ])("an unnamed outgoing transfer to %s is person_transfer and asks", (_n, over) => {
+    expect(classify(tx({ ...over, mcc: 4829 }), ctx())).toMatchObject({ type: "person_transfer", needsLabel: true });
+    expect(classify(tx({ ...over, mcc: 6012 }), ctx())).toMatchObject({ type: "person_transfer", needsLabel: true });
+    expect(classify(tx({ ...over, mcc: 4829, accountKind: "fop" }), ctx())).toMatchObject({ type: "person_transfer", needsLabel: true });
+  });
+
+  // Only a bank template: it names no one destination, and one answer would relabel every such transfer.
+  it.each(["Переказ на картку", "Поповнення «На свято»"])("a transfer with only a bank text stays person_transfer without a question: %s", (description) => {
     expect(classify(tx({ description, mcc: 4829 }), ctx())).toMatchObject({ type: "person_transfer", needsLabel: false });
     expect(classify(tx({ description, mcc: 4829, accountKind: "fop" }), ctx())).toMatchObject({ type: "person_transfer", needsLabel: false });
+  });
+
+  it("an unnamed fop payment with no MCC is not a transfer and does not ask", () => {
+    expect(classify(tx({ description: "545708****4563", mcc: null, accountKind: "fop" }), ctx())).toMatchObject({
+      type: "person_transfer",
+      needsLabel: false,
+    });
   });
 
   it("the bank's counterparty name decides over a generic description", () => {
@@ -307,6 +327,30 @@ describe("people", () => {
     expect(classify(tx({ description: "Від: Тест Тестовий", amount: 10000, mcc: 4829 }), ctx())).toMatchObject({
       type: "person_in",
     });
+  });
+});
+
+describe("hasThirdParty (Б10)", () => {
+  it.each([
+    ["money from a named person", { amount: 200_000, description: "Від: Анна Петренко" }],
+    ["money from a named counterparty", { amount: 200_000, description: "Переказ", counterName: "Анна Петренко" }],
+    ["a transfer to a masked card", { description: "545708****1111" }],
+    ["a transfer to a masked card in the counter name", { description: "Переказ на картку", counterName: "5457 08** **** 1111" }],
+    ["a transfer to a foreign IBAN", { description: "Переказ", counterIban: "UA213223130000026007233566001" }],
+    ["a transfer to a named counterparty", { description: "Переказ", counterName: "Анна Петренко" }],
+  ])("someone else is on the other side: %s", (_n, over) => {
+    expect(hasThirdParty(tx(over), ctx())).toBe(true);
+  });
+
+  it.each([
+    ["money from the owner", { amount: 200_000, description: "Від: Test Owner" }],
+    ["money with only a bank text", { amount: 200_000, description: "Переказ з картки" }],
+    ["money with a description that is not a sender", { amount: 200_000, description: "Payment from client" }],
+    ["a transfer to an own IBAN", { description: "Переказ", counterIban: "UA00OWN0001" }],
+    ["a transfer with only a bank text", { description: "Переказ на картку" }],
+    ["an exchange text", { description: "Обмін валюти" }],
+  ])("no one else: %s", (_n, over) => {
+    expect(hasThirdParty(tx(over), ctx())).toBe(false);
   });
 });
 

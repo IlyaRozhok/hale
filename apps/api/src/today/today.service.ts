@@ -14,7 +14,8 @@ import { taxReserve } from "../domain/tax";
 import { usdcMatchRows } from "../domain/usdc-match";
 import { PAID_QUESTION_DAYS, type PayableTx, type Payment, paidQuestions } from "../domain/recurring-match";
 import { BINANCE } from "../plan/plan.service";
-import { isCounterpartyName, transfersWord } from "../domain/counterparty";
+import { cardTail, isCounterpartyName, transfersWord, unnamedTransferQuestion } from "../domain/counterparty";
+import { TRANSFER_MCCS } from "../domain/merchants";
 import { counterKeySql } from "../transactions/counter-key";
 import { paymentCandidateIds } from "../cash/candidates";
 import { cardTransferSql, walletBalance } from "../cash/wallet";
@@ -781,11 +782,13 @@ export class TodayService {
       // With no expected income there is no date to answer: the limit simply runs on 30 days.
       if (ev) questions.push({ id: `income_date:${ev.id}`, kind: "income_date", text: "Когда ожидается следующий доход?" });
     }
-    const people: { key: string; labels: string[]; count: number; total: number; last_on: string }[] = await m.query(
+    const people: { key: string; labels: string[]; count: number; total: number; last_on: string; transfer: boolean; iban: boolean }[] = await m.query(
       `SELECT ck AS key, array_agg(label ORDER BY occurred_at DESC, id DESC) AS labels, COUNT(*)::int AS count,
-              COALESCE(SUM(ABS(amount_uah)), 0)::float8 AS total, MAX(local_date)::text AS last_on
+              COALESCE(SUM(ABS(amount_uah)), 0)::float8 AS total, MAX(local_date)::text AS last_on, bool_or(transfer) AS transfer,
+              bool_or(iban) AS iban
          FROM (
-           SELECT ${counterKeySql("t")} AS ck, COALESCE(NULLIF(t.counter_name,''), t.description) AS label, t.id, t.occurred_at, t.amount_uah, t.local_date
+           SELECT ${counterKeySql("t")} AS ck, COALESCE(NULLIF(t.counter_name,''), t.description) AS label, t.id, t.occurred_at, t.amount_uah, t.local_date,
+                  (t.amount < 0 AND t.mcc IN (${[...TRANSFER_MCCS].join(",")})) AS transfer, NULLIF(t.counter_iban, '') IS NOT NULL AS iban
              FROM transactions t JOIN accounts a ON a.id=t.account_id
             WHERE t.needs_label AND t.type='person_transfer' AND a.kind <> 'jar'
               AND t.local_date > $1::date - ${QUESTION_WINDOW_DAYS}
@@ -793,17 +796,21 @@ export class TodayService {
       [f.date],
     );
     // One IBAN can have named and generic rows: the group is asked about under its latest real name.
-    const named = people.flatMap((p) => {
+    // With no name at all it is asked about only if it holds an outgoing transfer (Б10), which may be the
+    // owner's own card at another bank spending the limit in silence, and only if its key is one
+    // destination (an account number, a card number): a key made of a bank template alone would carry
+    // one answer to every such transfer. The same rule as needs_label in classify().
+    const asked = people.flatMap((p) => {
       const label = p.labels.find((l) => isCounterpartyName(l));
-      return label ? [{ ...p, label }] : [];
+      if (label) {
+        return [{ key: p.key, subject: label, text: `${label}: ${p.count} ${transfersWord(p.count)}, ${fmt(p.total)}, последний ${fmtDay(p.last_on)}` }];
+      }
+      const latest = p.labels[0];
+      const destination = p.iban || (latest !== undefined && cardTail(latest) !== null);
+      return p.transfer && destination && latest ? [{ key: p.key, ...unnamedTransferQuestion(latest, p.count, fmt(p.total), fmtDay(p.last_on)) }] : [];
     });
-    for (const p of named.slice(0, MAX_RECIPIENT_QUESTIONS)) {
-      questions.push({
-        id: `recipient_label:${p.key}`,
-        kind: "recipient_label",
-        subject: p.label,
-        text: `${p.label}: ${p.count} ${transfersWord(p.count)}, ${fmt(p.total)}, последний ${fmtDay(p.last_on)}`,
-      });
+    for (const p of asked.slice(0, MAX_RECIPIENT_QUESTIONS)) {
+      questions.push({ id: `recipient_label:${p.key}`, kind: "recipient_label", subject: p.subject, text: p.text });
     }
 
     const badCases: TodayDto["badCases"] = [];

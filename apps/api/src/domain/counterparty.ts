@@ -9,6 +9,37 @@ export function isCounterpartyName(label: string | null | undefined): boolean {
   return text !== "" && !GENERIC_TEXT.test(text) && !MASKED_CARD.test(text);
 }
 
+/** "*4563" for a masked card number with digits after its stars; null for anything else. */
+export function cardTail(label: string): string | null {
+  const text = label.trim();
+  if (!MASKED_CARD.test(text)) return null;
+  const digits = text.slice(text.lastIndexOf("*") + 1).replace(/\D/g, "");
+  return digits === "" ? null : `*${digits.slice(-4)}`;
+}
+
+/**
+ * «Что это за перевод?» about transfers with no name (Б10): where the bank says the money went, a
+ * masked card shortened to its last digits. `amount` and `day` come formatted; `amount` is the total.
+ */
+export function unnamedTransferQuestion(label: string, count: number, amount: string, day: string): { subject: string; text: string } {
+  const text = label.trim();
+  const tail = cardTail(text);
+  if (tail) {
+    return {
+      subject: `Карта ${tail}`,
+      text: count === 1
+        ? `Перевод ${amount} на карту ${tail} (${day})`
+        : `${count} ${transfersWord(count)} на карту ${tail}, ${amount}, последний ${day}`,
+    };
+  }
+  return {
+    subject: text,
+    text: count === 1
+      ? `Перевод ${amount} (${day}): ${text}`
+      : `${count} ${transfersWord(count)}, ${amount}, последний ${day}: ${text}`,
+  };
+}
+
 /** "перевод" in the form that follows the number n. */
 export function transfersWord(n: number): string {
   const tens = n % 100;
