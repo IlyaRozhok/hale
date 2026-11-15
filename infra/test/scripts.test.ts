@@ -502,3 +502,16 @@ describe("compose logging", () => {
     }
   });
 });
+
+describe("compose api environment", () => {
+  const compose = readFileSync(join(infra, "compose.yml"), "utf8");
+  const start = compose.indexOf("\n  api:");
+  const rest = compose.slice(start + 1);
+  const end = rest.search(/\n {2}\S|\n\S/);
+  const api = rest.slice(0, end === -1 ? undefined : end);
+
+  // Task Б27: the api service has no env_file, so a variable reaches the container only when listed here.
+  it("passes LEDGER_CHECK_ENABLED to the api, empty (off) by default", () => {
+    expect(api).toMatch(/^ {6}LEDGER_CHECK_ENABLED: \$\{LEDGER_CHECK_ENABLED:-\}$/m);
+  });
+});

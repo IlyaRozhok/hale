@@ -44,6 +44,7 @@ services:
       MONOBANK_TOKEN: ${MONOBANK_TOKEN:-}
       MONO_WEBHOOK_SECRET: ${MONO_WEBHOOK_SECRET:-}
       OWNER_NAMES: ${OWNER_NAMES:-}
+      LEDGER_CHECK_ENABLED: ${LEDGER_CHECK_ENABLED:-}
       PUBLIC_URL: https://${DOMAIN}
       PORT: "3000"
     healthcheck:

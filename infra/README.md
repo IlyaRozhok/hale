@@ -46,6 +46,8 @@ Then run, in order:
    corrupt the hash (login would fail). Do not double the `$`. The backup cron
    reads only the variables it needs from this file as plain data (quotes
    stripped, nothing evaluated). (`API_IMAGE` is written by `deploy.sh`.)
+   Optional: `LEDGER_CHECK_ENABLED='true'` turns on the nightly ledger check
+   (05:00 Kyiv); unset or empty means off (the default).
 5. Deploy from your machine (port 22 is open to your IP only, so GitHub
    Actions cannot deploy; CI only builds the image to catch breakage):
    `DEPLOY_HOST=<server ip> DOMAIN=<domain> infra/deploy.sh`.
