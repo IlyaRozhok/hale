@@ -335,6 +335,20 @@ export interface DailyStateDto {
   shortageStart?: { nextLimit?: number };
 }
 
+/**
+ * One place own money lies (task Б25). `own` is in kopecks and may be negative: a card's balance less
+ * its credit limit. `creditLimit` is set on a card that has one. A balance kept by hand (`binance`,
+ * `manual`) also carries its own currency and amount in that currency's minor units.
+ */
+export interface OwnMoneyItemDto {
+  kind: "black" | "white" | "fop" | "cash" | "binance" | "manual";
+  name: string;
+  own: number;
+  creditLimit?: number;
+  currency?: string;
+  amount?: number;
+}
+
 export interface TodayDto {
   date: string;
   state: DailyStateDto;
@@ -342,7 +356,8 @@ export interface TodayDto {
   usdRate: number;
   rateStale: boolean;
   /** `cash` is the wallet, already inside `own`; 0 until the wallet is started. */
-  accounts: { own: number; credit: number; fop: number; binance: number; cash: number };
+  /** `items` (newer servers) add up exactly to `own`; an older server leaves it out. */
+  accounts: { own: number; credit: number; fop: number; binance: number; cash: number; items?: OwnMoneyItemDto[] };
   /** `amount` in kopecks, already converted to hryvnias; `currency` is the payment's own. */
   upcoming: { id: string; name: string; amount: number; dueOn: string; kind: string; currency: string }[];
   questions: {

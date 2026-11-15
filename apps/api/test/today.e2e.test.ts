@@ -45,7 +45,7 @@ beforeEach(async () => {
      RESTART IDENTITY CASCADE`,
   );
   await ds.query(
-    `UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, last_sync_at=NULL, last_contact_at=NULL, tracking_start='2026-01-01'`,
+    `UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, cash_start=NULL, last_sync_at=NULL, last_contact_at=NULL, tracking_start='2026-01-01'`,
   );
   at("2026-11-02T10:00:00Z");
 });
@@ -612,10 +612,47 @@ describe("tax reserve and own money", () => {
     const r = await today();
     expect(r.usdRate).toBe(41.5);
     expect(r.rateStale).toBe(false);
-    expect(r.accounts).toEqual({ own: 1_000_000 + 200_000 + 300_000 + 415_000 + 50_000, credit: 3_000_000, fop: 300_000, binance: 465_000, cash: 0 });
+    expect(r.accounts).toMatchObject({ own: 1_000_000 + 200_000 + 300_000 + 415_000 + 50_000, credit: 3_000_000, fop: 300_000, binance: 465_000, cash: 0 });
 
     await ds.query(`UPDATE fx_rates SET fetched_at='2026-10-20T08:00:00Z'`);
     expect((await today()).rateStale).toBe(true);
+  });
+});
+
+describe("accounts items (task Б25)", () => {
+  it("lists where own money is, place by place, adding up exactly to own money", async () => {
+    await account("black", 0, { creditLimit: 3_000_000 }); // the whole credit limit is spent
+    await account("white", 1_431_300);
+    await account("fop", 300_000);
+    await ds.query(`INSERT INTO manual_balances (name, amount, currency) VALUES ('Binance', 12600, 'USD')`);
+    await ds.query(`INSERT INTO manual_balances (name, amount, currency) VALUES ('Cash box', 50000, 'UAH')`);
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-02T08:00:00Z', 41.5)`);
+    await api.post("/cash/start", { amount: 3_025_000 }).expect(201);
+    const r = await today();
+    expect(r.accounts.items).toEqual([
+      { kind: "black", name: "Чёрная карта", own: -3_000_000, creditLimit: 3_000_000 },
+      { kind: "white", name: "Белая карта", own: 1_431_300 },
+      { kind: "fop", name: "Счёт ФОП", own: 300_000 },
+      { kind: "cash", name: "Наличные", own: 3_025_000 },
+      { kind: "binance", name: "Binance", own: 522_900, currency: "USD", amount: 12_600 },
+      { kind: "manual", name: "Cash box", own: 50_000, currency: "UAH", amount: 50_000 },
+    ]);
+    const sum = (r.accounts.items as { own: number }[]).reduce((s, i) => s + i.own, 0);
+    expect(sum).toBe(r.accounts.own);
+    expect(r.accounts.own).toBe(-3_000_000 + 1_431_300 + 300_000 + 3_025_000 + 522_900 + 50_000);
+  });
+
+  it("shows a card with part of its credit limit used as a negative amount with its limit", async () => {
+    await account("black", 1_000_000, { creditLimit: 3_000_000 });
+    const r = await today();
+    expect(r.accounts.items).toEqual([{ kind: "black", name: "Чёрная карта", own: -2_000_000, creditLimit: 3_000_000 }]);
+    expect(r.accounts.own).toBe(-2_000_000);
+  });
+
+  it("leaves out cash before the wallet starts and Binance when it is not set", async () => {
+    await account("white", 500_000);
+    const r = await today();
+    expect(r.accounts.items).toEqual([{ kind: "white", name: "Белая карта", own: 500_000 }]);
   });
 });
 

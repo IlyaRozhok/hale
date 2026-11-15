@@ -1,6 +1,6 @@
 import { ConflictException, Inject, Injectable, Logger } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
-import type { BridgePreviewDto, CalendarDto, SettingsPreviewDto, TodayDto } from "@hale/contracts";
+import type { BridgePreviewDto, CalendarDto, OwnMoneyItemDto, SettingsPreviewDto, TodayDto } from "@hale/contracts";
 import { DataSource, type EntityManager } from "typeorm";
 import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
@@ -27,6 +27,8 @@ const DEFAULT_LIFESTYLE_CAP = 10_000_000;
 /** Design §5.3: about ₴450 a day, used while the owner has not set a food floor (0 would mean a ₴0 bridge limit). */
 const DEFAULT_FOOD_FLOOR = 45_000;
 const MAX_RECIPIENT_QUESTIONS = 3;
+/** What the owner calls each bank account in the list of own money (task Б25). */
+const ACCOUNT_NAMES = { black: "Чёрная карта", white: "Белая карта", fop: "Счёт ФОП" } as const;
 /** The row of the day the shortage mode came on. */
 const START: DayMark = "bridge_start";
 /** Older transfers are history: asking about them now changes nothing. */
@@ -64,7 +66,7 @@ interface Facts {
   credit: number;
   usdRate: number;
   rateStale: boolean;
-  slots: { own: number; fop: number; binance: number; cash: number };
+  slots: { own: number; fop: number; binance: number; cash: number; items: OwnMoneyItemDto[] };
   upcoming: TodayDto["upcoming"];
   /** Where the stretch to the next income ends: its day, or the horizon's end. */
   end: string;
@@ -452,27 +454,42 @@ export class TodayService {
       return r.uah;
     };
 
-    // own money
-    const accounts: { kind: string; currency: string; balance: number; credit_limit: number }[] = await m.query(
-      `SELECT kind, currency, balance::float8 AS balance, credit_limit::float8 AS credit_limit FROM accounts WHERE kind IN ('black','white','fop')`,
+    // own money, and the places it lies: the items add up exactly to it (task Б25)
+    const items: OwnMoneyItemDto[] = [];
+    const accounts: { kind: "black" | "white" | "fop"; currency: string; balance: number; credit_limit: number }[] = await m.query(
+      `SELECT kind, currency, balance::float8 AS balance, credit_limit::float8 AS credit_limit FROM accounts
+        WHERE kind IN ('black','white','fop') ORDER BY id`,
     );
     let cards = 0, fop = 0, credit = 0;
     for (const a of accounts) {
       const own = uah(a.balance - a.credit_limit, a.currency);
+      const item: OwnMoneyItemDto = { kind: a.kind, name: ACCOUNT_NAMES[a.kind], own };
       if (a.kind === "fop") fop += own;
       else {
         cards += own;
-        credit += uah(a.credit_limit, a.currency);
+        const limit = uah(a.credit_limit, a.currency);
+        credit += limit;
+        if (limit > 0) item.creditLimit = limit;
       }
+      items.push(item);
     }
     // The Binance balance and any other manual balance that counts as own money share one slot.
     const manual: { name: string; amount: number; currency: string }[] = await m.query(
       `SELECT name, amount::float8 AS amount, currency FROM manual_balances WHERE counts_as_own ORDER BY id`,
     );
-    const binance = manual.reduce((s, b) => s + uah(b.amount, b.currency), 0);
+    const manualItems: OwnMoneyItemDto[] = manual.map((b) => ({
+      kind: b.name === BINANCE ? "binance" : "manual",
+      name: b.name,
+      own: uah(b.amount, b.currency),
+      currency: b.currency,
+      amount: b.amount,
+    }));
+    const binance = manualItems.reduce((s, b) => s + b.own, 0);
     // The cash wallet is spendable own money, like the cards.
     const wallet = await walletBalance(m);
     cards += wallet.balance;
+    if (wallet.start !== null) items.push({ kind: "cash", name: "Наличные", own: wallet.balance });
+    items.push(...manualItems);
 
     // income dates and loans
     const next = (await m.query(`SELECT min(expected_on)::text AS d FROM income_events WHERE status <> 'received'`))[0].d as string | null;
@@ -578,7 +595,7 @@ export class TodayService {
       credit,
       usdRate: usd?.rate ?? 0,
       rateStale: stale || usdStale,
-      slots: { own: cards + fop + binance, fop, binance, cash: wallet.balance },
+      slots: { own: cards + fop + binance, fop, binance, cash: wallet.balance, items },
       cashStart: wallet.start,
       loans,
       basis,
@@ -780,7 +797,7 @@ export class TodayService {
       runway: { endOn: f.end, incomeOn: f.end === f.input.nextIncomeOn ? f.end : null, ...run, events },
       usdRate: f.usdRate,
       rateStale: f.rateStale,
-      accounts: { own: f.slots.own, credit: f.credit, fop: f.slots.fop, binance: f.slots.binance, cash: f.slots.cash },
+      accounts: { own: f.slots.own, credit: f.credit, fop: f.slots.fop, binance: f.slots.binance, cash: f.slots.cash, items: f.slots.items },
       upcoming: f.upcoming,
       questions,
       badCases,
