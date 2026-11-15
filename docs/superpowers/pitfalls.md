@@ -24,6 +24,10 @@ For agents, in English. Each item cost someone time once. When you hit a new one
 
 - **`Login.test.tsx` on a cold run.** Right after `pnpm install`, the first full `npx jest` can time out (5000 ms) in "signs in with the password and device name"; alone or on a second run it passes. Seen once by a reviewer on 12 November 2026, not in CI.
 
+- **A new table needs three edits.** The migration, the table list in `apps/api/test/migrations.test.ts`, and `DEFAULT_TABLES` in `infra/restore-check.sh` — `infra/test/scripts.test.ts` fails otherwise. Put all three in the builder's «Где» (15 November 2026, Б8, Б21, Б11).
+- **`unmount()` returns a promise** in the installed `@testing-library/react-native`. Rendering again in the same test without `await unmount()` overlaps `act()` and breaks later tests in the file (15 November 2026, Б11).
+- **`CheckModule` must stay last in `app.module.ts`.** There is an import cycle around `today/` and `plan/`; importing it earlier leaves `LimitService` undefined in `PlanService` and every e2e suite fails (15 November 2026, Б11).
+
 ## iOS build
 
 - Run `pod install` only with `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`, otherwise it fails.
@@ -40,3 +44,4 @@ For agents, in English. Each item cost someone time once. When you hit a new one
 - **The bridge plan slider** in its sheet moves with the simulator tool's `touch_path` (start on the thumb, several points, 150 ms apart). Taps right after a pull-to-refresh are often lost: wait for the refresh to end and tap again.
 - **Confirming a bridge plan on the stand** needs a credit limit: `seed.sql` gives `sim-black` none, and then no amount can be confirmed (task А22). Give it one without changing own money: `UPDATE accounts SET credit_limit=3000000, balance=6764000 WHERE external_id='sim-black';`. A past transition day for the calendar: `UPDATE daily_snapshots SET mode='bridge_start' WHERE local_date=(now() AT TIME ZONE 'Europe/Kyiv')::date - 3;`.
 - **No `UNSAFE_getAllByType` on `screen`.** The installed `@testing-library/react-native` does not have `screen.UNSAFE_getAllByType`. To check the order of elements on the screen, use `screen.getAllByText(/./)` and compare positions (see `apps/mobile/src/components/RecipientLabelSheet.test.tsx`).
+- **Settings do not refresh by pull** while the sheet is open: close and reopen it to see a new «Сверка» result. After `down.sh` + `up.sh` the app must sign in again (new password and token); relaunch it with `xcrun simctl terminate booted com.irozhok.hale` and the `openurl` from the README. A stand server with the ledger check on: `LEDGER_CHECK_ENABLED=true scripts/sim/up.sh` (the variable passes through to the API). Only nightly (`scheduled`) runs are shown in the app (15 November 2026).
