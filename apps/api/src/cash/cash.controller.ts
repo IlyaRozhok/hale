@@ -9,6 +9,7 @@ import {
   cashStartInput,
   paymentLinksInput,
   type CashWalletDto,
+  type PaymentLinksDto,
   type TransactionDto,
 } from "@hale/contracts";
 import type { z } from "zod";
@@ -47,7 +48,7 @@ export class CashController {
   }
 
   @Post("payments/:id/links")
-  async link(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<{ linked: number }> {
+  async link(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<PaymentLinksDto> {
     return this.cash.payWith(id, parse(paymentLinksInput, body).transactionIds);
   }
 

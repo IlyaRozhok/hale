@@ -8,18 +8,20 @@ import type {
   CashOperationPatch,
   CashStartInput,
   CashWalletDto,
+  PaymentLinksDto,
   TransactionDto,
 } from "@hale/contracts";
 import { randomUUID } from "node:crypto";
 import { DataSource, type EntityManager } from "typeorm";
 import { isAnswerableDeposit } from "../domain/cash-answer";
 import { kyivDate } from "../domain/money";
+import { paymentCover } from "../domain/payment-cover";
 import { PlanService } from "../plan/plan.service";
 import { Clock } from "../today/clock";
 import { LimitService } from "../today/limit.service";
 import { TransactionsService } from "../transactions/transactions.service";
 import { counterKeySql } from "../transactions/counter-key";
-import { paymentCandidateIds } from "./candidates";
+import { linkedSum, paymentCandidateIds } from "./candidates";
 import { answerOther, answerWallet, binanceEvent, lockAnswer, undoAnswer } from "./cash-answer";
 import { CASH_ACCOUNT_ID, cardTransferSql, walletBalance } from "./wallet";
 
@@ -150,6 +152,8 @@ export class CashService {
       )[0] as { name: string; amount: number; currency: string; paid_at: Date | null } | undefined;
       if (!p) throw new NotFoundException("payment not found");
       if (p.paid_at !== null) throw new ConflictException("the payment is already paid");
+      // Its parts are paid already: the whole amount from the wallet on top would pay it twice (task Б9).
+      if ((await linkedSum(m, id)) > 0) throw new ConflictException("the payment is partly paid by operations");
       const account = await this.startedAccount(m);
       if (p.currency !== "UAH") throw new UnprocessableEntityException("only a payment in hryvnias can be paid in cash");
       const { balance } = await walletBalance(m);
@@ -251,11 +255,16 @@ export class CashService {
    * The owner says these operations paid the payment. They become it: obligation, so the limit is
    * not spent twice, and the owner's, so the classifier leaves them. A withdrawal after the wallet
    * start then passes the wallet by: its cash went straight to the payment.
+   *
+   * The payment closes only when all operations linked to it, earlier ones too, cover its amount
+   * (paymentCover, task Б9). Until then it stays open and keeps its whole amount reserved, as a tax
+   * paid in parts does (task Б24): the limit is lower for a while, never higher. More operations can
+   * be added later the same way, or the payment closed by hand with «Оплачено».
    */
-  async payWith(paymentId: number, ids: readonly number[]): Promise<{ linked: number }> {
+  async payWith(paymentId: number, ids: readonly number[]): Promise<PaymentLinksDto> {
     return this.ds.transaction(async (m) => {
-      const p = (await m.query(`SELECT paid_at FROM scheduled_payments WHERE id=$1 FOR UPDATE`, [paymentId]))[0] as
-        | { paid_at: Date | null }
+      const p = (await m.query(`SELECT amount::float8 AS amount, paid_at FROM scheduled_payments WHERE id=$1 FOR UPDATE`, [paymentId]))[0] as
+        | { amount: number; paid_at: Date | null }
         | undefined;
       if (!p) throw new NotFoundException("payment not found");
       if (p.paid_at !== null) throw new ConflictException("the payment is already paid");
@@ -267,12 +276,17 @@ export class CashService {
         `UPDATE transactions SET type='obligation', category='transfer', type_source='owner', needs_label=false WHERE id = ANY($1::int[])`,
         [chosen],
       );
-      await m.query(
-        `UPDATE scheduled_payments SET paid_at = (SELECT max(occurred_at) FROM transactions WHERE id = ANY($2::int[])) WHERE id=$1`,
-        [paymentId, chosen],
-      );
+      const cover = paymentCover(p.amount, await linkedSum(m, paymentId));
+      if (cover.closed) {
+        await m.query(
+          `UPDATE scheduled_payments SET paid_at = (SELECT max(t.occurred_at) FROM payment_links l JOIN transactions t ON t.id = l.transaction_id
+                                                     WHERE l.payment_id = $1) WHERE id=$1`,
+          [paymentId],
+        );
+      }
+      // The rows changed type even when the payment stays open: the day is fixed afresh either way.
       await this.limit.invalidate("payment_paid", m);
-      return { linked: chosen.length };
+      return { linked: chosen.length, closed: cover.closed, remaining: cover.remaining };
     });
   }
 

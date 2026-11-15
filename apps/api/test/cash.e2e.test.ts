@@ -438,6 +438,71 @@ describe("a planned payment paid with chosen operations", () => {
     expect(items.find((i) => i.description === "Квартплата" && i.id !== silpo)!.paymentName).toBe("Квартплата");
   });
 
+  describe("paid in parts (Б9)", () => {
+    const paidAt = async (id: number) => (await row(`SELECT paid_at FROM scheduled_payments WHERE id=$1`, [id])).paid_at as Date | null;
+    const dailyLimit = async () => (await today()).state.dailyLimit as number;
+
+    it("stays open and fully reserved until the operations add up to it; the next one closes it", async () => {
+      const c = await card();
+      const id = await plan(1_700_000);
+      const first = await bankTx(c, -1_000_000, "cash_out", "2026-11-07");
+      const second = await bankTx(c, -700_000, "person_transfer", "2026-11-08", { time: "12:00:00" });
+      const before = await dailyLimit();
+
+      expect((await api.post(`/cash/payments/${id}/links`, { transactionIds: [first] }).expect(201)).body).toEqual({
+        linked: 1, closed: false, remaining: 700_000,
+      });
+      expect(await paidAt(id)).toBeNull();
+      expect(await dailyLimit()).toBe(before);
+      // The linked row is not offered again; the rest still is.
+      expect(await candidates(id)).toEqual([second]);
+      expect((await today()).upcoming).toMatchObject([{ id: String(id), amount: 1_700_000, paid: 1_000_000 }]);
+
+      expect((await api.post(`/cash/payments/${id}/links`, { transactionIds: [second] }).expect(201)).body).toEqual({
+        linked: 1, closed: true, remaining: 0,
+      });
+      expect(await paidAt(id)).toEqual(new Date("2026-11-08T12:00:00Z"));
+      expect(await dailyLimit()).toBeGreaterThan(before);
+      expect((await ds.query(`SELECT transaction_id FROM payment_links WHERE payment_id=$1 ORDER BY transaction_id`, [id])).map((r: { transaction_id: number }) => r.transaction_id)).toEqual([first, second]);
+      await api.post(`/cash/payments/${id}/links`, { transactionIds: [second] }).expect(409);
+    });
+
+    it("one operation up to ₴20 short closes the payment; one far below does not", async () => {
+      const c = await card();
+      const near = await plan(1_700_000);
+      const far = await plan(1_700_000);
+      const almost = await bankTx(c, -1_698_000, "person_transfer", "2026-11-08");
+      const little = await bankTx(c, -310_500, "cash_out", "2026-11-08");
+      expect((await api.post(`/cash/payments/${near}/links`, { transactionIds: [almost] }).expect(201)).body).toMatchObject({ closed: true, remaining: 0 });
+      expect(await paidAt(near)).not.toBeNull();
+      expect((await api.post(`/cash/payments/${far}/links`, { transactionIds: [little] }).expect(201)).body).toMatchObject({ closed: false, remaining: 1_389_500 });
+      expect(await paidAt(far)).toBeNull();
+    });
+
+    it("a partly paid payment can be closed by hand with «Оплачено»; then it frees its money", async () => {
+      const c = await card();
+      const id = await plan(1_700_000);
+      const part = await bankTx(c, -310_500, "cash_out", "2026-11-08");
+      await api.post(`/cash/payments/${id}/links`, { transactionIds: [part] }).expect(201);
+      const before = await dailyLimit();
+      await api.post(`/plan/payments/${id}/mark-paid`).expect(201);
+      expect(await paidAt(id)).not.toBeNull();
+      expect(await dailyLimit()).toBeGreaterThan(before);
+      expect((await today()).upcoming).toEqual([]);
+    });
+
+    it("a partly paid payment is not paid in full from the wallet on top of its parts", async () => {
+      const c = await card();
+      await start(2_000_000, "2026-11-01").expect(201);
+      const id = await plan(1_700_000);
+      const part = await bankTx(c, -310_500, "person_transfer", "2026-11-08");
+      await api.post(`/cash/payments/${id}/links`, { transactionIds: [part] }).expect(201);
+      await api.post(`/cash/payments/${id}`).expect(409);
+      expect((await wallet()).balance).toBe(2_000_000);
+      expect(await paidAt(id)).toBeNull();
+    });
+  });
+
   it("retyping a linked row away from the payment unlinks it", async () => {
     const c = await card();
     const id = await plan(1_700_000);

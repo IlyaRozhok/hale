@@ -359,7 +359,16 @@ export interface TodayDto {
   /** `items` (newer servers) add up exactly to `own`; an older server leaves it out. */
   accounts: { own: number; credit: number; fop: number; binance: number; cash: number; items?: OwnMoneyItemDto[] };
   /** `amount` in kopecks, already converted to hryvnias; `currency` is the payment's own. */
-  upcoming: { id: string; name: string; amount: number; dueOn: string; kind: string; currency: string }[];
+  upcoming: {
+    id: string;
+    name: string;
+    amount: number;
+    dueOn: string;
+    kind: string;
+    currency: string;
+    /** Kopecks already paid by operations linked to this open payment (task Б9); absent from an older server. */
+    paid?: number;
+  }[];
   questions: {
     id: string;
     /** `payment_paid` (newer servers): id "payment_paid:<payment>:<operation>"; an older app shows it as a plain card. */
@@ -642,6 +651,14 @@ export type CashCountInput = z.infer<typeof cashCountInput>;
 /** Operations that paid a planned payment, chosen by the owner. */
 export const paymentLinksInput = z.object({ transactionIds: z.array(z.number().int().positive()).min(1).max(20) }).strict();
 export type PaymentLinksInput = z.infer<typeof paymentLinksInput>;
+/** What linking operations to a planned payment did. `closed` and `remaining` are absent from an older server, which always closed it. */
+export interface PaymentLinksDto {
+  linked: number;
+  /** All operations linked to the payment now cover it (up to ₴20 short), and it is paid (task Б9). */
+  closed?: boolean;
+  /** Kopecks still to pay; 0 once closed. */
+  remaining?: number;
+}
 /** "Снял наличными?" about a transfer to the owner's card at another bank; `amount` only with part. */
 export const cashCardAnswer = z
   .object({ answer: z.enum(["yes", "part", "no"]), amount: z.number().int().positive().max(100_000_000_00).optional() })

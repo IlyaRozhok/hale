@@ -33,3 +33,15 @@ export async function paymentCandidateIds(m: EntityManager, paymentId: number, t
   // A purchase only when it is really a withdrawal that an old rule made a purchase.
   return rows.filter((r) => r.type !== "spend" || isWithdrawal(r)).map((r) => r.id);
 }
+
+/** Hryvnia minor units already paid on this payment by operations linked through payment_links. */
+export async function linkedSum(m: EntityManager, paymentId: number): Promise<number> {
+  const r = (
+    await m.query(
+      `SELECT COALESCE(SUM(-COALESCE(t.amount_uah, t.amount)), 0)::float8 AS sum
+         FROM payment_links l JOIN transactions t ON t.id = l.transaction_id WHERE l.payment_id = $1`,
+      [paymentId],
+    )
+  )[0] as { sum: number };
+  return r.sum;
+}
