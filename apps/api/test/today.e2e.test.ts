@@ -587,6 +587,18 @@ describe("tax reserve and own money", () => {
       expect(await links(id)).toEqual([]);
     });
 
+    it("a part linked to an open row is not linked again when seen again", async () => {
+      await setup();
+      const id = await taxRow(795_000);
+      const part = await pay(100_000);
+      expect(await links(id)).toEqual([part]);
+      await plan().onClassified(part, "tax");
+      await plan().linkTaxTransactions();
+      expect(await links(id)).toEqual([part]);
+      expect(await ds.query(`SELECT 1 FROM payment_links`)).toHaveLength(1);
+      expect(await state(id)).toMatchObject({ paid: false, transaction_id: null });
+    });
+
     it("a payment far off the row does not close it", async () => {
       await setup();
       const id = await taxRow(795_000);
