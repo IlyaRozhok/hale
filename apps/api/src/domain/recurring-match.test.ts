@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { type Payment, matchPayment, matchTaxPayment, monthlyEvents, monthlyDueDates } from "./recurring-match";
+import {
+  type Payment,
+  TAX_ESTIMATE_TOLERANCE,
+  TAX_EXACT_TOLERANCE,
+  TAX_WINDOW_DAYS,
+  matchPayment,
+  matchTaxPayment,
+  matchTaxShare,
+  monthlyEvents,
+  monthlyDueDates,
+  taxTolerance,
+} from "./recurring-match";
 
 const pay = (over: Partial<Payment> = {}): Payment => ({
   id: 1,
@@ -141,6 +152,112 @@ describe("matchTaxPayment", () => {
     const b = row({ id: 4 });
     expect(matchTaxPayment(paying(), [a, b])).toBe(b);
     expect(matchTaxPayment(paying(), [b, a])).toBe(b);
+  });
+  it("leaves a row that already has operations linked to it to the shared path", () => {
+    expect(matchTaxPayment(paying(), [row({ linked: 40_000 })])).toBeNull();
+  });
+});
+
+describe("matchPayment and linked rows", () => {
+  it("never settles a payment that already has operations linked to it", () => {
+    expect(matchPayment(tx(), [pay({ linked: 100 })])).toBeNull();
+  });
+});
+
+describe("matchTaxShare", () => {
+  // A Q3 row due 20 November: ESV and single tax as the owner pays them.
+  const row = (over: Partial<Payment> = {}) =>
+    pay({ kind: "tax", name: "Q3", amount: 795_000, due_on: "2026-11-20", tax_quarter: "2026-Q3", is_estimate: false, linked: 0, ...over });
+  const paying = (amount: number, over: Partial<Parameters<typeof matchPayment>[0]> = {}) =>
+    tx({ id: 10, type: "tax", amount: -amount, amountUah: -amount, localDate: "2026-11-14", ...over });
+
+  it("has the tolerances proposed to the owner", () => {
+    expect(TAX_EXACT_TOLERANCE).toBe(2_000);
+    expect(TAX_ESTIMATE_TOLERANCE).toBe(0.1);
+    expect(TAX_WINDOW_DAYS).toBe(30);
+    expect(taxTolerance(row())).toBe(2_000);
+    expect(taxTolerance(row({ is_estimate: true, amount: 760_000 }))).toBe(76_000);
+  });
+
+  it("links the first of two payments without closing, and the second closes", () => {
+    const r = row();
+    expect(matchTaxShare(paying(571_000), [r], [])).toEqual({ payment: r, ids: [10], closes: false, release: false });
+    const after = row({ linked: 571_000 });
+    expect(matchTaxShare(paying(224_000, { id: 11 }), [after], [])).toEqual({ payment: after, ids: [11], closes: true, release: false });
+  });
+
+  it("links a pair at once when the other payment came first and nothing was linked yet", () => {
+    const r = row();
+    const earlier = paying(571_000, { id: 9, localDate: "2026-11-13" });
+    const res = matchTaxShare(paying(224_000), [r], [earlier]);
+    expect(res).toMatchObject({ payment: r, closes: true });
+    expect([...res!.ids].sort((a, b) => a - b)).toEqual([9, 10]);
+  });
+
+  it("closes an estimate with one payment within 10%, and not beyond", () => {
+    const est = row({ amount: 760_000, is_estimate: true });
+    expect(matchTaxShare(paying(795_000), [est], [])).toMatchObject({ payment: est, closes: true });
+    expect(matchTaxShare(paying(684_000), [est], [])).toMatchObject({ payment: est, closes: true });
+    expect(matchTaxShare(paying(837_000), [est], [])).toBeNull();
+  });
+
+  it("closes a real row with one payment within ₴20, and not beyond", () => {
+    const esv = row({ amount: 570_702 });
+    expect(matchTaxShare(paying(571_000), [esv], [])).toMatchObject({ payment: esv, closes: true });
+    expect(matchTaxShare(paying(573_000), [esv], [])).toBeNull();
+  });
+
+  it("a payment far above the row does not close it; far below only links", () => {
+    expect(matchTaxShare(paying(2_000_000), [row()], [])).toBeNull();
+    expect(matchTaxShare(paying(100_000), [row()], [])).toMatchObject({ closes: false });
+  });
+
+  it("a payment from before the quarter ended, or long after the due date, is not for the row", () => {
+    expect(matchTaxShare(paying(795_000, { localDate: "2026-09-30" }), [row()], [])).toBeNull();
+    expect(matchTaxShare(paying(795_000, { localDate: "2026-12-21" }), [row()], [])).toBeNull();
+    expect(matchTaxShare(paying(795_000, { localDate: "2026-12-20" }), [row()], [])).not.toBeNull();
+    // A pair partner from before the quarter ended does not count either.
+    expect(matchTaxShare(paying(224_000, { localDate: "2026-11-14" }), [row({ paid_at: "2026-11-14" })], [paying(571_000, { id: 9, localDate: "2026-09-29" })])).toBeNull();
+  });
+
+  it("a closed row takes no more: the next payment goes to the next open row", () => {
+    const closed = row({ id: 1, paid_at: "2026-11-14", linked: 795_000 });
+    const next = row({ id: 2, amount: 300_000, due_on: "2026-11-25" });
+    expect(matchTaxShare(paying(100_000), [closed, next], [])).toMatchObject({ payment: next, closes: false });
+  });
+
+  it("leftovers never go to the next quarter's row", () => {
+    const q4 = row({ id: 2, due_on: "2027-02-20", tax_quarter: "2026-Q4" });
+    expect(matchTaxShare(paying(100_000), [q4], [])).toBeNull();
+    expect(matchTaxShare(paying(795_000), [q4], [])).toBeNull();
+  });
+
+  it("a row the owner marked paid takes a payment or a pair that adds up, never a lone part", () => {
+    const hand = row({ paid_at: "2026-11-14" });
+    expect(matchTaxShare(paying(795_500), [hand], [])).toEqual({ payment: hand, ids: [10], closes: false, release: false });
+    expect(matchTaxShare(paying(224_000), [hand], [])).toBeNull();
+    const res = matchTaxShare(paying(224_000), [hand], [paying(571_000, { id: 9 })]);
+    expect(res).toMatchObject({ payment: hand, closes: false });
+    expect([...res!.ids].sort((a, b) => a - b)).toEqual([9, 10]);
+  });
+
+  it("prefers a row the payment fits over linking a part to an earlier row", () => {
+    const esv = row({ id: 1, amount: 570_702 });
+    const tax = row({ id: 2, amount: 224_000 });
+    expect(matchTaxShare(paying(224_000), [esv, tax], [])).toMatchObject({ payment: tax, closes: true });
+  });
+
+  it("a payment that fits the row alone takes it from a guessed part, which is let go", () => {
+    const r = row({ linked: 190_000 });
+    expect(matchTaxShare(paying(795_000), [r], [])).toEqual({ payment: r, ids: [10], closes: true, release: true });
+  });
+
+  it("ignores rows in another currency, non-tax rows, incoming and non-tax payments", () => {
+    expect(matchTaxShare(paying(795_000), [row({ currency: "USD" })], [])).toBeNull();
+    expect(matchTaxShare(paying(795_000), [row({ kind: "obligation" })], [])).toBeNull();
+    expect(matchTaxShare(paying(795_000), [row({ transaction_id: 3 })], [])).toBeNull();
+    expect(matchTaxShare(paying(-795_000), [row()], [])).toBeNull();
+    expect(matchTaxShare(paying(795_000, { type: "spend" }), [row()], [])).toBeNull();
   });
 });
 

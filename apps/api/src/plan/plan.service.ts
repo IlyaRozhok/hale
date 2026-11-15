@@ -10,7 +10,7 @@ import {
 import { Cron } from "@nestjs/schedule";
 import { DataSource, type EntityManager } from "typeorm";
 import { ruleMatches } from "../domain/classify";
-import { type Payment, matchPayment, matchTaxPayment, monthlyDueDates, monthlyEvents } from "../domain/recurring-match";
+import { type PayableTx, type Payment, matchPayment, matchTaxPayment, matchTaxShare, monthlyDueDates, monthlyEvents } from "../domain/recurring-match";
 import { kyivDate } from "../domain/money";
 import { estimateDueOn, precedingQuarter, quarterBounds, quarterOf } from "../domain/quarter";
 import { taxReserve } from "../domain/tax";
@@ -171,6 +171,7 @@ export class PlanService implements OnApplicationBootstrap {
       `SELECT t.id FROM transactions t
         WHERE t.type='tax' AND t.amount < 0
           AND NOT EXISTS (SELECT 1 FROM scheduled_payments p WHERE p.transaction_id = t.id)
+          AND NOT EXISTS (SELECT 1 FROM payment_links l WHERE l.transaction_id = t.id)
           AND EXISTS (SELECT 1 FROM scheduled_payments p WHERE p.kind='tax' AND p.transaction_id IS NULL)
         ORDER BY t.occurred_at DESC, t.id DESC`,
     );
@@ -375,17 +376,22 @@ export class PlanService implements OnApplicationBootstrap {
         await this.settleFromPlannedRecipient(m, t);
       } else if (t.type === "obligation" || t.type === "debt_payment" || t.type === "tax" || t.type === "spend") {
         if (t.type === "debt_payment") await this.repayShortLoans(m, t);
-        const linked = await m.query(`SELECT 1 FROM scheduled_payments WHERE transaction_id=$1`, [t.id]);
+        const linked = await m.query(
+          `SELECT 1 FROM scheduled_payments WHERE transaction_id=$1 UNION ALL SELECT 1 FROM payment_links WHERE transaction_id=$1`,
+          [t.id],
+        );
         if (linked.length > 0) {
           if (t.type === "spend") await this.retypeAsDebt(m, t.id);
           return;
         }
         // Tax rows stay candidates after the owner marked them paid: they can still claim their bank row.
         const open: Payment[] = await m.query(
-          `SELECT id, kind, name, amount::float8 AS amount, currency, due_on::text AS due_on, paid_at,
-                  transaction_id, match_hint, tax_quarter
-             FROM scheduled_payments WHERE transaction_id IS NULL AND (paid_at IS NULL OR kind='tax')
-            ORDER BY due_on, id FOR UPDATE`,
+          `SELECT p.id, p.kind, p.name, p.amount::float8 AS amount, p.currency, p.due_on::text AS due_on, p.paid_at,
+                  p.transaction_id, p.match_hint, p.tax_quarter, p.is_estimate,
+                  (SELECT COALESCE(SUM(-COALESCE(x.amount_uah, x.amount)), 0) FROM payment_links l
+                     JOIN transactions x ON x.id = l.transaction_id WHERE l.payment_id = p.id)::float8 AS linked
+             FROM scheduled_payments p WHERE p.transaction_id IS NULL AND (p.paid_at IS NULL OR p.kind='tax')
+            ORDER BY p.due_on, p.id FOR UPDATE OF p`,
         );
         if (t.type === "spend" && t.type_source === "owner") return;
         const payable = { id: t.id, type: t.type, amount: t.amount, currency: t.currency, amountUah: t.amount_uah, localDate: t.local_date, text: t.text };
@@ -396,9 +402,35 @@ export class PlanService implements OnApplicationBootstrap {
             [hit.id, t.occurred_at, t.id],
           );
           if (t.type === "spend") await this.retypeAsDebt(m, t.id);
+          if (hit.kind === "tax" && hit.paid_at === null) await this.limit.invalidate("payment_paid", m);
+        } else if (t.type === "tax") {
+          await this.settleTaxShare(m, payable, t.occurred_at, open);
         }
       }
     });
+  }
+
+  /**
+   * A tax paid in parts, or off its row by a little (task Б24): the operations are linked to the row
+   * through payment_links, and an open row is closed once they add up to it. See matchTaxShare.
+   */
+  private async settleTaxShare(m: EntityManager, tx: PayableTx, occurredAt: Date, open: readonly Payment[]): Promise<void> {
+    const others: PayableTx[] = await m.query(
+      `SELECT t.id, t.type, t.amount::float8 AS amount, a.currency, t.amount_uah::float8 AS "amountUah",
+              t.local_date::text AS "localDate", '' AS text
+         FROM transactions t JOIN accounts a ON a.id = t.account_id
+        WHERE t.type='tax' AND t.amount < 0 AND t.id <> $1
+          AND NOT EXISTS (SELECT 1 FROM scheduled_payments p WHERE p.transaction_id = t.id)
+          AND NOT EXISTS (SELECT 1 FROM payment_links l WHERE l.transaction_id = t.id)`,
+      [tx.id],
+    );
+    const share = matchTaxShare(tx, open, others);
+    if (!share) return;
+    if (share.release) await m.query(`DELETE FROM payment_links WHERE payment_id=$1`, [share.payment.id]);
+    await m.query(`INSERT INTO payment_links (payment_id, transaction_id) SELECT $1, unnest($2::int[])`, [share.payment.id, share.ids]);
+    if (!share.closes) return;
+    await m.query(`UPDATE scheduled_payments SET paid_at=COALESCE(paid_at, $2) WHERE id=$1`, [share.payment.id, occurredAt]);
+    await this.limit.invalidate("payment_paid", m);
   }
 
   /** The owner said this recipient is a close person, sent money regularly. */
