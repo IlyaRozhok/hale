@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
-import type { TransactionDto, TransactionPatch } from "@hale/contracts";
-import { useEditTransaction, useSetCardCash, useSimilarCount } from "../api/queries";
+import type { CashAnswerDto, CashDepositAnswerName, TransactionDto, TransactionPatch } from "@hale/contracts";
+import { useChangeDepositAnswer, useEditTransaction, useSetCardCash, useSimilarCount } from "../api/queries";
 import { dayMonth, formatMoney, formatSignedMoney, formatSignedOriginal, operationsText, two } from "../format";
 import { AmountForm } from "./AmountForm";
 import { SPEND_CATEGORIES, accountLabel, answerText, categoryLabel, typeChips, typeLabel } from "../labels";
@@ -66,6 +66,7 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
       {credit !== null && <Text style={styles.note}>{credit}</Text>}
       {onAnswer && <ActionRow label={`Что это за перевод: ${answerText(tx.recipientLabel)}`} onPress={onAnswer} />}
       {tx.cashOut !== null && <CardCash tx={tx} cashOut={tx.cashOut} />}
+      {tx.cashAnswer != null && <CashSource id={tx.id} answer={tx.cashAnswer} onChanged={onClose} />}
       <Text style={styles.heading}>Категория</Text>
       <View style={styles.chips}>
         {SPEND_CATEGORIES.map((c) => (
@@ -129,6 +130,40 @@ function CardCash({ tx, cashOut }: { tx: TransactionDto; cashOut: number }) {
           {shown > 0 && <Link label="Не снимал" onPress={() => save(0)} />}
         </View>
       )}
+      {failed && <ErrorText>Не удалось сохранить. Попробуйте ещё раз.</ErrorText>}
+    </View>
+  );
+}
+
+/** What changing a «Вывод с Binance» answer does to the Binance balance, in one calm sentence. */
+const BINANCE_NOTE: Record<"returns" | "untouched", string> = {
+  returns: "Если вы уже поправляли баланс Binance руками, проверьте его после смены ответа.",
+  untouched: "Баланс Binance при смене этого ответа не изменится — если нужно, поправьте его в «Плане».",
+};
+
+/** A cash deposit: the same choice as «Откуда наличные?», already answered and changeable (task Б21). */
+function CashSource({ id, answer, onChanged }: { id: number; answer: CashAnswerDto; onChanged: () => void }) {
+  const change = useChangeDepositAnswer();
+  const [failed, setFailed] = useState(false);
+  const choose = (next: CashDepositAnswerName) => {
+    if (next === answer.answer) return;
+    setFailed(false);
+    change.mutate({ id, answer: next }, { onSuccess: onChanged, onError: () => setFailed(true) });
+  };
+  const choices: { value: CashDepositAnswerName; label: string }[] = [
+    { value: "wallet", label: "Из кошелька" },
+    ...(answer.canBinance ? [{ value: "binance" as const, label: "Вывод с Binance" }] : []),
+    { value: "other", label: "Другое" },
+  ];
+  return (
+    <View style={styles.stack}>
+      <Text style={styles.heading}>Откуда наличные</Text>
+      <View style={styles.chips}>
+        {choices.map((c) => (
+          <Chip key={c.value} label={c.label} selected={answer.answer === c.value} disabled={change.isPending} onPress={() => choose(c.value)} />
+        ))}
+      </View>
+      {answer.binanceOnChange !== null && <Text style={styles.note}>{BINANCE_NOTE[answer.binanceOnChange]}</Text>}
       {failed && <ErrorText>Не удалось сохранить. Попробуйте ещё раз.</ErrorText>}
     </View>
   );

@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { TxEditSheet } from "./TxEditSheet";
+import type { TransactionDto } from "@hale/contracts";
 import { fakeApi, renderWith, txFixture } from "../testing";
 
 const noop = () => undefined;
@@ -202,5 +203,75 @@ describe("TxEditSheet: the order and «Применить к похожим»", 
     await renderWith(<TxEditSheet tx={txFixture({ id: 7 })} onClose={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: "Между своими" }));
     await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { type: "own_transfer", applyToSimilar: true }));
+  });
+});
+
+describe("TxEditSheet: the answer to «Откуда наличные?» can be changed (Б21)", () => {
+  const deposit = (cashAnswer: TransactionDto["cashAnswer"]) =>
+    txFixture({ id: 12, type: "own_transfer", category: "own", amount: 2_950_000, amountUah: 2_950_000, description: "Термінал City24", cashAnswer });
+  const UNTOUCHED = "Баланс Binance при смене этого ответа не изменится — если нужно, поправьте его в «Плане».";
+  const RETURNS = "Если вы уже поправляли баланс Binance руками, проверьте его после смены ответа.";
+
+  it("shows the same three choices as the question, the current one selected", async () => {
+    await renderWith(<TxEditSheet tx={deposit({ answer: "binance", canBinance: true, binanceOnChange: "returns" })} onClose={noop} />, fakeApi());
+    expect(await screen.findByText("Откуда наличные")).toBeTruthy();
+    expect(selected("Вывод с Binance")).toBe(true);
+    expect(selected("Из кошелька")).toBe(false);
+    expect(selected("Другое")).toBe(false);
+    expect(screen.getByText(RETURNS)).toBeTruthy();
+    expect(screen.queryByText(UNTOUCHED)).toBeNull();
+  });
+
+  it("a new answer goes to the server and the sheet closes", async () => {
+    const api = fakeApi();
+    const onClose = jest.fn();
+    await renderWith(<TxEditSheet tx={deposit({ answer: "binance", canBinance: true, binanceOnChange: "returns" })} onClose={onClose} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Из кошелька" }));
+    await waitFor(() => expect(api.changeDepositAnswer).toHaveBeenCalledWith(12, "wallet"));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(api.editTransaction).not.toHaveBeenCalled();
+  });
+
+  it("the answer already chosen sends nothing", async () => {
+    const api = fakeApi();
+    await renderWith(<TxEditSheet tx={deposit({ answer: "wallet", canBinance: true, binanceOnChange: null })} onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Из кошелька" }));
+    expect(api.changeDepositAnswer).not.toHaveBeenCalled();
+    expect(screen.queryByText(RETURNS)).toBeNull();
+    expect(screen.queryByText(UNTOUCHED)).toBeNull();
+  });
+
+  it("an answer given before the server kept it says Binance stays as it is", async () => {
+    await renderWith(<TxEditSheet tx={deposit({ answer: "binance", canBinance: true, binanceOnChange: "untouched" })} onClose={noop} />, fakeApi());
+    expect(await screen.findByText(UNTOUCHED)).toBeTruthy();
+    expect(screen.queryByText(RETURNS)).toBeNull();
+  });
+
+  it("with no USDC income to match, Binance is not offered", async () => {
+    const tx = deposit({ answer: "other", canBinance: false, binanceOnChange: null });
+    await renderWith(<TxEditSheet tx={{ ...tx, type: "cash_in", category: "cash" }} onClose={noop} />, fakeApi());
+    await screen.findByText("Откуда наличные");
+    expect(chip("Вывод с Binance")).toBeNull();
+    expect(selected("Другое")).toBe(true);
+  });
+
+  it("a failed change says so and keeps the sheet open", async () => {
+    const api = fakeApi({ changeDepositAnswer: jest.fn(async () => Promise.reject(new Error("422"))) });
+    const onClose = jest.fn();
+    await renderWith(<TxEditSheet tx={deposit({ answer: "wallet", canBinance: true, binanceOnChange: null })} onClose={onClose} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Другое" }));
+    expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("no block on other rows, nor from an older server", async () => {
+    await renderWith(<TxEditSheet tx={txFixture({ cashAnswer: null })} onClose={noop} />, fakeApi());
+    await screen.findByText("Тип");
+    expect(screen.queryByText("Откуда наличные")).toBeNull();
+    const old = txFixture({ type: "cash_in", amount: 100_000, amountUah: 100_000 });
+    delete old.cashAnswer;
+    await renderWith(<TxEditSheet tx={old} onClose={noop} />, fakeApi());
+    expect(screen.queryByText("Откуда наличные")).toBeNull();
+    expect(chip("Из кошелька")).toBeNull();
   });
 });

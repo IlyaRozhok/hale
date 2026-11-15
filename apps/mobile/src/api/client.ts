@@ -2,6 +2,7 @@ import type {
   BridgePreviewDto,
   CalendarDto,
   CashCardAnswer,
+  CashDepositAnswerName,
   CashOperationInput,
   CashOperationPatch,
   CashStartInput,
@@ -125,6 +126,8 @@ export interface Api {
   deleteCashOperation(id: number): Promise<void>;
   countCash(amount: number): Promise<CashWalletDto>;
   depositFromWallet(transactionId: number): Promise<void>;
+  /** A new answer to «Откуда наличные?» from the operation's card; the earlier one is undone (task Б21). */
+  changeDepositAnswer(transactionId: number, answer: CashDepositAnswerName): Promise<TransactionDto>;
   payFromWallet(paymentId: number): Promise<CashWalletDto>;
   /** Operations that could have paid a planned payment. */
   paymentCandidates(paymentId: number): Promise<TransactionDto[]>;
@@ -202,6 +205,7 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     countCash: (amount) => request("POST", "/cash/count", { amount }),
     payFromWallet: (paymentId) => request("POST", `/cash/payments/${paymentId}`),
     depositFromWallet: async (transactionId) => void (await request("POST", `/cash/deposits/${transactionId}/from-wallet`)),
+    changeDepositAnswer: (transactionId, answer) => request("POST", `/cash/deposits/${transactionId}/answer`, { answer }),
     paymentCandidates: (paymentId) => request("GET", `/cash/payments/${paymentId}/candidates`),
     payWith: async (paymentId, transactionIds) => void (await request("POST", `/cash/payments/${paymentId}/links`, { transactionIds })),
     dismissPaymentMatch: async (paymentId, transactionId) =>

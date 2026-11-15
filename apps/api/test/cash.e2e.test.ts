@@ -56,14 +56,14 @@ async function bankTx(
   amount: number,
   type: string,
   date: string,
-  over: { usdcChecked?: boolean; description?: string; time?: string; name?: string } = {},
+  over: { usdcChecked?: boolean; description?: string; time?: string; name?: string; mcc?: number } = {},
 ): Promise<number> {
   seq++;
   return (
     await ds.query(
-      `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, type_source, usdc_checked, counter_name, raw)
-       VALUES ($1,$2,$3,$4,$8,$5,$5,$6,'rule',$7,$9,'{}') RETURNING id`,
-      [`tx-${seq}`, accountId, `${date}T${over.time ?? "10:00:00"}Z`, date, amount, type, over.usdcChecked ?? false, over.description ?? "Банкомат", over.name ?? null],
+      `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, type_source, usdc_checked, counter_name, mcc, raw)
+       VALUES ($1,$2,$3,$4,$8,$5,$5,$6,'rule',$7,$9,$10,'{}') RETURNING id`,
+      [`tx-${seq}`, accountId, `${date}T${over.time ?? "10:00:00"}Z`, date, amount, type, over.usdcChecked ?? false, over.description ?? "Банкомат", over.name ?? null, over.mcc ?? null],
     )
   )[0].id;
 }
@@ -529,5 +529,200 @@ describe("the owner's card at another bank", () => {
     const c = await card();
     await bankTx(c, -100, "spend", "2026-11-09", { description: "Shop" });
     expect((await api.get(`/transactions`).expect(200)).body.items[0].cashOut).toBeNull();
+  });
+});
+
+describe("changing the answer to «Откуда наличные?» (Б21)", () => {
+  const DEPOSIT = 2_950_000; // ₴29,500
+  const TAKEN = 73_750; // its cents at ₴40 a dollar
+  const binance = async () => (await row(`SELECT amount::int AS amount FROM manual_balances WHERE name='Binance'`)).amount as number;
+  const answer = (id: number, a: string) => api.post(`/cash/deposits/${id}/answer`, { answer: a });
+  const rate = (r: number, fetched = "2026-11-10T09:00:00Z") =>
+    ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', $1, $2)`, [fetched, r]);
+  const event = async (status = "received") => {
+    const exp = (
+      await ds.query(
+        `INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('usdc', 500000, 'USD', 1, 5) RETURNING id`,
+      )
+    )[0].id;
+    return (
+      await ds.query(
+        `INSERT INTO income_events (expected_income_id, period, expected_on, status, received_at) VALUES ($1,'2026-11','2026-11-03',$2,$3) RETURNING id`,
+        [exp, status, status === "received" ? "2026-11-03T10:00:00Z" : null],
+      )
+    )[0].id as number;
+  };
+  const terminal = { description: "Термінал City24", mcc: 4829 };
+  /** The wallet started with ₴30,000, Binance holds $5,000 at ₴40, and ₴29,500 was paid in at a terminal. */
+  const setup = async (eventStatus = "received") => {
+    const c = await card();
+    await start(3_000_000, "2026-11-10").expect(201);
+    await rate(40);
+    await ds.query(`INSERT INTO manual_balances (name, amount, currency, counts_as_own) VALUES ('Binance', 500000, 'USD', true)`);
+    const ev = await event(eventStatus);
+    const deposit = await bankTx(c, DEPOSIT, "cash_in", "2026-11-10", terminal);
+    return { c, ev, deposit };
+  };
+  const tx = async (id: number) => {
+    const items = (await api.get(`/transactions?limit=200`).expect(200)).body.items as { id: number; cashAnswer?: unknown }[];
+    return items.find((t) => t.id === id)!;
+  };
+  const facts = (id: number) => row(`SELECT type, category, usdc_checked, from_wallet FROM transactions WHERE id=$1`, [id]);
+  const link = async (ev: number) => (await row(`SELECT matched_transaction_id AS m FROM income_events WHERE id=$1`, [ev])).m as number | null;
+
+  it("from Binance to the wallet: Binance gets back exactly the cents taken, the wallet pays the deposit", async () => {
+    const { ev, deposit } = await setup();
+    await api.post(`/plan/incomes/${ev}/match-transaction`, { transactionId: deposit }).expect(201);
+    expect(await binance()).toBe(500_000 - TAKEN);
+    expect((await tx(deposit)).cashAnswer).toEqual({ answer: "binance", canBinance: true, binanceOnChange: "returns" });
+    // The rate moved since: the answer gives back what it took, not today's equivalent.
+    await rate(42, "2026-11-10T09:30:00Z");
+
+    const r = await answer(deposit, "wallet").expect(201);
+    expect(r.body.cashAnswer).toEqual({ answer: "wallet", canBinance: true, binanceOnChange: null });
+    expect(await binance()).toBe(500_000);
+    expect((await wallet()).balance).toBe(3_000_000 - DEPOSIT);
+    expect(await facts(deposit)).toEqual({ type: "own_transfer", category: "own", usdc_checked: true, from_wallet: true });
+    expect(await link(ev)).toBeNull();
+    expect((await row(`SELECT status FROM income_events WHERE id=$1`, [ev])).status).toBe("received");
+  });
+
+  it("from the wallet to Binance: the wallet gets the deposit back, Binance is lowered once and remembers by how much", async () => {
+    const { ev, deposit } = await setup();
+    await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
+    expect((await wallet()).balance).toBe(3_000_000 - DEPOSIT);
+
+    await answer(deposit, "binance").expect(201);
+    expect((await wallet()).balance).toBe(3_000_000);
+    expect(await binance()).toBe(500_000 - TAKEN);
+    expect(await facts(deposit)).toEqual({ type: "own_transfer", category: "own", usdc_checked: true, from_wallet: false });
+    expect(await link(ev)).toBe(deposit);
+
+    await rate(42, "2026-11-10T09:30:00Z");
+    await answer(deposit, "wallet").expect(201);
+    expect(await binance()).toBe(500_000);
+    expect((await wallet()).balance).toBe(3_000_000 - DEPOSIT);
+  });
+
+  it("a Binance balance that went to zero gets back only what the answer really took", async () => {
+    const { deposit } = await setup();
+    await ds.query(`UPDATE manual_balances SET amount=50000 WHERE name='Binance'`);
+    await answer(deposit, "binance").expect(201);
+    expect(await binance()).toBe(0);
+    await answer(deposit, "other").expect(201);
+    expect(await binance()).toBe(50_000);
+  });
+
+  it("the same answer again changes nothing", async () => {
+    const { deposit } = await setup();
+    await answer(deposit, "binance").expect(201);
+    await answer(deposit, "binance").expect(201);
+    expect(await binance()).toBe(500_000 - TAKEN);
+    await answer(deposit, "wallet").expect(201);
+    await answer(deposit, "wallet").expect(201);
+    expect(await binance()).toBe(500_000);
+    expect((await wallet()).balance).toBe(3_000_000 - DEPOSIT);
+    await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
+    expect((await wallet()).balance).toBe(3_000_000 - DEPOSIT);
+  });
+
+  it("«Другое» and back: it touches neither the wallet nor Binance, and undoes what the others did", async () => {
+    const { deposit } = await setup();
+    await api.post(`/plan/transactions/${deposit}/not-usdc`).expect(201);
+    expect((await tx(deposit)).cashAnswer).toEqual({ answer: "other", canBinance: true, binanceOnChange: null });
+
+    await answer(deposit, "wallet").expect(201);
+    expect((await wallet()).balance).toBe(3_000_000 - DEPOSIT);
+    await answer(deposit, "other").expect(201);
+    expect((await wallet()).balance).toBe(3_000_000);
+    expect(await facts(deposit)).toEqual({ type: "cash_in", category: null, usdc_checked: true, from_wallet: false });
+
+    await answer(deposit, "binance").expect(201);
+    expect(await binance()).toBe(500_000 - TAKEN);
+    await answer(deposit, "other").expect(201);
+    expect(await binance()).toBe(500_000);
+    expect(await facts(deposit)).toEqual({ type: "cash_in", category: null, usdc_checked: true, from_wallet: false });
+    // Still answered: the question does not come back.
+    expect(((await today()).questions as { kind: string }[]).filter((q) => q.kind === "cash_source")).toEqual([]);
+  });
+
+  it("an income not received before the answer gets its earlier status back", async () => {
+    const { ev, deposit } = await setup("expected");
+    await api.post(`/plan/incomes/${ev}/match-transaction`, { transactionId: deposit }).expect(201);
+    expect((await row(`SELECT status FROM income_events WHERE id=$1`, [ev])).status).toBe("received");
+    expect(await binance()).toBe(500_000);
+
+    const r = await answer(deposit, "wallet").expect(201);
+    expect(r.body.cashAnswer.answer).toBe("wallet");
+    expect(await row(`SELECT status, received_at, amount_uah, matched_transaction_id AS m FROM income_events WHERE id=$1`, [ev])).toEqual({
+      status: "expected", received_at: null, amount_uah: null, m: null,
+    });
+    expect(await binance()).toBe(500_000);
+    // With no USDC income received there is nothing to match: Binance cannot be the answer now.
+    expect(r.body.cashAnswer.canBinance).toBe(false);
+    await answer(deposit, "binance").expect(422);
+  });
+
+  it("a row answered before the migration changes its answer without touching Binance", async () => {
+    const { c, ev } = await setup();
+    // Answered «Вывод с Binance» before answers were kept; the owner may have put Binance right by hand since.
+    const deposit = await bankTx(c, DEPOSIT, "own_transfer", "2026-11-10", { ...terminal, usdcChecked: true });
+    await ds.query(`UPDATE transactions SET category='own', type_source='owner' WHERE id=$1`, [deposit]);
+    await ds.query(`UPDATE income_events SET matched_transaction_id=$2 WHERE id=$1`, [ev, deposit]);
+    expect((await tx(deposit)).cashAnswer).toEqual({ answer: "binance", canBinance: true, binanceOnChange: "untouched" });
+
+    await answer(deposit, "wallet").expect(201);
+    expect(await binance()).toBe(500_000);
+    expect(await link(ev)).toBeNull();
+    expect(await facts(deposit)).toEqual({ type: "own_transfer", category: "own", usdc_checked: true, from_wallet: true });
+
+    // An earlier «Из кошелька» changes the same way: the wallet gets that deposit back.
+    const old = await bankTx(c, 100_000, "own_transfer", "2026-11-10", { ...terminal, usdcChecked: true });
+    await ds.query(`UPDATE transactions SET category='own', type_source='owner', from_wallet=true WHERE id=$1`, [old]);
+    expect((await tx(old)).cashAnswer).toEqual({ answer: "wallet", canBinance: true, binanceOnChange: null });
+    const before = (await wallet()).balance as number;
+    await answer(old, "other").expect(201);
+    expect((await wallet()).balance).toBe(before + 100_000);
+    expect(await facts(old)).toEqual({ type: "cash_in", category: "cash", usdc_checked: true, from_wallet: false });
+    expect(await binance()).toBe(500_000);
+  });
+
+  it("a type chip on an answered row undoes the answer first", async () => {
+    const { c, ev, deposit } = await setup();
+    await answer(deposit, "binance").expect(201);
+    // Only the category, or the same type: the answer stays.
+    await api.patch(`/transactions/${deposit}`, { category: "own" }).expect(200);
+    await api.patch(`/transactions/${deposit}`, { type: "own_transfer" }).expect(200);
+    expect(await binance()).toBe(500_000 - TAKEN);
+
+    const r = await api.patch(`/transactions/${deposit}`, { type: "income" }).expect(200);
+    expect(r.body.transaction.cashAnswer).toBeNull();
+    expect(await binance()).toBe(500_000);
+    expect(await link(ev)).toBeNull();
+    expect(await facts(deposit)).toEqual({ type: "income", category: "income", usdc_checked: false, from_wallet: false });
+
+    const other = await bankTx(c, 100_000, "cash_in", "2026-11-10", terminal);
+    await api.post(`/cash/deposits/${other}/from-wallet`).expect(201);
+    expect((await wallet()).balance).toBe(3_000_000 - 100_000);
+    await api.patch(`/transactions/${other}`, { type: "person_in" }).expect(200);
+    expect((await wallet()).balance).toBe(3_000_000);
+    expect(await facts(other)).toEqual({ type: "person_in", category: "transfer", usdc_checked: false, from_wallet: false });
+  });
+
+  it("only a cash deposit since the wallet start; the field is null on other rows", async () => {
+    const c = await card();
+    const early = await bankTx(c, DEPOSIT, "cash_in", "2026-11-09", terminal);
+    await answer(early, "wallet").expect(409); // no wallet yet
+    await start(0, "2026-11-10").expect(201);
+    const spend = await bankTx(c, -100, "spend", "2026-11-10", { description: "Shop" });
+    await answer(spend, "wallet").expect(422);
+    await answer(early, "wallet").expect(422);
+    await answer(99999, "wallet").expect(404);
+    await answer(spend, "elsewhere").expect(400);
+    expect((await tx(spend)).cashAnswer).toBeNull();
+    // A deposit not answered yet can be answered from its card too.
+    const fresh = await bankTx(c, DEPOSIT, "cash_in", "2026-11-10", terminal);
+    expect((await tx(fresh)).cashAnswer).toBeNull();
+    expect((await answer(fresh, "wallet").expect(201)).body.cashAnswer).toEqual({ answer: "wallet", canBinance: false, binanceOnChange: null });
   });
 });

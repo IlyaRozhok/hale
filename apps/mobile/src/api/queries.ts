@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CashOperationInput, CashOperationPatch, CashStartInput, ExpectedIncomeInput, ExpectedIncomePatch, InstallmentInput, InstallmentPatch, LoanInput, LoanRepayInput, RecipientLabelName, RecurringInput, RecurringPatch, ScheduledPaymentInput, ScheduledPaymentPatch, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
-import type { CashCardAnswer, GoalInput, GoalPatch, TxTypeDto } from "@hale/contracts";
+import type { CashCardAnswer, CashDepositAnswerName, GoalInput, GoalPatch, TxTypeDto } from "@hale/contracts";
 import type { TransactionsFilter } from "./client";
 import { useApi } from "./context";
 
@@ -176,7 +176,9 @@ export function useEditTransaction() {
   return useMutation({
     mutationFn: ({ id, patch }: { id: number; patch: Pick<TransactionPatch, "type" | "category" | "applyToSimilar"> }) =>
       api.editTransaction(id, patch),
-    onSuccess: () => Promise.all([client.invalidateQueries({ queryKey: TRANSACTIONS_KEY }), client.invalidateQueries({ queryKey: TODAY_KEY })]),
+    // A new type undoes an answer about where cash came from (Б21): the wallet and Binance may change too.
+    onSuccess: () =>
+      Promise.all([TRANSACTIONS_KEY, TODAY_KEY, CASH_KEY, MANUAL_BALANCES_KEY].map((queryKey) => client.invalidateQueries({ queryKey }))),
   });
 }
 
@@ -473,6 +475,21 @@ export function useCountCash() {
 export function useDepositFromWallet() {
   const api = useApi();
   return useCashMutation((transactionId: number) => api.depositFromWallet(transactionId));
+}
+
+/** A new answer to «Откуда наличные?»: the wallet, Binance, the income and the day's limit may all change. */
+export function useChangeDepositAnswer() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, answer }: { id: number; answer: CashDepositAnswerName }) => api.changeDepositAnswer(id, answer),
+    onSuccess: () =>
+      Promise.all(
+        [CASH_KEY, TODAY_KEY, TRANSACTIONS_KEY, MANUAL_BALANCES_KEY, INCOME_EVENTS_KEY, CALENDAR_KEY, CAP_PREVIEW_KEY].map((queryKey) =>
+          client.invalidateQueries({ queryKey }),
+        ),
+      ),
+  });
 }
 
 /** A planned payment paid in cash: the payment closes and the wallet goes down. */

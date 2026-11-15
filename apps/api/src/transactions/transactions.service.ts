@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import type {
+  CashAnswerDto,
   RuleDto,
   RecipientLabelName,
   RecipientLabelResultDto,
@@ -15,8 +16,11 @@ import { DataSource, type EntityManager } from "typeorm";
 import { isCounterpartyName } from "../domain/counterparty";
 import { creditPart } from "../domain/credit";
 import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
+import { binanceOnChange, cashAnswerOf } from "../domain/cash-answer";
 import { limitSql, spendGroupSql } from "../domain/ledger";
 import { PlanService } from "../plan/plan.service";
+import { LimitService } from "../today/limit.service";
+import { type CashAnswerRow, binanceEvent, cashAnswerColumnsSql, cashAnswerFacts, undoAnswer } from "../cash/cash-answer";
 import { cardCashSql, cardTransferSql } from "../cash/wallet";
 import { counterKeySql } from "./counter-key";
 import { PLAN_TYPES, ReclassifyService } from "./reclassify.service";
@@ -32,13 +36,14 @@ const COLUMNS = `
   t.balance_after::float8 AS balance_after, t.credit_limit_at::float8 AS credit_limit_at,
   ${KEY} AS counter_key, t.counter_iban, t.counter_name, a.kind AS account_kind, (a.kind = 'cash') AS manual,
   CASE WHEN ${cardTransferSql()} THEN ${cardCashSql()}::float8 END AS card_cash,
+  ${cashAnswerColumnsSql("t")},
   COALESCE(
     (SELECT s.name FROM payment_links l JOIN scheduled_payments s ON s.id = l.payment_id WHERE l.transaction_id = t.id),
     (SELECT s.name FROM scheduled_payments s WHERE s.transaction_id = t.id ORDER BY s.id LIMIT 1)
   ) AS payment_name`;
 const FROM = `FROM transactions t JOIN accounts a ON a.id = t.account_id`;
 
-interface Row {
+interface Row extends CashAnswerRow {
   id: number;
   occurred_at: Date;
   ts: string;
@@ -78,7 +83,14 @@ const answerFor = (
 ): RecipientLabelName | null =>
   rules.find((rule) => ruleMatches(rule, { amount: r.amount, description: r.description, counterIban: r.counter_iban, counterName: r.counter_name }))?.label ?? null;
 
-const view = (r: Row, rules: readonly AnswerRule[]): TransactionDto => ({
+/** The answer to «Откуда наличные?» the card can change; `binanceOpen`: a received USDC income and a rate (see binanceEvent). */
+function cashAnswerView(r: Row, binanceOpen: boolean): CashAnswerDto | null {
+  const a = cashAnswerOf(cashAnswerFacts(r));
+  if (!a) return null;
+  return { answer: a.answer, canBinance: a.answer === "binance" || binanceOpen, binanceOnChange: binanceOnChange(a) };
+}
+
+const view = (r: Row, rules: readonly AnswerRule[], binanceOpen: boolean): TransactionDto => ({
   id: r.id,
   occurredAt: r.occurred_at.toISOString(),
   localDate: r.local_date,
@@ -100,6 +112,7 @@ const view = (r: Row, rules: readonly AnswerRule[]): TransactionDto => ({
   paymentName: r.payment_name,
   creditPart: creditPart({ amount: r.amount, balanceAfter: r.balance_after, creditLimit: r.credit_limit_at, currency: r.currency }),
   inLimit: r.in_limit,
+  cashAnswer: cashAnswerView(r, binanceOpen),
 });
 
 const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6})\|(\d{1,10})$/;
@@ -146,6 +159,7 @@ export class TransactionsService {
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(PlanService) private readonly plan: PlanService,
     @Inject(ReclassifyService) private readonly reclassify: ReclassifyService,
+    @Inject(LimitService) private readonly limit: LimitService,
   ) {}
 
   async list(q: TransactionsQuery): Promise<TransactionPageDto> {
@@ -178,12 +192,13 @@ export class TransactionsService {
     );
     const page = rows.slice(0, q.limit);
     const rules = await this.answerRules();
+    const binanceOpen = await this.binanceOpen(page);
     // Under «Траты» the totals are the limit's (Б2): the sum and count of the rows that count against it,
     // the same figure as «потрачено» on «Сегодня» and in the calendar. Payments, taxes, debts, loans out
     // and jar rows stay on the list, marked by inLimit, but do not add up. «Все» and «Доходы» sum every row.
     const counted = q.group === "spend" ? IN_LIMIT : "true";
     return {
-      items: page.map((r) => view(r, rules)),
+      items: page.map((r) => view(r, rules, binanceOpen)),
       nextCursor: rows.length > q.limit ? encodeCursor(page[page.length - 1]!) : null,
       dayTotals: await this.dayTotals([...new Set(page.map((r) => r.local_date))], filters, filterArgs, counted),
       summary: q.category || q.from || q.to ? await this.summary(filters, filterArgs, counted) : null,
@@ -246,7 +261,10 @@ export class TransactionsService {
         }
       }
       const scope = p.applyToSimilar ? similarScope(id, base, ruleType!) : { id };
-      return this.apply(m, scope, p.type ?? null, p.category ?? null);
+      const undone = p.type ? await this.undoCashAnswers(m, scope, p.type) : false;
+      const ids = await this.apply(m, scope, p.type ?? null, p.category ?? null);
+      if (undone) await this.limit.invalidate("cash", m);
+      return ids;
     });
     if (p.type) await this.settle(changed, p.type);
     const row = await this.one(id);
@@ -428,7 +446,31 @@ export class TransactionsService {
 
   async one(id: number): Promise<TransactionDto> {
     const r = (await this.ds.query(`SELECT ${COLUMNS} ${FROM} WHERE t.id=$1`, [id]))[0] as Row;
-    return view(r, await this.answerRules());
+    return view(r, await this.answerRules(), await this.binanceOpen([r]));
+  }
+
+  /** Whether «Вывод с Binance» can be chosen now; asked only when a row on the page has a cash answer. */
+  private async binanceOpen(rows: readonly Row[]): Promise<boolean> {
+    if (!rows.some((r) => cashAnswerOf(cashAnswerFacts(r)) !== null)) return false;
+    return (await binanceEvent(this.ds.manager)) !== null;
+  }
+
+  /**
+   * A type changed by hand on a row with an answer to «Откуда наличные?» or «Это вывод с Binance?» undoes
+   * that answer first, as a new answer would (task Б21): the wallet, Binance and the income get back what
+   * it did. Rows keeping their type keep their answer. True when anything was undone.
+   */
+  private async undoCashAnswers(m: EntityManager, scope: Scope, type: string): Promise<boolean> {
+    const { where, args } = scopeWhere(scope, 2);
+    const rows: { id: number }[] = await m.query(
+      `SELECT t.id ${FROM} WHERE ${where} AND t.type IS DISTINCT FROM $1
+          AND (t.from_wallet OR t.usdc_checked OR EXISTS (SELECT 1 FROM cash_answers c WHERE c.transaction_id = t.id))
+        ORDER BY t.id FOR UPDATE OF t`,
+      [type, ...args],
+    );
+    let undone = false;
+    for (const r of rows) undone = (await undoAnswer(m, r.id)) || undone;
+    return undone;
   }
 }
 

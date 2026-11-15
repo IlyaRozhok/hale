@@ -19,8 +19,10 @@ import { LimitService } from "../today/limit.service";
 import { quarterTaxFacts } from "../today/tax-facts";
 import { INTEREST_TEXT, SHORT_LOAN_TEXT } from "./short-loan";
 import { ScheduledPayment, type IncomeEvent } from "../db/entities";
+import { answerOther, keepAnswer, rowBefore, undoAnswer } from "../cash/cash-answer";
+import { BINANCE } from "./binance";
 
-export const BINANCE = "Binance";
+export { BINANCE } from "./binance";
 const MATCH_DAYS = 3;
 const PLANNED_RECIPIENT_LABELS = ["close_regular", "shared_budget"];
 
@@ -262,61 +264,92 @@ export class PlanService implements OnApplicationBootstrap {
   }
 
   /**
-   * A card credit or cash deposit that is the USDC arriving by another way: lowers the Binance
-   * balance by its hryvnia amount at the current USD rate and retypes the row as an own transfer.
-   * One event can take several rows: withdrawing in parts just lowers the balance each time, and each
-   * row counts once. An event not yet confirmed is confirmed by this match (the money was never on Binance in the
-   * app's books, so the balance is left alone).
+   * A card credit or cash deposit that is the USDC arriving by another way: see answerBinance. Asking
+   * again about a row already matched, or already an own transfer from Binance or the wallet, changes nothing.
    */
   async matchTransaction(eventId: number, transactionId: number): Promise<IncomeEvent> {
     return this.ds.transaction(async (m) => {
       const ev = await this.lockEvent(m, eventId);
       if (ev.source !== "usdc") throw new UnprocessableEntityException("only USDC events can be matched");
-      const tx = (
-        await m.query(
-          `SELECT t.id, t.type, t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah, t.usdc_checked, a.kind AS account_kind
-             FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.id=$1 FOR UPDATE OF t`,
-          [transactionId],
-        )
-      )[0] as { id: number; type: string | null; amount: number; amount_uah: number | null; usdc_checked: boolean; account_kind: string } | undefined;
+      const tx = (await m.query(`SELECT id, type, usdc_checked FROM transactions WHERE id=$1 FOR UPDATE`, [transactionId]))[0] as
+        | { id: number; type: string | null; usdc_checked: boolean }
+        | undefined;
       if (!tx) throw new NotFoundException("transaction not found");
       if (ev.matched_transaction_id === tx.id) return this.eventView(m, eventId);
       const taken = await m.query(`SELECT 1 FROM income_events WHERE matched_transaction_id=$1`, [tx.id]);
       if (taken.length > 0) throw new ConflictException("transaction is already matched to another event");
       if (tx.usdc_checked && tx.type === "own_transfer") return this.eventView(m, eventId); // already taken off the balance
-      const creditOnCard = tx.amount > 0 && (tx.account_kind === "black" || tx.account_kind === "white");
-      if (!(tx.amount > 0 && (tx.type === "cash_in" || creditOnCard))) {
-        throw new UnprocessableEntityException("only a cash deposit or a card credit can be matched");
-      }
-      if (tx.amount_uah === null) throw new UnprocessableEntityException("transaction has no hryvnia amount");
-
-      if (ev.status === "received") {
-        const rate = await this.usdRate(m);
-        if (rate === null) throw new UnprocessableEntityException("no USD rate available");
-        const cents = Math.round(tx.amount_uah / rate);
-        await m.query(
-          `UPDATE manual_balances SET amount = GREATEST(amount - $2, 0) WHERE name=$1`,
-          [BINANCE, cents],
-        );
-      } else {
-        await this.markReceived(m, ev, tx.amount_uah);
-      }
-      await m.query(`UPDATE income_events SET matched_transaction_id=COALESCE(matched_transaction_id, $2) WHERE id=$1`, [eventId, tx.id]);
-      await m.query(
-        `UPDATE transactions SET type='own_transfer', category='own', type_source='owner', needs_label=false, usdc_checked=true WHERE id=$1`,
-        [tx.id],
-      );
+      await this.answerBinance(m, eventId, tx.id);
       // The money counted twice until now: the day's limit drops at once.
       await this.limit.invalidate("income", m);
       return this.eventView(m, eventId);
     });
   }
 
-  /** The owner says this incoming row is not a Binance withdrawal: it is not asked about again. */
+  /**
+   * «Вывод с Binance» about this row, in the caller's transaction (the caller fixes the limit afresh): lowers
+   * the Binance balance by its hryvnia amount at the current USD rate, never below zero, and retypes the row
+   * as an own transfer. One event can take several rows: withdrawing in parts just lowers the balance each
+   * time, and each row counts once. An event not yet confirmed is confirmed by this match (the money was never
+   * on Binance in the app's books, so the balance is left alone). The answer is kept with the cents really
+   * taken and the event's earlier status, so that changing it undoes exactly this (task Б21).
+   */
+  async answerBinance(m: EntityManager, eventId: number, transactionId: number): Promise<void> {
+    const ev = await this.lockEvent(m, eventId);
+    if (ev.source !== "usdc") throw new UnprocessableEntityException("only USDC events can be matched");
+    const tx = (
+      await m.query(
+        `SELECT t.id, t.type, t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah, a.kind AS account_kind
+           FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.id=$1 FOR UPDATE OF t`,
+        [transactionId],
+      )
+    )[0] as { id: number; type: string | null; amount: number; amount_uah: number | null; account_kind: string } | undefined;
+    if (!tx) throw new NotFoundException("transaction not found");
+    const creditOnCard = tx.amount > 0 && (tx.account_kind === "black" || tx.account_kind === "white");
+    if (!(tx.amount > 0 && (tx.type === "cash_in" || creditOnCard))) {
+      throw new UnprocessableEntityException("only a cash deposit or a card credit can be matched");
+    }
+    if (tx.amount_uah === null) throw new UnprocessableEntityException("transaction has no hryvnia amount");
+
+    // An earlier «Другое» about the row gives way to this answer.
+    await undoAnswer(m, tx.id);
+    const before = await rowBefore(m, tx.id);
+    let taken = 0;
+    let statusBefore: string | null = null;
+    if (ev.status === "received") {
+      const rate = await this.usdRate(m);
+      if (rate === null) throw new UnprocessableEntityException("no USD rate available");
+      const cents = Math.round(tx.amount_uah / rate);
+      const b = (await m.query(`SELECT amount::float8 AS amount FROM manual_balances WHERE name=$1 FOR UPDATE`, [BINANCE]))[0] as
+        | { amount: number }
+        | undefined;
+      if (b) {
+        const next = Math.max(b.amount - cents, 0);
+        await m.query(`UPDATE manual_balances SET amount=$2 WHERE name=$1`, [BINANCE, next]);
+        taken = b.amount - next;
+      }
+    } else {
+      statusBefore = ev.status;
+      await this.markReceived(m, ev, tx.amount_uah);
+    }
+    await m.query(`UPDATE income_events SET matched_transaction_id=COALESCE(matched_transaction_id, $2) WHERE id=$1`, [eventId, tx.id]);
+    await m.query(
+      `UPDATE transactions SET type='own_transfer', category='own', type_source='owner', needs_label=false, usdc_checked=true WHERE id=$1`,
+      [tx.id],
+    );
+    await keepAnswer(m, tx.id, "binance", before, { binanceCents: taken, eventId, eventStatusBefore: statusBefore });
+  }
+
+  /** The owner says this incoming row is not a Binance withdrawal: it is not asked about again. The answer is kept (Б21). */
   async dismissUsdcMatch(transactionId: number): Promise<{ usdc_checked: true }> {
-    const r: [unknown[], number] = await this.ds.query(`UPDATE transactions SET usdc_checked=true WHERE id=$1`, [transactionId]);
-    if (r[1] === 0) throw new NotFoundException("transaction not found");
-    return { usdc_checked: true };
+    return this.ds.transaction(async (m) => {
+      const t = (await m.query(`SELECT usdc_checked FROM transactions WHERE id=$1 FOR UPDATE`, [transactionId]))[0] as
+        | { usdc_checked: boolean }
+        | undefined;
+      if (!t) throw new NotFoundException("transaction not found");
+      if (!t.usdc_checked) await answerOther(m, transactionId);
+      return { usdc_checked: true as const };
+    });
   }
 
   /**
