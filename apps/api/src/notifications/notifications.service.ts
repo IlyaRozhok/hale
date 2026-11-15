@@ -79,6 +79,7 @@ export class NotificationsService {
       taxes: taxes.map((p) => ({ id: p.id, name: p.name, amount: p.amount, currency: p.currency, dueOn: p.due_on, paid: false })),
       leftToday: t.state.leftToday,
       dailyLimit: t.state.dailyLimit,
+      shortageStart: t.state.shortageStart !== undefined,
       badCases,
       questions: t.questions,
       syncedAt: t.syncedAt,

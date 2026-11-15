@@ -25,6 +25,8 @@ export interface NotifyState {
   taxes: TaxPayment[];
   leftToday: number;
   dailyLimit: number;
+  /** Today is the day the shortage mode came on: its spending is not judged by any limit (audit, decision 6.7). */
+  shortageStart: boolean;
   badCases: { id: string; text: string }[];
   questions: { id: string; kind: string; text: string }[];
   /** `settings.last_sync_at` as an ISO string. */
@@ -79,8 +81,8 @@ function taxNotifications(t: TaxPayment, date: string, hour: number, sent: Reado
  * Notifications due at `now`. Tax reminders are not limited. Ordinary candidates come in priority order
  * (bad case, over limit, USDC, income date, broken sync) and the caller sends only the first that gets
  * through, so a failing top item cannot starve the rest. Ordinary ones are held until 10:00 Kyiv and none
- * goes out after one already did today, except over_limit, which keeps the evening to itself. A reminder is only due on its
- * own day, so one that was missed is skipped rather than back-filled.
+ * goes out after one already did today, except over_limit, which keeps the evening to itself and is not sent on the day
+ * the shortage came on. A reminder is only due on its own day, so one that was missed is skipped rather than back-filled.
  */
 export function dueNotifications(state: NotifyState, now: Date): Notification[] {
   const date = kyivDate(now);
@@ -95,7 +97,7 @@ export function dueNotifications(state: NotifyState, now: Date): Notification[] 
       ordinary.push({ key: `bad:${b.id}`, kind: "bad_case", title: "Денежный план", body: b.text });
     }
   }
-  if (hour >= OVER_LIMIT_HOUR && state.leftToday < 0) {
+  if (hour >= OVER_LIMIT_HOUR && state.leftToday < 0 && !state.shortageStart) {
     ordinary.push({
       key: `over_limit:${date}`,
       kind: "over_limit",
