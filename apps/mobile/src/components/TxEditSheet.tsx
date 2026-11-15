@@ -137,7 +137,7 @@ function CardCash({ tx, cashOut }: { tx: TransactionDto; cashOut: number }) {
 
 /** What changing a «Вывод с Binance» answer does to the Binance balance, in one calm sentence. */
 const BINANCE_NOTE: Record<"returns" | "untouched", string> = {
-  returns: "Если вы уже поправляли баланс Binance руками, проверьте его после смены ответа.",
+  returns: "Сумма, которую списал этот ответ, вернётся на Binance — если вы уже поправляли баланс руками, проверьте его после смены ответа.",
   untouched: "Баланс Binance при смене этого ответа не изменится — если нужно, поправьте его в «Плане».",
 };
 

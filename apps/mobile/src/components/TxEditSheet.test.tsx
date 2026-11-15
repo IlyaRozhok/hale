@@ -210,7 +210,7 @@ describe("TxEditSheet: the answer to «Откуда наличные?» can be c
   const deposit = (cashAnswer: TransactionDto["cashAnswer"]) =>
     txFixture({ id: 12, type: "own_transfer", category: "own", amount: 2_950_000, amountUah: 2_950_000, description: "Термінал City24", cashAnswer });
   const UNTOUCHED = "Баланс Binance при смене этого ответа не изменится — если нужно, поправьте его в «Плане».";
-  const RETURNS = "Если вы уже поправляли баланс Binance руками, проверьте его после смены ответа.";
+  const RETURNS = "Сумма, которую списал этот ответ, вернётся на Binance — если вы уже поправляли баланс руками, проверьте его после смены ответа.";
 
   it("shows the same three choices as the question, the current one selected", async () => {
     await renderWith(<TxEditSheet tx={deposit({ answer: "binance", canBinance: true, binanceOnChange: "returns" })} onClose={noop} />, fakeApi());

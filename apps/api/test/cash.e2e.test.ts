@@ -626,6 +626,23 @@ describe("changing the answer to «Откуда наличные?» (Б21)", () 
     expect((await wallet()).balance).toBe(3_000_000 - DEPOSIT);
   });
 
+  it("«Вывод с Binance» again leaves Binance as it is: after a rate change, and on a row answered before the migration", async () => {
+    const { c, ev, deposit } = await setup();
+    await answer(deposit, "binance").expect(201);
+    await rate(42, "2026-11-10T09:30:00Z");
+    await answer(deposit, "binance").expect(201);
+    expect(await binance()).toBe(500_000 - TAKEN);
+
+    const old = await bankTx(c, DEPOSIT, "own_transfer", "2026-11-10", { ...terminal, usdcChecked: true });
+    await ds.query(`UPDATE transactions SET category='own', type_source='owner' WHERE id=$1`, [old]);
+    await ds.query(`UPDATE income_events SET matched_transaction_id=$2 WHERE id=$1`, [ev, old]);
+    await ds.query(`UPDATE manual_balances SET amount=500000 WHERE name='Binance'`);
+    await answer(old, "binance").expect(201);
+    expect(await binance()).toBe(500_000);
+    expect(await link(ev)).toBe(old);
+    expect((await tx(old)).cashAnswer).toEqual({ answer: "binance", canBinance: true, binanceOnChange: "untouched" });
+  });
+
   it("«Другое» and back: it touches neither the wallet nor Binance, and undoes what the others did", async () => {
     const { deposit } = await setup();
     await api.post(`/plan/transactions/${deposit}/not-usdc`).expect(201);
