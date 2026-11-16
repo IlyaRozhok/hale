@@ -752,15 +752,18 @@ describe("tax reserve and own money", () => {
       const limit = async () => (await row(`SELECT daily_limit::int AS l FROM daily_snapshots WHERE local_date='2026-11-14'`)).l as number;
       const closedByLinks = async (id: number) => (await row(`SELECT closed_by_links FROM scheduled_payments WHERE id=$1`, [id])).closed_by_links;
 
-      it("₴5,500 on a ₴5,000 row closes it, «Оплачено» after changes nothing; Q4 keeps its whole reserve", async () => {
+      it("₴5,500 on an open ₴5,000 row waits; «Оплачено» links it at once and Q4 keeps its whole reserve", async () => {
         await big();
         const id = await taxRow(500_000);
-        await staleLimit();
         const t = await pay(550_000);
-        expect(await links(id)).toEqual([t]);
-        expect(await state(id)).toMatchObject({ paid: true, transaction_id: null });
-        expect(await limit()).not.toBe(1);
+        // Open rows close only within ₴20: the payment is not the row's yet, and the row stays reserved.
+        expect(await links(id)).toEqual([]);
+        expect(await state(id)).toMatchObject({ paid: false });
+        await staleLimit();
         await markPaid(id);
+        expect(await links(id)).toEqual([t]);
+        expect(await closedByLinks(id)).toBe(false);
+        expect(await limit()).not.toBe(1);
         expect((await today()).state.free).toBe(q4Whole(550_000));
       });
 
@@ -850,6 +853,20 @@ describe("tax reserve and own money", () => {
         await plan().hourlyJob();
         expect(await row(`SELECT 1 AS x FROM payment_links WHERE transaction_id=$1`, [advance])).toBeUndefined();
         expect((await today()).state.free).toBe(2_000_000 - (571_000 + 190_234 + 700_000) - (600_000 - 190_234));
+      });
+
+      it("ЄСВ closed by hand and paid ₴5,710 next to an open ЄП of ₴5,500: each row gets its own payment (round 3, N1)", async () => {
+        await big();
+        const esv = await taxRow(570_702, { name: "ЄСВ", due: "2026-10-20", paid: "2026-10-20T12:00:00Z" });
+        const ep = await taxRow(550_000, { name: "ЄП", due: "2026-11-19" });
+        const a = await pay(571_000, "2026-10-18");
+        expect(await links(esv)).toEqual([a]);
+        expect(await links(ep)).toEqual([]);
+        expect(await state(ep)).toMatchObject({ paid: false });
+        const b = await pay(550_000);
+        expect(await state(ep)).toMatchObject({ paid: true, transaction_id: b });
+        expect(await links(esv)).toEqual([a]);
+        expect((await today()).state.free).toBe(q4Whole(571_000 + 550_000));
       });
 
       it("a tax payment more than 30 days after the row's due date stays with Q4", async () => {

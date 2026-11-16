@@ -408,6 +408,8 @@ export class PlanService implements OnApplicationBootstrap {
       [id],
     );
     if (!rows[0]) throw new NotFoundException("payment not found");
+    // A tax closed by hand takes payments off its figure now (Б30): link them at once, not at the next hour.
+    if (paid[1] > 0 && rows[0].kind === "tax") await this.linkTaxTransactions();
     return rows[0];
   }
 
