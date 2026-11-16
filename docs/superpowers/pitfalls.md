@@ -12,6 +12,7 @@ For agents, in English. Each item cost someone time once. When you hit a new one
 - **The simulator tool does not work in a scheduled run.** `mcp__Claude_Code_iOS_Simulator__control` answers "Mobile simulator tools require an attended session" when the session was started by the schedule. The stand and Metro still start, but nothing can be tapped. The owner writing in that session later does not change it: the tool still refuses, so screens can only be checked in a session the owner started. Do not drive the Simulator window another way: skip the screen check, stop the stand, and say in the summary which screens nobody saw (12 November 2026).
 - **A builder subagent without `isolation: "worktree"` works in the lead's own working copy** (13 November 2026: the А21 builder checked out its branch in the lead's worktree). Harmless when the lead's copy is clean, but the lead then has to switch back to `origin/main` after the merge. Start builders with worktree isolation.
 - **The full type check** (`pnpm typecheck`) takes about 6 GB of memory. No more than two builders at once; reviewers do not run it.
+- **`/usr/bin/python3` (3.9) rejects a script file with long Cyrillic lines** with "SyntaxError: Non-UTF-8 code starting with ..." although the file is valid UTF-8 (16 November 2026, editing backlog.md). Run it as `python3 -c "exec(open(PATH, encoding='utf-8').read())"`, or keep the Russian text in a separate file the script reads.
 - **zsh and unquoted globs in `grep --include`.** The shell here is zsh: `grep -rn pattern dir --include=*.tsx` fails with "no matches found" before grep runs, and the rest of a compound command is lost with it. Quote the glob (`--include='*.tsx'`) or list the directories instead.
 
 ## Tests
@@ -27,6 +28,7 @@ For agents, in English. Each item cost someone time once. When you hit a new one
 - **A new table needs three edits.** The migration, the table list in `apps/api/test/migrations.test.ts`, and `DEFAULT_TABLES` in `infra/restore-check.sh` — `infra/test/scripts.test.ts` fails otherwise. Put all three in the builder's «Где» (15 November 2026, Б8, Б21, Б11).
 - **`unmount()` returns a promise** in the installed `@testing-library/react-native`. Rendering again in the same test without `await unmount()` overlaps `act()` and breaks later tests in the file (15 November 2026, Б11).
 - **`CheckModule` must stay last in `app.module.ts`.** There is an import cycle around `today/` and `plan/`; importing it earlier leaves `LimitService` undefined in `PlanService` and every e2e suite fails (15 November 2026, Б11).
+- **The same holds for the `import` line of any new module that imports `TodayModule`** (for the `Clock`). With `import { InsightsModule }` placed alphabetically before `MonoModule`/`PlanModule`, every e2e suite failed with "Nest can't resolve dependencies of the PlanService (DataSource, Clock, ?)". Put both the `import` statement and the module entry next to `CheckModule`'s, after the others (16 November 2026, В1).
 
 ## iOS build
 
