@@ -284,25 +284,29 @@ export interface PlannedEvent {
   status: "expected";
 }
 
-export const DEFAULT_EVENT_DAY = 25;
+/**
+ * The day an income of `period` (YYYY-MM) is expected: its window's last day, clamped to the month's length
+ * (task Б28). The latest day, not the first or the middle: the limit divides by the days to the next income,
+ * so more days give a lower, safe limit; an income that comes early is simply received early, and it is
+ * late only once its whole window has passed. Only the end counts, so a window whose start is after its end
+ * (the API refuses one) still gets a date.
+ */
+export function windowEndDate(period: string, windowEndDay: number): string {
+  const last = new Date(Date.UTC(Number(period.slice(0, 4)), Number(period.slice(5, 7)), 0)).getUTCDate();
+  return `${period}-${String(Math.min(windowEndDay, last)).padStart(2, "0")}`;
+}
 
-/** Events for the month of `today` and the next one, one per expected income per month. */
-export function monthlyEvents(
-  expected: readonly ExpectedForEvents[],
-  today: string,
-  defaultDay = DEFAULT_EVENT_DAY,
-): PlannedEvent[] {
+/** Events for the month of `today` and the next one, one per expected income per month, on its window's end. */
+export function monthlyEvents(expected: readonly ExpectedForEvents[], today: string): PlannedEvent[] {
   const year = Number(today.slice(0, 4));
   const month = Number(today.slice(5, 7));
   const out: PlannedEvent[] = [];
   for (let i = 0; i < 2; i++) {
     const y = year + Math.floor((month - 1 + i) / 12);
     const m = ((month - 1 + i) % 12) + 1;
-    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
     const period = `${y}-${String(m).padStart(2, "0")}`;
-    const on = `${period}-${String(Math.min(defaultDay, last)).padStart(2, "0")}`;
     for (const e of expected) {
-      out.push({ expected_income_id: e.id, period, expected_on: on, status: "expected" });
+      out.push({ expected_income_id: e.id, period, expected_on: windowEndDate(period, e.window_end_day), status: "expected" });
     }
   }
   return out;

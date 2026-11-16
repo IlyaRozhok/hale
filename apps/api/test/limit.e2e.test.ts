@@ -186,11 +186,11 @@ describe("the plan", () => {
     await fixed("2026-11-01", 100_000, "normal");
     await plant();
     const id = (await api.post("/plan/expected-incomes", { source: "fop", amount: 500_000, currency: "UAH", window_start_day: 10, window_end_day: 10 }).expect(201)).body.id as number;
-    // Its event lands on the 25th (the default day): 23 days of ₴10,000.
-    await fixedNow(Math.floor(1_000_000 / 23));
+    // Its event lands on its window's end, the 10th (Б28): 8 days of ₴10,000.
+    await fixedNow(Math.floor(1_000_000 / 8));
     await plant();
     await api.patch(`/plan/expected-incomes/${id}`, { amount: 600_000 }).expect(200);
-    await fixedNow(Math.floor(1_000_000 / 23));
+    await fixedNow(Math.floor(1_000_000 / 8));
     await plant();
     await api.delete(`/plan/expected-incomes/${id}`).expect(200);
     await fixedNow(Math.floor(1_000_000 / 30));
@@ -418,8 +418,8 @@ describe("the night jobs that used to delete the row", () => {
     expect((await today()).state.dailyLimit).toBe(Math.floor(1_000_000 / 30));
     await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop',500000,'UAH',12,12)`);
     await app.get(PlanService).hourlyJob();
-    // Its event lands on the 25th: 23 days instead of 30.
-    await fixedNow(Math.floor(1_000_000 / 23));
+    // Its event lands on its window's end, the 12th (Б28): 10 days instead of 30.
+    await fixedNow(Math.floor(1_000_000 / 10));
   });
 });
 

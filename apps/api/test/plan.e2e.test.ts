@@ -636,9 +636,11 @@ describe("editing the plan from the phone", () => {
 
     it("a change leaves dates the owner set alone", async () => {
       const id = await add();
-      await ds.query(`UPDATE income_events SET expected_on=$1 WHERE period=$2`, [monthsAhead(0, 22), monthsAhead(0, 1).slice(0, 7)]);
+      const ev = (await ds.query(`SELECT id FROM income_events WHERE period=$1`, [monthsAhead(0, 1).slice(0, 7)]))[0].id as number;
+      await api.post(`/plan/incomes/${ev}/date`, { date: monthsAhead(0, 22) }).expect(201);
       await api.patch(`/plan/expected-incomes/${id}`, { amount: 200_000, window_start_day: 5, window_end_day: 10 }).expect(200);
-      expect((await events())[0].d).toBe(monthsAhead(0, 22));
+      // Б28: the owner's date stays; the next month's, still the generated one, moves to the window's end.
+      expect((await events()).map((e: { d: string }) => e.d)).toEqual([monthsAhead(0, 22), monthsAhead(1, 10)]);
     });
 
     it("deleting one gives the day a fresh limit", async () => {

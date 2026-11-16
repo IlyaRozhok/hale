@@ -235,7 +235,8 @@ export class PlanService implements OnApplicationBootstrap {
   async setEventDate(id: number, date: string): Promise<IncomeEvent> {
     const found = await this.ds.query(`SELECT 1 FROM income_events WHERE id=$1`, [id]);
     if (found.length === 0) throw new NotFoundException("income event not found");
-    await this.ds.query(`UPDATE income_events SET expected_on=$2 WHERE id=$1`, [id, date]);
+    // The owner's own date: a later change of the window leaves it where he put it (task Б28).
+    await this.ds.query(`UPDATE income_events SET expected_on=$2, date_set_by_hand=true WHERE id=$1`, [id, date]);
     // A new date is used at once (design §5.2).
     await this.limit.invalidate("income");
     return this.eventView(this.ds.manager, id);

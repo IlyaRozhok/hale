@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { ExpectedIncomePatch, InstallmentInput, InstallmentPatch, RecurringPatch } from "@hale/contracts";
 import { DataSource } from "typeorm";
 import { ExpectedIncome, RecurringPayment } from "../db/entities";
+import { windowEndDate } from "../domain/recurring-match";
 import { LimitService } from "../today/limit.service";
 import { PlanService } from "./plan.service";
 
@@ -103,10 +104,23 @@ export class PlanEntriesService {
   }
 
   async patchExpected(id: number, data: ExpectedIncomePatch): Promise<ExpectedIncome> {
-    const repo = this.ds.getRepository(ExpectedIncome);
-    if (Object.keys(data).length > 0) await repo.update(id, data);
-    const row = await repo.findOneBy({ id });
-    if (!row) throw new NotFoundException();
+    const row = await this.ds.transaction(async (m) => {
+      const repo = m.getRepository(ExpectedIncome);
+      if (Object.keys(data).length > 0) await repo.update(id, data);
+      const r = await repo.findOneBy({ id });
+      if (!r) throw new NotFoundException();
+      if (data.window_end_day !== undefined) {
+        // Б28: the events still expected follow the window's new end, except a date the owner set himself.
+        const events = (await m.query(
+          `SELECT id, period FROM income_events WHERE expected_income_id=$1 AND status <> 'received' AND NOT date_set_by_hand`,
+          [id],
+        )) as { id: number; period: string }[];
+        for (const e of events) {
+          await m.query(`UPDATE income_events SET expected_on=$2 WHERE id=$1`, [e.id, windowEndDate(e.period, r.window_end_day)]);
+        }
+      }
+      return r;
+    });
     await this.freshLimit();
     return row;
   }
