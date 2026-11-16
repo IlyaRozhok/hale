@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { binanceTake, exchangeRate } from "./cash-exchange";
+import { binanceTake } from "./cash-exchange";
 
-describe("exchangeRate", () => {
-  it("is hryvnias per dollar, to two decimals", () => {
-    // $1,400 for ₴65,430: 46.7357… a dollar.
-    expect(exchangeRate(6_543_000, 140_000)).toBe(46.74);
-    expect(exchangeRate(4_100_000, 100_000)).toBe(41);
-    expect(exchangeRate(1, 3)).toBe(0.33);
-  });
-});
+// The rate of an exchange is exchangeRate in @hale/contracts: the server and the app round it the same way.
 
 describe("binanceTake", () => {
   it("takes the dollars given off the balance", () => {

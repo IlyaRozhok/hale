@@ -105,7 +105,10 @@ export class CashService {
     return this.tx.one(id);
   }
 
-  /** An exchange changed, or turned into another kind and back, gives Binance back what it took first. */
+  /**
+   * An exchange given other dollars, or turned into another kind and back, gives Binance back what it took
+   * first; one whose dollars stay the same leaves Binance alone.
+   */
   async change(id: number, p: CashOperationPatch): Promise<TransactionDto> {
     await this.ds.transaction(async (m) => {
       const row = await this.manualRow(m, id);
@@ -131,8 +134,12 @@ export class CashService {
         [id, op.type, op.category, op.amount, op.date, op.note],
       );
       if (was || kind === "exchange") {
-        await undoExchange(m, id);
-        if (kind === "exchange") await takeExchange(m, id, usdc!);
+        // The same dollars keep what they took: taken again, an exchange Binance could not cover in full would
+        // take the rest from money that came to Binance since.
+        if (!(was && kind === "exchange" && usdc === was.usdc)) {
+          await undoExchange(m, id);
+          if (kind === "exchange") await takeExchange(m, id, usdc!);
+        }
         await this.limit.invalidate("binance", m);
       }
     });

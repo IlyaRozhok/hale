@@ -1,14 +1,8 @@
-import type { Minor } from "./money";
-
 /**
  * Task Б22: USDC exchanged for cash in one action. Binance gives the dollars, the wallet gets the hryvnias;
- * it is a move between the owner's own money, not income and not spending.
+ * it is a move between the owner's own money, not income and not spending. Its rate is exchangeRate in
+ * @hale/contracts, shared with the app.
  */
-
-/** Hryvnias per dollar of an exchange, to two decimals: ₴65,430 for $1,400 is 46.74. `cents` is positive. */
-export function exchangeRate(kopecks: Minor, cents: number): number {
-  return Math.round((kopecks / cents) * 100) / 100;
-}
 
 /**
  * What taking `cents` off the Binance balance leaves, and how much it really takes: never below zero, so a

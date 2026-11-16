@@ -582,9 +582,11 @@ export interface TransactionDto {
 export interface CashExchangeDto {
   /** US cents of USDC given. */
   usdc: number;
-  /** Hryvnias received per dollar, to two decimals (46.74). */
+  /** Hryvnias received per dollar, to two decimals (46.74): exchangeRate. */
   rate: number;
 }
+
+export { exchangeRate } from "./exchange";
 
 export interface CashAnswerDto {
   answer: CashDepositAnswerName;

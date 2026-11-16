@@ -12,12 +12,12 @@ import type {
   TransactionsQuery,
   TxTypeDto,
 } from "@hale/contracts";
+import { exchangeRate } from "@hale/contracts";
 import { DataSource, type EntityManager } from "typeorm";
 import { isCounterpartyName } from "../domain/counterparty";
 import { creditPart } from "../domain/credit";
 import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
 import { binanceOnChange, cashAnswerOf } from "../domain/cash-answer";
-import { exchangeRate } from "../domain/cash-exchange";
 import { PlanService } from "../plan/plan.service";
 import { LimitService } from "../today/limit.service";
 import { type CashAnswerRow, binanceEvent, cashAnswerColumnsSql, cashAnswerFacts, undoAnswer } from "../cash/cash-answer";
@@ -238,13 +238,17 @@ export class TransactionsService {
   async edit(id: number, p: TransactionPatch): Promise<TransactionEditDto> {
     const base = (
       await this.ds.query(
-        `SELECT t.type, t.amount::float8 AS amount, t.counter_iban, t.counter_name, t.description, ${KEY} AS counter_key ${FROM} WHERE t.id=$1`,
+        `SELECT t.type, t.amount::float8 AS amount, t.counter_iban, t.counter_name, t.description, ${KEY} AS counter_key, a.kind AS account_kind
+           ${FROM} WHERE t.id=$1`,
         [id],
       )
     )[0] as
-      | { type: string | null; amount: number; counter_iban: string | null; counter_name: string | null; description: string; counter_key: string }
+      | { type: string | null; amount: number; counter_iban: string | null; counter_name: string | null; description: string; counter_key: string; account_kind: string }
       | undefined;
     if (!base) throw new NotFoundException("transaction not found");
+    // A wallet row is changed only through /cash/operations, which keeps what it did to the wallet and Binance
+    // (an exchange, task Б22); retyped here it would leave that behind.
+    if (base.account_kind === "cash") throw new UnprocessableEntityException("an operation on the cash wallet is changed in the cash wallet");
     const ruleType = p.type ?? base.type;
     if (p.applyToSimilar && !ruleType) throw new UnprocessableEntityException("the row has no type to make a rule from");
 

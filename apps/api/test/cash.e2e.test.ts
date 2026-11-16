@@ -197,7 +197,10 @@ describe("operations entered by hand", () => {
     const bank = await bankTx(await card(), -500_000, "tax", "2026-11-09");
     await app.get(PlanService).onClassified(bank, "tax");
     const { id } = (await op({ kind: "spend", amount: 300_000, category: "cafe" }).expect(201)).body as { id: number };
-    await api.patch(`/transactions/${id}`, { type: "tax" }).expect(200);
+    // A wallet row retyped to a tax before the general editor refused wallet rows (Б22, review round 1).
+    await api.patch(`/transactions/${id}`, { type: "tax" }).expect(422);
+    await ds.query(`UPDATE transactions SET type='tax', category='tax', type_source='owner' WHERE id=$1`, [id]);
+    await app.get(PlanService).onClassified(id, "tax");
     expect((await row(`SELECT paid_at FROM scheduled_payments WHERE id=$1`, [tax])).paid_at).not.toBeNull();
 
     await api.del(`/cash/operations/${id}`).expect(200);
@@ -987,6 +990,27 @@ describe("USDC exchanged for cash in one action (Б22)", () => {
     expect(await kept(id)).toBeUndefined();
   });
 
+  it("an exchange Binance could not cover keeps what it took while its dollars stay the same (review round 1)", async () => {
+    await hasBinance(100_000);
+    const { id } = (await exchange().expect(201)).body as { id: number };
+    expect(await binance()).toBe(0);
+    // A USDC income arrived since: Binance holds $2,000 that this exchange never touched.
+    await ds.query(`UPDATE manual_balances SET amount=200000 WHERE name='Binance'`);
+    const spy = fixes();
+
+    // What the app sends when only the note, the date or the hryvnias change.
+    await api.patch(`/cash/operations/${id}`, { kind: "exchange", usdc: USDC, amount: 6_500_000, date: "2026-11-10", note: "Обменник" }).expect(200);
+    expect(await binance()).toBe(200_000);
+    expect(await kept(id)).toEqual({ usdc: USDC, binance: 100_000 });
+    expect((await wallet()).balance).toBe(500_000 + 6_500_000);
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    // Other dollars: what was taken goes back, and the new dollars are taken from what is there now.
+    await api.patch(`/cash/operations/${id}`, { usdc: 150_000 }).expect(200);
+    expect(await binance()).toBe(200_000 + 100_000 - 150_000);
+    expect(await kept(id)).toEqual({ usdc: 150_000, binance: 150_000 });
+  });
+
   it("a changed exchange gives back what it took and takes again; into another kind and back too", async () => {
     await hasBinance(500_000);
     const { id } = (await exchange().expect(201)).body as { id: number };
@@ -1000,6 +1024,9 @@ describe("USDC exchanged for cash in one action (Б22)", () => {
 
     // A note alone leaves Binance as it is.
     await api.patch(`/cash/operations/${id}`, { note: "Обменник на Подоле" }).expect(200);
+    // A wallet row is changed only here: the general editor of operations refuses it.
+    await api.patch(`/transactions/${id}`, { type: "spend", category: "cafe" }).expect(422);
+    await api.patch(`/transactions/${id}`, { category: "cafe", applyToSimilar: true }).expect(422);
     expect(await binance()).toBe(400_000);
     expect(await kept(id)).toEqual({ usdc: 100_000, binance: 100_000 });
 

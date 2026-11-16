@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { CashCategory, CashOperationKind, TransactionDto } from "@hale/contracts";
+import { exchangeRate } from "@hale/contracts/exchange";
 import { useAddCashOperation, useCash, useDeleteCashOperation, usePatchCashOperation } from "../api/queries";
 import { formatDollars, formatMoney, kyivDate, parseHryvnias } from "../format";
 import { SPEND_CATEGORIES, categoryLabel } from "../labels";
@@ -28,7 +29,7 @@ type Props = { /** An operation entered earlier, to change or delete; none for a
 
 /** What an exchange does, once both amounts are typed: the rate it came to, then where the money goes (task Б22). */
 const exchangeEffect = (cents: number, kopecks: number) =>
-  `Курс обмена ₴${(Math.round((kopecks / cents) * 100) / 100).toFixed(2)} за $1. Binance уменьшится на ${formatDollars(cents)}, ` +
+  `Курс обмена ₴${exchangeRate(kopecks, cents).toFixed(2)} за $1. Binance уменьшится на ${formatDollars(cents)}, ` +
   `наличных станет больше на ${formatMoney(kopecks)}. Это перевод между своими, не доход.`;
 
 /** A cash operation: kind, amount, category for a purchase, date and a note. */
