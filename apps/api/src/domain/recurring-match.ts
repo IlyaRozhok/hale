@@ -124,6 +124,13 @@ export function matchTaxPayment(tx: PayableTx, payments: readonly Payment[]): Pa
 
 /** A payment still unpaid this many days after its due date may be asked about (task Б8, invariant 6). */
 export const PAID_QUESTION_DAYS = 14;
+/**
+ * Task Б31: a transfer this many days or fewer from the due date, before or after it, is asked about
+ * at once, without waiting PAID_QUESTION_DAYS.
+ */
+export const PAID_QUESTION_WINDOW_DAYS = 5;
+/** Task Б31: how far that transfer may be from the payment's amount, in hryvnia minor units (₴20). */
+export const PAID_QUESTION_TOLERANCE = 2_000;
 /** No more «Это оплата?» questions than this at once. */
 export const MAX_PAID_QUESTIONS = 2;
 
@@ -140,15 +147,28 @@ function amountGap(tx: PayableTx, p: Payment, rates: Readonly<Record<string, num
   return Math.abs(uah - p.amount * rates[p.currency]!);
 }
 
+/** How far a row is from the payment's amount in hryvnia minor units, at the rate for a foreign one; null when unknown. */
+function uahGap(tx: PayableTx, p: Payment, rates: Readonly<Record<string, number>>): number | null {
+  const uah = paidUah(tx);
+  if (uah === null) return null;
+  if (p.currency === "UAH") return Math.abs(uah - p.amount);
+  const rate = rates[p.currency];
+  return rate && rate > 0 ? Math.abs(uah - p.amount * rate) : null;
+}
+
 /**
- * «Это оплата?» (task Б8): a payment still unpaid more than PAID_QUESTION_DAYS after its due date,
- * while an operation that could have paid it sits unlinked, keeps its money out of the limit for no
- * reason. `candidates` are the operations the «Оплачено» sheet offers for each payment; of those, only
- * an outgoing row that is not an own transfer, with the payment's amount (the same fit matchPayment
- * uses), and not dismissed by the owner for this payment (`dismissed` holds "payment:operation").
+ * «Это оплата?» (task Б8): a payment left unpaid while an operation that could have paid it sits
+ * unlinked keeps its money out of the limit for no reason, and the operation counts as spending.
+ * `candidates` are the operations the «Оплачено» sheet offers for each payment; of those, only an
+ * outgoing row that is not an own transfer and not dismissed by the owner for this payment
+ * (`dismissed` holds "payment:operation"), and that fits in one of two ways:
+ * - the payment is more than PAID_QUESTION_DAYS overdue and the row has its amount (the same fit
+ *   matchPayment uses);
+ * - at once (task Б31): the row is at most PAID_QUESTION_WINDOW_DAYS from the due date, either side,
+ *   and within PAID_QUESTION_TOLERANCE of the amount in hryvnias (a foreign payment at the rate).
  * Taxes are left out: they close on their own (task Б24). One question per payment, with its closest
  * amount, then the closest date to the due date; an operation is offered for one payment only. Oldest
- * due date first, at most MAX_PAID_QUESTIONS.
+ * due date first, at most MAX_PAID_QUESTIONS. Nothing is linked here: the owner answers.
  */
 export function paidQuestions(
   payments: readonly Payment[],
@@ -158,21 +178,24 @@ export function paidQuestions(
   rates: Readonly<Record<string, number>> = {},
 ): PaidQuestion[] {
   const now = dayNumber(today);
-  const due = payments
+  const open = payments
     .filter((p) => p.kind !== "tax" && p.paid_at === null && p.transaction_id === null && (p.linked ?? 0) === 0)
-    .filter((p) => now - dayNumber(p.due_on) > PAID_QUESTION_DAYS)
     .sort((a, b) => (a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : a.id - b.id));
   const used = new Set<number>();
   const out: PaidQuestion[] = [];
-  for (const p of due) {
+  for (const p of open) {
     if (out.length >= MAX_PAID_QUESTIONS) break;
     const dueDay = dayNumber(p.due_on);
+    const overdue = now - dueDay > PAID_QUESTION_DAYS;
     let best: { tx: PayableTx; gap: number; dist: number } | null = null;
     for (const tx of candidates.get(p.id) ?? []) {
       if (tx.amount >= 0 || tx.type === "own_transfer" || used.has(tx.id) || dismissed.has(`${p.id}:${tx.id}`)) continue;
-      const gap = amountGap(tx, p, rates);
-      if (gap === null) continue;
       const dist = Math.abs(dayNumber(tx.localDate) - dueDay);
+      const late = overdue ? amountGap(tx, p, rates) : null;
+      const near = dist <= PAID_QUESTION_WINDOW_DAYS ? uahGap(tx, p, rates) : null;
+      const early = near !== null && near <= PAID_QUESTION_TOLERANCE ? near : null;
+      const gap = late === null ? early : early === null ? late : Math.min(late, early);
+      if (gap === null) continue;
       if (!best || gap < best.gap || (gap === best.gap && (dist < best.dist || (dist === best.dist && tx.id < best.tx.id)))) {
         best = { tx, gap, dist };
       }

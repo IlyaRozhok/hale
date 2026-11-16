@@ -4,6 +4,8 @@ import {
   type Payment,
   MAX_PAID_QUESTIONS,
   PAID_QUESTION_DAYS,
+  PAID_QUESTION_TOLERANCE,
+  PAID_QUESTION_WINDOW_DAYS,
   TAX_ESTIMATE_TOLERANCE,
   TAX_EXACT_TOLERANCE,
   TAX_OVERPAY_SHARE,
@@ -466,6 +468,74 @@ describe("paidQuestions", () => {
     const shared = out(10);
     expect(ask([a, b, c], { 1: [shared], 2: [shared, out(11)], 3: [out(12)] })).toEqual([[2, 10], [3, 12]]);
     expect(ask([a, b], { 1: [shared], 2: [shared] })).toEqual([[2, 10]]);
+  });
+
+  // Б31: a rent paid by a plain transfer near its due date is asked about at once, not after 14 days.
+  describe("the early question (Б31)", () => {
+    const due = (over: Partial<Payment> = {}) => rent({ amount: 1_000_000, due_on: "2026-11-10", ...over });
+    const sent = (id: number, amount: number, localDate = "2026-11-08", over: Partial<PayableTx> = {}) =>
+      out(id, { amount: -amount, amountUah: -amount, localDate, ...over });
+
+    it("asks on the day of a transfer of the payment's amount two days before it is due", () => {
+      expect(PAID_QUESTION_WINDOW_DAYS).toBe(5);
+      expect(PAID_QUESTION_TOLERANCE).toBe(2_000);
+      expect(ask([due()], { 1: [sent(10, 1_000_000)] }, [], "2026-11-08")).toEqual([[1, 10]]);
+    });
+
+    it("takes a hryvnia amount within ₴20 of the payment, either side", () => {
+      expect(ask([due()], { 1: [sent(10, 1_001_500)] }, [], "2026-11-08")).toEqual([[1, 10]]);
+      expect(ask([due()], { 1: [sent(10, 998_000)] }, [], "2026-11-08")).toEqual([[1, 10]]);
+      expect(ask([due()], { 1: [sent(10, 1_005_000)] }, [], "2026-11-08")).toEqual([]);
+      expect(ask([due()], { 1: [sent(10, 997_999)] }, [], "2026-11-08")).toEqual([]);
+    });
+
+    it("takes a transfer up to five days from the due date, before or after it", () => {
+      expect(ask([due()], { 1: [sent(10, 1_000_000, "2026-11-05")] }, [], "2026-11-05")).toEqual([[1, 10]]);
+      expect(ask([due()], { 1: [sent(10, 1_000_000, "2026-11-15")] }, [], "2026-11-15")).toEqual([[1, 10]]);
+      expect(ask([due()], { 1: [sent(10, 1_000_000, "2026-11-16")] }, [], "2026-11-16")).toEqual([]);
+    });
+
+    it("does not ask early about a transfer a week before; the 14-day question still comes later", () => {
+      const early = sent(10, 1_000_000, "2026-11-03");
+      expect(ask([due()], { 1: [early] }, [], "2026-11-03")).toEqual([]);
+      expect(ask([due()], { 1: [early] }, [], "2026-11-10")).toEqual([]);
+      expect(ask([due()], { 1: [early] }, [], "2026-11-24")).toEqual([]);
+      expect(ask([due()], { 1: [early] }, [], "2026-11-25")).toEqual([[1, 10]]);
+    });
+
+    it("keeps asking about an early pair after the payment is long overdue", () => {
+      expect(ask([due()], { 1: [sent(10, 1_001_500)] }, [], "2026-11-30")).toEqual([[1, 10]]);
+    });
+
+    it("never asks about an own transfer, a dismissed pair, a tax, or a paid or linked payment", () => {
+      const t = sent(10, 1_000_000);
+      expect(ask([due()], { 1: [sent(10, 1_000_000, "2026-11-08", { type: "own_transfer" })] }, [], "2026-11-08")).toEqual([]);
+      expect(ask([due()], { 1: [t] }, ["1:10"], "2026-11-08")).toEqual([]);
+      expect(ask([due({ kind: "tax" })], { 1: [t] }, [], "2026-11-08")).toEqual([]);
+      expect(ask([due({ paid_at: "2026-11-08" })], { 1: [t] }, [], "2026-11-08")).toEqual([]);
+      expect(ask([due({ transaction_id: 5 })], { 1: [t] }, [], "2026-11-08")).toEqual([]);
+      expect(ask([due({ linked: 100 })], { 1: [t] }, [], "2026-11-08")).toEqual([]);
+      expect(ask([due()], { 1: [sent(10, -1_000_000)] }, [], "2026-11-08")).toEqual([]);
+    });
+
+    it("takes a foreign-currency payment at the rate, within the same ₴20", () => {
+      const usd = due({ currency: "USD", amount: 24_000 }); // $240 at 41.5 = ₴9,960
+      expect(ask([usd], { 1: [sent(10, 997_000)] }, [], "2026-11-08", { USD: 41.5 })).toEqual([[1, 10]]);
+      expect(ask([usd], { 1: [sent(10, 999_000)] }, [], "2026-11-08", { USD: 41.5 })).toEqual([]);
+      expect(ask([usd], { 1: [sent(10, 996_000)] }, [], "2026-11-08")).toEqual([]);
+    });
+
+    it("offers one operation for one payment and asks two at most", () => {
+      const a = due({ id: 1 });
+      const b = due({ id: 2, due_on: "2026-11-11" });
+      const c = due({ id: 3, due_on: "2026-11-12" });
+      const shared = sent(10, 1_000_000);
+      expect(ask([a, b], { 1: [shared], 2: [shared] }, [], "2026-11-08")).toEqual([[1, 10]]);
+      expect(ask([a, b, c], { 1: [sent(10, 1_000_000)], 2: [sent(11, 1_000_000)], 3: [sent(12, 1_000_000)] }, [], "2026-11-08")).toEqual([
+        [1, 10],
+        [2, 11],
+      ]);
+    });
   });
 });
 
