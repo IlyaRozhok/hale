@@ -292,6 +292,41 @@ describe("matchTaxShare", () => {
       expect(matchTaxShare(paying(40_000), [covered], [])).toMatchObject({ payment: covered, closes: false });
     });
 
+    describe("an open row of the quarter comes before an earlier row closed by hand", () => {
+      // ЄСВ closed by hand (paid outside the visible accounts); ЄП still open.
+      const esv = (over: Partial<Payment> = {}) =>
+        row({ id: 1, name: "ЄСВ", amount: 570_702, due_on: "2026-10-20", paid_at: "2026-10-20", ...over });
+      const ep = (over: Partial<Payment> = {}) => row({ id: 2, name: "ЄП", amount: 224_000, due_on: "2026-11-19", ...over });
+
+      it("a part goes to the open row, and the second part closes it", () => {
+        expect(matchTaxShare(paying(100_000), [esv(), ep()], [])).toEqual({ payment: ep(), ids: [10], closes: false, release: false });
+        const after = ep({ linked: 100_000 });
+        expect(matchTaxShare(paying(124_000, { id: 11 }), [esv(), after], [])).toEqual({ payment: after, ids: [11], closes: true, release: false });
+      });
+
+      it("a payment that completes the open row is not taken by the hand-closed row's parts", () => {
+        const hand = esv({ amount: 500_000, linked: 300_000 });
+        expect(matchTaxShare(paying(224_000), [hand, ep()], [])).toMatchObject({ payment: { id: 2 }, closes: true });
+      });
+
+      it("a payment that fits both goes to the open row", () => {
+        const hand = esv({ amount: 500_000 });
+        const open = ep({ amount: 520_000 });
+        expect(matchTaxShare(paying(530_000), [hand, open], [])).toMatchObject({ payment: { id: 2 }, closes: true });
+      });
+
+      it("a pair that fits both goes to the open row", () => {
+        const hand = esv({ amount: 500_000 });
+        const open = ep({ amount: 520_000 });
+        const res = matchTaxShare(paying(230_000), [hand, open], [paying(300_000, { id: 9 })]);
+        expect(res).toMatchObject({ payment: { id: 2 }, closes: true });
+      });
+
+      it("the hand-closed row takes what no open row can", () => {
+        expect(matchTaxShare(paying(300_000), [esv(), ep()], [])).toMatchObject({ payment: { id: 1 }, closes: false });
+      });
+    });
+
     it("takes nothing from outside its window", () => {
       expect(matchTaxShare(paying(300_000, { localDate: "2026-09-30" }), [hand()], [])).toBeNull();
       expect(matchTaxShare(paying(300_000, { localDate: "2026-12-21" }), [hand()], [])).toBeNull();

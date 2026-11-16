@@ -240,7 +240,9 @@ function inTaxWindow(tx: PayableTx, p: Payment): boolean {
  * Candidates are hryvnia tax rows not settled through `transaction_id`, whose quarter ended before the
  * payment, at most TAX_WINDOW_DAYS after their due date, open or closed by the owner's hand alike: a tax
  * paid in the window belongs to that quarter first. A total settles a row from `taxTolerance` below it up
- * to `taxCap` above it (10% over). The first that applies, oldest due date first within each step:
+ * to `taxCap` above it (10% over). Steps 1-4 run over the open rows first, and only then over the rows
+ * the owner closed by hand: an open row is still reserved, a closed one is not, so a payment that can pay
+ * an open row goes there. The first that applies, oldest due date first within each step:
  * 1. with the parts already linked to a row, this payment completes it;
  * 2. this payment alone settles a row (parts guessed before are let go);
  * 3. this payment and one unlinked tax payment from `others` together settle a row with nothing linked;
@@ -258,27 +260,32 @@ export function matchTaxShare(tx: PayableTx, payments: readonly Payment[], other
   const inWindow = payments
     .filter((p) => p.kind === "tax" && p.currency === "UAH" && p.transaction_id === null && inTaxWindow(tx, p))
     .sort((a, b) => (a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : a.id - b.id));
-  const rows = inWindow.filter((p) => !taxCovered(p, linked(p)));
+  const uncovered = inWindow.filter((p) => !taxCovered(p, linked(p)));
   const fits = (p: Payment, sum: number) => sum >= p.amount - tol(p) && sum <= taxCap(p);
   const share = (p: Payment, ids: number[], release = false): TaxShare => ({ payment: p, ids, closes: p.paid_at === null, release });
-
-  for (const p of rows) if (linked(p) > 0 && fits(p, linked(p) + x)) return share(p, [tx.id]);
-  for (const p of rows) if (fits(p, x)) return share(p, [tx.id], linked(p) > 0);
   const today = dayNumber(tx.localDate);
-  for (const p of rows) {
-    if (linked(p) > 0) continue;
-    const partner = others
-      .filter((o) => o.id !== tx.id && inTaxWindow(o, p))
-      .filter((o) => {
-        const y = paidUah(o);
-        return y !== null && fits(p, x + y);
-      })
-      .sort((a, b) => Math.abs(dayNumber(a.localDate) - today) - Math.abs(dayNumber(b.localDate) - today) || a.id - b.id)[0];
-    if (partner) return share(p, [tx.id, partner.id]);
-  }
-  for (const p of rows) {
-    if (linked(p) + x < p.amount - tol(p)) return { payment: p, ids: [tx.id], closes: false, release: false };
-  }
+
+  const settle = (rows: readonly Payment[]): TaxShare | null => {
+    for (const p of rows) if (linked(p) > 0 && fits(p, linked(p) + x)) return share(p, [tx.id]);
+    for (const p of rows) if (fits(p, x)) return share(p, [tx.id], linked(p) > 0);
+    for (const p of rows) {
+      if (linked(p) > 0) continue;
+      const partner = others
+        .filter((o) => o.id !== tx.id && inTaxWindow(o, p))
+        .filter((o) => {
+          const y = paidUah(o);
+          return y !== null && fits(p, x + y);
+        })
+        .sort((a, b) => Math.abs(dayNumber(a.localDate) - today) - Math.abs(dayNumber(b.localDate) - today) || a.id - b.id)[0];
+      if (partner) return share(p, [tx.id, partner.id]);
+    }
+    for (const p of rows) {
+      if (linked(p) + x < p.amount - tol(p)) return { payment: p, ids: [tx.id], closes: false, release: false };
+    }
+    return null;
+  };
+  const found = settle(uncovered.filter((p) => p.paid_at === null)) ?? settle(uncovered.filter((p) => p.paid_at !== null));
+  if (found) return found;
   for (const p of inWindow) {
     if (taxCovered(p, linked(p)) && linked(p) + x <= taxCap(p)) return share(p, [tx.id]);
   }
