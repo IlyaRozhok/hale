@@ -1,8 +1,10 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { ExpectedIncomePatch, InstallmentInput, InstallmentPatch, RecurringPatch } from "@hale/contracts";
+import type { ExpectedIncomePatch, InstallmentInput, InstallmentPatch, RecurringInput, RecurringPatch } from "@hale/contracts";
 import { DataSource } from "typeorm";
 import { ExpectedIncome, RecurringPayment } from "../db/entities";
+import { kyivDate } from "../domain/money";
 import { windowEndDate } from "../domain/recurring-match";
+import { Clock } from "../time/clock";
 import { LimitService } from "../today/limit.service";
 import { PlanService } from "./plan.service";
 
@@ -24,6 +26,7 @@ export class PlanEntriesService {
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(PlanService) private readonly plan: PlanService,
     @Inject(LimitService) private readonly limit: LimitService,
+    @Inject(Clock) private readonly clock: Clock,
   ) {}
 
   /** Today's fixed limit no longer holds: the day is fixed afresh now. */
@@ -35,6 +38,35 @@ export class PlanEntriesService {
   async generated(): Promise<void> {
     await this.plan.refresh();
     await this.freshLimit();
+  }
+
+  /** A new series starts today: no payment of it falls due earlier (Б29). */
+  async createRecurring(data: RecurringInput): Promise<RecurringPayment> {
+    const repo = this.ds.getRepository(RecurringPayment);
+    const row = await repo.save(repo.create({ ...data, starts_on: kyivDate(this.clock.now()) }));
+    await this.generated();
+    return row;
+  }
+
+  /**
+   * A planned payment deleted. A month deleted from a monthly series is remembered, so that the next
+   * generation does not bring it back (Б29).
+   */
+  async removePayment(id: number): Promise<{ deleted: true }> {
+    const deleted = await this.ds.transaction(async (m) => {
+      const [rows] = (await m.query(`DELETE FROM scheduled_payments WHERE id=$1 RETURNING recurring_id, due_on::text AS due_on`, [id])) as [
+        { recurring_id: number | null; due_on: string }[],
+        number,
+      ];
+      const r = rows[0];
+      if (r?.recurring_id != null) {
+        await m.query(`INSERT INTO recurring_skips (recurring_id, due_on) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [r.recurring_id, r.due_on]);
+      }
+      return rows.length;
+    });
+    if (!deleted) throw new NotFoundException();
+    await this.freshLimit();
+    return { deleted: true };
   }
 
   async patchRecurring(id: number, data: RecurringPatch): Promise<RecurringPayment> {

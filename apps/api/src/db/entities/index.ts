@@ -109,6 +109,8 @@ export class RecurringPayment {
   @Column({ type: "smallint" }) day_of_month!: number;
   @Column({ type: "text", nullable: true }) match_hint!: string | null;
   @Column({ type: "boolean", default: true }) active!: boolean;
+  /** Kyiv day the series was set up: no payment of it falls due before this day (Б29). */
+  @Column({ type: "date" }) starts_on!: string;
 }
 
 @Entity("manual_balances")

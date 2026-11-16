@@ -104,10 +104,10 @@ export async function applySeed(db: Queryable, seed: SeedFile, now: Date = new D
   }
   for (const r of seed.recurring) {
     result.recurring += await inserted(
-      `INSERT INTO recurring_payments (kind, name, amount, currency, day_of_month, match_hint, active)
-       SELECT $1::text,$2::text,$3,$4,$5,$6,$7 WHERE NOT EXISTS (SELECT 1 FROM recurring_payments WHERE name=$2::text)
+      `INSERT INTO recurring_payments (kind, name, amount, currency, day_of_month, match_hint, active, starts_on)
+       SELECT $1::text,$2::text,$3,$4,$5,$6,$7,$8 WHERE NOT EXISTS (SELECT 1 FROM recurring_payments WHERE name=$2::text)
        RETURNING id`,
-      [r.kind ?? "obligation", r.name, r.amount, r.currency, r.day_of_month, r.match_hint ?? null, r.active ?? true],
+      [r.kind ?? "obligation", r.name, r.amount, r.currency, r.day_of_month, r.match_hint ?? null, r.active ?? true, today],
     );
   }
   for (const b of seed.manual_balances) {
