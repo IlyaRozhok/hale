@@ -366,6 +366,18 @@ describe("repaying and reviewing loans", () => {
     expect((await history()).open.find((l: { id: number }) => l.id === person).dueOn).toBeNull();
   });
 
+  it("a loan's day cannot move past its return date, nor both at once out of order (Б7)", async () => {
+    const id = await manual(100_000, "2026-11-01");
+    await api.patch(`/plan/loans/${id}`, { due_on: "2026-11-10" }).expect(200);
+    await api.patch(`/plan/loans/${id}`, { received_on: "2026-11-11" }).expect(422);
+    await api.patch(`/plan/loans/${id}`, { received_on: "2026-11-12", due_on: "2026-11-11" }).expect(422);
+    expect((await history()).open[0]).toMatchObject({ receivedOn: "2026-11-01", dueOn: "2026-11-10" });
+    await api.patch(`/plan/loans/${id}`, { received_on: "2026-11-05" }).expect(200);
+    await api.patch(`/plan/loans/${id}`, { received_on: "2026-11-12", due_on: "2026-11-20" }).expect(200);
+    await api.patch(`/plan/loans/${id}`, { due_on: null }).expect(200);
+    await api.patch(`/plan/loans/${id}`, { received_on: "2026-11-30" }).expect(200);
+  });
+
   it("a repayment with a date keeps it", async () => {
     const id = await manual(1_000);
     await api.post(`/plan/loans/${id}/repay`, { amount: 1_000, date: "2026-11-02" }).expect(201);

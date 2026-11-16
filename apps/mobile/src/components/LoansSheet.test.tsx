@@ -112,11 +112,11 @@ describe("the loans list in Plan", () => {
     it("gives an open loan a return date, and Today is counted again", async () => {
       const api = dated(null);
       await show(api);
-      expect(screen.getByRole("button", { name: "Вернуть до: не выбрана" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Вернуть до, Друг, ₴5,000 от 01.11: не выбрана" })).toBeTruthy();
       expect(screen.queryByRole("button", { name: /^Убрать срок/ })).toBeNull();
-      await pickDate("Вернуть до", "2026-11-20");
+      await pickDate("Вернуть до, Друг, ₴5,000 от 01.11", "2026-11-20");
       await waitFor(() => expect(api.patchLoan).toHaveBeenCalledWith(7, { due_on: "2026-11-20" }));
-      expect(await screen.findByRole("button", { name: /^Вернуть до: 20 ноября/ })).toBeTruthy();
+      expect(await screen.findByRole("button", { name: /^Вернуть до, Друг, ₴5,000 от 01.11: 20 ноября/ })).toBeTruthy();
       await waitFor(() => expect(api.today).toHaveBeenCalledTimes(2));
     });
 
@@ -125,8 +125,23 @@ describe("the loans list in Plan", () => {
       await show(api);
       await fireEvent.press(screen.getByRole("button", { name: "Убрать срок: Друг" }));
       await waitFor(() => expect(api.patchLoan).toHaveBeenCalledWith(7, { due_on: null }));
-      expect(await screen.findByRole("button", { name: "Вернуть до: не выбрана" })).toBeTruthy();
+      expect(await screen.findByRole("button", { name: "Вернуть до, Друг, ₴5,000 от 01.11: не выбрана" })).toBeTruthy();
       expect(screen.queryByRole("button", { name: /^Убрать срок/ })).toBeNull();
+    });
+
+    it("names the loan in each date field, so a screen reader tells them apart", async () => {
+      const api = fakeApi({
+        loanHistory: jest.fn(async () =>
+          loanHistoryFixture({
+            open: [loanFixture({ dueOn: null }), loanFixture({ id: 8, title: "Кредит до завтра", manual: false, amount: 200_000, remaining: 150_000, receivedOn: "2026-11-02", dueOn: "2026-11-20" })],
+          }),
+        ),
+      });
+      await show(api);
+      expect(screen.getByRole("button", { name: "Вернуть до, Друг, ₴5,000 от 01.11: не выбрана" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^Вернуть до, Кредит до завтра, ₴2,000 от 02\.11, осталось ₴1,500: 20 ноября/ })).toBeTruthy();
+      // The visible label stays short.
+      expect(screen.getAllByText("Вернуть до")).toHaveLength(2);
     });
 
     it("says so when the date does not save", async () => {

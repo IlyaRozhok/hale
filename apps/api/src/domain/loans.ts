@@ -31,7 +31,10 @@ export interface LoanReserve {
   due: Minor;
   /** Every loan that lowers free money now, in the order given. */
   counted: OpenLoan[];
-  /** Tracked loans whose return date is today or already past, the oldest date first. */
+  /**
+   * Reserved loans whose return date is today or already past, the oldest date first. A loan due on the day the
+   * income comes is outside the window, so it is not named: nothing would say it is in the limit.
+   */
   dueNow: OpenLoan[];
 }
 
@@ -58,6 +61,6 @@ export function loanReserve(i: LoanReserveInput): LoanReserve {
     borrowed: undated.reduce((s, l) => s + l.remaining, 0),
     due: dated.reduce((s, l) => s + l.remaining, 0),
     counted: tracked.filter((l) => undated.includes(l) || dated.includes(l)),
-    dueNow: tracked.filter((l) => l.dueOn !== null && l.dueOn <= i.today).sort((a, b) => a.dueOn!.localeCompare(b.dueOn!) || a.id - b.id),
+    dueNow: dated.filter((l) => l.dueOn! <= i.today).sort((a, b) => a.dueOn!.localeCompare(b.dueOn!) || a.id - b.id),
   };
 }

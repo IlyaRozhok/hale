@@ -145,7 +145,13 @@ function DueDate({ loan }: { loan: LoanRowDto }) {
     );
   return (
     <View style={styles.due}>
-      <DateField label="Вернуть до" value={loan.dueOn ?? ""} onChange={save} min={loan.receivedOn} />
+      <DateField
+        label="Вернуть до"
+        accessibilityName={`Вернуть до, ${nameOf(loan)}, ${detail(loan)}`}
+        value={loan.dueOn ?? ""}
+        onChange={save}
+        min={loan.receivedOn}
+      />
       {!!loan.dueOn && (
         <Pressable
           accessibilityRole="button"
