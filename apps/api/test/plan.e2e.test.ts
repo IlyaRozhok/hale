@@ -1076,6 +1076,19 @@ describe("recurring payments", () => {
       expect(await dues(id)).toEqual([]);
     });
 
+    it("a seeded series getting its first rows at the hourly job refixes the day once", async () => {
+      await ds.query(
+        `INSERT INTO recurring_payments (name, amount, currency, day_of_month, starts_on) VALUES ('Rent', 1700000, 'UAH', 20, $1)`,
+        [now],
+      );
+      await plantSnapshot(now);
+      await app.get(PlanService).hourlyJob();
+      await fixedAfresh(now);
+      await plantSnapshot(now);
+      await app.get(PlanService).hourlyJob();
+      expect(await ds.query(`SELECT daily_limit::int AS l FROM daily_snapshots WHERE local_date=$1`, [now])).toEqual([{ l: 1 }]);
+    });
+
     it("a payment of no series leaves nothing behind when deleted", async () => {
       const p = (await api.post("/plan/payments", { kind: "obligation", name: "x", amount: 1000, currency: "UAH", due_on: "2026-12-01" }).expect(201)).body.id;
       await api.del(`/plan/payments/${p}`).expect(200);
