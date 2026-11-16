@@ -27,6 +27,7 @@ For agents, in English. Each item cost someone time once. When you hit a new one
 - **A new table needs three edits.** The migration, the table list in `apps/api/test/migrations.test.ts`, and `DEFAULT_TABLES` in `infra/restore-check.sh` — `infra/test/scripts.test.ts` fails otherwise. Put all three in the builder's «Где» (15 November 2026, Б8, Б21, Б11).
 - **`unmount()` returns a promise** in the installed `@testing-library/react-native`. Rendering again in the same test without `await unmount()` overlaps `act()` and breaks later tests in the file (15 November 2026, Б11).
 - **`CheckModule` must stay last in `app.module.ts`.** There is an import cycle around `today/` and `plan/`; importing it earlier leaves `LimitService` undefined in `PlanService` and every e2e suite fails (15 November 2026, Б11).
+- **The same holds for the `import` line of any new module that imports `TodayModule`** (for the `Clock`). With `import { InsightsModule }` placed alphabetically before `MonoModule`/`PlanModule`, every e2e suite failed with "Nest can't resolve dependencies of the PlanService (DataSource, Clock, ?)". Put both the `import` statement and the module entry next to `CheckModule`'s, after the others (16 November 2026, В1).
 
 ## iOS build
 
