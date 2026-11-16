@@ -183,23 +183,37 @@ export class PlanService implements OnApplicationBootstrap {
     for (const r of rows) await this.onClassified(r.id, "tax");
   }
 
-  /** Creates this and next month's payment for every active recurring series. Returns new rows. */
+  /**
+   * Creates this and next month's payment for every active recurring series. Returns new rows. Never a
+   * day before the series started (a day already past when it was set up was paid, or not tracked,
+   * before setup, and would show up as overdue), nor a month the owner deleted from it (Б29).
+   */
   async generateRecurring(today: string = kyivDate(this.clock.now())): Promise<number> {
-    const series: { id: number; kind: string; name: string; amount: number; currency: string; day_of_month: number; match_hint: string | null }[] =
-      await this.ds.query(
-        `SELECT id, kind, name, amount::float8 AS amount, currency, day_of_month, match_hint
-           FROM recurring_payments WHERE active ORDER BY id`,
-      );
+    const series: {
+      id: number;
+      kind: string;
+      name: string;
+      amount: number;
+      currency: string;
+      day_of_month: number;
+      match_hint: string | null;
+      starts_on: string;
+    }[] = await this.ds.query(
+      `SELECT id, kind, name, amount::float8 AS amount, currency, day_of_month, match_hint, starts_on::text AS starts_on
+         FROM recurring_payments WHERE active ORDER BY id`,
+    );
     let created = 0;
     for (const r of series) {
-      // A series being created now has no history: a day already past this month was paid (or not
-      // tracked) before setup, and would show up as overdue.
+      // A series with no rows yet (set up long ago while paused, say) gets nothing already past either.
       const fresh = (await this.ds.query(`SELECT 1 FROM scheduled_payments WHERE recurring_id=$1 LIMIT 1`, [r.id])).length === 0;
       for (const due of monthlyDueDates(r.day_of_month, today)) {
-        if (fresh && due < today) continue;
+        if (due < r.starts_on || (fresh && due < today)) continue;
         const out: unknown[] = await this.ds.query(
           `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, match_hint, recurring_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (recurring_id, due_on) DO NOTHING RETURNING id`,
+           SELECT $1,$2,$3,$4,$5::date,$6,$7
+            WHERE NOT EXISTS (SELECT 1 FROM recurring_skips s
+                               WHERE s.recurring_id = $7 AND date_trunc('month', s.due_on) = date_trunc('month', $5::date))
+           ON CONFLICT (recurring_id, due_on) DO NOTHING RETURNING id`,
           [r.kind, r.name, r.amount, r.currency, due, r.match_hint, r.id],
         );
         created += out.length;

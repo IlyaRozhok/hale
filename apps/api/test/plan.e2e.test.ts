@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import { kyivDate } from "../src/domain/money";
 import { PlanService } from "../src/plan/plan.service";
+import { Clock } from "../src/time/clock";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
 import { DayTermCashLoans1795132800000 } from "../src/db/migrations/0019-day-term-cash-loans";
 
@@ -1015,6 +1016,71 @@ describe("recurring payments", () => {
   it("skips inactive series", async () => {
     await api.post("/plan/recurring", { ...rent, active: false }).expect(201);
     expect(await app.get(PlanService).generateRecurring("2027-01-15")).toBe(0);
+  });
+
+  describe("set up on 16 November (Б29)", () => {
+    const now = "2026-11-16";
+    const dues = async (id: number) =>
+      (await ds.query(`SELECT due_on::text AS d FROM scheduled_payments WHERE recurring_id=$1 ORDER BY due_on`, [id])).map(
+        (r: { d: string }) => r.d,
+      );
+    const create = async (day: number) => (await api.post("/plan/recurring", { ...rent, day_of_month: day }).expect(201)).body.id as number;
+
+    beforeEach(async () => {
+      app.get(Clock).fixed = new Date(`${now}T10:00:00Z`);
+      await ds.query(`DELETE FROM daily_snapshots`);
+    });
+    afterEach(() => {
+      app.get(Clock).fixed = null;
+    });
+
+    it("a day already past this month starts next month, and no later run brings it back as overdue", async () => {
+      const id = await create(10);
+      expect((await api.get("/plan/recurring")).body[0]).toMatchObject({ id, starts_on: now });
+      expect(await dues(id)).toEqual(["2026-12-10"]);
+      const plan = app.get(PlanService);
+      expect(await plan.generateRecurring()).toBe(0); // the hourly job
+      await create(28); // another series: generation runs again for every series
+      expect(await dues(id)).toEqual(["2026-12-10"]);
+      await plan.generateRecurring("2026-12-01");
+      expect(await dues(id)).toEqual(["2026-12-10", "2027-01-10"]);
+    });
+
+    it("a day still ahead this month is due this month", async () => {
+      const id = await create(20);
+      await app.get(PlanService).generateRecurring();
+      expect(await dues(id)).toEqual(["2026-11-20", "2026-12-20"]);
+    });
+
+    it("a deleted month stays deleted at later runs, and the day is fixed afresh", async () => {
+      const id = await create(20);
+      const dec = (await ds.query(`SELECT id FROM scheduled_payments WHERE recurring_id=$1 AND due_on='2026-12-20'`, [id]))[0].id as number;
+      await plantSnapshot(now);
+      await api.del(`/plan/payments/${dec}`).expect(200);
+      await fixedAfresh(now);
+      const plan = app.get(PlanService);
+      expect(await plan.generateRecurring()).toBe(0);
+      await create(5);
+      await plan.generateRecurring("2026-12-21");
+      expect(await dues(id)).toEqual(["2026-11-20", "2027-01-20"]);
+      await api.del(`/plan/payments/${dec}`).expect(404);
+    });
+
+    it("a payment of no series leaves nothing behind when deleted", async () => {
+      const p = (await api.post("/plan/payments", { kind: "obligation", name: "x", amount: 1000, currency: "UAH", due_on: "2026-12-01" }).expect(201)).body.id;
+      await api.del(`/plan/payments/${p}`).expect(200);
+      expect(await ds.query(`SELECT * FROM recurring_skips`)).toEqual([]);
+    });
+
+    it("deleting the series takes its skipped months with it", async () => {
+      const id = await create(20);
+      const dec = (await ds.query(`SELECT id FROM scheduled_payments WHERE recurring_id=$1 AND due_on='2026-12-20'`, [id]))[0].id as number;
+      await api.del(`/plan/payments/${dec}`).expect(200);
+      expect(await ds.query(`SELECT recurring_id, due_on::text AS d FROM recurring_skips`)).toEqual([{ recurring_id: id, d: "2026-12-20" }]);
+      await api.del(`/plan/recurring/${id}`).expect(200);
+      expect(await ds.query(`SELECT * FROM recurring_skips`)).toEqual([]);
+      expect(await ds.query(`SELECT * FROM scheduled_payments`)).toEqual([]);
+    });
   });
 });
 

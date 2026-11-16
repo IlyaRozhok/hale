@@ -165,10 +165,8 @@ export class PlanController {
   }
 
   @Delete("payments/:id")
-  async deletePayment(@Param("id", ParseIntPipe) id: number) {
-    const done = await removeRow(this.ds.getRepository(ScheduledPayment), id);
-    await this.entries.freshLimit();
-    return done;
+  deletePayment(@Param("id", ParseIntPipe) id: number) {
+    return this.entries.removePayment(id);
   }
 
   // --- installments ---------------------------------------------------------
@@ -205,11 +203,8 @@ export class PlanController {
   }
 
   @Post("recurring")
-  async createRecurring(@Body() body: unknown): Promise<RecurringPayment> {
-    const repo = this.ds.getRepository(RecurringPayment);
-    const row = await repo.save(repo.create(parse(recurringInput, body)));
-    await this.entries.generated();
-    return row;
+  createRecurring(@Body() body: unknown): Promise<RecurringPayment> {
+    return this.entries.createRecurring(parse(recurringInput, body));
   }
 
   @Patch("recurring/:id")

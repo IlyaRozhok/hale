@@ -5,6 +5,8 @@ import { createDataSource, migrations } from "../src/db/data-source";
 import { PaymentClosedByLinks1795392000000 } from "../src/db/migrations/0022-payment-closed-by-links";
 import { LoanDueOn1795564800000 } from "../src/db/migrations/0024-loan-due-on";
 import { IncomeEventDateByHand1795737600000 } from "../src/db/migrations/0026-income-event-date-by-hand";
+import { RecurringStart1795824000000 } from "../src/db/migrations/0027-recurring-start";
+import { kyivDate } from "../src/domain/money";
 import { createTestDatabase } from "./db";
 
 const TABLES = [
@@ -12,7 +14,7 @@ const TABLES = [
   "scheduled_payments", "recurring_payments", "manual_balances", "loans", "settings", "bridge_plans",
   "daily_snapshots", "fx_rates",
       "goals", "jobs", "devices", "notifications_log", "loan_repayments", "payment_links", "cash_cards", "payment_dismissals", "cash_answers",
-  "ledger_checks", "cash_exchanges",
+  "ledger_checks", "cash_exchanges", "recurring_skips",
 ];
 
 async function listTables(url: string): Promise<string[]> {
@@ -153,6 +155,40 @@ describe("migrations", () => {
     for (let i = migrations.indexOf(IncomeEventDateByHand1795737600000); i < migrations.length; i++) await ds.undoLastMigration();
     expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE column_name='date_set_by_hand'`)).toEqual([]);
     expect(await ds.query(`SELECT count(*)::int AS n FROM income_events`)).toEqual([{ n: 5 }]);
+    await ds.destroy();
+  });
+
+  it("0027 starts each series at its earliest payment and leaves the payments alone (Б29)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(RecurringStart1795824000000)) });
+    await before.initialize();
+    await before.runMigrations();
+    await before.query(
+      `INSERT INTO recurring_payments (id, name, amount, currency, day_of_month, active) VALUES
+         (1, 'Квартира', 100000, 'UAH', 10, true), (2, 'Спорт', 50000, 'UAH', 20, false)`,
+    );
+    await before.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, recurring_id, paid_at) VALUES
+         ('obligation', 'Квартира', 100000, 'UAH', '2026-11-10', 1, NULL),
+         ('obligation', 'Квартира', 100000, 'UAH', '2026-10-10', 1, '2026-10-10T10:00:00Z'),
+         ('obligation', 'Квартира', 100000, 'UAH', '2026-12-10', 1, NULL)`,
+    );
+    const payments = `SELECT id, due_on::text AS d, recurring_id AS r, paid_at IS NOT NULL AS paid FROM scheduled_payments ORDER BY id`;
+    const was = await before.query(payments);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    expect(await ds.query(`SELECT id, starts_on::text AS s FROM recurring_payments ORDER BY id`)).toEqual([
+      { id: 1, s: "2026-10-10" }, // its earliest payment: history stays as it is
+      { id: 2, s: kyivDate(new Date()) }, // no payments: the day of the migration
+    ]);
+    expect(await ds.query(payments)).toEqual(was);
+    expect(await ds.query(`SELECT count(*)::int AS n FROM recurring_skips`)).toEqual([{ n: 0 }]);
+    for (let i = migrations.indexOf(RecurringStart1795824000000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE column_name='starts_on'`)).toEqual([]);
+    expect(await ds.query(payments)).toEqual(was);
     await ds.destroy();
   });
 });
