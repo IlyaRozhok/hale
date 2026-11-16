@@ -64,3 +64,37 @@ export function loanReserve(i: LoanReserveInput): LoanReserve {
     dueNow: dated.filter((l) => l.dueOn! <= i.today).sort((a, b) => a.dueOn!.localeCompare(b.dueOn!) || a.id - b.id),
   };
 }
+
+/** A received income event, as the loan cycle boundary sees it. */
+export interface ReceivedIncome {
+  source: "fop" | "usdc";
+  /** The Kyiv day it was received; null when the day is unknown. */
+  receivedOn: string | null;
+  /** What arrived, in kopecks; null when not recorded. */
+  amountUah: Minor | null;
+  /** The expected amount, in minor units of `currency`. */
+  expectedAmount: Minor;
+  currency: string;
+  /** Marked received by a bank income on the fop account, not by the owner's «Доход пришёл». */
+  byBank: boolean;
+}
+
+/**
+ * The day the last income came, for the monthly-bank-loan rule of `loanReserve` (task Б33). Any fop income
+ * marks its month received, so the next income date never hangs; but a small part of the expected amount is not
+ * the month's income for this boundary: a fop event marked by the bank closes the cycle only once what arrived
+ * reaches half the expected amount in hryvnias (a foreign one at its rate; without a rate it does not). An older
+ * boundary keeps more loans in the limit: the safe side. Income confirmed by hand and USDC count as before.
+ */
+export function lastIncomeBoundary(events: readonly ReceivedIncome[], rates: Readonly<Record<string, number>>): string | null {
+  let last: string | null = null;
+  for (const e of events) {
+    if (e.receivedOn === null) continue;
+    if (e.source === "fop" && e.byBank) {
+      const rate = e.currency === "UAH" ? 1 : rates[e.currency];
+      if (!rate || e.amountUah === null || e.amountUah * 2 < e.expectedAmount * rate) continue;
+    }
+    if (last === null || e.receivedOn > last) last = e.receivedOn;
+  }
+  return last;
+}

@@ -2061,4 +2061,78 @@ describe("a fop income smaller than expected still counts as the month's income 
     expect(late.state.dailyLimit).toBe(Math.floor(late.state.free / 27));
     expect(late.questions.map((q: { kind: string }) => q.kind)).not.toContain("income_date");
   });
+
+  describe("a monthly bank loan taken before a small income still counts (Б7 boundary)", () => {
+    /** October's income came on 20 October; ₴50,000 is expected in a 15–25 window; ₴30,000 monthly bank loan on 3 November. */
+    async function setup(card: number): Promise<number> {
+      const fop = await account("fop", 0);
+      at("2026-11-02T08:00:00Z");
+      await api.post("/plan/expected-incomes", { source: "fop", amount: 5_000_000, currency: "UAH", window_start_day: 15, window_end_day: 25 }).expect(201);
+      await ds.query(
+        `INSERT INTO income_events (expected_income_id, period, expected_on, status, received_at)
+         SELECT id, '2026-10', '2026-10-25', 'received', '2026-10-20T09:00:00Z' FROM expected_incomes`,
+      );
+      const lt = await tx(card, 3_000_000, "loan_in", { date: "2026-11-03" });
+      await ds.query(`INSERT INTO loans (amount, received_on, source_transaction_id, kind) VALUES (3000000,'2026-11-03',$1,'other')`, [lt]);
+      return fop;
+    }
+    async function fopIncome(fop: number, amount: number, date: string, balance: number): Promise<void> {
+      seq++;
+      const t = (
+        await ds.query(
+          `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, mcc, raw)
+           VALUES ($1,$2,$3,$4,'From client',$5,$5,4829,'{}') RETURNING id`,
+          [`tx-${seq}`, fop, `${date}T09:00:00Z`, date, amount],
+        )
+      )[0].id as number;
+      await setBalance(fop, balance);
+      await app.get(ReclassifyService).reclassifyIds([t]);
+    }
+
+    it("₴2,000 of ₴50,000 leaves the loan in free money; once half has come it stops counting, as before", async () => {
+      const card = await account("black", 4_000_000);
+      const fop = await setup(card);
+      await fopIncome(fop, 200_000, "2026-11-06", 200_000);
+      at("2026-11-07T08:00:00Z");
+      const small = (await today()).state;
+      // ₴40,000 + ₴2,000 − the ₴30,000 loan − 6% tax on ₴2,000.
+      expect(small.free).toBe(4_000_000 + 200_000 - 3_000_000 - 12_000);
+      expect(small.dailyLimit).toBeLessThanOrEqual(66_000);
+
+      await fopIncome(fop, 2_500_000, "2026-11-07", 2_700_000);
+      at("2026-11-08T08:00:00Z");
+      expect((await today()).state.free).toBe(4_000_000 + 2_700_000 - 162_000);
+    });
+
+    it("in bridge mode a small income does not close the plan", async () => {
+      const card = await account("black", 3_200_000, { creditLimit: 3_000_000 });
+      const fop = await setup(card);
+      at("2026-11-05T08:00:00Z");
+      expect((await today()).state.mode).toBe("bridge");
+      await api.post("/bridge", { dailyAmount: 45_000 }).expect(201);
+
+      await fopIncome(fop, 200_000, "2026-11-05", 200_000);
+      await fix();
+      const same = (await api.get("/today").expect(200)).body.state;
+      expect(same).toMatchObject({ mode: "bridge", dailyLimit: 45_000 });
+      expect(await ds.query(`SELECT closed_on FROM bridge_plans`)).toEqual([{ closed_on: null }]);
+      at("2026-11-06T08:00:00Z");
+      expect((await today()).state.mode).toBe("bridge");
+      expect(await ds.query(`SELECT closed_on FROM bridge_plans`)).toEqual([{ closed_on: null }]);
+    });
+
+    it("an expected income set up after a small income this month does not drop the loan either", async () => {
+      const card = await account("black", 4_000_000);
+      const fop = await account("fop", 0);
+      at("2026-11-02T08:00:00Z");
+      const lt = await tx(card, 3_000_000, "loan_in", { date: "2026-11-03" });
+      await ds.query(`INSERT INTO loans (amount, received_on, source_transaction_id, kind) VALUES (3000000,'2026-11-03',$1,'other')`, [lt]);
+      await fopIncome(fop, 200_000, "2026-11-06", 200_000);
+      at("2026-11-07T08:00:00Z");
+      await api.post("/plan/expected-incomes", { source: "fop", amount: 5_000_000, currency: "UAH", window_start_day: 15, window_end_day: 25 }).expect(201);
+      await app.get(PlanService).hourlyJob();
+      expect((await ds.query(`SELECT status FROM income_events WHERE period='2026-11'`))[0].status).toBe("received");
+      expect((await today()).state.free).toBe(4_000_000 + 200_000 - 3_000_000 - 12_000);
+    });
+  });
 });
