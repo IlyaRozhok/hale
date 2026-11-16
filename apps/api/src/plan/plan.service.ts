@@ -168,7 +168,8 @@ export class PlanService implements OnApplicationBootstrap {
 
   /**
    * Bank rows can arrive before the tax row that claims them (history is imported first, the owner's
-   * rows are seeded later), so unclaimed tax payments are tried again. Newest first: a row goes to its
+   * rows are seeded later), so unclaimed tax payments are tried again, on start and hourly. This is also
+   * how payments read under an older rule reach their quarter (Б30). Newest first: a row goes to its
    * latest fitting payment. Safe to repeat.
    */
   async linkTaxTransactions(): Promise<void> {
@@ -407,6 +408,8 @@ export class PlanService implements OnApplicationBootstrap {
       [id],
     );
     if (!rows[0]) throw new NotFoundException("payment not found");
+    // A tax closed by hand takes payments off its figure now (Б30): link them at once, not at the next hour.
+    if (paid[1] > 0 && rows[0].kind === "tax") await this.linkTaxTransactions();
     return rows[0];
   }
 
@@ -479,7 +482,8 @@ export class PlanService implements OnApplicationBootstrap {
             [hit.id, t.occurred_at, t.id],
           );
           if (t.type === "spend") await this.retypeAsDebt(m, t.id);
-          if (hit.kind === "tax" && hit.paid_at === null) await this.limit.invalidate("payment_paid", m);
+          // A tax row claiming its payment moves it off this quarter's accrual, closed or not: the day is fixed afresh.
+          if (hit.kind === "tax") await this.limit.invalidate("payment_paid", m);
         } else if (t.type === "tax") {
           await this.settleTaxShare(m, payable, t.occurred_at, open);
         }
@@ -488,8 +492,10 @@ export class PlanService implements OnApplicationBootstrap {
   }
 
   /**
-   * A tax paid in parts, or off its row by a little (task Б24): the operations are linked to the row
-   * through payment_links, and an open row is closed once they add up to it. See matchTaxShare.
+   * A tax paid in parts, or off its row by a little (tasks Б24, Б30): the operations are linked to the row
+   * through payment_links, and an open row is closed once they add up to it; a row closed by hand keeps its
+   * mark. A link takes the payment off this quarter's accrual, so every link fixes the day afresh. See
+   * matchTaxShare.
    */
   private async settleTaxShare(m: EntityManager, tx: PayableTx, occurredAt: Date, open: readonly Payment[]): Promise<void> {
     const others: PayableTx[] = await m.query(
@@ -505,9 +511,10 @@ export class PlanService implements OnApplicationBootstrap {
     if (!share) return;
     if (share.release) await m.query(`DELETE FROM payment_links WHERE payment_id=$1`, [share.payment.id]);
     await m.query(`INSERT INTO payment_links (payment_id, transaction_id) SELECT $1, unnest($2::int[])`, [share.payment.id, share.ids]);
-    if (!share.closes) return;
-    // Closed by its links: it opens again if it loses one and the rest no longer cover it (task Б26).
-    await m.query(`UPDATE scheduled_payments SET paid_at=COALESCE(paid_at, $2), closed_by_links = true WHERE id=$1`, [share.payment.id, occurredAt]);
+    if (share.closes) {
+      // Closed by its links: it opens again if it loses one and the rest no longer cover it (task Б26).
+      await m.query(`UPDATE scheduled_payments SET paid_at=COALESCE(paid_at, $2), closed_by_links = true WHERE id=$1`, [share.payment.id, occurredAt]);
+    }
     await this.limit.invalidate("payment_paid", m);
   }
 
