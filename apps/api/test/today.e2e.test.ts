@@ -832,6 +832,26 @@ describe("tax reserve and own money", () => {
         expect(await limit()).toBe(1);
       });
 
+      it("ЄСВ closed by hand and paid off its figure, a Q4 advance, then ЄП: each row gets its own payment, Q4 only the advance", async () => {
+        await big();
+        const esv = await taxRow(570_702, { name: "ЄСВ", due: "2026-10-20", paid: "2026-10-20T12:00:00Z" });
+        const ep = await taxRow(700_000, { name: "ЄП", due: "2026-11-19" });
+        const a = await pay(571_000, "2026-10-18");
+        expect(await links(esv)).toEqual([a]);
+        expect(await links(ep)).toEqual([]);
+        const advance = await pay(190_234, "2026-11-10");
+        expect(await state(ep)).toMatchObject({ paid: false });
+        const b = await pay(700_000);
+        expect(await links(esv)).toEqual([a]);
+        expect(await links(ep)).toEqual([b]);
+        expect(await state(ep)).toMatchObject({ paid: true, transaction_id: null });
+        expect(await state(esv)).toMatchObject({ paid: true, transaction_id: null });
+        // The hourly retry leaves the advance with Q4.
+        await plan().hourlyJob();
+        expect(await row(`SELECT 1 AS x FROM payment_links WHERE transaction_id=$1`, [advance])).toBeUndefined();
+        expect((await today()).state.free).toBe(2_000_000 - (571_000 + 190_234 + 700_000) - (600_000 - 190_234));
+      });
+
       it("a tax payment more than 30 days after the row's due date stays with Q4", async () => {
         await big();
         at("2026-12-22T10:00:00Z");

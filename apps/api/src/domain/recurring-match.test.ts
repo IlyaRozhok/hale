@@ -322,6 +322,15 @@ describe("matchTaxShare", () => {
         expect(res).toMatchObject({ payment: { id: 2 }, closes: true });
       });
 
+      it("a payment that pays the hand-closed row by itself goes there, not to the open row as a part", () => {
+        const open = ep({ amount: 700_000 });
+        const t = paying(571_000, { localDate: "2026-10-18" });
+        expect(matchTaxShare(t, [esv(), open], [])).toEqual({ payment: esv(), ids: [10], closes: false, release: false });
+        // A pair adding up to the hand-closed row also beats a part of the open row.
+        const res = matchTaxShare(paying(300_000, { localDate: "2026-10-18" }), [esv(), open], [paying(271_000, { id: 9, localDate: "2026-10-17" })]);
+        expect(res).toMatchObject({ payment: { id: 1 }, closes: false });
+      });
+
       it("the hand-closed row takes what no open row can", () => {
         expect(matchTaxShare(paying(300_000), [esv(), ep()], [])).toMatchObject({ payment: { id: 1 }, closes: false });
       });

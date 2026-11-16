@@ -240,14 +240,15 @@ function inTaxWindow(tx: PayableTx, p: Payment): boolean {
  * Candidates are hryvnia tax rows not settled through `transaction_id`, whose quarter ended before the
  * payment, at most TAX_WINDOW_DAYS after their due date, open or closed by the owner's hand alike: a tax
  * paid in the window belongs to that quarter first. A total settles a row from `taxTolerance` below it up
- * to `taxCap` above it (10% over). Steps 1-4 run over the open rows first, and only then over the rows
- * the owner closed by hand: an open row is still reserved, a closed one is not, so a payment that can pay
- * an open row goes there. The first that applies, oldest due date first within each step:
+ * to `taxCap` above it (10% over). The first that applies, oldest due date first within each step:
  * 1. with the parts already linked to a row, this payment completes it;
  * 2. this payment alone settles a row (parts guessed before are let go);
  * 3. this payment and one unlinked tax payment from `others` together settle a row with nothing linked;
  * 4. a row it does not settle yet takes it as a part; an open row stays open and reserved;
  * 5. a row its links already settle takes it while their total stays within `taxCap`.
+ * Steps 1-3 run over the open rows, then over the rows the owner closed by hand; then step 4 the same
+ * way. An open row is still reserved and a closed one is not, so a payment that can pay an open row goes
+ * there; but a payment that pays a row by itself is not taken as a part of another one.
  * Links are whole operations: a payment that would take a row's total past its cap is not linked at all,
  * and counts against the current quarter as before. Only an open row is closed here (`closes`); one the
  * owner closed keeps his mark.
@@ -279,12 +280,17 @@ export function matchTaxShare(tx: PayableTx, payments: readonly Payment[], other
         .sort((a, b) => Math.abs(dayNumber(a.localDate) - today) - Math.abs(dayNumber(b.localDate) - today) || a.id - b.id)[0];
       if (partner) return share(p, [tx.id, partner.id]);
     }
+    return null;
+  };
+  const part = (rows: readonly Payment[]): TaxShare | null => {
     for (const p of rows) {
       if (linked(p) + x < p.amount - tol(p)) return { payment: p, ids: [tx.id], closes: false, release: false };
     }
     return null;
   };
-  const found = settle(uncovered.filter((p) => p.paid_at === null)) ?? settle(uncovered.filter((p) => p.paid_at !== null));
+  const open = uncovered.filter((p) => p.paid_at === null);
+  const byHand = uncovered.filter((p) => p.paid_at !== null);
+  const found = settle(open) ?? settle(byHand) ?? part(open) ?? part(byHand);
   if (found) return found;
   for (const p of inWindow) {
     if (taxCovered(p, linked(p)) && linked(p) + x <= taxCap(p)) return share(p, [tx.id]);
