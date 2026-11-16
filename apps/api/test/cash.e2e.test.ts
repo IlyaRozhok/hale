@@ -1,12 +1,13 @@
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { DataSource as DS, type DataSource } from "typeorm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import { Clock } from "../src/time/clock";
 import { TodayService } from "../src/today/today.service";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
 import { PlanService } from "../src/plan/plan.service";
+import { LimitService } from "../src/today/limit.service";
 
 let app: INestApplication;
 let ds: DataSource;
@@ -919,5 +920,121 @@ describe("changing the answer to «Откуда наличные?» (Б21)", () 
     const fresh = await bankTx(c, DEPOSIT, "cash_in", "2026-11-10", terminal);
     expect((await tx(fresh)).cashAnswer).toBeNull();
     expect((await answer(fresh, "wallet").expect(201)).body.cashAnswer).toEqual({ answer: "wallet", canBinance: false, binanceOnChange: null });
+  });
+});
+
+describe("USDC exchanged for cash in one action (Б22)", () => {
+  // The owner's exchange of 15 November: $1,400 USDC for ₴65,430 in cash.
+  const USDC = 140_000;
+  const UAH = 6_543_000;
+  const binance = async () => (await row(`SELECT amount::int AS amount FROM manual_balances WHERE name='Binance'`))?.amount as number | undefined;
+  const hasBinance = (cents: number) =>
+    ds.query(`INSERT INTO manual_balances (name, amount, currency, counts_as_own) VALUES ('Binance', $1, 'USD', true)`, [cents]);
+  const exchange = (usdc = USDC, amount = UAH) => op({ kind: "exchange", usdc, amount });
+  const kept = (id: number) =>
+    row(`SELECT usdc_cents::int AS usdc, binance_cents::int AS binance FROM cash_exchanges WHERE transaction_id=$1`, [id]);
+  const spentToday = async () =>
+    ((await api.get("/today/calendar?month=2026-11").expect(200)).body.days as { date: string; spent: number }[]).find((d) => d.date === "2026-11-10")!
+      .spent;
+  const fixes = () => vi.spyOn(app.get(LimitService), "invalidate");
+
+  beforeEach(async () => {
+    await start(500_000).expect(201);
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-10T09:00:00Z', 41.5)`);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("lowers Binance by the dollars, raises the wallet by the hryvnias, spends nothing and fixes the limit once", async () => {
+    await hasBinance(500_000);
+    await op({ kind: "spend", amount: 30_000, category: "cafe" }).expect(201);
+    const spent = await spentToday();
+    const spy = fixes();
+
+    const created = (await exchange().expect(201)).body;
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(created).toMatchObject({
+      amount: UAH, amountUah: UAH, type: "own_transfer", category: "own", description: "Обмен USDC на наличные", manual: true,
+      exchange: { usdc: USDC, rate: 46.74 },
+    });
+    expect(await binance()).toBe(500_000 - USDC);
+    expect((await wallet()).balance).toBe(500_000 - 30_000 + UAH);
+    expect(await spentToday()).toBe(spent);
+    expect(await kept(created.id)).toEqual({ usdc: USDC, binance: USDC });
+
+    const spend = (await api.get("/transactions?group=spend").expect(200)).body.items as { id: number }[];
+    expect(spend.map((i) => i.id)).not.toContain(created.id);
+    const all = (await api.get("/transactions").expect(200)).body.items as { id: number; exchange?: unknown; inLimit?: boolean }[];
+    expect(all.find((i) => i.id === created.id)).toMatchObject({ exchange: { usdc: USDC, rate: 46.74 }, inLimit: false });
+    // Every other row says it is no exchange.
+    expect(all.filter((i) => i.id !== created.id).every((i) => i.exchange === null)).toBe(true);
+  });
+
+  it("with $1,000 on Binance takes only $1,000, and deleting gives back exactly that", async () => {
+    await hasBinance(100_000);
+    const { id } = (await exchange().expect(201)).body as { id: number };
+    expect(await binance()).toBe(0);
+    expect(await kept(id)).toEqual({ usdc: USDC, binance: 100_000 });
+
+    // The owner put Binance right by hand since: deleting gives back what was taken, not the dollars given.
+    await ds.query(`UPDATE manual_balances SET amount=30000 WHERE name='Binance'`);
+    const spy = fixes();
+    await api.del(`/cash/operations/${id}`).expect(200);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(await binance()).toBe(130_000);
+    expect((await wallet()).balance).toBe(500_000);
+    expect(await kept(id)).toBeUndefined();
+  });
+
+  it("a changed exchange gives back what it took and takes again; into another kind and back too", async () => {
+    await hasBinance(500_000);
+    const { id } = (await exchange().expect(201)).body as { id: number };
+
+    const spy = fixes();
+    const fewer = (await api.patch(`/cash/operations/${id}`, { usdc: 100_000, amount: 4_100_000 }).expect(200)).body;
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(fewer).toMatchObject({ amount: 4_100_000, type: "own_transfer", exchange: { usdc: 100_000, rate: 41 } });
+    expect(await binance()).toBe(400_000);
+    expect((await wallet()).balance).toBe(500_000 + 4_100_000);
+
+    // A note alone leaves Binance as it is.
+    await api.patch(`/cash/operations/${id}`, { note: "Обменник на Подоле" }).expect(200);
+    expect(await binance()).toBe(400_000);
+    expect(await kept(id)).toEqual({ usdc: 100_000, binance: 100_000 });
+
+    const own = (await api.patch(`/cash/operations/${id}`, { kind: "own_out", amount: 50_000 }).expect(200)).body;
+    expect(own).toMatchObject({ amount: -50_000, type: "own_transfer", exchange: null });
+    expect(await binance()).toBe(500_000);
+    expect(await kept(id)).toBeUndefined();
+    expect((await wallet()).balance).toBe(450_000);
+
+    // Back to an exchange: it needs the dollars again.
+    await api.patch(`/cash/operations/${id}`, { kind: "exchange" }).expect(422);
+    await api.patch(`/cash/operations/${id}`, { kind: "exchange", usdc: USDC, amount: UAH }).expect(200);
+    expect(await binance()).toBe(500_000 - USDC);
+    expect((await wallet()).balance).toBe(500_000 + UAH);
+    expect((await api.patch(`/cash/operations/${id}`, { kind: "spend", category: "cafe" }).expect(200)).body).toMatchObject({ amount: -UAH, exchange: null });
+    expect(await binance()).toBe(500_000);
+  });
+
+  it("with no Binance balance takes nothing and still records the exchange", async () => {
+    const created = (await exchange().expect(201)).body;
+    expect(created.exchange).toEqual({ usdc: USDC, rate: 46.74 });
+    expect(await kept(created.id)).toEqual({ usdc: USDC, binance: 0 });
+    expect((await wallet()).balance).toBe(500_000 + UAH);
+    await api.del(`/cash/operations/${created.id}`).expect(200);
+    expect(await binance()).toBeUndefined();
+    expect((await wallet()).balance).toBe(500_000);
+  });
+
+  it("validates", async () => {
+    await op({ kind: "exchange", amount: UAH }).expect(400);
+    await exchange(0).expect(400);
+    await op({ kind: "own_out", amount: 100, usdc: 100 }).expect(400);
+    const { id } = (await op({ kind: "own_out", amount: 100 }).expect(201)).body as { id: number };
+    await api.patch(`/cash/operations/${id}`, { kind: "spend", category: "cafe", usdc: 100 }).expect(400);
+    // The dollars of a row that is no exchange.
+    await api.patch(`/cash/operations/${id}`, { usdc: 100 }).expect(422);
   });
 });

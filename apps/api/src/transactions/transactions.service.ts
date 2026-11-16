@@ -17,9 +17,11 @@ import { isCounterpartyName } from "../domain/counterparty";
 import { creditPart } from "../domain/credit";
 import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
 import { binanceOnChange, cashAnswerOf } from "../domain/cash-answer";
+import { exchangeRate } from "../domain/cash-exchange";
 import { PlanService } from "../plan/plan.service";
 import { LimitService } from "../today/limit.service";
 import { type CashAnswerRow, binanceEvent, cashAnswerColumnsSql, cashAnswerFacts, undoAnswer } from "../cash/cash-answer";
+import { exchangeUsdcSql } from "../cash/cash-exchange";
 import { cardCashSql, cardTransferSql } from "../cash/wallet";
 import { counterKeySql } from "./counter-key";
 import { IN_LIMIT, SPEND_TAB, dayTotalsSql } from "./day-totals";
@@ -35,6 +37,7 @@ const COLUMNS = `
   ${KEY} AS counter_key, t.counter_iban, t.counter_name, a.kind AS account_kind, (a.kind = 'cash') AS manual,
   CASE WHEN ${cardTransferSql()} THEN ${cardCashSql()}::float8 END AS card_cash,
   ${cashAnswerColumnsSql("t")},
+  ${exchangeUsdcSql("t")},
   COALESCE(
     (SELECT s.name FROM payment_links l JOIN scheduled_payments s ON s.id = l.payment_id WHERE l.transaction_id = t.id),
     (SELECT s.name FROM scheduled_payments s WHERE s.transaction_id = t.id ORDER BY s.id LIMIT 1)
@@ -65,6 +68,7 @@ interface Row extends CashAnswerRow {
   balance_after: number | null;
   credit_limit_at: number | null;
   in_limit: boolean;
+  exchange_usdc: number | null;
 }
 
 /** A stored answer about a recipient. */
@@ -111,6 +115,7 @@ const view = (r: Row, rules: readonly AnswerRule[], binanceOpen: boolean): Trans
   creditPart: creditPart({ amount: r.amount, balanceAfter: r.balance_after, creditLimit: r.credit_limit_at, currency: r.currency }),
   inLimit: r.in_limit,
   cashAnswer: cashAnswerView(r, binanceOpen),
+  exchange: r.exchange_usdc === null ? null : { usdc: r.exchange_usdc, rate: exchangeRate(Math.abs(r.amount), r.exchange_usdc) },
 });
 
 const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6})\|(\d{1,10})$/;

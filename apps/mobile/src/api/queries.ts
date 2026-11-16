@@ -454,7 +454,7 @@ export function useCash() {
   return useQuery({ queryKey: CASH_KEY, queryFn: () => api.cash() });
 }
 
-/** Cash moves the wallet, the day's spending and the list. */
+/** Cash moves the wallet, the day's spending and the list; an exchange of USDC for cash moves Binance too (Б22). */
 function useCashMutation<V>(mutationFn: (vars: V) => Promise<unknown>) {
   const client = useQueryClient();
   return useMutation({
@@ -466,6 +466,7 @@ function useCashMutation<V>(mutationFn: (vars: V) => Promise<unknown>) {
         client.invalidateQueries({ queryKey: TRANSACTIONS_KEY }),
         client.invalidateQueries({ queryKey: CALENDAR_KEY }),
         client.invalidateQueries({ queryKey: INSIGHTS_KEY }),
+        client.invalidateQueries({ queryKey: MANUAL_BALANCES_KEY }),
       ]),
   });
 }

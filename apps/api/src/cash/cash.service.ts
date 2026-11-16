@@ -23,16 +23,19 @@ import { TransactionsService } from "../transactions/transactions.service";
 import { counterKeySql } from "../transactions/counter-key";
 import { linkedSum, paymentCandidateIds } from "./candidates";
 import { answerOther, answerWallet, binanceEvent, lockAnswer, undoAnswer } from "./cash-answer";
+import { exchangeOf, takeExchange, undoExchange } from "./cash-exchange";
 import { CASH_ACCOUNT_ID, cardTransferSql, walletBalance } from "./wallet";
 
 const DEFAULT_NOTE: Record<CashOperationKind, string> = {
   spend: "Покупка наличными",
   received: "Получил наличные",
   own_out: "Отдал в свои",
+  exchange: "Обмен USDC на наличные",
 };
-const TYPE: Record<CashOperationKind, string> = { spend: "spend", received: "person_in", own_out: "own_transfer" };
+/** An exchange is an own transfer like own_out; cash_exchanges tells them apart (task Б22). */
+const TYPE: Record<CashOperationKind, string> = { spend: "spend", received: "person_in", own_out: "own_transfer", exchange: "own_transfer" };
 const KIND_OF_TYPE: Record<string, CashOperationKind> = { spend: "spend", person_in: "received", own_transfer: "own_out" };
-const CATEGORY_OF: Record<Exclude<CashOperationKind, "spend">, string> = { received: "cash", own_out: "own" };
+const CATEGORY_OF: Record<Exclude<CashOperationKind, "spend">, string> = { received: "cash", own_out: "own", exchange: "own" };
 
 /** A row on the wallet: `amount` is signed, as it changes the wallet. */
 interface Row {
@@ -43,8 +46,8 @@ interface Row {
   note: string;
 }
 
-/** received adds to the wallet; a purchase and own_out take from it. */
-const signed = (kind: CashOperationKind, amount: number) => (kind === "received" ? amount : -amount);
+/** received and an exchange add to the wallet; a purchase and own_out take from it. */
+const signed = (kind: CashOperationKind, amount: number) => (kind === "received" || kind === "exchange" ? amount : -amount);
 
 /** The cash wallet: its start, operations entered by hand, counting the pocket, and deposits from it. */
 @Injectable()
@@ -78,26 +81,40 @@ export class CashService {
     });
   }
 
+  /**
+   * An exchange (task Б22) also takes its dollars off Binance and, unlike the other operations, whose cash
+   * changes the limit from tomorrow, fixes the day afresh at once, as a Binance balance edit does.
+   */
   async add(p: CashOperationInput): Promise<TransactionDto> {
     const date = this.checkDate(p.date);
     const id = await this.ds.transaction(async (m) => {
       const account = await this.startedAccount(m);
-      return this.insert(m, account, {
+      const id = await this.insert(m, account, {
         type: TYPE[p.kind],
         amount: signed(p.kind, p.amount),
         category: p.kind === "spend" ? p.category! : CATEGORY_OF[p.kind],
         date,
         note: p.note || DEFAULT_NOTE[p.kind],
       });
+      if (p.kind === "exchange") {
+        await takeExchange(m, id, p.usdc!);
+        await this.limit.invalidate("binance", m);
+      }
+      return id;
     });
     return this.tx.one(id);
   }
 
+  /** An exchange changed, or turned into another kind and back, gives Binance back what it took first. */
   async change(id: number, p: CashOperationPatch): Promise<TransactionDto> {
     await this.ds.transaction(async (m) => {
       const row = await this.manualRow(m, id);
       if (row.type === "obligation") throw new ConflictException("a planned payment is deleted, not changed");
-      const kind = p.kind ?? KIND_OF_TYPE[row.type] ?? "own_out";
+      const was = await exchangeOf(m, id);
+      const kind = p.kind ?? (was ? "exchange" : (KIND_OF_TYPE[row.type] ?? "own_out"));
+      if (p.usdc !== undefined && kind !== "exchange") throw new UnprocessableEntityException("usdc is only for an exchange");
+      const usdc = kind === "exchange" ? (p.usdc ?? was?.usdc) : undefined;
+      if (kind === "exchange" && usdc === undefined) throw new UnprocessableEntityException("an exchange needs usdc");
       const category = kind === "spend" ? (p.category ?? (row.type === "spend" ? row.category : null)) : CATEGORY_OF[kind];
       if (!category) throw new UnprocessableEntityException("a purchase needs a category");
       const op: Row = {
@@ -113,6 +130,11 @@ export class CashService {
           WHERE id=$1`,
         [id, op.type, op.category, op.amount, op.date, op.note],
       );
+      if (was || kind === "exchange") {
+        await undoExchange(m, id);
+        if (kind === "exchange") await takeExchange(m, id, usdc!);
+        await this.limit.invalidate("binance", m);
+      }
     });
     return this.tx.one(id);
   }
@@ -120,6 +142,8 @@ export class CashService {
   async remove(id: number): Promise<{ deleted: true }> {
     await this.ds.transaction(async (m) => {
       await this.manualRow(m, id);
+      // An exchange gives Binance back exactly what it took (task Б22).
+      const exchanged = await undoExchange(m, id);
       // A planned payment paid with this row is unpaid again, and back in the day's limit at once.
       const reopened = (await m.query(`UPDATE scheduled_payments SET paid_at=NULL WHERE transaction_id=$1`, [id])) as [unknown[], number];
       // One it helped pay through payment_links loses it with the row (ON DELETE CASCADE), and opens again
@@ -127,7 +151,8 @@ export class CashService {
       const linked: { payment_id: number }[] = await m.query(`SELECT payment_id FROM payment_links WHERE transaction_id=$1`, [id]);
       await m.query(`DELETE FROM transactions WHERE id=$1`, [id]);
       const uncovered = await this.plan.reopenUncovered(m, linked.map((l) => l.payment_id));
-      if (reopened[1] > 0 || uncovered) await this.limit.invalidate("payment_paid", m);
+      if (exchanged) await this.limit.invalidate("binance", m);
+      else if (reopened[1] > 0 || uncovered) await this.limit.invalidate("payment_paid", m);
     });
     return { deleted: true };
   }

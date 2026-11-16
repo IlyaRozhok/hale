@@ -240,7 +240,7 @@ describe("GET /transactions", () => {
       [
         "accountKind", "amount", "cashAnswer", "cashOut", "amountUah", "category", "counterKey", "counterName", "currency", "description",
         "creditPart", "fxRate", "hold", "id", "inLimit", "localDate", "manual", "needsLabel", "occurredAt", "paymentName", "recipientLabel",
-        "type",
+        "type", "exchange",
       ].sort(),
     );
     expect(x).toMatchObject({ accountKind: "fop", currency: "UAH", counterName: "Ivan P", hold: false, manual: false });

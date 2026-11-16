@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { TransactionDto } from "@hale/contracts";
-import { amountTone, formatOriginal, formatSignedMoney, formatSignedOriginal } from "../format";
+import { amountTone, formatDollars, formatOriginal, formatSignedMoney, formatSignedOriginal } from "../format";
 import { categoryLabel, typeLabel } from "../labels";
 import { categoryIcon } from "../categoryIcon";
 import { Icon } from "./Icon";
@@ -26,7 +26,9 @@ export function TxRow({ tx, onPress, first, last, markOutsideLimit = false }: Pr
   const foreign = tx.currency !== "UAH";
   const main = tx.amountUah !== null ? formatSignedMoney(tx.amountUah) : formatSignedOriginal(tx.amount, tx.currency);
   const title = tx.counterName ?? tx.description;
-  const kind = tx.paymentName ?? (tx.type === "spend" ? categoryLabel(tx.category) : typeLabel(tx.type));
+  // USDC exchanged for cash (task Б22): the dollars and the rate under the title, «свои» under the amount.
+  const exchange = tx.exchange ? `${formatDollars(tx.exchange.usdc)} · курс ₴${tx.exchange.rate.toFixed(2)}` : null;
+  const kind = exchange ?? tx.paymentName ?? (tx.type === "spend" ? categoryLabel(tx.category) : typeLabel(tx.type));
   const tone = amountTone(tx.type, tx.amount);
   const icon = categoryIcon(tx);
   return (
@@ -47,6 +49,7 @@ export function TxRow({ tx, onPress, first, last, markOutsideLimit = false }: Pr
         {foreign && tx.amountUah !== null ? <Text style={styles.note}>{formatOriginal(tx.amount, tx.currency)}</Text> : null}
         {foreign && tx.amountUah === null ? <Text style={styles.note}>курс неизвестен</Text> : null}
         {tx.hold ? <Text style={styles.note}>в обработке</Text> : null}
+        {exchange ? <Text style={styles.note}>свои</Text> : null}
       </View>
     </Pressable>
   );
