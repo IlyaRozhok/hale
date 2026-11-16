@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expectedIncomeInput, insightsMonthDto, insightsMonthQuery, isoDate, scheduledPaymentInput, settingsPatch } from "./index";
+import { exchangeRate, expectedIncomeInput, insightsMonthDto, insightsMonthQuery, isoDate, scheduledPaymentInput, settingsPatch } from "./index";
 
 describe("contracts", () => {
   it("accepts only real dates", () => {
@@ -41,5 +41,14 @@ describe("contracts", () => {
     expect(insightsMonthDto.safeParse({ ...ok, spent: 1.5 }).success).toBe(false);
     expect(insightsMonthDto.safeParse({ ...ok, through: "2026-02-30" }).success).toBe(false);
     expect(insightsMonthDto.safeParse({ ...ok, categories: [{ category: "cafe", spent: 1, previousSpent: 0, count: -1 }] }).success).toBe(false);
+  });
+});
+
+describe("exchangeRate (Б22)", () => {
+  it("is hryvnias per dollar, to two decimals", () => {
+    // $1,400 for ₴65,430: 46.7357… a dollar.
+    expect(exchangeRate(6_543_000, 140_000)).toBe(46.74);
+    expect(exchangeRate(4_100_000, 100_000)).toBe(41);
+    expect(exchangeRate(1, 3)).toBe(0.33);
   });
 });

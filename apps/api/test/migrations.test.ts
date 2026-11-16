@@ -11,7 +11,7 @@ const TABLES = [
   "scheduled_payments", "recurring_payments", "manual_balances", "loans", "settings", "bridge_plans",
   "daily_snapshots", "fx_rates",
       "goals", "jobs", "devices", "notifications_log", "loan_repayments", "payment_links", "cash_cards", "payment_dismissals", "cash_answers",
-  "ledger_checks",
+  "ledger_checks", "cash_exchanges",
 ];
 
 async function listTables(url: string): Promise<string[]> {

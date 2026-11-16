@@ -190,6 +190,13 @@ describe("POST /check/run and GET /check/latest", () => {
     expect(r.body.issues).toEqual([]);
   });
 
+  it("USDC exchanged for cash, a wallet row with no bank leg, is not a lone leg (Б22)", async () => {
+    await ds.query(`INSERT INTO manual_balances (name, amount, currency, counts_as_own) VALUES ('Binance', 500000, 'USD', true)`);
+    await request(http(on)).post("/cash/operations").set("Authorization", auth).send({ kind: "exchange", usdc: 140_000, amount: 6_543_000 }).expect(201);
+    const r = await run();
+    expect(r.body.issues).toEqual([]);
+  });
+
   it("spending with no category shows as categories not adding up", async () => {
     await tx(black, "2026-11-10T08:00:00Z", -1_000, "spend", null, 44_000);
     await ds.query(`UPDATE accounts SET balance=44000 WHERE id=$1`, [black]);

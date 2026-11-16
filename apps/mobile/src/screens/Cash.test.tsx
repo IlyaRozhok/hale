@@ -7,6 +7,7 @@ import { TabBar } from "../components/TabBar";
 import { fakeApi, renderWith, todayFixture, txFixture } from "../testing";
 import { kyivDate } from "../format";
 import { ApiError } from "../api/client";
+import { MANUAL_BALANCES_KEY } from "../api/queries";
 
 jest.mock("../metal", () => {
   const { View } = require("react-native");
@@ -65,6 +66,70 @@ describe("adding a cash operation from the menu", () => {
     await press("Начать учёт");
     await waitFor(() => expect(api.startCash).toHaveBeenCalledWith({ amount: 250_000 }));
     expect(await screen.findByLabelText("Сумма")).toBeTruthy();
+  });
+});
+
+describe("USDC exchanged for cash (Б22)", () => {
+  const exchanged = txFixture({
+    id: 7, manual: true, accountKind: "cash", type: "own_transfer", category: "own", description: "Обмен USDC на наличные",
+    amount: 6_543_000, amountUah: 6_543_000, localDate: kyivDate(), inLimit: false, exchange: { usdc: 140_000, rate: 46.74 },
+  });
+  const listed = () => ({ transactions: jest.fn(async () => ({ items: [exchanged], nextCursor: null, dayTotals: {} })), ...started() });
+
+  it("a fourth kind with two amounts, a sentence that follows them, and one save", async () => {
+    const api = fakeApi(started());
+    const { client } = await renderWith(menu, api);
+    const refetched = jest.spyOn(client, "invalidateQueries");
+    await press("Добавить операцию");
+    await press("Обменял USDC");
+    expect(screen.queryByLabelText("Сумма")).toBeNull();
+    expect(screen.getByText("Binance уменьшится на отданные USDC, наличных станет больше. Это перевод между своими, не доход.")).toBeTruthy();
+    await fireEvent.changeText(screen.getByLabelText("Отдал USDC, $"), "1400");
+    await fireEvent.changeText(screen.getByLabelText("Получил наличными, ₴"), "65430");
+    expect(
+      screen.getByText("Курс обмена ₴46.74 за $1. Binance уменьшится на $1,400, наличных станет больше на ₴65,430. Это перевод между своими, не доход."),
+    ).toBeTruthy();
+    await press("Сохранить");
+    await waitFor(() => expect(api.addCashOperation).toHaveBeenCalledWith({ kind: "exchange", usdc: 140_000, amount: 6_543_000, date: kyivDate() }));
+    // Binance changed on the server: Plan reads it afresh.
+    await waitFor(() => expect(refetched).toHaveBeenCalledWith({ queryKey: MANUAL_BALANCES_KEY }));
+  });
+
+  it("asks for both amounts before saving", async () => {
+    const api = fakeApi(started());
+    await renderWith(menu, api);
+    await press("Добавить операцию");
+    await press("Обменял USDC");
+    await fireEvent.changeText(screen.getByLabelText("Получил наличными, ₴"), "65430");
+    await press("Сохранить");
+    expect(await screen.findByText("Введите, сколько USDC отдали и сколько гривен получили.")).toBeTruthy();
+    expect(api.addCashOperation).not.toHaveBeenCalled();
+  });
+
+  it("shows one row in Activity: the dollars and the rate, the hryvnias, and «свои»", async () => {
+    await renderWith(<Activity />, fakeApi(listed()));
+    expect(await screen.findByText("Обмен USDC на наличные")).toBeTruthy();
+    expect(screen.getByText("$1,400 · курс ₴46.74")).toBeTruthy();
+    expect(screen.getByText("+₴65,430")).toBeTruthy();
+    expect(screen.getByText("свои")).toBeTruthy();
+    expect(screen.queryByText("Между своими")).toBeNull();
+  });
+
+  it("opens with its kind and both amounts, and saves them", async () => {
+    const api = fakeApi(listed());
+    await renderWith(<Activity />, api);
+    await fireEvent.press(await screen.findByText("Обмен USDC на наличные"));
+    expect((await screen.findByRole("button", { name: "Обменял USDC" })).props.accessibilityState.selected).toBe(true);
+    expect(screen.getByLabelText("Отдал USDC, $").props.value).toBe("1400");
+    const uah = screen.getByLabelText("Получил наличными, ₴");
+    expect(uah.props.value).toBe("65430");
+    await fireEvent.changeText(uah, "65000");
+    await press("Сохранить");
+    await waitFor(() =>
+      expect(api.patchCashOperation).toHaveBeenCalledWith(7, {
+        kind: "exchange", usdc: 140_000, amount: 6_500_000, date: exchanged.localDate, note: "Обмен USDC на наличные",
+      }),
+    );
   });
 });
 

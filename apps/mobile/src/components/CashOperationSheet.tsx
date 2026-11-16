@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { CashCategory, CashOperationKind, TransactionDto } from "@hale/contracts";
+import { exchangeRate } from "@hale/contracts/exchange";
 import { useAddCashOperation, useCash, useDeleteCashOperation, usePatchCashOperation } from "../api/queries";
-import { kyivDate, parseHryvnias } from "../format";
+import { formatDollars, formatMoney, kyivDate, parseHryvnias } from "../format";
 import { SPEND_CATEGORIES, categoryLabel } from "../labels";
 import { CashStartForm } from "./CashStartForm";
 import { Chip } from "./Chip";
@@ -19,11 +20,17 @@ const KINDS: { kind: CashOperationKind; label: string; effect: string }[] = [
   { kind: "spend", label: "Трата", effect: "Тратит лимит дня." },
   { kind: "received", label: "Получил", effect: "Наличных больше, лимит не меняется." },
   { kind: "own_out", label: "Отдал в свои", effect: "Например, купил USDC за наличные. Наличных меньше, лимит не меняется." },
+  { kind: "exchange", label: "Обменял USDC", effect: "Binance уменьшится на отданные USDC, наличных станет больше. Это перевод между своими, не доход." },
 ];
 const CATEGORIES = SPEND_CATEGORIES.filter((c): c is CashCategory => c !== "refund");
 const KIND_OF_TYPE: Record<string, CashOperationKind> = { spend: "spend", person_in: "received", own_transfer: "own_out" };
 
 type Props = { /** An operation entered earlier, to change or delete; none for a new one. */ tx?: TransactionDto; onClose: () => void };
+
+/** What an exchange does, once both amounts are typed: the rate it came to, then where the money goes (task Б22). */
+const exchangeEffect = (cents: number, kopecks: number) =>
+  `Курс обмена ₴${exchangeRate(kopecks, cents).toFixed(2)} за $1. Binance уменьшится на ${formatDollars(cents)}, ` +
+  `наличных станет больше на ${formatMoney(kopecks)}. Это перевод между своими, не доход.`;
 
 /** A cash operation: kind, amount, category for a purchase, date and a note. */
 export function CashOperationSheet({ tx, onClose }: Props) {
@@ -31,8 +38,9 @@ export function CashOperationSheet({ tx, onClose }: Props) {
   const add = useAddCashOperation();
   const patch = usePatchCashOperation();
   const remove = useDeleteCashOperation();
-  const [kind, setKind] = useState<CashOperationKind>(tx ? (KIND_OF_TYPE[tx.type ?? ""] ?? "own_out") : "spend");
+  const [kind, setKind] = useState<CashOperationKind>(tx ? (tx.exchange ? "exchange" : (KIND_OF_TYPE[tx.type ?? ""] ?? "own_out")) : "spend");
   const [amount, setAmount] = useState(tx ? String(Math.abs(tx.amount) / 100) : "");
+  const [usdc, setUsdc] = useState(tx?.exchange ? String(tx.exchange.usdc / 100) : "");
   const [category, setCategory] = useState<CashCategory | null>(tx && CATEGORIES.includes(tx.category as CashCategory) ? (tx.category as CashCategory) : null);
   const [date, setDate] = useState(tx?.localDate ?? kyivDate());
   const [note, setNote] = useState(tx?.description ?? "");
@@ -40,14 +48,27 @@ export function CashOperationSheet({ tx, onClose }: Props) {
   const busy = add.isPending || patch.isPending || remove.isPending;
   const failed = () => setMessage("Не удалось сохранить. Попробуйте ещё раз.");
 
+  const kopecks = parseHryvnias(amount);
+  const cents = parseHryvnias(usdc);
+  const effect = KINDS.find((k) => k.kind === kind)!.effect;
+
   const save = () => {
-    const kopecks = parseHryvnias(amount);
+    if (kind === "exchange" && (kopecks === null || cents === null)) {
+      setMessage("Введите, сколько USDC отдали и сколько гривен получили.");
+      return;
+    }
     if (kopecks === null || (kind === "spend" && category === null)) {
       setMessage(kind === "spend" ? "Введите сумму и выберите категорию." : "Введите сумму.");
       return;
     }
     setMessage(null);
-    const base = { kind, amount: kopecks, ...(kind === "spend" ? { category: category! } : {}), date };
+    const base = {
+      kind,
+      ...(kind === "exchange" ? { usdc: cents! } : {}),
+      amount: kopecks,
+      ...(kind === "spend" ? { category: category! } : {}),
+      date,
+    };
     if (tx) patch.mutate({ id: tx.id, patch: { ...base, note: note.trim() } }, { onSuccess: onClose, onError: failed });
     else add.mutate({ ...base, ...(note.trim() ? { note: note.trim() } : {}) }, { onSuccess: onClose, onError: failed });
   };
@@ -85,8 +106,18 @@ export function CashOperationSheet({ tx, onClose }: Props) {
           <Chip key={k.kind} label={k.label} selected={kind === k.kind} onPress={() => setKind(k.kind)} />
         ))}
       </View>
-      <Text style={styles.muted}>{KINDS.find((k) => k.kind === kind)!.effect}</Text>
-      <Field label="Сумма" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
+      {kind === "exchange" ? (
+        <>
+          <Field label="Отдал USDC, $" value={usdc} onChangeText={setUsdc} keyboardType="decimal-pad" />
+          <Field label="Получил наличными, ₴" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
+          <Text style={styles.muted}>{cents !== null && kopecks !== null ? exchangeEffect(cents, kopecks) : effect}</Text>
+        </>
+      ) : (
+        <>
+          <Text style={styles.muted}>{effect}</Text>
+          <Field label="Сумма" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
+        </>
+      )}
       {kind === "spend" && (
         <View style={styles.chips}>
           {CATEGORIES.map((c) => (

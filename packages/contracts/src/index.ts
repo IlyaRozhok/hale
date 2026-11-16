@@ -572,7 +572,21 @@ export interface TransactionDto {
    * null on every other row and on a deposit not answered yet. Absent from an older server.
    */
   cashAnswer?: CashAnswerDto | null;
+  /**
+   * USDC exchanged for cash (task Б22), on the wallet row it made: the dollars given and the rate. null on every
+   * other row. Absent from an older server.
+   */
+  exchange?: CashExchangeDto | null;
 }
+
+export interface CashExchangeDto {
+  /** US cents of USDC given. */
+  usdc: number;
+  /** Hryvnias received per dollar, to two decimals (46.74): exchangeRate. */
+  rate: number;
+}
+
+export { exchangeRate } from "./exchange";
 
 export interface CashAnswerDto {
   answer: CashDepositAnswerName;
@@ -638,23 +652,39 @@ export const cashCategory = z.enum([
   "groceries", "cafe", "transport", "subscriptions", "leisure", "health", "utilities", "telecom", "shopping", "uncategorized",
 ]);
 export type CashCategory = z.infer<typeof cashCategory>;
-/** spend: a purchase, against the limit; received: cash came in; own_out: cash went to one's own other money. */
-export const cashOperationKind = z.enum(["spend", "received", "own_out"]);
+/**
+ * spend: a purchase, against the limit; received: cash came in; own_out: cash went to one's own other money;
+ * exchange: USDC from Binance exchanged for cash (task Б22), with `usdc` the dollars given. An older server
+ * does not know exchange and answers 400.
+ */
+export const cashOperationKind = z.enum(["spend", "received", "own_out", "exchange"]);
 export type CashOperationKind = z.infer<typeof cashOperationKind>;
 const cashAmount = z.number().int().positive().max(100_000_000_00);
 const cashNote = z.string().trim().max(200);
 
 export const cashStartInput = z.object({ amount: z.number().int().min(0).max(100_000_000_00), date: isoDate.optional() }).strict();
 export type CashStartInput = z.infer<typeof cashStartInput>;
+/** US cents of USDC given in an exchange. */
+const usdcCents = z.number().int().positive().max(100_000_000_00);
 export const cashOperationInput = z
-  .object({ kind: cashOperationKind, amount: cashAmount, category: cashCategory.optional(), date: isoDate.optional(), note: cashNote.optional() })
+  .object({
+    kind: cashOperationKind,
+    amount: cashAmount,
+    category: cashCategory.optional(),
+    usdc: usdcCents.optional(),
+    date: isoDate.optional(),
+    note: cashNote.optional(),
+  })
   .strict()
-  .refine((v) => v.kind !== "spend" || v.category !== undefined, { message: "a purchase needs a category", path: ["category"] });
+  .refine((v) => v.kind !== "spend" || v.category !== undefined, { message: "a purchase needs a category", path: ["category"] })
+  .refine((v) => (v.kind === "exchange") === (v.usdc !== undefined), { message: "an exchange, and only an exchange, needs usdc", path: ["usdc"] });
 export type CashOperationInput = z.infer<typeof cashOperationInput>;
+/** `usdc` only for an exchange: with kind exchange, or on a row that is one. */
 export const cashOperationPatch = z
-  .object({ kind: cashOperationKind, amount: cashAmount, category: cashCategory, date: isoDate, note: cashNote })
+  .object({ kind: cashOperationKind, amount: cashAmount, category: cashCategory, usdc: usdcCents, date: isoDate, note: cashNote })
   .partial()
-  .strict();
+  .strict()
+  .refine((v) => v.usdc === undefined || v.kind === undefined || v.kind === "exchange", { message: "usdc is only for an exchange", path: ["usdc"] });
 export type CashOperationPatch = z.infer<typeof cashOperationPatch>;
 export const cashCountInput = z.object({ amount: z.number().int().min(0).max(100_000_000_00) }).strict();
 export type CashCountInput = z.infer<typeof cashCountInput>;
