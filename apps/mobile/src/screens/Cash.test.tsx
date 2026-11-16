@@ -224,6 +224,38 @@ describe("an operation entered by hand, in Activity", () => {
     expect(screen.getByText("Категория")).toBeTruthy();
   });
 
+  const KIND_CHIPS = ["Трата", "Получил", "Отдал в свои", "Обменял USDC"];
+  const surplus = txFixture({
+    id: 11, manual: true, accountKind: "cash", type: "own_transfer", category: "own", description: "Сверка: больше, чем записано",
+    amount: 2_950_000, amountUah: 2_950_000, localDate: kyivDate(), exchange: null,
+  });
+
+  it("a correction of the balance opens without kinds and saves no kind, so it stays a plus", async () => {
+    const api = fakeApi({ transactions: jest.fn(async () => ({ items: [surplus], nextCursor: null, dayTotals: {} })), ...started() });
+    await renderWith(<Activity />, api);
+    await fireEvent.press(await screen.findByText("Сверка: больше, чем записано"));
+    const amount = await screen.findByLabelText("Сумма");
+    expect(amount.props.value).toBe("29500");
+    for (const label of KIND_CHIPS) expect(screen.queryByRole("button", { name: label })).toBeNull();
+    expect(screen.queryByText(/Наличных меньше/)).toBeNull();
+    expect(screen.getByText("Поправка остатка наличных.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Удалить" })).toBeTruthy();
+    await fireEvent.changeText(screen.getByLabelText("Заметка"), "Нашёл в куртке");
+    await press("Сохранить");
+    await waitFor(() => expect(api.patchCashOperation).toHaveBeenCalledWith(11, { amount: 2_950_000, date: surplus.localDate, note: "Нашёл в куртке" }));
+  });
+
+  it("«Отдал в свои» still opens with its kinds", async () => {
+    const own = txFixture({ id: 12, manual: true, accountKind: "cash", type: "own_transfer", category: "own", description: "Купил USDC", amount: -50_000, amountUah: -50_000, localDate: kyivDate(), exchange: null });
+    const api = fakeApi({ transactions: jest.fn(async () => ({ items: [own], nextCursor: null, dayTotals: {} })), ...started() });
+    await renderWith(<Activity />, api);
+    await fireEvent.press(await screen.findByText("Купил USDC"));
+    expect((await screen.findByRole("button", { name: "Отдал в свои" })).props.accessibilityState.selected).toBe(true);
+    for (const label of KIND_CHIPS) expect(screen.getByRole("button", { name: label })).toBeTruthy();
+    await press("Сохранить");
+    await waitFor(() => expect(api.patchCashOperation).toHaveBeenCalledWith(12, { kind: "own_out", amount: 50_000, date: own.localDate, note: "Купил USDC" }));
+  });
+
   it("shows a failed save calmly", async () => {
     const api = fakeApi({
       transactions: jest.fn(async () => ({ items: [manual], nextCursor: null, dayTotals: {} })),

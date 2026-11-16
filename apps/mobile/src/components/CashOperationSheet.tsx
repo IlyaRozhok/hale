@@ -24,6 +24,11 @@ const KINDS: { kind: CashOperationKind; label: string; effect: string }[] = [
 ];
 const CATEGORIES = SPEND_CATEGORIES.filter((c): c is CashCategory => c !== "refund");
 const KIND_OF_TYPE: Record<string, CashOperationKind> = { spend: "spend", person_in: "received", own_transfer: "own_out" };
+/**
+ * The opening balance or a count that found more: an own transfer into the wallet that is no exchange. It corrects
+ * the balance and is no operation of any kind; read as «Отдал в свои» it would be saved as a minus.
+ */
+const isCorrection = (tx: TransactionDto) => tx.type === "own_transfer" && tx.amount > 0 && !tx.exchange;
 
 type Props = { /** An operation entered earlier, to change or delete; none for a new one. */ tx?: TransactionDto; onClose: () => void };
 
@@ -50,7 +55,8 @@ export function CashOperationSheet({ tx, onClose }: Props) {
 
   const kopecks = parseHryvnias(amount);
   const cents = parseHryvnias(usdc);
-  const effect = KINDS.find((k) => k.kind === kind)!.effect;
+  const correction = tx !== undefined && isCorrection(tx);
+  const effect = correction ? "Поправка остатка наличных." : KINDS.find((k) => k.kind === kind)!.effect;
 
   const save = () => {
     if (kind === "exchange" && (kopecks === null || cents === null)) {
@@ -62,6 +68,11 @@ export function CashOperationSheet({ tx, onClose }: Props) {
       return;
     }
     setMessage(null);
+    if (correction) {
+      // No kind: the server keeps a correction a plus.
+      patch.mutate({ id: tx!.id, patch: { amount: kopecks, date, note: note.trim() } }, { onSuccess: onClose, onError: failed });
+      return;
+    }
     const base = {
       kind,
       ...(kind === "exchange" ? { usdc: cents! } : {}),
@@ -101,11 +112,13 @@ export function CashOperationSheet({ tx, onClose }: Props) {
 
   return (
     <Sheet title="Наличные" subtitle={tx ? "Изменить или удалить" : "Новая операция"} onClose={onClose}>
-      <View style={styles.chips}>
-        {KINDS.map((k) => (
-          <Chip key={k.kind} label={k.label} selected={kind === k.kind} onPress={() => setKind(k.kind)} />
-        ))}
-      </View>
+      {!correction && (
+        <View style={styles.chips}>
+          {KINDS.map((k) => (
+            <Chip key={k.kind} label={k.label} selected={kind === k.kind} onPress={() => setKind(k.kind)} />
+          ))}
+        </View>
+      )}
       {kind === "exchange" ? (
         <>
           <Field label="Отдал USDC, $" value={usdc} onChangeText={setUsdc} keyboardType="decimal-pad" />
