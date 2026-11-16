@@ -7,10 +7,18 @@ const { color, radius, space, touchMin, type } = tokens;
 
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
-type Props = { label: string; value: string; onChange: (date: string) => void; min?: string; max?: string };
+type Props = {
+  label: string;
+  value: string;
+  onChange: (date: string) => void;
+  min?: string;
+  max?: string;
+  /** What a screen reader names the field by, when the short label alone is ambiguous (several on one sheet). */
+  accessibilityName?: string;
+};
 
 /** A date chosen on a month calendar that opens in place. */
-export function DateField({ label, value, onChange, min, max }: Props) {
+export function DateField({ label, value, onChange, min, max, accessibilityName = label }: Props) {
   const [open, setOpen] = useState(false);
   const start = value || kyivDate();
   const [shown, setShown] = useState({ year: Number(start.slice(0, 4)), month: Number(start.slice(5, 7)) });
@@ -25,7 +33,7 @@ export function DateField({ label, value, onChange, min, max }: Props) {
     <View style={styles.stack}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${label}: ${value ? dateLabel(value) : "не выбрана"}`}
+        accessibilityLabel={`${accessibilityName}: ${value ? dateLabel(value) : "не выбрана"}`}
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen(!open)}
         style={styles.field}

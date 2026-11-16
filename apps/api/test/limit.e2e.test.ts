@@ -307,6 +307,25 @@ describe("loans", () => {
     await api.patch(`/plan/loans/${id}`, { amount: 200_000 }).expect(200);
     await fixedNow(80_000);
   });
+
+  it("a return date set or cleared fixes the limit afresh at once (Б7)", async () => {
+    await ordinary();
+    const id = (await api.post("/plan/loans", { amount: 100_000, received_on: TODAY, note: "manual" }).expect(201)).body.id as number;
+    await fixedNow(90_000);
+    await plant();
+    // After the next income (12 November): nothing to keep for it before then.
+    expect((await api.patch(`/plan/loans/${id}`, { due_on: "2026-11-20" }).expect(200)).body.due_on).toBe("2026-11-20");
+    await fixedNow(100_000);
+    await plant();
+    await api.patch(`/plan/loans/${id}`, { due_on: "2026-11-05" }).expect(200);
+    await fixedNow(90_000);
+    await plant();
+    await api.patch(`/plan/loans/${id}`, { due_on: "2026-11-20" }).expect(200);
+    await fixedNow(100_000);
+    await plant();
+    expect((await api.patch(`/plan/loans/${id}`, { due_on: null }).expect(200)).body.due_on).toBeNull();
+    await fixedNow(90_000);
+  });
 });
 
 describe("Binance and other manual balances", () => {

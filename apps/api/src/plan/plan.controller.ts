@@ -11,6 +11,7 @@ import {
   Patch,
   Post,
   Query,
+  UnprocessableEntityException,
 } from "@nestjs/common";
 import {
   confirmIncomeInput,
@@ -261,7 +262,15 @@ export class PlanController {
   async patchLoan(@Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
     const data = parse(loanPatch, body);
     const patch = data.repaid_at === undefined ? data : { ...data, repaid_at: data.repaid_at === null ? null : new Date(data.repaid_at) };
-    const row = await patchRow(this.ds.getRepository(Loan), id, patch);
+    const repo = this.ds.getRepository(Loan);
+    if (data.due_on !== undefined || data.received_on !== undefined) {
+      const loan = await repo.findOneBy({ id });
+      if (!loan) throw new NotFoundException();
+      // A loan is not returned before it was taken, whichever of the two days moves.
+      const due = data.due_on !== undefined ? data.due_on : loan.due_on;
+      if (due !== null && due < (data.received_on ?? loan.received_on)) throw new UnprocessableEntityException("return date is before the loan");
+    }
+    const row = await patchRow(repo, id, patch);
     await this.limit.invalidate("loan");
     return badCase(row);
   }

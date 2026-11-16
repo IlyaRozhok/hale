@@ -132,6 +132,8 @@ export class Loan {
   @Column({ type: "bigint", transformer: bt, default: 0 }) service_cost!: number;
   @Column({ type: "boolean", default: false }) repaid_date_unknown!: boolean;
   @Column({ type: "text", nullable: true }) note!: string | null;
+  /** «Вернуть до» (Б7): with it the loan behaves as a payment on that day. */
+  @Column({ type: "date", nullable: true }) due_on!: string | null;
 }
 
 @Entity("settings")

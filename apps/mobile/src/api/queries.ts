@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CashOperationInput, CashOperationPatch, CashStartInput, ExpectedIncomeInput, ExpectedIncomePatch, InstallmentInput, InstallmentPatch, LoanInput, LoanRepayInput, RecipientLabelName, RecurringInput, RecurringPatch, ScheduledPaymentInput, ScheduledPaymentPatch, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
+import type { CashOperationInput, CashOperationPatch, CashStartInput, ExpectedIncomeInput, ExpectedIncomePatch, InstallmentInput, InstallmentPatch, LoanInput, LoanPatch, LoanRepayInput, RecipientLabelName, RecurringInput, RecurringPatch, ScheduledPaymentInput, ScheduledPaymentPatch, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
 import type { CashCardAnswer, CashDepositAnswerName, GoalInput, GoalPatch, TxTypeDto } from "@hale/contracts";
 import type { TransactionsFilter } from "./client";
 import { useApi } from "./context";
@@ -402,6 +402,12 @@ export function useRepayOldLoans() {
 export function useRepayLoan() {
   const api = useApi();
   return useLoanMutation(({ id, input }: { id: number; input: LoanRepayInput }) => api.repayLoan(id, input));
+}
+
+/** «Вернуть до» set or cleared (Б7): the limit moves with it. */
+export function usePatchLoan() {
+  const api = useApi();
+  return useLoanMutation(({ id, input }: { id: number; input: LoanPatch }) => api.patchLoan(id, input));
 }
 
 export function useGoals() {

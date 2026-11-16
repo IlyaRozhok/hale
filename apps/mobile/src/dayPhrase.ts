@@ -3,7 +3,7 @@ import { dayMonth, formatMoney, pluralIndex, shiftDate } from "./format";
 
 type Payment = TodayDto["upcoming"][number];
 
-export type PhraseAction = { kind: "bridge" } | { kind: "questions" } | { kind: "calendar" } | { kind: "pay"; payment: Payment };
+export type PhraseAction = { kind: "bridge" } | { kind: "questions" } | { kind: "calendar" } | { kind: "loans" } | { kind: "pay"; payment: Payment };
 export interface Phrase {
   text: string;
   action: PhraseAction;
@@ -16,6 +16,8 @@ export interface PhraseInput {
   needsPlan: boolean;
   questions: number;
   upcoming: Payment[];
+  /** Loans whose return date is today or past; absent from an older server. */
+  loansDue?: NonNullable<TodayDto["loansDue"]>;
   yesterday: CalendarDayDto | null;
   streak: number;
 }
@@ -26,8 +28,8 @@ const date = (iso: string) => {
 };
 
 /**
- * The one thing worth saying today, the most important first: a decision that is waiting, then a
- * payment at the door, then how yesterday went. Null on a day with nothing to say.
+ * The one thing worth saying today, the most important first: a decision that is waiting, an overdue
+ * payment, a loan to return, then a payment at the door, then how yesterday went. Null on a day with nothing to say.
  */
 export function dayPhrase(i: PhraseInput): Phrase | null {
   if (i.needsPlan) return { text: "Нужен план до дохода. Это пара минут: выберите сумму на день.", action: { kind: "bridge" } };
@@ -35,6 +37,15 @@ export function dayPhrase(i: PhraseInput): Phrase | null {
   const byDate = [...i.upcoming].sort((a, b) => a.dueOn.localeCompare(b.dueOn));
   const late = byDate.find((p) => p.dueOn < i.today);
   if (late) return { text: `${late.name} ждёт с ${date(late.dueOn)}. Отметьте, если уже оплачено.`, action: { kind: "pay", payment: late } };
+
+  const loan = [...(i.loansDue ?? [])].sort((a, b) => a.dueOn.localeCompare(b.dueOn))[0];
+  if (loan) {
+    const text =
+      loan.dueOn < i.today
+        ? `Займ ${formatMoney(loan.amount)} ждёт возврата с ${date(loan.dueOn)}. Отметьте, если уже вернули.`
+        : `Сегодня срок вернуть займ ${formatMoney(loan.amount)}. Он уже учтён в лимите.`;
+    return { text, action: { kind: "loans" } };
+  }
 
   if (i.questions > 0) {
     const words = ["вопрос ждёт", "вопроса ждут", "вопросов ждут"][pluralIndex(i.questions)];

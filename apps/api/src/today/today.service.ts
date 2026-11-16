@@ -4,6 +4,7 @@ import type { BridgePreviewDto, CalendarDto, OwnMoneyItemDto, SettingsPreviewDto
 import { DataSource, type EntityManager } from "typeorm";
 import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
+import { loanReserve } from "../domain/loans";
 import { type DailyInput, type DailyState, type DayMark, computeDaily, dayMark, sumDue } from "../domain/daily";
 import { spentByDaySql, spentSql } from "../domain/ledger";
 import { runway } from "../domain/runway";
@@ -53,6 +54,8 @@ interface Loan {
   amount: number;
   remaining: number;
   received_on: string;
+  due_on: string | null;
+  kind: "short" | "other";
   manual: boolean;
 }
 
@@ -68,7 +71,9 @@ interface Facts {
   upcoming: TodayDto["upcoming"];
   /** Where the stretch to the next income ends: its day, or the horizon's end. */
   end: string;
+  /** The open loans that lower free money now (task Б7). */
   loans: Loan[];
+  loansDue: NonNullable<TodayDto["loansDue"]>;
   basis: string;
   plan: Plan | null;
   trackingStart: string;
@@ -491,15 +496,24 @@ export class TodayService {
     const lastIncome = (
       await m.query(`SELECT (${kyivDaySql("max(received_at)")})::text AS d FROM income_events WHERE status = 'received'`)
     )[0].d as string | null;
-    // Loans since the last received income, within the tracked period (earlier ones are history):
-    // they are what was borrowed in this cycle, less what short-loan repayments already covered.
-    const loans: Loan[] = await m.query(
+    // Open loans within the tracked period (earlier ones are history), less what repayments already covered.
+    // Which of them lower free money, and how, is the rule of task Б7 in domain/loans.
+    const open: Loan[] = await m.query(
       `SELECT id, amount::float8 AS amount, (amount - repaid_amount)::float8 AS remaining, received_on::text AS received_on,
-              source_transaction_id IS NULL AS manual FROM loans
-        WHERE repaid_at IS NULL AND received_on >= $2::date AND ($1::date IS NULL OR received_on >= $1::date) ORDER BY received_on, id`,
-      [lastIncome, settings.tracking_start],
+              due_on::text AS due_on, kind, source_transaction_id IS NULL AS manual FROM loans
+        WHERE repaid_at IS NULL AND received_on >= $1::date ORDER BY received_on, id`,
+      [settings.tracking_start],
     );
-    const borrowed = loans.reduce((s, l) => s + l.remaining, 0);
+    const loanRule = loanReserve({
+      loans: open.map((l) => ({ id: l.id, remaining: l.remaining, receivedOn: l.received_on, dueOn: l.due_on, kind: l.kind, manual: l.manual })),
+      today: date,
+      trackingStart: settings.tracking_start,
+      lastIncomeOn: lastIncome,
+      nextIncomeOn: next,
+    });
+    const counted = new Set(loanRule.counted.map((l) => l.id));
+    const loans = open.filter((l) => counted.has(l.id));
+    const loansDue = loanRule.dueNow.map((l) => ({ id: l.id, amount: l.remaining, dueOn: l.dueOn! }));
 
     // payments: unpaid ones feed the limit; the window's payments (paid or not, native amounts) define the bridge basis
     const end = next && next >= date ? next : addDays(date, HORIZON_DAYS);
@@ -516,11 +530,13 @@ export class TodayService {
         [end],
       );
     const unpaid = pays.filter((p) => !p.paid);
-    const obligationsDue = sumDue(
-      unpaid.filter((p) => p.kind !== "tax").map((p) => ({ dueOn: p.due_on, amount: uah(p.amount, p.currency), paid: false })),
-      date,
-      next,
-    );
+    // A loan with a return date is reserved as a payment on that date (task Б7).
+    const obligationsDue =
+      sumDue(
+        unpaid.filter((p) => p.kind !== "tax").map((p) => ({ dueOn: p.due_on, amount: uah(p.amount, p.currency), paid: false })),
+        date,
+        next,
+      ) + loanRule.due;
     const unpaidScheduled = unpaid.filter((p) => p.kind === "tax").reduce((s, p) => s + uah(p.amount, p.currency), 0);
     const basis =
       pays
@@ -583,7 +599,7 @@ export class TodayService {
         taxAccruedNotDue: Math.min(accrued + deferred, reserve),
         obligationsDue,
         goalDue: 0,
-        borrowed,
+        borrowed: loanRule.borrowed,
         nextIncomeOn: next,
         lifestyleCapMonthly: settings.lifestyle_cap > 0 ? settings.lifestyle_cap : DEFAULT_LIFESTYLE_CAP,
         foodFloor: settings.food_floor > 0 ? settings.food_floor : DEFAULT_FOOD_FLOOR,
@@ -596,6 +612,7 @@ export class TodayService {
       slots: { own: cards + fop + binance, fop, binance, cash: wallet.balance, items },
       cashStart: wallet.start,
       loans,
+      loansDue,
       basis,
       upcoming,
       end,
@@ -845,6 +862,7 @@ export class TodayService {
       upcoming: f.upcoming,
       questions,
       badCases,
+      loansDue: f.loansDue,
       runOutOn,
       syncedAt: f.syncedAt ? f.syncedAt.toISOString() : null,
       syncStale: !f.syncedAt || f.now.getTime() - f.syncedAt.getTime() > STALE_SYNC_MS,

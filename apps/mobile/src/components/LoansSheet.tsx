@@ -2,8 +2,9 @@ import { type ReactNode, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { LoanRowDto } from "@hale/contracts";
-import { useDeleteLoan, useLoanHistory, useRepayOldLoans } from "../api/queries";
+import { useDeleteLoan, useLoanHistory, usePatchLoan, useRepayOldLoans } from "../api/queries";
 import { formatMoney, shortDate } from "../format";
+import { DateField } from "./DateField";
 import { ErrorText } from "./ErrorText";
 import { ManualLoanSheet } from "./ManualLoan";
 import { PrimaryButton } from "./PrimaryButton";
@@ -40,41 +41,45 @@ export function LoansSheet({ onClose }: { onClose: () => void }) {
   const data = history.data;
   const total = data ? data.open.length + data.old.length + data.repaid.length : 0;
 
-  const row = (l: LoanRowDto) => (
-    <View key={l.id} style={styles.row}>
-      <View style={styles.rowText}>
-        <Text style={styles.name}>{nameOf(l)}</Text>
-        <Text style={styles.detail}>{detail(l)}</Text>
+  const row = (l: LoanRowDto, due = false) => (
+    <View key={l.id} style={styles.loan}>
+      <View style={styles.row}>
+        <View style={styles.rowText}>
+          <Text style={styles.name}>{nameOf(l)}</Text>
+          <Text style={styles.detail}>{detail(l)}</Text>
+        </View>
+        {l.manual && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Удалить: ${nameOf(l)}`}
+            onPress={() =>
+              askDeleteLoan(nameOf(l), () =>
+                remove.mutate(l.id, { onError: () => Alert.alert("Не удалось удалить займ", "Проверьте связь и попробуйте ещё раз.") }),
+              )
+            }
+            style={styles.action}
+          >
+            <Text style={styles.deleteText}>Удалить</Text>
+          </Pressable>
+        )}
+        {l.repaidOn === null && (
+          <Pressable accessibilityRole="button" accessibilityLabel={`Погасил: ${nameOf(l)}`} onPress={() => setRepaying(l)} style={styles.action}>
+            <Text style={styles.actionText}>Погасил</Text>
+          </Pressable>
+        )}
       </View>
-      {l.manual && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Удалить: ${nameOf(l)}`}
-          onPress={() =>
-            askDeleteLoan(nameOf(l), () =>
-              remove.mutate(l.id, { onError: () => Alert.alert("Не удалось удалить займ", "Проверьте связь и попробуйте ещё раз.") }),
-            )
-          }
-          style={styles.action}
-        >
-          <Text style={styles.deleteText}>Удалить</Text>
-        </Pressable>
-      )}
-      {l.repaidOn === null && (
-        <Pressable accessibilityRole="button" accessibilityLabel={`Погасил: ${nameOf(l)}`} onPress={() => setRepaying(l)} style={styles.action}>
-          <Text style={styles.actionText}>Погасил</Text>
-        </Pressable>
-      )}
+      {/* An older server has no return date and could not keep one. */}
+      {due && l.dueOn !== undefined && <DueDate loan={l} />}
     </View>
   );
 
-  const section = (title: string, loans: LoanRowDto[], note?: string, action?: ReactNode) =>
+  const section = (title: string, loans: LoanRowDto[], note?: string, action?: ReactNode, due = false) =>
     loans.length > 0 && (
       <View style={styles.section}>
         <Text style={styles.heading}>{title}</Text>
         {note && <Text style={styles.detail}>{note}</Text>}
         {action}
-        {loans.map(row)}
+        {loans.map((l) => row(l, due))}
       </View>
     );
 
@@ -107,7 +112,7 @@ export function LoansSheet({ onClose }: { onClose: () => void }) {
             <Stat label="На обслуживание" value={data.stats.serviceCost} />
             <Stat label="Открыто сейчас" value={data.stats.stillOpen} />
           </View>
-          {section("Открытые", data.open)}
+          {section("Открытые", data.open, undefined, undefined, true)}
           {section(
             "До начала учёта",
             data.old,
@@ -127,6 +132,41 @@ export function LoansSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
+/**
+ * «Вернуть до» (task Б7): with a date the loan is kept for like a payment on that day; without one it stays
+ * in the limit until it is repaid. Saved as soon as it is picked or cleared.
+ */
+function DueDate({ loan }: { loan: LoanRowDto }) {
+  const patch = usePatchLoan();
+  const save = (due_on: string | null) =>
+    patch.mutate(
+      { id: loan.id, input: { due_on } },
+      { onError: () => Alert.alert("Не удалось сохранить срок", "Проверьте связь и попробуйте ещё раз.") },
+    );
+  return (
+    <View style={styles.due}>
+      <DateField
+        label="Вернуть до"
+        accessibilityName={`Вернуть до, ${nameOf(loan)}, ${detail(loan)}`}
+        value={loan.dueOn ?? ""}
+        onChange={save}
+        min={loan.receivedOn}
+      />
+      {!!loan.dueOn && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Убрать срок: ${nameOf(loan)}`}
+          onPress={() => save(null)}
+          disabled={patch.isPending}
+          style={styles.quiet}
+        >
+          <Text style={styles.deleteText}>Убрать срок</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <View style={styles.stat}>
@@ -140,7 +180,9 @@ const styles = StyleSheet.create({
   section: { gap: space.sm },
   heading: { ...type.label, color: color.fg.muted },
   stat: { flexDirection: "row", justifyContent: "space-between", gap: space.md },
+  loan: { gap: space.xs },
   row: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.md },
+  due: { gap: space.xs },
   rowText: { flex: 1 },
   name: { ...type.body, color: color.fg.default },
   detail: { ...type.caption, color: color.fg.muted },

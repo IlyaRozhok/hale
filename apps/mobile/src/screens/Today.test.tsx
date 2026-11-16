@@ -3,7 +3,7 @@ import { Alert, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { BridgeStateDto, DailyStateDto } from "@hale/contracts";
 import { Today } from "./Today";
-import { calendarFixture, fakeApi, makeClient, renderWith, todayFixture } from "../testing";
+import { calendarFixture, fakeApi, loanFixture, loanHistoryFixture, makeClient, renderWith, todayFixture } from "../testing";
 import { ApiError, NetworkError } from "../api/client";
 
 jest.mock("../metal", () => {
@@ -154,6 +154,27 @@ describe("Today, normal mode", () => {
       await fireEvent(chart, "responderGrant", { nativeEvent: { locationX: 320 } });
       await fireEvent.press(screen.getByRole("button", { name: "Квартплата, ₴17,000: отметить оплату" }));
       expect(await screen.findByRole("button", { name: "Оплачено" })).toBeTruthy();
+    });
+
+    it("a loan past its return date is named before the questions, and a tap opens the loans (Б7)", async () => {
+      const loansDue = [{ id: 7, amount: 500_000, dueOn: "2026-10-30" }];
+      const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
+      const api = fakeApi({
+        today: jest.fn(async () => todayFixture({ loansDue, questions })),
+        loanHistory: jest.fn(async () => loanHistoryFixture({ open: [loanFixture({ dueOn: "2026-10-30" })] })),
+      });
+      await renderWith(<Today onOpenActivity={noop} />, api);
+      await fireEvent.press(await screen.findByText("Займ ₴5,000 ждёт возврата с 30 окт. Отметьте, если уже вернули."));
+      expect(await screen.findByText("Займы")).toBeTruthy();
+      expect(await screen.findByRole("button", { name: "Погасил: Друг" })).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
+      await waitFor(() => expect(screen.queryByText("Займы")).toBeNull());
+    });
+
+    it("a loan due today is said to be inside the limit (Б7)", async () => {
+      const loansDue = [{ id: 7, amount: 500_000, dueOn: "2026-11-02" }];
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ loansDue })) }));
+      expect(await screen.findByText("Сегодня срок вернуть займ ₴5,000. Он уже учтён в лимите.")).toBeTruthy();
     });
 
     it("a quiet day says nothing", async () => {

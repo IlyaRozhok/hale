@@ -111,7 +111,7 @@ export class LoansService {
     const rows: (Omit<LoanRowDto, "title"> & { title: string | null })[] = await this.ds.query(
       `SELECT l.id, l.amount::float8 AS amount, (l.amount - l.repaid_amount)::float8 AS remaining, l.received_on::text AS "receivedOn",
               (${kyivDaySql("l.repaid_at")})::text AS "repaidOn", NOT l.repaid_date_unknown AS "repaidDateKnown", l.repaid_amount::float8 AS "repaidAmount",
-              l.service_cost::float8 AS "serviceCost", l.source_transaction_id IS NULL AS manual,
+              l.service_cost::float8 AS "serviceCost", l.source_transaction_id IS NULL AS manual, l.due_on::text AS "dueOn",
               CASE WHEN l.source_transaction_id IS NULL THEN l.note ELSE t.description END AS title
          FROM loans l LEFT JOIN transactions t ON t.id = l.source_transaction_id
         WHERE ${where} ORDER BY l.received_on DESC, l.id DESC`,
