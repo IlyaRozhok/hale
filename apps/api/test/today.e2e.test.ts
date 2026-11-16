@@ -1742,10 +1742,11 @@ describe("questions, upcoming and run-out", () => {
       ]);
     });
 
-    it("waits while the payment is 10 days overdue", async () => {
+    it("waits while the payment is 10 days overdue, for an operation a week before its due date", async () => {
+      // Б31: an operation within five days of the due date is asked about at once; this one is not.
       const card = await account("black", 5_000_000);
       await plan("Аренда", 1_700_000, "2026-11-12");
-      await tx(card, -1_700_000, "person_transfer", { date: "2026-11-11" });
+      await tx(card, -1_700_000, "person_transfer", { date: "2026-11-05" });
       expect(paidQs(await today())).toEqual([]);
     });
 
@@ -1810,6 +1811,88 @@ describe("questions, upcoming and run-out", () => {
         await tx(card, -100_000 * (n + 1), "person_transfer", { date: due });
       }
       expect(paidQs(await today()).map((q) => Number(q.id.split(":")[1]))).toEqual([ids[1], ids[2]]);
+    });
+
+    describe("a rent paid by a transfer near its due date is asked about at once (Б31)", () => {
+      const spent = (r: { state: { dailyLimit: number; leftToday: number } }) => r.state.dailyLimit - r.state.leftToday;
+
+      it("asks on the day of the transfer, the day before the rent is due", async () => {
+        const card = await account("black", 20_000_000);
+        await income("fop", "2026-12-10");
+        const rent = await plan("Аренда", 1_000_000, "2026-11-23");
+        const t = await tx(card, -1_000_000, "person_transfer", { date: "2026-11-22", description: "Іван П." });
+        const r = await today();
+        expect(paidQs(r)).toEqual([
+          { id: `payment_paid:${rent}:${t}`, kind: "payment_paid", text: "Это оплата «Аренда» ₴10,000?", detail: "Іван П. · 22.11" },
+        ]);
+        // Until the owner answers, the transfer is today's spending.
+        expect(spent(r)).toBe(1_000_000);
+      });
+
+      it("takes a transfer up to ₴20 short, but not ₴50", async () => {
+        const card = await account("black", 20_000_000);
+        const rent = await plan("Аренда", 1_000_000, "2026-11-23");
+        const short = await tx(card, -998_500, "person_transfer", { date: "2026-11-22" });
+        expect(paidQs(await today()).map((q) => q.id)).toEqual([`payment_paid:${rent}:${short}`]);
+        await ds.query(`DELETE FROM transactions`);
+        await tx(card, -995_000, "person_transfer", { date: "2026-11-22" });
+        expect(paidQs(await today())).toEqual([]);
+      });
+
+      it("«Да»: the transfer leaves today's spending and the day is fixed afresh at once", async () => {
+        const card = await account("black", 10_000_000);
+        await income("fop", "2026-12-10");
+        const rent = await plan("Аренда", 1_000_000, "2026-11-23");
+        await fix(); // the morning: the rent is reserved, nothing spent yet
+        const morning = await limitRow();
+        await setBalance(card, 8_970_000);
+        const t = await tx(card, -1_000_000, "person_transfer", { date: "2026-11-22" });
+        await tx(card, -30_000, "spend", { date: "2026-11-22" });
+        const before = await today();
+        expect(paidQs(before).map((q) => q.id)).toEqual([`payment_paid:${rent}:${t}`]);
+        expect(spent(before)).toBe(1_030_000);
+        expect(before.state.leftToday).toBeLessThan(0); // the day is over its limit
+
+        // A stale row, to see the answer itself replace it rather than the next job.
+        await ds.query(`UPDATE daily_snapshots SET daily_limit=1 WHERE local_date='2026-11-22'`);
+        await api.post(`/cash/payments/${rent}/links`, { transactionIds: [t] }).expect(201);
+        // The rent's money was held from the limit all along and left the account once: the limit stays.
+        expect(await limitRow()).toBe(morning);
+        const after = (await api.get("/today").expect(200)).body;
+        expect(spent(after)).toBe(30_000);
+        expect(after.state.dailyLimit).toBe(morning);
+        expect(after.state.leftToday).toBe(morning - 30_000);
+        expect(after.state.leftToday).toBeGreaterThan(0);
+        expect(paidQs(after)).toEqual([]);
+      });
+
+      it("«Нет»: the pair is not asked again", async () => {
+        const card = await account("black", 20_000_000);
+        const rent = await plan("Аренда", 1_000_000, "2026-11-23");
+        const t = await tx(card, -1_000_000, "person_transfer", { date: "2026-11-22" });
+        expect(paidQs(await today()).map((q) => q.id)).toEqual([`payment_paid:${rent}:${t}`]);
+        await api.post(`/plan/payments/${rent}/not-paid-by`, { transactionId: t }).expect(201);
+        expect(paidQs(await today())).toEqual([]);
+        at("2026-11-26T10:00:00Z");
+        expect(paidQs(await today())).toEqual([]);
+      });
+
+      it("does not ask about a payment due more than five days ahead, an own transfer or a tax", async () => {
+        const card = await account("black", 20_000_000);
+        await plan("Аренда", 1_000_000, "2026-11-28");
+        await tx(card, -1_000_000, "person_transfer", { date: "2026-11-22" });
+        expect(paidQs(await today())).toEqual([]);
+
+        await ds.query(`DELETE FROM scheduled_payments; DELETE FROM transactions`);
+        await plan("Аренда", 1_000_000, "2026-11-23");
+        await tx(card, -1_000_000, "own_transfer", { date: "2026-11-22" });
+        expect(paidQs(await today())).toEqual([]);
+
+        await ds.query(`DELETE FROM scheduled_payments; DELETE FROM transactions`);
+        await plan("Налог", 1_000_000, "2026-11-23", "tax");
+        await tx(card, -1_000_000, "person_transfer", { date: "2026-11-22" });
+        expect(paidQs(await today())).toEqual([]);
+      });
     });
   });
 

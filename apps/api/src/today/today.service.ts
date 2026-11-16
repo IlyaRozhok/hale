@@ -13,7 +13,7 @@ import { quarterLabel, quarterOf } from "../domain/quarter";
 import { runOutDate } from "../domain/run-out";
 import { taxReserve } from "../domain/tax";
 import { usdcMatchRows } from "../domain/usdc-match";
-import { PAID_QUESTION_DAYS, type PayableTx, type Payment, paidQuestions } from "../domain/recurring-match";
+import { PAID_QUESTION_WINDOW_DAYS, type PayableTx, type Payment, paidQuestions } from "../domain/recurring-match";
 import { BINANCE } from "../plan/plan.service";
 import { cardTail, isCounterpartyName, transfersWord, unnamedTransferQuestion } from "../domain/counterparty";
 import { TRANSFER_MCCS } from "../domain/merchants";
@@ -737,14 +737,17 @@ export class TodayService {
   }
 
   /**
-   * «Это оплата?» (task Б8): a payment long overdue while an operation of its amount sits unlinked.
-   * The operations are the ones the «Оплачено» sheet offers for the payment; paidQuestions narrows them.
+   * «Это оплата?» (task Б8): a payment long overdue while an operation of its amount sits unlinked, or
+   * (task Б31) one due within days of an operation near its amount. Every open payment due by today plus
+   * PAID_QUESTION_WINDOW_DAYS is looked at: an operation is never later than today, so one due later
+   * cannot have an operation near its due date. The operations are the ones the «Оплачено» sheet offers
+   * for the payment; paidQuestions narrows them.
    */
   private async paymentPaidQuestions(m: EntityManager, f: Facts): Promise<TodayDto["questions"]> {
     const payments: Payment[] = await m.query(
       `SELECT id, kind, name, amount::float8 AS amount, currency, due_on::text AS due_on, paid_at, transaction_id, match_hint
          FROM scheduled_payments
-        WHERE paid_at IS NULL AND transaction_id IS NULL AND kind <> 'tax' AND due_on < $1::date - ${PAID_QUESTION_DAYS}
+        WHERE paid_at IS NULL AND transaction_id IS NULL AND kind <> 'tax' AND due_on <= $1::date + ${PAID_QUESTION_WINDOW_DAYS}
           AND NOT EXISTS (SELECT 1 FROM payment_links l WHERE l.payment_id = scheduled_payments.id)
         ORDER BY due_on, id`,
       [f.date],
