@@ -13,6 +13,7 @@ const TABS: Record<string, { icon: IconName; label: string }> = {
   Today: { icon: "home", label: "Сегодня" },
   Activity: { icon: "list", label: "Операции" },
   Plan: { icon: "target", label: "План" },
+  Insights: { icon: "chart", label: "Итоги" },
 };
 
 /** The pill and the round button beside it are the same height. */

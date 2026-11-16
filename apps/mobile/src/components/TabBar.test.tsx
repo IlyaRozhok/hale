@@ -6,7 +6,7 @@ import { TabBar } from "./TabBar";
 import { fakeApi, renderWith } from "../testing";
 
 const METRICS = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
-const routes = ["Today", "Activity", "Plan"].map((name) => ({ key: `${name}-k`, name }));
+const routes = ["Today", "Activity", "Plan", "Insights"].map((name) => ({ key: `${name}-k`, name }));
 
 function setup(index = 0, defaultPrevented = false) {
   const navigation = { emit: jest.fn(() => ({ defaultPrevented })), navigate: jest.fn() };
@@ -29,10 +29,11 @@ describe("TabBar", () => {
     await render(setup(1).ui);
     expect(screen.getByRole("tab", { name: "Сегодня" }).props.accessibilityState.selected).toBe(false);
     expect(screen.getByRole("tab", { name: "Операции" }).props.accessibilityState.selected).toBe(true);
-    for (const name of ["Сегодня", "Операции", "План"]) expect(screen.queryByText(name)).toBeNull();
+    for (const name of ["Сегодня", "Операции", "План", "Итоги"]) expect(screen.queryByText(name)).toBeNull();
     expect(screen.getByTestId("icon-list").props.accessibilityHint).toBe(tokens.color.fg.default);
     expect(screen.getByTestId("icon-home").props.accessibilityHint).toBe(tokens.color.fg.subtle);
     expect(screen.getByTestId("icon-target").props.accessibilityHint).toBe(tokens.color.fg.subtle);
+    expect(screen.getByTestId("icon-chart").props.accessibilityHint).toBe(tokens.color.fg.subtle);
     expect(StyleSheet.flatten(screen.getByRole("tab", { name: "Операции" }).props.style).backgroundColor).toBeUndefined();
   });
 
@@ -41,6 +42,8 @@ describe("TabBar", () => {
     await render(ui);
     await fireEvent.press(screen.getByRole("tab", { name: "План" }));
     expect(navigation.navigate).toHaveBeenCalledWith("Plan");
+    await fireEvent.press(screen.getByRole("tab", { name: "Итоги" }));
+    expect(navigation.navigate).toHaveBeenCalledWith("Insights");
     navigation.navigate.mockClear();
     await fireEvent.press(screen.getByRole("tab", { name: "Сегодня" }));
     expect(navigation.navigate).not.toHaveBeenCalled();
@@ -48,7 +51,7 @@ describe("TabBar", () => {
 
   it("keeps touch targets big enough", async () => {
     await render(setup(0).ui);
-    for (const name of ["Сегодня", "Операции", "План"]) {
+    for (const name of ["Сегодня", "Операции", "План", "Итоги"]) {
       expect(StyleSheet.flatten(screen.getByRole("tab", { name }).props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
     }
     expect(StyleSheet.flatten(screen.getByRole("button", { name: "Добавить операцию" }).props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);

@@ -71,6 +71,23 @@ describe("api client", () => {
     expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toBe("https://api.example.test/check/latest");
   });
 
+  it("reads a month's «Итоги», the current one without a month, and has none from an older server (В2)", async () => {
+    const month = { month: "2026-11", through: "2026-11-16", previous: { from: "2026-10-01", to: "2026-10-16" }, spent: 0, previousSpent: 0, categories: [] };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(json(month))
+      .mockResolvedValueOnce(json({ ...month, month: "2026-10" }))
+      .mockResolvedValueOnce(json({ message: "Cannot GET /insights/month" }, 404))
+      .mockResolvedValueOnce(json({ message: "boom" }, 500));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await expect(api.insights()).resolves.toEqual(month);
+    await expect(api.insights("2026-10")).resolves.toEqual({ ...month, month: "2026-10" });
+    await expect(api.insights()).resolves.toBeNull();
+    await expect(api.insights()).rejects.toBeInstanceOf(ApiError);
+    const urls = (fetchImpl.mock.calls as unknown as [string][]).map(([url]) => url.replace("https://api.example.test", ""));
+    expect(urls.slice(0, 2)).toEqual(["/insights/month", "/insights/month?month=2026-10"]);
+  });
+
   it("login sends no token and returns the token string", async () => {
     const fetchImpl = vi.fn(async () => json({ token: "abc" }));
     const { api } = setup(fetchImpl as unknown as typeof fetch, null);

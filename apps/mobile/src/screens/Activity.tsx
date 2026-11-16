@@ -8,7 +8,7 @@ import { useTransactions } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
 import { dayHeader, formatSignedMoney, kyivDate, operationsText, periodLabel } from "../format";
 import { categoryLabel } from "../labels";
-import { FiltersSheet, type Period } from "../components/FiltersSheet";
+import { FiltersSheet, type Filters, type Period } from "../components/FiltersSheet";
 import { ErrorText } from "../components/ErrorText";
 import { Field } from "../components/Field";
 import { Glass } from "../components/Glass";
@@ -35,8 +35,12 @@ const SEARCH_DELAY_MS = 300;
 /** A row an answer can be about: already answered, or still a plain transfer out. */
 const isTransferToSomeone = (t: TransactionDto) => t.amount < 0 && (t.recipientLabel !== null || t.type === "person_transfer");
 
-/** What a move to the operations may carry: `day` asks for that one day's operations; `at` differs on every arrival. */
-type ActivityParams = { day?: string; at?: number } | undefined;
+/**
+ * What a move to the operations may carry: `day` asks for that one day's spending (the limit calendar);
+ * `category` with `from`..`to` for that category's spending over those days («Итоги», task В2). `at` differs on
+ * every arrival, so the same one twice in a row is applied twice.
+ */
+export type ActivityParams = { day?: string; category?: string; from?: string; to?: string; at?: number } | undefined;
 
 type Props = {
   /** Test seam for the current moment. */
@@ -70,16 +74,21 @@ export function Activity({ now = () => new Date(), route }: Props) {
     return () => clearTimeout(id);
   }, [text]);
 
-  // Arriving from a day of the limit calendar: that day's spending, and nothing chosen before it.
-  // Done while rendering, so the list is never asked for with the old filters first.
-  const day = route?.params?.day;
-  const arrival = day ? `${day}@${route?.params?.at ?? 0}` : null;
+  // Arriving from a day of the limit calendar, or from a category of «Итоги»: that spending, and nothing
+  // chosen before it. Done while rendering, so the list is never asked for with the old filters first.
+  const params = route?.params;
+  const target: Filters | null = params?.day
+    ? { category: null, period: { from: params.day, to: params.day } }
+    : params?.category && params.from && params.to
+      ? { category: params.category, period: { from: params.from, to: params.to } }
+      : null;
+  const arrival = target ? `${target.category ?? ""}:${target.period?.from}..${target.period?.to}@${params?.at ?? 0}` : null;
   const [applied, setApplied] = useState<string | null>(null);
-  if (day && arrival !== applied) {
+  if (target && arrival !== applied) {
     setApplied(arrival);
     setTab("spend");
-    setCategory(null);
-    setPeriod({ from: day, to: day });
+    setCategory(target.category);
+    setPeriod(target.period);
     setSearching(false);
     setText("");
     setSearch("");

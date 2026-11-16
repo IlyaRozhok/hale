@@ -14,6 +14,7 @@ import { createStorePersister, shouldPersist } from "./api/persist";
 import { CACHE_KEY, TOKEN_KEY, keychain } from "./api/secureStore";
 import { Login } from "./screens/Login";
 import { Activity } from "./screens/Activity";
+import { Insights } from "./screens/Insights";
 import { Plan } from "./screens/Plan";
 import { TabBar } from "./components/TabBar";
 import { Background } from "./components/Background";
@@ -39,6 +40,11 @@ function TodayTab({ navigation }: { navigation: NavigationProp<ParamListBase> })
   return <Today onOpenActivity={(day) => navigation.navigate("Activity", day ? { day, at: Date.now() } : undefined)} />;
 }
 
+function InsightsTab({ navigation }: { navigation: NavigationProp<ParamListBase> }) {
+  // A category's spending over the shown days of its month, as the filters of «Операции» put it.
+  return <Insights onOpenCategory={(category, from, to) => navigation.navigate("Activity", { category, from, to, at: Date.now() })} />;
+}
+
 function Main() {
   const api = useApi();
   // Ask for notifications once after login. A refusal or a missing token changes nothing.
@@ -52,6 +58,7 @@ function Main() {
         <Tabs.Screen name="Today" component={TodayTab} options={{ title: "Сегодня" }} />
         <Tabs.Screen name="Activity" component={Activity} options={{ title: "Операции" }} />
         <Tabs.Screen name="Plan" component={Plan} options={{ title: "План" }} />
+        <Tabs.Screen name="Insights" component={InsightsTab} options={{ title: "Итоги" }} />
       </Tabs.Navigator>
     </NavigationContainer>
   );
