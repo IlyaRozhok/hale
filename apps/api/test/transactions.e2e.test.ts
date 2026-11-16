@@ -3,6 +3,7 @@ import request from "supertest";
 import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
+import { ImportService } from "../src/mono/import.service";
 import { PlanService } from "../src/plan/plan.service";
 import { Clock } from "../src/time/clock";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
@@ -869,5 +870,47 @@ describe("a tax closed by its operations, one of them retyped (Б26)", () => {
     await api.patch(`/transactions/${first}`, { type: "spend" }).expect(200);
     expect(await state(id)).toEqual({ paid: true, closed_by_links: false });
     expect(await links(id)).toEqual([second]);
+  });
+});
+
+describe("the same sum from someone else is no transfer between own accounts (Б32)", () => {
+  /** A statement row as monobank sends it, at noon UTC on 10 November 2026 plus `s` seconds. */
+  const item = (id: string, amount: number, description: string, s: number) => ({
+    id, time: Math.floor(Date.UTC(2026, 10, 10, 12, 0, 0) / 1000) + s, description, mcc: 4829, originalMcc: 4829, hold: false,
+    amount, operationAmount: amount, currencyCode: 980, commissionRate: 0, cashbackAmount: 0, balance: 1_000_000,
+  });
+  const listed = async (group: string) =>
+    (await api.get(`/transactions?group=${group}&from=2026-11-10&to=2026-11-10`).expect(200)).body.items as
+      { id: number; type: string; inLimit: boolean; needsLabel: boolean }[];
+
+  it("₴500 to Олена from the black card and ₴500 from Петро on the white one three minutes later stay a transfer and money from a person", async () => {
+    const black = await account("black");
+    const white = await account("white");
+    const imp = app.get(ImportService);
+    const out = await imp.upsertStatementItem(black, item("olena", -50_000, "Олена Коваль", 0));
+    const inn = await imp.upsertStatementItem(white, item("petro", 50_000, "Від: Петро Сидоренко", 180));
+    expect(await ds.query(`SELECT id, type, needs_label FROM transactions ORDER BY id`)).toEqual([
+      { id: out.id, type: "person_transfer", needs_label: true },
+      // As a lone «Від:» row on its own: money from a person, not asked about.
+      { id: inn.id, type: "person_in", needs_label: false },
+    ]);
+    // The ₴500 counts against the day and is asked about; the money in stays under «Доходы».
+    const spend = await listed("spend");
+    expect(spend.map((r) => [r.id, r.type, r.inLimit, r.needsLabel])).toEqual([[out.id, "person_transfer", true, true]]);
+    expect((await listed("income")).map((r) => r.id)).toEqual([inn.id]);
+  });
+
+  it("a real transfer between two own cards with the exact sum still pairs", async () => {
+    const black = await account("black");
+    const white = await account("white");
+    const imp = app.get(ImportService);
+    await imp.upsertStatementItem(black, item("to-white", -50_000, "Переказ на картку", 0));
+    await imp.upsertStatementItem(white, item("from-black", 50_000, "Переказ з картки", 30));
+    expect(await ds.query(`SELECT type, needs_label FROM transactions ORDER BY id`)).toEqual([
+      { type: "own_transfer", needs_label: false },
+      { type: "own_transfer", needs_label: false },
+    ]);
+    expect(await listed("spend")).toEqual([]);
+    expect(await listed("income")).toEqual([]);
   });
 });
