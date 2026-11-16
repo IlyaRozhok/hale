@@ -859,30 +859,97 @@ describe("income events", () => {
     });
   });
 
-  it("fop event is received only once incomes reach half the expected amount", async () => {
-    await fopIncome(); // $5,000
-    await app.get(PlanService).generateEvents("2026-11-02");
-    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', now(), 40)`); // half = 10_000_000 kop
-    const fop = await account("fop", "USD");
-    const status = async () => (await row(`SELECT status, amount_uah::int AS amount_uah FROM income_events WHERE period='2026-11'`));
-    const small = await tx(fop, { amount: 25_000, description: "From client", date: "2026-11-10", amountUah: 1_000_000 });
-    await reclassify([small]);
-    expect((await status()).status).toBe("expected");
-    const big = await tx(fop, { amount: 200_000, description: "From client", date: "2026-11-17", amountUah: 9_000_000 });
-    await reclassify([big]);
-    await reclassify([big]);
-    expect(await status()).toEqual({ status: "received", amount_uah: 10_000_000 });
-    // next month stays untouched
-    expect((await row(`SELECT status FROM income_events WHERE period='2026-12'`)).status).toBe("expected");
-  });
+  describe("a fop income of any size marks its month's event received (Б33)", () => {
+    const uahFop = () =>
+      api.post("/plan/expected-incomes", { source: "fop", amount: 500_000, currency: "UAH", window_start_day: 15, window_end_day: 25 });
+    const event = async (period: string) =>
+      (await row(
+        `SELECT e.status, e.amount_uah::int AS amount_uah, e.received_at, e.matched_transaction_id AS tx
+           FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id WHERE x.source='fop' AND e.period=$1`,
+        [period],
+      )) as { status: string; amount_uah: number | null; received_at: Date | null; tx: number | null };
 
-  it("a fop income cannot be judged without a rate", async () => {
-    await fopIncome();
-    await app.get(PlanService).generateEvents("2026-11-02");
-    const fop = await account("fop", "USD");
-    const t = await tx(fop, { amount: 500_000, description: "From client", date: "2026-11-17", amountUah: 21_000_000 });
-    await reclassify([t]);
-    expect((await row(`SELECT status FROM income_events WHERE period='2026-11'`)).status).toBe("expected");
+    it("₴2,000 against an expected ₴5,000 marks November received; next month stays expected", async () => {
+      await uahFop();
+      await app.get(PlanService).generateEvents("2026-11-02");
+      const fop = await account("fop");
+      const t = await tx(fop, { amount: 200_000, description: "From client", date: "2026-11-10" });
+      await reclassify([t]);
+      expect(await event("2026-11")).toEqual({ status: "received", amount_uah: 200_000, received_at: new Date("2026-11-10T10:00:00Z"), tx: t });
+      expect((await event("2026-12")).status).toBe("expected");
+    });
+
+    it("a later income in the month raises the amount and keeps the first arrival's time and row", async () => {
+      await uahFop();
+      await app.get(PlanService).generateEvents("2026-11-02");
+      const fop = await account("fop");
+      const first = await tx(fop, { amount: 200_000, description: "From client", date: "2026-11-10" });
+      await reclassify([first]);
+      const second = await tx(fop, { amount: 300_000, description: "From client", date: "2026-11-17" });
+      await reclassify([second]);
+      await reclassify([second]);
+      expect(await event("2026-11")).toEqual({ status: "received", amount_uah: 500_000, received_at: new Date("2026-11-10T10:00:00Z"), tx: first });
+    });
+
+    it("a foreign-currency fop income counts once it has a hryvnia amount, with no rate needed; without one it waits", async () => {
+      await fopIncome(); // $5,000
+      await app.get(PlanService).generateEvents("2026-11-02");
+      const fop = await account("fop", "USD");
+      const unknown = await tx(fop, { amount: 25_000, description: "From client", date: "2026-11-10", amountUah: null });
+      await reclassify([unknown]);
+      expect((await event("2026-11")).status).toBe("expected");
+      const known = await tx(fop, { amount: 25_000, description: "From client", date: "2026-11-12", amountUah: 1_000_000 });
+      await reclassify([known]);
+      expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 1_000_000, tx: known });
+    });
+
+    it("a refund to the fop account (Б5) does not mark it", async () => {
+      await uahFop();
+      await app.get(PlanService).generateEvents("2026-11-02");
+      const fop = await account("fop");
+      const cancel = await tx(fop, { amount: 9_000, description: "Скасування. Some Shop", mcc: 4829, date: "2026-11-10" });
+      const back = await tx(fop, { amount: 52_950, description: "Повернення платежу skay.ua", mcc: 4829, date: "2026-11-11" });
+      await reclassify([cancel, back]);
+      expect(await ds.query(`SELECT type FROM transactions ORDER BY id`)).toEqual([{ type: "spend" }, { type: "spend" }]);
+      expect((await event("2026-11")).status).toBe("expected");
+      await app.get(PlanService).hourlyJob();
+      expect((await event("2026-11")).status).toBe("expected");
+    });
+
+    it("an event left expected by the old half rule is marked by the hourly job, once, from the month's first income", async () => {
+      await uahFop();
+      await usdc();
+      await app.get(PlanService).generateEvents("2026-11-02");
+      const fop = await account("fop");
+      // Typed before the fix: the half rule left the event expected.
+      const first = await tx(fop, { amount: 100_000, description: "From client", date: "2026-11-05" });
+      await tx(fop, { amount: 100_000, description: "From client", date: "2026-11-09" });
+      await ds.query(`UPDATE transactions SET type='income', category='income'`);
+      expect((await event("2026-11")).status).toBe("expected");
+
+      await app.get(PlanService).hourlyJob();
+      const marked = await event("2026-11");
+      expect(marked).toEqual({ status: "received", amount_uah: 200_000, received_at: new Date("2026-11-05T10:00:00Z"), tx: first });
+      await app.get(PlanService).hourlyJob();
+      expect(await event("2026-11")).toEqual(marked);
+      // Next month has no income yet, and USDC keeps its own path.
+      expect((await event("2026-12")).status).toBe("expected");
+      expect(await ds.query(`SELECT e.status FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id WHERE x.source='usdc'`)).toEqual([
+        { status: "expected" }, { status: "expected" },
+      ]);
+    });
+
+    it("leaves a USDC event alone when fop income arrives", async () => {
+      await uahFop();
+      await usdc();
+      await app.get(PlanService).generateEvents("2026-11-02");
+      const fop = await account("fop");
+      await reclassify([await tx(fop, { amount: 200_000, description: "From client", date: "2026-11-10" })]);
+      expect((await event("2026-11")).status).toBe("received");
+      expect(
+        await ds.query(`SELECT e.status FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id WHERE x.source='usdc' AND e.period='2026-11'`),
+      ).toEqual([{ status: "expected" }]);
+    });
   });
 
   it("matching a cash_in to a USDC event lowers Binance, retypes the row and is idempotent", async () => {

@@ -2022,3 +2022,43 @@ describe("an expected income's window dates its events (Б28)", () => {
     expect((await events())[0]!.on).toBe("2026-11-09");
   });
 });
+
+describe("a fop income smaller than expected still counts as the month's income (Б33)", () => {
+  it("the next income date moves to next month's event: the morning limit holds that day, the next days divide by the days to it", async () => {
+    await account("black", 1_000_000);
+    const fop = await account("fop", 0);
+    at("2026-11-18T08:00:00Z");
+    await api.post("/plan/expected-incomes", { source: "fop", amount: 500_000, currency: "UAH", window_start_day: 15, window_end_day: 25 }).expect(201);
+    const morning = (await today()).state;
+    expect(morning).toMatchObject({ daysLeft: 7, needsIncomeDate: false });
+
+    // ₴2,000 against an expected ₴5,000, as the bank sends it: untyped until classified.
+    const t = (
+      await ds.query(
+        `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, mcc, raw)
+         VALUES ('tx-small-income',$1,'2026-11-18T09:00:00Z','2026-11-18','From client',200000,200000,4829,'{}') RETURNING id`,
+        [fop],
+      )
+    )[0].id as number;
+    await setBalance(fop, 200_000);
+    await app.get(ReclassifyService).reclassifyIds([t]);
+    expect(await ds.query(`SELECT period, status FROM income_events ORDER BY period`)).toEqual([
+      { period: "2026-11", status: "received" },
+      { period: "2026-12", status: "expected" },
+    ]);
+    // Money that arrives on its own does not move the day's limit (LimitService): it holds until tomorrow.
+    expect((await today()).state.dailyLimit).toBe(morning.dailyLimit);
+
+    at("2026-11-19T08:00:00Z");
+    const next = (await today()).state;
+    expect(next).toMatchObject({ daysLeft: 36, needsIncomeDate: false });
+    expect(next.dailyLimit).toBe(Math.floor(next.free / 36));
+
+    // After the November date has passed, nothing hangs on the old event: no 30-day horizon, no question about it.
+    at("2026-11-28T08:00:00Z");
+    const late = await today();
+    expect(late.state).toMatchObject({ daysLeft: 27, needsIncomeDate: false });
+    expect(late.state.dailyLimit).toBe(Math.floor(late.state.free / 27));
+    expect(late.questions.map((q: { kind: string }) => q.kind)).not.toContain("income_date");
+  });
+});
