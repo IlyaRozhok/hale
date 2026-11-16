@@ -11,6 +11,8 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { PlanModule } from "./plan/plan.module";
 import { TodayModule } from "./today/today.module";
 import { TransactionsModule } from "./transactions/transactions.module";
+// After the modules above: it reaches into today/, which must load in its usual order first.
+import { InsightsModule } from "./insights/insights.module";
 // Last: it reaches into today/ and cash/, which must load in their usual order first.
 import { CheckModule } from "./check/check.module";
 
@@ -34,6 +36,7 @@ export class AppModule {
         PlanModule,
         TodayModule,
         TransactionsModule,
+        InsightsModule,
         CheckModule,
       ],
       controllers: [HealthController],
