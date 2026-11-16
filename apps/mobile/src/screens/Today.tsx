@@ -29,6 +29,7 @@ import { Glass } from "../components/Glass";
 import { Icon } from "../components/Icon";
 import { LAYOUT } from "../components/layout";
 import { LimitCalendar } from "../components/LimitCalendar";
+import { LoansSheet } from "../components/LoansSheet";
 import { QuestionCard, eventIdOf } from "../components/QuestionCard";
 import { RecipientLabelSheet } from "../components/RecipientLabelSheet";
 import { Runway } from "../components/Runway";
@@ -76,7 +77,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const cancelBridge = useCancelBridge();
   const pull = usePullRefresh(today.refetch);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
-  const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | null>(null);
+  const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | "loans" | null>(null);
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
   const [arriving, setArriving] = useState<{ id: string; eventId: number; expectedAmount: number } | null>(null);
   const [paying, setPaying] = useState<TodayDto["upcoming"][number] | null>(null);
@@ -154,6 +155,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
     needsPlan: state.mode === "bridge" && state.bridge !== null && !state.bridge.confirmed,
     questions: questions.length,
     upcoming: data.upcoming,
+    loansDue: data.loansDue,
     yesterday: calendar.data?.days.find((d) => d.date === dayBefore) ?? null,
     streak: data.streak ?? 0,
   });
@@ -244,6 +246,8 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
         ))}
       </ScrollView>
 
+      {/* A loan to return opens the same list as in Plan (task Б7). */}
+      {sheet === "loans" && <LoansSheet onClose={closeSheet} />}
       {sheet === "calendar" && (
         <LimitCalendar
           today={data.date}

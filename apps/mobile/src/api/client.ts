@@ -19,6 +19,7 @@ import type {
   LedgerCheckDto,
   LoanHistoryDto,
   LoanInput,
+  LoanPatch,
   LoanRepayInput,
   ManualBalanceDto,
   ManualBalanceInput,
@@ -99,6 +100,7 @@ export interface Api {
   createLoan(input: LoanInput): Promise<void>;
   deleteLoan(id: number): Promise<void>;
   repayLoan(id: number, input: LoanRepayInput): Promise<void>;
+  patchLoan(id: number, input: LoanPatch): Promise<void>;
   loanHistory(): Promise<LoanHistoryDto>;
   repayOldLoans(): Promise<void>;
   expectedIncomes(): Promise<ExpectedIncomeDto[]>;
@@ -251,6 +253,7 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     createLoan: async (input) => void (await request("POST", "/plan/loans", input)),
     deleteLoan: async (id) => void (await request("DELETE", `/plan/loans/${id}`)),
     repayLoan: async (id, input) => void (await request("POST", `/plan/loans/${id}/repay`, input)),
+    patchLoan: async (id, input) => void (await request("PATCH", `/plan/loans/${id}`, input)),
     loanHistory: () => request("GET", "/plan/loans/history"),
     repayOldLoans: async () => void (await request("POST", "/plan/loans/old/repaid")),
     expectedIncomes: () => request("GET", "/plan/expected-incomes"),

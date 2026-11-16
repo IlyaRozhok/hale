@@ -3,7 +3,7 @@ import { Alert } from "react-native";
 import { LoansSheet } from "./LoansSheet";
 import { NetworkError } from "../api/client";
 import { useToday } from "../api/queries";
-import { fakeApi, loanFixture, loanHistoryFixture, renderWith } from "../testing";
+import { fakeApi, loanFixture, loanHistoryFixture, pickDate, renderWith } from "../testing";
 
 const noop = () => undefined;
 const pressAlert = (alert: jest.SpyInstance, label: string) => {
@@ -95,5 +95,71 @@ describe("the loans list in Plan", () => {
     await waitFor(() => expect(screen.queryByLabelText("Сумма")).toBeNull());
     await waitFor(() => expect(screen.queryByText("Друг")).toBeNull());
     await waitFor(() => expect(api.today).toHaveBeenCalledTimes(2));
+  });
+
+  describe("«Вернуть до» (Б7)", () => {
+    /** One open loan from a person with the given return date; the list follows what was saved. */
+    const dated = (dueOn: string | null | undefined) => {
+      let due = dueOn;
+      return fakeApi({
+        loanHistory: jest.fn(async () => loanHistoryFixture({ open: [loanFixture(due === undefined ? {} : { dueOn: due })] })),
+        patchLoan: jest.fn(async (_id: number, input: { due_on?: string | null }) => {
+          due = input.due_on;
+        }),
+      });
+    };
+
+    it("gives an open loan a return date, and Today is counted again", async () => {
+      const api = dated(null);
+      await show(api);
+      expect(screen.getByRole("button", { name: "Вернуть до: не выбрана" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^Убрать срок/ })).toBeNull();
+      await pickDate("Вернуть до", "2026-11-20");
+      await waitFor(() => expect(api.patchLoan).toHaveBeenCalledWith(7, { due_on: "2026-11-20" }));
+      expect(await screen.findByRole("button", { name: /^Вернуть до: 20 ноября/ })).toBeTruthy();
+      await waitFor(() => expect(api.today).toHaveBeenCalledTimes(2));
+    });
+
+    it("clears the return date", async () => {
+      const api = dated("2026-11-20");
+      await show(api);
+      await fireEvent.press(screen.getByRole("button", { name: "Убрать срок: Друг" }));
+      await waitFor(() => expect(api.patchLoan).toHaveBeenCalledWith(7, { due_on: null }));
+      expect(await screen.findByRole("button", { name: "Вернуть до: не выбрана" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^Убрать срок/ })).toBeNull();
+    });
+
+    it("says so when the date does not save", async () => {
+      const api = fakeApi({
+        loanHistory: jest.fn(async () => loanHistoryFixture({ open: [loanFixture({ dueOn: "2026-11-20" })] })),
+        patchLoan: jest.fn(async () => {
+          throw new NetworkError();
+        }),
+      });
+      await show(api);
+      await fireEvent.press(screen.getByRole("button", { name: "Убрать срок: Друг" }));
+      await waitFor(() => expect(alert.mock.calls.at(-1)![0]).toBe("Не удалось сохранить срок"));
+    });
+
+    it("is offered only on open loans", async () => {
+      const api = fakeApi({
+        loanHistory: jest.fn(async () =>
+          loanHistoryFixture({
+            old: [loanFixture({ id: 8, title: "Старый", receivedOn: "2025-12-01", dueOn: null })],
+            repaid: [loanFixture({ id: 9, title: "Погашенный", repaidOn: "2026-11-02", remaining: 0, dueOn: null })],
+          }),
+        ),
+      });
+      await renderWith(<LoansSheet onClose={noop} />, api);
+      await screen.findByText("Старый");
+      expect(screen.getByText("Погашенный")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^Вернуть до/ })).toBeNull();
+    });
+
+    it("is not offered by an older server, which cannot keep it", async () => {
+      await show(fakeApi({ loanHistory: jest.fn(async () => loanHistoryFixture({ open: [loanFixture()] })) }));
+      expect(screen.getByRole("button", { name: "Погасил: Друг" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^Вернуть до/ })).toBeNull();
+    });
   });
 });

@@ -23,6 +23,26 @@ describe("dayPhrase", () => {
     });
   });
 
+  it("then a loan whose return date has passed, the oldest one, which opens the loans (Б7)", () => {
+    const loansDue = [{ id: 4, amount: 300_000, dueOn: "2026-11-11" }, { id: 3, amount: 500_000, dueOn: "2026-11-09" }];
+    expect(dayPhrase(input({ questions: 2, upcoming: [pay({ dueOn: "2026-11-11" })], loansDue }))).toEqual({
+      text: "Займ ₴5,000 ждёт возврата с 9 ноя. Отметьте, если уже вернули.",
+      action: { kind: "loans" },
+    });
+  });
+
+  it("then a loan due today, already inside the limit (Б7)", () => {
+    expect(dayPhrase(input({ questions: 2, loansDue: [{ id: 3, amount: 500_000, dueOn: "2026-11-11" }] }))).toEqual({
+      text: "Сегодня срок вернуть займ ₴5,000. Он уже учтён в лимите.",
+      action: { kind: "loans" },
+    });
+  });
+
+  it("an overdue payment still comes before a loan to return (Б7)", () => {
+    const late = pay({ dueOn: "2026-11-06" });
+    expect(dayPhrase(input({ upcoming: [late], loansDue: [{ id: 3, amount: 500_000, dueOn: "2026-11-01" }] }))!.action).toEqual({ kind: "pay", payment: late });
+  });
+
   it("then questions, in the right word form", () => {
     expect(dayPhrase(input({ questions: 1 }))!.text).toBe("1 вопрос ждёт ответа. Это пять секунд, и лимит станет точнее.");
     expect(dayPhrase(input({ questions: 3 }))!.text).toBe("3 вопроса ждут ответа. Это пять секунд, и лимит станет точнее.");

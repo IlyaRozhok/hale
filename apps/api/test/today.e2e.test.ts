@@ -311,17 +311,75 @@ describe("borrowed", () => {
     expect(after.badCases).toHaveLength(1);
   });
 
-  it("ignores loans from before the last received income", async () => {
-    await account("black", 1_000_000);
-    await income("fop", "2026-10-20", { status: "received" });
-    await ds.query(`UPDATE income_events SET received_at='2026-10-20T09:00:00Z'`);
+  /** A loan from a bank row; `kind` 'other' is the monthly bank loan, 'short' «Кредит до завтра» and the like. */
+  async function bankLoan(card: number, amount: number, on: string, kind: "short" | "other", dueOn: string | null = null): Promise<number> {
+    const t = await tx(card, amount, "loan_in", { date: on });
+    return (
+      await ds.query(`INSERT INTO loans (amount, received_on, source_transaction_id, kind, due_on) VALUES ($1,$2,$3,$4,$5) RETURNING id`, [
+        amount, on, t, kind, dueOn,
+      ])
+    )[0].id;
+  }
+  async function lastIncomeOn(date: string): Promise<void> {
+    await income("fop", date, { status: "received" });
+    await ds.query(`UPDATE income_events SET received_at=$1 WHERE status='received'`, [`${date}T09:00:00Z`]);
+  }
+
+  it("ignores a monthly bank loan from before the last received income, as before (Б7, option А)", async () => {
+    const card = await account("black", 1_000_000);
+    await lastIncomeOn("2026-10-20");
     await income("usdc", "2026-11-12");
-    await ds.query(`INSERT INTO loans (amount, received_on) VALUES (200000, '2026-10-05')`);
-    await ds.query(`INSERT INTO loans (amount, received_on) VALUES (100000, '2026-10-25')`);
+    await bankLoan(card, 200_000, "2026-10-05", "other");
+    await bankLoan(card, 100_000, "2026-10-25", "other");
     const r = await today();
     expect(r.state.free).toBe(1_000_000 - 100_000);
     expect(r.badCases).toHaveLength(1);
     expect(r.badCases[0].text).toContain("₴1,000");
+  });
+
+  it("a loan from a person or a short bank loan taken before the last income lowers free until repaid (Б7)", async () => {
+    const card = await account("black", 1_000_000);
+    await lastIncomeOn("2026-10-20");
+    await income("usdc", "2026-11-12");
+    await ds.query(`INSERT INTO loans (amount, received_on, repaid_amount) VALUES (200000, '2026-10-05', 50000)`);
+    await bankLoan(card, 100_000, "2026-10-06", "short");
+    const r = await today();
+    expect(r.state.free).toBe(1_000_000 - 150_000 - 100_000);
+    expect(r.badCases).toHaveLength(2);
+    await ds.query(`UPDATE loans SET repaid_amount=amount, repaid_at=now()`);
+    expect((await today()).state.free).toBe(1_000_000);
+  });
+
+  it("a loan with a return date after the next income does not lower today's money; one before it does (Б7)", async () => {
+    const card = await account("black", 1_000_000);
+    await lastIncomeOn("2026-10-20");
+    await income("usdc", "2026-11-12");
+    const person = (await ds.query(`INSERT INTO loans (amount, received_on, due_on) VALUES (200000, '2026-10-05', '2026-11-20') RETURNING id`))[0].id;
+    // A monthly bank loan from before the last income counts again once it has a date inside the window.
+    await bankLoan(card, 100_000, "2026-10-06", "other", "2026-11-10");
+    const r = await today();
+    expect(r.state.free).toBe(1_000_000 - 100_000);
+    expect(r.loansDue).toEqual([]);
+    await ds.query(`UPDATE loans SET due_on='2026-11-11' WHERE id=$1`, [person]);
+    expect((await today()).state.free).toBe(1_000_000 - 300_000);
+  });
+
+  it("lists the loans due today or overdue, with what is still owed, the oldest date first (Б7)", async () => {
+    const card = await account("black", 1_000_000);
+    await income("fop", "2026-11-12");
+    const now = (await ds.query(`INSERT INTO loans (amount, received_on, due_on) VALUES (500000, '2026-10-20', '2026-11-02') RETURNING id`))[0].id;
+    const late = await bankLoan(card, 300_000, "2026-10-10", "short", "2026-10-28");
+    await ds.query(`UPDATE loans SET repaid_amount=100000 WHERE id=$1`, [late]);
+    await ds.query(`INSERT INTO loans (amount, received_on, due_on) VALUES (100000, '2026-10-20', '2026-11-03')`);
+    await ds.query(`INSERT INTO loans (amount, received_on, due_on, repaid_amount, repaid_at) VALUES (100000, '2026-10-20', '2026-10-30', 100000, now())`);
+    await ds.query(`INSERT INTO loans (amount, received_on, due_on) VALUES (100000, '2025-10-20', '2025-11-01')`); // before tracking
+    await ds.query(`UPDATE settings SET tracking_start='2026-10-01'`);
+    const r = await today();
+    expect(r.loansDue).toEqual([
+      { id: late, amount: 200_000, dueOn: "2026-10-28" },
+      { id: now, amount: 500_000, dueOn: "2026-11-02" },
+    ]);
+    expect(r.state.free).toBe(1_000_000 - 200_000 - 500_000 - 100_000);
   });
 
   it("lists only unrepaid loans as bad cases", async () => {

@@ -3,6 +3,7 @@ import pg from "pg";
 import { DataSource } from "typeorm";
 import { createDataSource, migrations } from "../src/db/data-source";
 import { PaymentClosedByLinks1795392000000 } from "../src/db/migrations/0022-payment-closed-by-links";
+import { LoanDueOn1795564800000 } from "../src/db/migrations/0024-loan-due-on";
 import { createTestDatabase } from "./db";
 
 const TABLES = [
@@ -93,6 +94,27 @@ describe("migrations", () => {
     // Back down through 0022, whatever came after it.
     for (let i = migrations.indexOf(PaymentClosedByLinks1795392000000); i < migrations.length; i++) await ds.undoLastMigration();
     expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE column_name='closed_by_links'`)).toEqual([]);
+    await ds.destroy();
+  });
+
+  it("0024 gives loans a return date and leaves every existing loan without one (Б7)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(LoanDueOn1795564800000)) });
+    await before.initialize();
+    await before.runMigrations();
+    await before.query(`INSERT INTO loans (amount, received_on) VALUES (100000, '2026-11-01'), (50000, '2026-10-01')`);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    expect(await ds.query(`SELECT amount::int AS amount, received_on::text AS received_on, due_on FROM loans ORDER BY id`)).toEqual([
+      { amount: 100_000, received_on: "2026-11-01", due_on: null },
+      { amount: 50_000, received_on: "2026-10-01", due_on: null },
+    ]);
+    for (let i = migrations.indexOf(LoanDueOn1795564800000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE table_name='loans' AND column_name='due_on'`)).toEqual([]);
+    expect(await ds.query(`SELECT count(*)::int AS n FROM loans`)).toEqual([{ n: 2 }]);
     await ds.destroy();
   });
 });

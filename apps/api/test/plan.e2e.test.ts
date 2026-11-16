@@ -349,6 +349,23 @@ describe("repaying and reviewing loans", () => {
     expect((await api.post("/plan/loans/old/repaid").expect(201)).body).toEqual({ closed: 0 });
   });
 
+  it("a loan of any kind takes a return date, shows it in the history and can lose it (Б7)", async () => {
+    const person = await manual(100_000, "2026-11-01");
+    const lender = await bank(300_000);
+    expect((await history()).open.map((l: { dueOn: string | null }) => l.dueOn)).toEqual([null, null]);
+    await api.patch(`/plan/loans/${person}`, { due_on: "2026-11-20" }).expect(200);
+    await api.patch(`/plan/loans/${lender}`, { due_on: "2026-12-01" }).expect(200);
+    expect((await history()).open).toEqual([
+      expect.objectContaining({ id: lender, dueOn: "2026-12-01" }),
+      expect.objectContaining({ id: person, dueOn: "2026-11-20" }),
+    ]);
+    await api.patch(`/plan/loans/${person}`, { due_on: "20.11.2026" }).expect(400);
+    // Not before the day the loan was taken.
+    await api.patch(`/plan/loans/${person}`, { due_on: "2026-10-31" }).expect(422);
+    await api.patch(`/plan/loans/${person}`, { due_on: null }).expect(200);
+    expect((await history()).open.find((l: { id: number }) => l.id === person).dueOn).toBeNull();
+  });
+
   it("a repayment with a date keeps it", async () => {
     const id = await manual(1_000);
     await api.post(`/plan/loans/${id}/repay`, { amount: 1_000, date: "2026-11-02" }).expect(201);

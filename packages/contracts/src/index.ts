@@ -139,11 +139,14 @@ const loanShape = {
   received_on: isoDate,
   note: z.string().max(500).nullable(),
   repaid_at: z.iso.datetime({ offset: true }).nullable(),
+  /** «Вернуть до» (Б7); null clears it. */
+  due_on: isoDate.nullable(),
 };
 export const loanInput = z
   .object({ amount: loanShape.amount, received_on: loanShape.received_on, note: loanShape.note.optional() })
   .strict();
 export const loanPatch = partial(z.object(loanShape));
+export type LoanPatch = z.infer<typeof loanPatch>;
 export type LoanInput = z.infer<typeof loanInput>;
 export const loanRepayInput = z.object({ amount: money.positive(), date: isoDate }).strict();
 export type LoanRepayInput = z.infer<typeof loanRepayInput>;
@@ -165,6 +168,8 @@ export interface LoanRowDto {
   title: string | null;
   /** Entered by hand, so it can be deleted. */
   manual: boolean;
+  /** «Вернуть до» (Б7): null when not set. Absent on an older server. */
+  dueOn?: string | null;
 }
 
 export interface LoanHistoryDto {
@@ -389,6 +394,11 @@ export interface TodayDto {
     /** Set on an open loan: it can be marked repaid. */
     repayLoan?: { id: number; remaining: number; receivedOn?: string };
   }[];
+  /**
+   * Open loans whose return date is today or past (Б7), the oldest date first; `amount` is what is still owed.
+   * Absent on an older server.
+   */
+  loansDue?: { id: number; amount: number; dueOn: string }[];
   runOutOn: string | null;
   /** Last successful contact with the bank (webhook item, reconcile or balance refresh), null if there was none yet. */
   syncedAt: string | null;

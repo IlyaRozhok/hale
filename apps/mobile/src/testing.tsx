@@ -163,6 +163,7 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     createLoan: jest.fn(async () => undefined),
     deleteLoan: jest.fn(async () => undefined),
     repayLoan: jest.fn(async () => undefined),
+    patchLoan: jest.fn(async () => undefined),
     loanHistory: jest.fn(async () => loanHistoryFixture()),
     repayOldLoans: jest.fn(async () => undefined),
     calendar: jest.fn(async (month: string) => calendarFixture({ month })),
