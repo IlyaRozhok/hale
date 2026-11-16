@@ -882,6 +882,26 @@ describe("accounts items (task Б25)", () => {
     const r = await today();
     expect(r.accounts.items).toEqual([{ kind: "white", name: "Белая карта", own: 500_000 }]);
   });
+
+  it("leaves out empty accounts without a credit limit, and shows a currency account with money in its own currency", async () => {
+    await account("white", 975_700);
+    await account("fop", 0, { currency: "USD" }); // monobank gives one account per currency
+    await account("fop", 0, { currency: "EUR" });
+    await account("black", 0, { currency: "USD" });
+    await account("black", 0, { creditLimit: 3_000_000 }); // empty, but its limit is spent: it stays
+    await account("fop", 12_345, { currency: "USD" });
+    await account("black", 5_000, { currency: "EUR" });
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-02T08:00:00Z', 41.5), ('EUR', '2026-11-02T08:00:00Z', 48)`);
+    const r = await today();
+    expect(r.accounts.items).toEqual([
+      { kind: "white", name: "Белая карта", own: 975_700 },
+      { kind: "black", name: "Чёрная карта", own: -3_000_000, creditLimit: 3_000_000 },
+      { kind: "fop", name: "Счёт ФОП", own: Math.round(12_345 * 41.5), currency: "USD", amount: 12_345 },
+      { kind: "black", name: "Чёрная карта", own: 5_000 * 48, currency: "EUR", amount: 5_000 },
+    ]);
+    const sum = (r.accounts.items as { own: number }[]).reduce((s, i) => s + i.own, 0);
+    expect(sum).toBe(r.accounts.own);
+  });
 });
 
 describe("bridge mode", () => {
