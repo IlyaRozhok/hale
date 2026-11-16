@@ -6,6 +6,7 @@ import {
   PAID_QUESTION_DAYS,
   TAX_ESTIMATE_TOLERANCE,
   TAX_EXACT_TOLERANCE,
+  TAX_OVERPAY_SHARE,
   TAX_WINDOW_DAYS,
   matchPayment,
   matchTaxPayment,
@@ -206,10 +207,20 @@ describe("matchTaxShare", () => {
     expect(matchTaxShare(paying(837_000), [est], [])).toBeNull();
   });
 
-  it("closes a real row with one payment within ₴20, and not beyond", () => {
+  it("closes a real row with one payment from ₴20 below it up to 10% above it, and not beyond (Б30)", () => {
+    expect(TAX_OVERPAY_SHARE).toBe(0.1);
     const esv = row({ amount: 570_702 });
     expect(matchTaxShare(paying(571_000), [esv], [])).toMatchObject({ payment: esv, closes: true });
-    expect(matchTaxShare(paying(573_000), [esv], [])).toBeNull();
+    expect(matchTaxShare(paying(573_000), [esv], [])).toMatchObject({ payment: esv, closes: true });
+    const r = row({ amount: 500_000 });
+    expect(matchTaxShare(paying(550_000), [r], [])).toEqual({ payment: r, ids: [10], closes: true, release: false });
+    expect(matchTaxShare(paying(560_000), [r], [])).toBeNull();
+  });
+
+  it("a tiny real row still takes ₴20 above it, where 10% is less (Б30)", () => {
+    const r = row({ amount: 10_000 });
+    expect(matchTaxShare(paying(12_000), [r], [])).toMatchObject({ payment: r, closes: true });
+    expect(matchTaxShare(paying(12_100), [r], [])).toBeNull();
   });
 
   it("a payment far above the row does not close it; far below only links", () => {
@@ -221,8 +232,10 @@ describe("matchTaxShare", () => {
     expect(matchTaxShare(paying(795_000, { localDate: "2026-09-30" }), [row()], [])).toBeNull();
     expect(matchTaxShare(paying(795_000, { localDate: "2026-12-21" }), [row()], [])).toBeNull();
     expect(matchTaxShare(paying(795_000, { localDate: "2026-12-20" }), [row()], [])).not.toBeNull();
-    // A pair partner from before the quarter ended does not count either.
-    expect(matchTaxShare(paying(224_000, { localDate: "2026-11-14" }), [row({ paid_at: "2026-11-14" })], [paying(571_000, { id: 9, localDate: "2026-09-29" })])).toBeNull();
+    // A pair partner from before the quarter ended does not count either: the payment goes alone, as a part.
+    expect(
+      matchTaxShare(paying(224_000, { localDate: "2026-11-14" }), [row({ paid_at: "2026-11-14" })], [paying(571_000, { id: 9, localDate: "2026-09-29" })]),
+    ).toMatchObject({ ids: [10], closes: false });
   });
 
   it("a closed row takes no more: the next payment goes to the next open row", () => {
@@ -237,13 +250,53 @@ describe("matchTaxShare", () => {
     expect(matchTaxShare(paying(795_000), [q4], [])).toBeNull();
   });
 
-  it("a row the owner marked paid takes a payment or a pair that adds up, never a lone part", () => {
+  it("a row the owner marked paid takes a payment or a pair that adds up, and stays as he closed it", () => {
     const hand = row({ paid_at: "2026-11-14" });
     expect(matchTaxShare(paying(795_500), [hand], [])).toEqual({ payment: hand, ids: [10], closes: false, release: false });
-    expect(matchTaxShare(paying(224_000), [hand], [])).toBeNull();
     const res = matchTaxShare(paying(224_000), [hand], [paying(571_000, { id: 9 })]);
     expect(res).toMatchObject({ payment: hand, closes: false });
     expect([...res!.ids].sort((a, b) => a - b)).toEqual([9, 10]);
+  });
+
+  describe("a tax row closed by hand, paid off its figure (Б30)", () => {
+    const hand = (over: Partial<Payment> = {}) => row({ amount: 500_000, paid_at: "2026-11-14", ...over });
+
+    it("takes a payment up to 10% above it, and not beyond", () => {
+      const r = hand();
+      expect(matchTaxShare(paying(550_000), [r], [])).toEqual({ payment: r, ids: [10], closes: false, release: false });
+      expect(matchTaxShare(paying(560_000), [r], [])).toBeNull();
+    });
+
+    it("takes a lone part, without closing anything", () => {
+      const r = hand();
+      expect(matchTaxShare(paying(300_000), [r], [])).toEqual({ payment: r, ids: [10], closes: false, release: false });
+    });
+
+    it("takes the rest of 3,000 + 2,500 up to 10% above it, and nothing beyond", () => {
+      const r = hand({ linked: 300_000 });
+      expect(matchTaxShare(paying(250_000, { id: 11 }), [r], [])).toEqual({ payment: r, ids: [11], closes: false, release: false });
+      expect(matchTaxShare(paying(260_000, { id: 11 }), [r], [])).toBeNull();
+    });
+
+    it("once covered, takes more only while the total stays within 10% above it", () => {
+      const r = hand({ linked: 500_000 });
+      expect(matchTaxShare(paying(50_000), [r], [])).toEqual({ payment: r, ids: [10], closes: false, release: false });
+      expect(matchTaxShare(paying(50_100), [r], [])).toBeNull();
+      expect(matchTaxShare(paying(10_000), [hand({ linked: 550_000 })], [])).toBeNull();
+    });
+
+    it("an open row covered by its links takes the overpayment too, after open rows took their parts", () => {
+      const covered = row({ id: 1, amount: 500_000, paid_at: "2026-11-14", linked: 500_000 });
+      const open = row({ id: 2, amount: 300_000, due_on: "2026-11-25" });
+      expect(matchTaxShare(paying(40_000), [covered, open], [])).toMatchObject({ payment: open, closes: false });
+      expect(matchTaxShare(paying(40_000), [covered], [])).toMatchObject({ payment: covered, closes: false });
+    });
+
+    it("takes nothing from outside its window", () => {
+      expect(matchTaxShare(paying(300_000, { localDate: "2026-09-30" }), [hand()], [])).toBeNull();
+      expect(matchTaxShare(paying(300_000, { localDate: "2026-12-21" }), [hand()], [])).toBeNull();
+      expect(matchTaxShare(paying(50_000, { localDate: "2026-12-21" }), [hand({ linked: 500_000 })], [])).toBeNull();
+    });
   });
 
   it("prefers a row the payment fits over linking a part to an earlier row", () => {

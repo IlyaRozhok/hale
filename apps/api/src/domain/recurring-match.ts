@@ -191,9 +191,20 @@ export const TAX_ESTIMATE_TOLERANCE = 0.1;
 /** A payment more than 30 days after the row's due date is not taken as paying it. */
 export const TAX_WINDOW_DAYS = 30;
 
+/**
+ * A tax payment within the window goes to its quarter's row first, up to the row's amount plus this share
+ * (the owner's decision on Б30): only what is beyond that goes to the next quarter.
+ */
+export const TAX_OVERPAY_SHARE = 0.1;
+
 /** How far the payments may be from a tax row, in minor units, and still settle it. */
 export function taxTolerance(p: Pick<Payment, "amount" | "is_estimate">): number {
   return p.is_estimate ? Math.round(p.amount * TAX_ESTIMATE_TOLERANCE) : TAX_EXACT_TOLERANCE;
+}
+
+/** The most the payments linked to a tax row may add up to: its amount plus 10%, or its tolerance if that is more. */
+export function taxCap(p: Pick<Payment, "amount" | "is_estimate">): number {
+  return Math.max(p.amount + taxTolerance(p), Math.round(p.amount * (1 + TAX_OVERPAY_SHARE)));
 }
 
 /** The payments linked to a tax row (`linked`, minor units) add up to it within its tolerance, or more: it takes nothing more. */
@@ -225,28 +236,30 @@ function inTaxWindow(tx: PayableTx, p: Payment): boolean {
 }
 
 /**
- * A tax paid in parts or with a sum off the row (task Б24), for rows the exact match left. The
- * tolerance is `taxTolerance` on the total; candidates are hryvnia tax rows not settled through
- * `transaction_id`, whose quarter ended before the payment, at most TAX_WINDOW_DAYS after their due
- * date; a row whose links already add up to it takes nothing more. The first that applies, oldest due
- * date first within each step:
+ * A tax paid in parts or with a sum off the row (tasks Б24, Б30), for rows the exact match left.
+ * Candidates are hryvnia tax rows not settled through `transaction_id`, whose quarter ended before the
+ * payment, at most TAX_WINDOW_DAYS after their due date, open or closed by the owner's hand alike: a tax
+ * paid in the window belongs to that quarter first. A total settles a row from `taxTolerance` below it up
+ * to `taxCap` above it (10% over). The first that applies, oldest due date first within each step:
  * 1. with the parts already linked to a row, this payment completes it;
  * 2. this payment alone settles a row (parts guessed before are let go);
  * 3. this payment and one unlinked tax payment from `others` together settle a row with nothing linked;
- * 4. an open row it does not settle yet takes it as a part, without closing; the row stays reserved.
- * A row the owner marked paid takes payments that add up to it (1-3), never a lone part. When in doubt,
- * nothing is linked and the payment counts against the current quarter as before.
+ * 4. a row it does not settle yet takes it as a part; an open row stays open and reserved;
+ * 5. a row its links already settle takes it while their total stays within `taxCap`.
+ * Links are whole operations: a payment that would take a row's total past its cap is not linked at all,
+ * and counts against the current quarter as before. Only an open row is closed here (`closes`); one the
+ * owner closed keeps his mark.
  */
 export function matchTaxShare(tx: PayableTx, payments: readonly Payment[], others: readonly PayableTx[]): TaxShare | null {
   const x = paidUah(tx);
   if (tx.type !== "tax" || tx.amount >= 0 || x === null) return null;
   const tol = (p: Payment) => taxTolerance(p);
   const linked = (p: Payment) => p.linked ?? 0;
-  const rows = payments
+  const inWindow = payments
     .filter((p) => p.kind === "tax" && p.currency === "UAH" && p.transaction_id === null && inTaxWindow(tx, p))
-    .filter((p) => !taxCovered(p, linked(p)))
     .sort((a, b) => (a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : a.id - b.id));
-  const fits = (p: Payment, sum: number) => Math.abs(sum - p.amount) <= tol(p);
+  const rows = inWindow.filter((p) => !taxCovered(p, linked(p)));
+  const fits = (p: Payment, sum: number) => sum >= p.amount - tol(p) && sum <= taxCap(p);
   const share = (p: Payment, ids: number[], release = false): TaxShare => ({ payment: p, ids, closes: p.paid_at === null, release });
 
   for (const p of rows) if (linked(p) > 0 && fits(p, linked(p) + x)) return share(p, [tx.id]);
@@ -264,7 +277,10 @@ export function matchTaxShare(tx: PayableTx, payments: readonly Payment[], other
     if (partner) return share(p, [tx.id, partner.id]);
   }
   for (const p of rows) {
-    if (p.paid_at === null && linked(p) + x < p.amount - tol(p)) return { payment: p, ids: [tx.id], closes: false, release: false };
+    if (linked(p) + x < p.amount - tol(p)) return { payment: p, ids: [tx.id], closes: false, release: false };
+  }
+  for (const p of inWindow) {
+    if (taxCovered(p, linked(p)) && linked(p) + x <= taxCap(p)) return share(p, [tx.id]);
   }
   return null;
 }

@@ -550,7 +550,12 @@ describe("tax reserve and own money", () => {
       const fop = await account("fop", 500_000);
       await income("usdc", "2026-11-12");
       await tx(fop, 1_000_000, "income", { date: "2026-10-05" });
-      await paidRow();
+      // A Q3 row in its window would take a payment of this quarter first (Б30); Q2's window ended on 19 September.
+      await ds.query(
+        `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, paid_at, tax_quarter)
+         VALUES ('tax','Q2 tax',$1,'UAH','2026-08-20','2026-08-20','2026-Q2')`,
+        [Q3_TAX],
+      );
       const t = await tx(fop, -20_000, "tax", { date: "2026-10-19" });
       await plan().onClassified(t, "tax");
       expect((await today()).state.free).toBe(1_500_000 - (60_000 - 20_000));
@@ -622,7 +627,11 @@ describe("tax reserve and own money", () => {
       await setup();
       await taxRow(795_000);
       await pay(571_000);
-      await ds.query(`INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ('2026-11-14', 1, 'normal')`);
+      // The part fixed the day already (Б30); a stale limit shows whether closing fixes it again.
+      await ds.query(
+        `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ('2026-11-14', 1, 'normal')
+         ON CONFLICT (local_date) DO UPDATE SET daily_limit = 1`,
+      );
       await pay(224_000);
       const r = await row(`SELECT daily_limit::int AS l FROM daily_snapshots WHERE local_date='2026-11-14'`);
       expect(r.l).not.toBe(1);
@@ -715,14 +724,121 @@ describe("tax reserve and own money", () => {
         expect(await state(single)).toMatchObject({ paid: true, transaction_id: b });
       });
 
-      it("leaves the bank rows alone when the hand-closed row is outside the tolerance", async () => {
+      it("a hand-closed row takes only what stays within its amount plus 10%; the rest counts against Q4 (Б30)", async () => {
         await setup();
         const id = await taxRow(500_000, { paid: "2026-11-14T12:00:00Z" });
         await tx(card, -571_000, "tax", { date: "2026-11-14" });
-        await tx(card, -224_000, "tax", { date: "2026-11-14" });
+        const b = await tx(card, -224_000, "tax", { date: "2026-11-14" });
         await plan().linkTaxTransactions();
-        expect(await links(id)).toEqual([]);
+        // Newest first: 2,240 goes as a part; 5,710 more would take the row past 5,500.
+        expect(await links(id)).toEqual([b]);
         expect(await state(id)).toMatchObject({ paid: true, transaction_id: null });
+      });
+    });
+
+    describe("a tax paid off its figure, the row closed by hand (Б30)", () => {
+      // Q4 accrues on 10,000,000 of income: 6% = 600,000 (₴6,000). The Q3 row is ₴5,000.
+      const big = async () => {
+        await setup();
+        await tx(fop, 9_000_000, "income", { date: "2026-10-06" });
+      };
+      const q4Whole = (paid: number) => 2_000_000 - paid - 600_000;
+      const markPaid = (id: number) => api.post(`/plan/payments/${id}/mark-paid`).expect(201);
+      const staleLimit = () =>
+        ds.query(
+          `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ('2026-11-14', 1, 'normal')
+           ON CONFLICT (local_date) DO UPDATE SET daily_limit = 1`,
+        );
+      const limit = async () => (await row(`SELECT daily_limit::int AS l FROM daily_snapshots WHERE local_date='2026-11-14'`)).l as number;
+      const closedByLinks = async (id: number) => (await row(`SELECT closed_by_links FROM scheduled_payments WHERE id=$1`, [id])).closed_by_links;
+
+      it("₴5,500 on a ₴5,000 row closes it, «Оплачено» after changes nothing; Q4 keeps its whole reserve", async () => {
+        await big();
+        const id = await taxRow(500_000);
+        await staleLimit();
+        const t = await pay(550_000);
+        expect(await links(id)).toEqual([t]);
+        expect(await state(id)).toMatchObject({ paid: true, transaction_id: null });
+        expect(await limit()).not.toBe(1);
+        await markPaid(id);
+        expect((await today()).state.free).toBe(q4Whole(550_000));
+      });
+
+      it("«Оплачено» first, then ₴5,500: the payment still goes to Q3 and the day is fixed afresh", async () => {
+        await big();
+        const id = await taxRow(500_000);
+        await markPaid(id);
+        await staleLimit();
+        const t = await pay(550_000);
+        expect(await links(id)).toEqual([t]);
+        expect(await closedByLinks(id)).toBe(false);
+        expect(await limit()).not.toBe(1);
+        expect((await today()).state.free).toBe(q4Whole(550_000));
+      });
+
+      it("₴5,600 is more than the row plus 10%: it counts against Q4, as before", async () => {
+        await big();
+        const id = await taxRow(500_000);
+        await markPaid(id);
+        await pay(560_000);
+        expect(await links(id)).toEqual([]);
+        expect((await today()).state.free).toBe(2_000_000 - 560_000 - 40_000);
+      });
+
+      it("closed by hand, then ₴3,000 + ₴2,500: both go to Q3, the day is fixed afresh each time, the mark stays", async () => {
+        await big();
+        const id = await taxRow(500_000);
+        await markPaid(id);
+        const paidOn = (await row(`SELECT paid_at FROM scheduled_payments WHERE id=$1`, [id])).paid_at as Date;
+        await staleLimit();
+        const a = await pay(300_000);
+        expect(await links(id)).toEqual([a]);
+        expect(await limit()).not.toBe(1);
+        expect((await today()).state.free).toBe(q4Whole(300_000));
+        await staleLimit();
+        const b = await pay(250_000);
+        expect(await links(id)).toEqual([a, b]);
+        expect(await limit()).not.toBe(1);
+        expect((await today()).state.free).toBe(q4Whole(550_000));
+        expect(await row(`SELECT paid_at, closed_by_links, transaction_id FROM scheduled_payments WHERE id=$1`, [id])).toEqual({
+          paid_at: paidOn,
+          closed_by_links: false,
+          transaction_id: null,
+        });
+        // Seen again, nothing changes.
+        await plan().linkTaxTransactions();
+        expect(await ds.query(`SELECT 1 FROM payment_links`)).toHaveLength(2);
+      });
+
+      it("payments loaded before this rule are reached by the hourly job, which fixes the day afresh", async () => {
+        await big();
+        const id = await taxRow(500_000, { paid: "2026-11-14T12:00:00Z" });
+        // Already loaded and classified by the old rule: unlinked, taken off Q4.
+        const a = await tx(card, -300_000, "tax", { date: "2026-11-14" });
+        const b = await tx(card, -250_000, "tax", { date: "2026-11-14" });
+        await setBalance(card, 2_000_000 - 550_000);
+        expect((await today()).state.free).toBe(2_000_000 - 550_000 - 50_000);
+        await staleLimit();
+        await plan().hourlyJob();
+        expect(await links(id)).toEqual([a, b]);
+        expect(await state(id)).toMatchObject({ paid: true, paid_on: "2026-11-14", transaction_id: null });
+        expect(await closedByLinks(id)).toBe(false);
+        expect(await limit()).not.toBe(1);
+        expect((await today()).state.free).toBe(q4Whole(550_000));
+        // The next run changes nothing.
+        await staleLimit();
+        await plan().hourlyJob();
+        expect(await ds.query(`SELECT 1 FROM payment_links`)).toHaveLength(2);
+        expect(await limit()).toBe(1);
+      });
+
+      it("a tax payment more than 30 days after the row's due date stays with Q4", async () => {
+        await big();
+        at("2026-12-22T10:00:00Z");
+        const id = await taxRow(500_000);
+        await markPaid(id);
+        await pay(300_000, "2026-12-21");
+        expect(await links(id)).toEqual([]);
       });
     });
   });
