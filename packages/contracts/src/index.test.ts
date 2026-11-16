@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expectedIncomeInput, isoDate, scheduledPaymentInput, settingsPatch } from "./index";
+import { expectedIncomeInput, insightsMonthDto, insightsMonthQuery, isoDate, scheduledPaymentInput, settingsPatch } from "./index";
 
 describe("contracts", () => {
   it("accepts only real dates", () => {
@@ -17,5 +17,29 @@ describe("contracts", () => {
   });
   it("rejects unknown settings keys", () => {
     expect(settingsPatch.safeParse({ nope: 1 }).success).toBe(false);
+  });
+  it("takes an optional month for «Итоги» and nothing else", () => {
+    expect(insightsMonthQuery.safeParse({}).success).toBe(true);
+    expect(insightsMonthQuery.safeParse({ month: "2026-11" }).success).toBe(true);
+    expect(insightsMonthQuery.safeParse({ month: "2026-13" }).success).toBe(false);
+    expect(insightsMonthQuery.safeParse({ month: "2026-1" }).success).toBe(false);
+    expect(insightsMonthQuery.safeParse({ month: "2026-11", x: "1" }).success).toBe(false);
+  });
+  it("describes the «Итоги» answer in whole kopecks", () => {
+    const ok = {
+      month: "2026-11",
+      through: "2026-11-16",
+      previous: { from: "2026-10-01", to: "2026-10-16" },
+      spent: 18_000,
+      previousSpent: 9_000,
+      categories: [
+        { category: "shopping", spent: 30_000, previousSpent: 9_000, count: 1 },
+        { category: "refund", spent: -12_000, previousSpent: 0, count: 1 },
+      ],
+    };
+    expect(insightsMonthDto.safeParse(ok).success).toBe(true);
+    expect(insightsMonthDto.safeParse({ ...ok, spent: 1.5 }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...ok, through: "2026-02-30" }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...ok, categories: [{ category: "cafe", spent: 1, previousSpent: 0, count: -1 }] }).success).toBe(false);
   });
 });

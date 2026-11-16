@@ -705,3 +705,31 @@ export interface LedgerCheckDto {
   ranAt: string;
   issues: LedgerCheckIssueDto[];
 }
+
+// --- insights («Итоги», task В1) ---------------------------------------------
+const yearMonth = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+
+/** Without `month`, the current Kyiv month. */
+export const insightsMonthQuery = z.object({ month: yearMonth.optional() }).strict();
+
+/**
+ * A month's spending by category against the same days of the month before. Spending is the limit's (what
+ * «Сегодня» calls spent): kopecks, refunds negative, so `spent` is the sum of the categories. Categories are the
+ * stored keys (groceries, cafe, refund, uncategorized, …), the month's largest sum first; a category spent on only
+ * in the earlier stretch comes with `spent` 0 and `count` 0.
+ */
+export const insightsMonthDto = z
+  .object({
+    month: yearMonth,
+    /** The last day counted: today for the current month, the last day for a past one. */
+    through: isoDate,
+    /** The stretch of the month before: from its 1st to the same day number, or to its last day when shorter. */
+    previous: z.object({ from: isoDate, to: isoDate }).strict(),
+    spent: money,
+    previousSpent: money,
+    categories: z.array(
+      z.object({ category: z.string().min(1), spent: money, previousSpent: money, count: z.number().int().nonnegative() }).strict(),
+    ),
+  })
+  .strict();
+export type InsightsMonthDto = z.infer<typeof insightsMonthDto>;
