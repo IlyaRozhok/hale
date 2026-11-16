@@ -19,6 +19,7 @@ const http = () => app.getHttpServer();
 const api = {
   get: (p: string) => request(http()).get(p).set("Authorization", auth),
   post: (p: string, b: object = {}) => request(http()).post(p).set("Authorization", auth).send(b),
+  patch: (p: string, b: object = {}) => request(http()).patch(p).set("Authorization", auth).send(b),
   delete: (p: string) => request(http()).delete(p).set("Authorization", auth),
 };
 const at = (iso: string) => {
@@ -1802,5 +1803,69 @@ describe("settings preview", () => {
     const r = await preview(100_000);
     expect(r.rateStale).toBe(true);
     expect(r.leftForGoalsMonthly).toBe(0);
+  });
+});
+
+describe("an expected income's window dates its events (Б28)", () => {
+  const add = async (start: number, end: number) =>
+    (await api.post("/plan/expected-incomes", { source: "fop", amount: 500_000, currency: "UAH", window_start_day: start, window_end_day: end }).expect(201))
+      .body.id as number;
+  const events = async () =>
+    (await ds.query(`SELECT period, expected_on::text AS on FROM income_events ORDER BY period`)) as { period: string; on: string }[];
+  const eventId = async (period: string) => (await ds.query(`SELECT id FROM income_events WHERE period=$1`, [period]))[0].id as number;
+  /** What the app reads, with no job in between: the limit must already be fixed afresh. */
+  const read = async () => (await api.get("/today").expect(200)).body.state;
+
+  it("a new income with a 5–10 window is expected on the 10th, and the limit divides by the days to it", async () => {
+    await account("black", 1_000_000);
+    await add(5, 10);
+    expect(await events()).toEqual([
+      { period: "2026-11", on: "2026-11-10" },
+      { period: "2026-12", on: "2026-12-10" },
+    ]);
+    expect((await today()).state).toMatchObject({ daysLeft: 8, dailyLimit: Math.floor(1_000_000 / 8) });
+  });
+
+  it("editing the window moves the events still expected and fixes the limit afresh at once", async () => {
+    await account("black", 1_000_000);
+    const id = await add(5, 10);
+    expect((await today()).state.dailyLimit).toBe(Math.floor(1_000_000 / 8));
+    await api.patch(`/plan/expected-incomes/${id}`, { window_start_day: 12, window_end_day: 15 }).expect(200);
+    expect(await events()).toEqual([
+      { period: "2026-11", on: "2026-11-15" },
+      { period: "2026-12", on: "2026-12-15" },
+    ]);
+    expect(await read()).toMatchObject({ daysLeft: 13, dailyLimit: Math.floor(1_000_000 / 13) });
+  });
+
+  it("a date the owner set stays where he put it when the window changes", async () => {
+    await account("black", 1_000_000);
+    const id = await add(12, 15);
+    await api.post(`/plan/incomes/${await eventId("2026-11")}/date`, { date: "2026-11-20" }).expect(201);
+    await api.patch(`/plan/expected-incomes/${id}`, { window_start_day: 5, window_end_day: 10 }).expect(200);
+    expect(await events()).toEqual([
+      { period: "2026-11", on: "2026-11-20" },
+      { period: "2026-12", on: "2026-12-10" },
+    ]);
+    expect(await read()).toMatchObject({ daysLeft: 18 });
+  });
+
+  it("a received income keeps its date", async () => {
+    await account("black", 1_000_000);
+    const id = await add(5, 10);
+    await ds.query(`UPDATE income_events SET status='received', received_at='2026-11-01T10:00:00Z' WHERE period='2026-11'`);
+    await api.patch(`/plan/expected-incomes/${id}`, { window_start_day: 12, window_end_day: 15 }).expect(200);
+    expect(await events()).toEqual([
+      { period: "2026-11", on: "2026-11-10" },
+      { period: "2026-12", on: "2026-12-15" },
+    ]);
+  });
+
+  it("a change that leaves the window alone leaves the dates alone", async () => {
+    await account("black", 1_000_000);
+    const id = await add(5, 10);
+    await ds.query(`UPDATE income_events SET expected_on='2026-11-09' WHERE period='2026-11'`);
+    await api.patch(`/plan/expected-incomes/${id}`, { amount: 600_000 }).expect(200);
+    expect((await events())[0]!.on).toBe("2026-11-09");
   });
 });

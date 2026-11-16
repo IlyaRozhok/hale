@@ -14,6 +14,7 @@ import {
   monthlyDueDates,
   paidQuestions,
   taxTolerance,
+  windowEndDate,
 } from "./recurring-match";
 
 const pay = (over: Partial<Payment> = {}): Payment => ({
@@ -372,7 +373,41 @@ describe("monthlyEvents", () => {
   it("rolls over the year and clamps to the month length", () => {
     const ev = monthlyEvents([{ id: 1, source: "usdc", window_start_day: 15, window_end_day: 25 }], "2026-12-30");
     expect(ev.map((e) => e.period)).toEqual(["2026-12", "2027-01"]);
-    const feb = monthlyEvents([{ id: 1, source: "usdc", window_start_day: 15, window_end_day: 31 }], "2027-02-01", 31);
+    const feb = monthlyEvents([{ id: 1, source: "usdc", window_start_day: 15, window_end_day: 31 }], "2027-02-01");
     expect(feb[0]!.expected_on).toBe("2027-02-28");
+  });
+
+  // Б28: the event is dated on the window's last day, so the limit divides by the most days.
+  it("dates each event on its own window's end, not on the 25th", () => {
+    const ev = monthlyEvents(
+      [
+        { id: 1, source: "fop", window_start_day: 5, window_end_day: 10 },
+        { id: 2, source: "usdc", window_start_day: 12, window_end_day: 15 },
+      ],
+      "2026-11-02",
+    );
+    expect(ev.map((e) => [e.expected_income_id, e.expected_on])).toEqual([
+      [1, "2026-11-10"], [2, "2026-11-15"], [1, "2026-12-10"], [2, "2026-12-15"],
+    ]);
+  });
+
+  it("clamps a window end past the month's last day to that day", () => {
+    const ev = monthlyEvents([{ id: 1, source: "fop", window_start_day: 25, window_end_day: 31 }], "2026-11-02");
+    expect(ev.map((e) => e.expected_on)).toEqual(["2026-11-30", "2026-12-31"]);
+  });
+
+  it("takes the end even from a window whose start is after it (the API refuses one)", () => {
+    const ev = monthlyEvents([{ id: 1, source: "fop", window_start_day: 20, window_end_day: 10 }], "2026-11-02");
+    expect(ev.map((e) => e.expected_on)).toEqual(["2026-11-10", "2026-12-10"]);
+  });
+});
+
+describe("windowEndDate", () => {
+  it("is the window's end day in the period's month, clamped to its length", () => {
+    expect(windowEndDate("2026-11", 10)).toBe("2026-11-10");
+    expect(windowEndDate("2026-11", 31)).toBe("2026-11-30");
+    expect(windowEndDate("2027-02", 30)).toBe("2027-02-28");
+    expect(windowEndDate("2028-02", 31)).toBe("2028-02-29");
+    expect(windowEndDate("2026-12", 1)).toBe("2026-12-01");
   });
 });

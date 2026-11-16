@@ -26,6 +26,7 @@ import { PaymentClosedByLinks1795392000000 } from "./migrations/0022-payment-clo
 import { LedgerChecks1795478400000 } from "./migrations/0023-ledger-checks";
 import { LoanDueOn1795564800000 } from "./migrations/0024-loan-due-on";
 import { CashExchanges1795651200000 } from "./migrations/0025-cash-exchanges";
+import { IncomeEventDateByHand1795737600000 } from "./migrations/0026-income-event-date-by-hand";
 
 export const migrations = [
   Init1793577600000,
@@ -53,6 +54,7 @@ export const migrations = [
   LedgerChecks1795478400000,
   LoanDueOn1795564800000,
   CashExchanges1795651200000,
+  IncomeEventDateByHand1795737600000,
 ];
 
 export function createDataSource(url: string): DataSource {

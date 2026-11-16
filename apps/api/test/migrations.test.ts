@@ -4,6 +4,7 @@ import { DataSource } from "typeorm";
 import { createDataSource, migrations } from "../src/db/data-source";
 import { PaymentClosedByLinks1795392000000 } from "../src/db/migrations/0022-payment-closed-by-links";
 import { LoanDueOn1795564800000 } from "../src/db/migrations/0024-loan-due-on";
+import { IncomeEventDateByHand1795737600000 } from "../src/db/migrations/0026-income-event-date-by-hand";
 import { createTestDatabase } from "./db";
 
 const TABLES = [
@@ -115,6 +116,43 @@ describe("migrations", () => {
     for (let i = migrations.indexOf(LoanDueOn1795564800000); i < migrations.length; i++) await ds.undoLastMigration();
     expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE table_name='loans' AND column_name='due_on'`)).toEqual([]);
     expect(await ds.query(`SELECT count(*)::int AS n FROM loans`)).toEqual([{ n: 2 }]);
+    await ds.destroy();
+  });
+
+  it("0026 moves events still expected on the old 25th to their window's end and keeps dates set by hand (Б28)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(IncomeEventDateByHand1795737600000)) });
+    await before.initialize();
+    await before.runMigrations();
+    await before.query(
+      `INSERT INTO expected_incomes (id, source, amount, currency, window_start_day, window_end_day)
+       VALUES (1, 'fop', 100000, 'UAH', 5, 10), (2, 'usdc', 100000, 'USD', 25, 31)`,
+    );
+    await before.query(
+      `INSERT INTO income_events (expected_income_id, period, expected_on, status, received_at) VALUES
+         (1, '2026-10', '2026-10-25', 'received', '2026-10-24T10:00:00Z'),
+         (1, '2026-11', '2026-11-25', 'expected', NULL),
+         (1, '2026-12', '2026-12-19', 'expected', NULL),
+         (2, '2026-11', '2026-11-25', 'expected', NULL),
+         (2, '2027-02', '2027-02-25', 'expected', NULL)`,
+    );
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    const rows = () =>
+      ds.query(`SELECT expected_income_id AS x, period, expected_on::text AS on, date_set_by_hand AS hand FROM income_events ORDER BY expected_income_id, period`);
+    expect(await rows()).toEqual([
+      { x: 1, period: "2026-10", on: "2026-10-25", hand: false }, // received: untouched
+      { x: 1, period: "2026-11", on: "2026-11-10", hand: false }, // the old 25th: to the window's end
+      { x: 1, period: "2026-12", on: "2026-12-19", hand: true }, // not the 25th: set by the owner, kept
+      { x: 2, period: "2026-11", on: "2026-11-30", hand: false }, // end 31, clamped to November
+      { x: 2, period: "2027-02", on: "2027-02-28", hand: false }, // and to February
+    ]);
+    for (let i = migrations.indexOf(IncomeEventDateByHand1795737600000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE column_name='date_set_by_hand'`)).toEqual([]);
+    expect(await ds.query(`SELECT count(*)::int AS n FROM income_events`)).toEqual([{ n: 5 }]);
     await ds.destroy();
   });
 });
