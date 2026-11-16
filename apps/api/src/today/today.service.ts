@@ -4,7 +4,7 @@ import type { BridgePreviewDto, CalendarDto, OwnMoneyItemDto, SettingsPreviewDto
 import { DataSource, type EntityManager } from "typeorm";
 import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
-import { loanReserve } from "../domain/loans";
+import { lastIncomeBoundary, loanReserve, type ReceivedIncome } from "../domain/loans";
 import { type DailyInput, type DailyState, type DayMark, computeDaily, dayMark, sumDue } from "../domain/daily";
 import { spentByDaySql, spentSql } from "../domain/ledger";
 import { runway } from "../domain/runway";
@@ -501,9 +501,13 @@ export class TodayService {
 
     // income dates and loans
     const next = (await m.query(`SELECT min(expected_on)::text AS d FROM income_events WHERE status <> 'received'`))[0].d as string | null;
-    const lastIncome = (
-      await m.query(`SELECT (${kyivDaySql("max(received_at)")})::text AS d FROM income_events WHERE status = 'received'`)
-    )[0].d as string | null;
+    // A small fop income marks its month received but does not end the loan cycle (Б33): see lastIncomeBoundary.
+    const received: ReceivedIncome[] = await m.query(
+      `SELECT x.source, (${kyivDaySql("e.received_at")})::text AS "receivedOn", e.amount_uah::float8 AS "amountUah",
+              x.amount::float8 AS "expectedAmount", x.currency, e.matched_transaction_id IS NOT NULL AS "byBank"
+         FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id WHERE e.status = 'received'`,
+    );
+    const lastIncome = lastIncomeBoundary(received, Object.fromEntries(Object.entries(rates).map(([c, r]) => [c, r.rate])));
     // Open loans within the tracked period (earlier ones are history), less what repayments already covered.
     // Which of them lower free money, and how, is the rule of task Б7 in domain/loans.
     const open: Loan[] = await m.query(

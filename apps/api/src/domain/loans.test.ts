@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loanReserve, type LoanReserveInput, type OpenLoan } from "./loans.js";
+import { lastIncomeBoundary, loanReserve, type LoanReserveInput, type OpenLoan, type ReceivedIncome } from "./loans.js";
 
 // Today is 2 November; the last income came on 20 October, the next is expected on 12 November.
 const base: Omit<LoanReserveInput, "loans"> = { today: "2026-11-02", trackingStart: "2026-01-01", lastIncomeOn: "2026-10-20", nextIncomeOn: "2026-11-12" };
@@ -83,5 +83,37 @@ describe("loanReserve: loans with a return date behave as a payment on that date
       manual({ id: 4, dueOn: null }),
     ]);
     expect(r.dueNow.map((l) => l.id)).toEqual([2, 1]);
+  });
+});
+
+describe("lastIncomeBoundary: which received income closes the loan cycle (Б33)", () => {
+  const ev = (o: Partial<ReceivedIncome> = {}): ReceivedIncome => ({
+    source: "fop", receivedOn: "2026-11-06", amountUah: 200_000, expectedAmount: 5_000_000, currency: "UAH", byBank: true, ...o,
+  });
+  const october = ev({ receivedOn: "2026-10-20", amountUah: 5_000_000 });
+
+  it("a fop income below half the expected amount does not move the boundary", () => {
+    expect(lastIncomeBoundary([october, ev()], {})).toBe("2026-10-20");
+  });
+
+  it("once the month's fop income reaches half, its day is the boundary", () => {
+    expect(lastIncomeBoundary([october, ev({ amountUah: 2_500_000 })], {})).toBe("2026-11-06");
+  });
+
+  it("a foreign expected amount is compared at the rate; without a rate the event is ignored", () => {
+    const usd = ev({ expectedAmount: 500_000, currency: "USD", amountUah: 10_000_000 }); // $5,000; half at 40 = ₴100,000
+    expect(lastIncomeBoundary([october, usd], { USD: 40 })).toBe("2026-11-06");
+    expect(lastIncomeBoundary([october, usd], { USD: 41 })).toBe("2026-10-20");
+    expect(lastIncomeBoundary([october, usd], {})).toBe("2026-10-20");
+  });
+
+  it("a fop income confirmed by hand and a USDC income count as before, whatever their amount", () => {
+    expect(lastIncomeBoundary([october, ev({ byBank: false, amountUah: null })], {})).toBe("2026-11-06");
+    expect(lastIncomeBoundary([october, ev({ source: "usdc", amountUah: null, byBank: false })], {})).toBe("2026-11-06");
+  });
+
+  it("is null with nothing received, and skips an event with no day", () => {
+    expect(lastIncomeBoundary([], {})).toBeNull();
+    expect(lastIncomeBoundary([ev({ receivedOn: null, byBank: false })], {})).toBeNull();
   });
 });

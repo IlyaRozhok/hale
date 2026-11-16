@@ -35,6 +35,11 @@ import { BINANCE } from "./binance";
 export { BINANCE } from "./binance";
 const MATCH_DAYS = 3;
 const PLANNED_RECIPIENT_LABELS = ["close_regular", "shared_budget"];
+/** Fop income per month: its hryvnia sum and its first row. The caller adds conditions and `GROUP BY 1`. */
+const FOP_INCOME_BY_PERIOD = `SELECT to_char(t.local_date,'YYYY-MM') AS period, SUM(t.amount_uah) AS s,
+    (array_agg(t.id ORDER BY t.occurred_at, t.id))[1] AS first_id, min(t.occurred_at) AS first_at
+  FROM transactions t JOIN accounts a ON a.id = t.account_id
+  WHERE a.kind='fop' AND t.type='income' AND t.amount > 0 AND t.amount_uah IS NOT NULL`;
 
 interface TxRow {
   id: number;
@@ -91,6 +96,8 @@ export class PlanService implements OnApplicationBootstrap {
       `SELECT EXISTS (SELECT 1 FROM expected_incomes x WHERE NOT EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id)) AS fresh`,
     )) as [{ fresh: boolean }];
     await this.generateEvents(today);
+    // Events the old rule left waiting after a small fop income are received now (Б33).
+    await this.receiveFopEvents(this.ds.manager, null);
     const { firstRows } = await this.recurringRows(today);
     await this.linkTaxTransactions();
     if ((fresh || firstRows) && fixLimit) await this.limit.invalidate("plan");
@@ -625,34 +632,37 @@ export class PlanService implements OnApplicationBootstrap {
   }
 
   /**
-   * Marks the month's fop event received once the incomes on the fop account in that month reach
-   * half the expected amount, compared in hryvnias at the current rate. Without a rate it waits.
+   * Any income on the fop account in a month, whatever its size, is that month's fop income (task Б33, the
+   * owner's decision of 16 November): the month's fop event is received at the first such income, with the
+   * month's sum in hryvnias. More income later that month raises the sum and keeps the first arrival's time, so
+   * the next income date moves on to next month at once and never hangs on a month whose money came. A row
+   * without a hryvnia amount waits. Refunds to the fop account are not income (Б5) and do not count.
    */
   private async markFopEvents(m: EntityManager, t: TxRow): Promise<void> {
     const period = t.local_date.slice(0, 7);
-    const events: { id: number; amount: number; currency: string }[] = await m.query(
-      `SELECT e.id, x.amount::float8 AS amount, x.currency FROM income_events e
-         JOIN expected_incomes x ON x.id = e.expected_income_id
-        WHERE x.source='fop' AND e.period=$1 AND e.status <> 'received' FOR UPDATE OF e`,
+    await this.receiveFopEvents(m, period);
+    await m.query(
+      `WITH inc AS (${FOP_INCOME_BY_PERIOD} AND to_char(t.local_date,'YYYY-MM')=$1 GROUP BY 1)
+       UPDATE income_events e SET amount_uah = inc.s FROM inc, expected_incomes x
+        WHERE x.id = e.expected_income_id AND x.source='fop' AND e.period = inc.period AND e.status = 'received'
+          AND e.matched_transaction_id IS NOT NULL AND e.amount_uah IS DISTINCT FROM inc.s`,
       [period],
     );
-    if (events.length === 0) return;
-    const rates = await this.rates(m);
-    const sum: number = (
-      await m.query(
-        `SELECT COALESCE(SUM(t.amount_uah),0)::float8 AS s FROM transactions t JOIN accounts a ON a.id = t.account_id
-          WHERE a.kind='fop' AND t.type='income' AND t.amount_uah IS NOT NULL AND to_char(t.local_date,'YYYY-MM')=$1`,
-        [period],
-      )
-    )[0].s;
-    for (const e of events) {
-      const rate = e.currency === "UAH" ? 1 : rates[e.currency];
-      if (!rate || sum < (e.amount * rate) / 2) continue;
-      await m.query(
-        `UPDATE income_events SET status='received', received_at=$2, amount_uah=$3, matched_transaction_id=$4 WHERE id=$1`,
-        [e.id, t.occurred_at, sum, t.id],
-      );
-    }
+  }
+
+  /**
+   * Fop events still expected in a month that already has fop income are received, dated by its first income.
+   * One month, or every month (the hourly job: events the old half-the-amount rule left waiting). Safe to repeat;
+   * a received event is never re-dated. Like any bank credit it leaves the day's fixed limit alone.
+   */
+  private async receiveFopEvents(m: EntityManager, period: string | null): Promise<void> {
+    await m.query(
+      `WITH inc AS (${FOP_INCOME_BY_PERIOD} AND ($1::text IS NULL OR to_char(t.local_date,'YYYY-MM')=$1) GROUP BY 1)
+       UPDATE income_events e SET status='received', received_at = inc.first_at, amount_uah = inc.s, matched_transaction_id = inc.first_id
+         FROM inc, expected_incomes x
+        WHERE x.id = e.expected_income_id AND x.source='fop' AND e.period = inc.period AND e.status <> 'received'`,
+      [period],
+    );
   }
 
   private async rates(m: EntityManager): Promise<Record<string, number>> {
