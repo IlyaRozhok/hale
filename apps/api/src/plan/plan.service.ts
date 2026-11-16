@@ -82,18 +82,18 @@ export class PlanService implements OnApplicationBootstrap {
   /**
    * Generation, safe to repeat. A template that gets its first rows here (just seeded, say) was not in
    * the day's limit if a job fixed it in the meantime, so the limit is fixed afresh. Later months' rows
-   * leave the fixed limit alone.
+   * leave the fixed limit alone, and so does a series that stays without rows because the owner deleted
+   * its months (Б29).
    */
   private async generate(fixLimit = true): Promise<void> {
     const today = kyivDate(this.clock.now());
     const [{ fresh }] = (await this.ds.query(
-      `SELECT EXISTS (SELECT 1 FROM expected_incomes x WHERE NOT EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id))
-           OR EXISTS (SELECT 1 FROM recurring_payments r WHERE r.active AND NOT EXISTS (SELECT 1 FROM scheduled_payments p WHERE p.recurring_id = r.id)) AS fresh`,
+      `SELECT EXISTS (SELECT 1 FROM expected_incomes x WHERE NOT EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id)) AS fresh`,
     )) as [{ fresh: boolean }];
     await this.generateEvents(today);
-    await this.generateRecurring(today);
+    const { firstRows } = await this.recurringRows(today);
     await this.linkTaxTransactions();
-    if (fresh && fixLimit) await this.limit.invalidate("plan");
+    if ((fresh || firstRows) && fixLimit) await this.limit.invalidate("plan");
   }
 
   /** The owner just added something to the plan: its dates are needed now. The caller fixes the limit afterwards. */
@@ -189,6 +189,11 @@ export class PlanService implements OnApplicationBootstrap {
    * before setup, and would show up as overdue), nor a month the owner deleted from it (Б29).
    */
   async generateRecurring(today: string = kyivDate(this.clock.now())): Promise<number> {
+    return (await this.recurringRows(today)).created;
+  }
+
+  /** `firstRows`: some series that had no rows got its first ones here. */
+  private async recurringRows(today: string): Promise<{ created: number; firstRows: boolean }> {
     const series: {
       id: number;
       kind: string;
@@ -203,6 +208,7 @@ export class PlanService implements OnApplicationBootstrap {
          FROM recurring_payments WHERE active ORDER BY id`,
     );
     let created = 0;
+    let firstRows = false;
     for (const r of series) {
       // A series with no rows yet (set up long ago while paused, say) gets nothing already past either.
       const fresh = (await this.ds.query(`SELECT 1 FROM scheduled_payments WHERE recurring_id=$1 LIMIT 1`, [r.id])).length === 0;
@@ -217,9 +223,10 @@ export class PlanService implements OnApplicationBootstrap {
           [r.kind, r.name, r.amount, r.currency, due, r.match_hint, r.id],
         );
         created += out.length;
+        if (fresh && out.length > 0) firstRows = true;
       }
     }
-    return created;
+    return { created, firstRows };
   }
 
   /** Creates this and next month's events. Returns how many were new. */

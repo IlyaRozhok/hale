@@ -1066,6 +1066,16 @@ describe("recurring payments", () => {
       await api.del(`/plan/payments/${dec}`).expect(404);
     });
 
+    it("a series left with no rows by a deleted month does not make the hourly job refix the day", async () => {
+      const id = await create(10);
+      const [{ id: only }] = await ds.query(`SELECT id FROM scheduled_payments WHERE recurring_id=$1`, [id]);
+      await api.del(`/plan/payments/${only}`).expect(200);
+      await plantSnapshot(now);
+      await app.get(PlanService).hourlyJob();
+      expect(await ds.query(`SELECT daily_limit::int AS l FROM daily_snapshots WHERE local_date=$1`, [now])).toEqual([{ l: 1 }]);
+      expect(await dues(id)).toEqual([]);
+    });
+
     it("a payment of no series leaves nothing behind when deleted", async () => {
       const p = (await api.post("/plan/payments", { kind: "obligation", name: "x", amount: 1000, currency: "UAH", due_on: "2026-12-01" }).expect(201)).body.id;
       await api.del(`/plan/payments/${p}`).expect(200);
