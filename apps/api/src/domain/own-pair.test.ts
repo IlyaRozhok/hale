@@ -86,7 +86,18 @@ describe("isOwnPair (Б10)", () => {
   it("a row with someone else on the other side is not an exchange leg", () => {
     expect(isOwnPair(leg({ thirdParty: true }), usd())).toBe(false);
     expect(isOwnPair(leg(), usd({ thirdParty: true }))).toBe(false);
-    // The exact rule is as before.
-    expect(isOwnPair(leg({ thirdParty: true }), leg({ accountId: 2, amount: 410_000, amountUah: 410_000 }))).toBe(true);
+  });
+
+  it("an exact opposite amount is no pair when someone else is on either side (Б32)", () => {
+    // ₴500 to Олена Коваль from the black card, and three minutes later ₴500 from Петро Сидоренко on the white one.
+    const toOlena = leg({ amount: -50_000, amountUah: -50_000 });
+    const fromPetro = leg({ accountId: 2, accountKind: "white", amount: 50_000, amountUah: 50_000, at: 180_000 });
+    expect(isOwnPair(toOlena, { ...fromPetro, thirdParty: true })).toBe(false);
+    expect(isOwnPair({ ...fromPetro, thirdParty: true }, toOlena)).toBe(false);
+    expect(isOwnPair({ ...toOlena, thirdParty: true }, fromPetro)).toBe(false);
+    expect(isOwnPair({ ...toOlena, thirdParty: true }, { ...fromPetro, thirdParty: true })).toBe(false);
+    // Two own legs still pair whatever the accounts, a jar included.
+    expect(isOwnPair(toOlena, fromPetro)).toBe(true);
+    expect(isOwnPair(toOlena, { ...fromPetro, accountKind: "jar" })).toBe(true);
   });
 });

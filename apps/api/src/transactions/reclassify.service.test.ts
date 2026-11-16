@@ -120,6 +120,23 @@ describe("reclassify", () => {
     expect((await get(lone)).type).toBe("person_transfer");
   });
 
+  it("money sent to a person and the same sum from another person a few minutes later do not pair (Б32)", async () => {
+    const at = NOW - 3_600_000;
+    const out = await insertTx(black, { amount: -50_000, mcc: 4829, description: "Олена Коваль", counterName: "Олена Коваль", at: new Date(at) });
+    const inn = await insertTx(white, { amount: 50_000, mcc: 4829, description: "Від: Петро Сидоренко", at: new Date(at + 180_000) });
+    await service().reclassifyPending();
+    expect(await get(out)).toMatchObject({ type: "person_transfer" });
+    expect(await get(inn)).toMatchObject({ type: "person_in" });
+    // The same, one leg at a time, in either order.
+    const svc = service();
+    const inn2 = await insertTx(white, { amount: 70_000, mcc: 4829, description: "Від: Петро Сидоренко", at: new Date(at - 7_200_000) });
+    await svc.reclassifyIds([inn2]);
+    const out2 = await insertTx(black, { amount: -70_000, mcc: 4829, description: "Олена Коваль", at: new Date(at - 7_100_000) });
+    await svc.reclassifyIds([out2]);
+    expect((await get(inn2)).type).toBe("person_in");
+    expect((await get(out2)).type).toBe("person_transfer");
+  });
+
   it.each([
     ["outgoing leg first", true],
     ["incoming leg first", false],
@@ -233,6 +250,9 @@ describe("reclassify", () => {
       }
       await fopIncomeChain(t0 + 3_600_000);
       await strangers(t0 + 5_400_000);
+      // Б32: the same sum to one person and from another, three minutes apart.
+      await insertTx(black, { amount: -50_000, mcc: 4829, description: "Олена Коваль", counterName: "Олена Коваль", at: new Date(t0 + 6_000_000) });
+      await insertTx(white, { amount: 50_000, mcc: 4829, description: "Від: Петро Сидоренко", at: new Date(t0 + 6_180_000) });
       await service().reclassifyPending();
 
       const own = { ownNames: ["Test Owner"], ownIbans: new Set<string>() };
