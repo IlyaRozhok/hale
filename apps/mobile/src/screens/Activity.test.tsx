@@ -435,6 +435,78 @@ describe("Activity filters", () => {
     });
   });
 
+  describe("arriving from a category of «Итоги» (В2)", () => {
+    type Params = { day?: string; category?: string; from?: string; to?: string; at: number };
+    let arrive: (p: Omit<Params, "at">) => Promise<void>;
+    function Arriving() {
+      const [params, setParams] = useState<Params>();
+      arrive = (next) => act(async () => setParams((p) => ({ ...next, at: (p?.at ?? 0) + 1 })));
+      return <Activity now={now} route={{ params }} />;
+    }
+
+    it("shows that category's spending over the month's days, both filters in sight", async () => {
+      const transactions = summaryPage({ total: -880000, count: 12 });
+      await renderWith(
+        <Activity now={now} route={{ params: { category: "groceries", from: "2026-11-01", to: "2026-11-16", at: 1 } }} />,
+        fakeApi({ transactions }),
+      );
+      await waitFor(() =>
+        expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", category: "groceries", from: "2026-11-01", to: "2026-11-16" }),
+      );
+      expect(await screen.findByRole("button", { name: "Фильтры: 2" })).toBeTruthy();
+      expect(await screen.findByText("Продукты · 1–16 ноя: −₴8,800 · 12 операций")).toBeTruthy();
+    });
+
+    it("«Без категории» is asked for as the filters window asks for it", async () => {
+      const transactions = summaryPage({ total: -10000, count: 1 });
+      await renderWith(
+        <Activity now={now} route={{ params: { category: "uncategorized", from: "2026-10-01", to: "2026-10-31", at: 1 } }} />,
+        fakeApi({ transactions }),
+      );
+      await waitFor(() =>
+        expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", category: "uncategorized", from: "2026-10-01", to: "2026-10-31" }),
+      );
+      expect(await screen.findByText("Без категории · 1–31 окт: −₴100 · 1 операция")).toBeTruthy();
+    });
+
+    it("puts aside what was chosen before, and a day arriving later takes the category off", async () => {
+      const transactions = summaryPage({ total: -312000, count: 4 });
+      await renderWith(<Arriving />, fakeApi({ transactions }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Все" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Поиск" }));
+      await fireEvent.changeText(screen.getByLabelText("Поиск по операциям"), "кофе");
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "all", q: "кофе" }));
+
+      await arrive({ category: "cafe", from: "2026-11-01", to: "2026-11-16" });
+      await waitFor(() =>
+        expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", category: "cafe", from: "2026-11-01", to: "2026-11-16" }),
+      );
+      expect(screen.getByRole("button", { name: "Траты" }).props.accessibilityState.selected).toBe(true);
+      expect(screen.queryByLabelText("Поиск по операциям")).toBeNull();
+
+      await arrive({ day: "2026-11-02" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", from: "2026-11-02", to: "2026-11-02" }));
+      expect(await screen.findByRole("button", { name: "Фильтры: 1" })).toBeTruthy();
+    });
+
+    it("the same category again, after the filters were taken off, is applied again", async () => {
+      const transactions = summaryPage({ total: -312000, count: 4 });
+      await renderWith(<Arriving />, fakeApi({ transactions }));
+      await screen.findByRole("button", { name: "Фильтры" });
+      await arrive({ category: "cafe", from: "2026-11-01", to: "2026-11-16" });
+      await fireEvent.press(await screen.findByRole("button", { name: "Фильтры: 2" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Сбросить" }));
+      await windowGone();
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" }));
+
+      await arrive({ category: "cafe", from: "2026-11-01", to: "2026-11-16" });
+      await waitFor(() =>
+        expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", category: "cafe", from: "2026-11-01", to: "2026-11-16" }),
+      );
+      expect(await screen.findByRole("button", { name: "Фильтры: 2" })).toBeTruthy();
+    });
+  });
+
   it("income has no categories: one chosen for spending does not narrow it and is not counted there", async () => {
     const transactions = summaryPage({ total: -342000, count: 11 });
     await renderWith(<Activity now={now} />, fakeApi({ transactions }));

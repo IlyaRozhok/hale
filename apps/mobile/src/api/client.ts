@@ -14,6 +14,7 @@ import type {
   GoalInput,
   GoalPatch,
   IncomeEventDto,
+  InsightsMonthDto,
   InstallmentInput,
   InstallmentPatch,
   LedgerCheckDto,
@@ -145,6 +146,8 @@ export interface Api {
   deleteRule(id: number): Promise<void>;
   /** The latest ledger check (task Б11); null when there is none to show or the server is older. */
   ledgerCheck(): Promise<LedgerCheckDto | null>;
+  /** A month's «Итоги» (task В2), the current Kyiv month without `month`; null from an older server that has none. */
+  insights(month?: string): Promise<InsightsMonthDto | null>;
 }
 
 export type TransactionsFilter = {
@@ -276,6 +279,14 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
         return (await request<LedgerCheckDto | undefined>("GET", "/check/latest")) ?? null;
       } catch (e) {
         if (e instanceof ApiError && e.status === 404) return null; // an older server has no check
+        throw e;
+      }
+    },
+    insights: async (month) => {
+      try {
+        return await request<InsightsMonthDto>("GET", `/insights/month${month ? `?month=${month}` : ""}`);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null; // an older server has no «Итоги»
         throw e;
       }
     },

@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
-import type { CalendarDto, GoalDto, LoanHistoryDto, LoanRowDto, ManualBalanceDto, OwnMoneyItemDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@hale/contracts";
+import type { CalendarDto, GoalDto, InsightsMonthDto, LoanHistoryDto, LoanRowDto, ManualBalanceDto, OwnMoneyItemDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@hale/contracts";
 import { ApiProvider } from "./api/context";
 import type { Api } from "./api/client";
 import { dateLabel, kyivDate } from "./format";
@@ -117,6 +117,33 @@ export function calendarFixture(over: Partial<CalendarDto> = {}): CalendarDto {
   return { month: "2026-11", today: "2026-11-05", streak: 0, days: [], ...over };
 }
 
+/**
+ * «Итоги» for 1–16 November against 1–16 October, sorted as the server sorts them: ten categories,
+ * one of them spent on only in October and one a refund below zero. They add up to ₴18,220 against ₴18,040.
+ */
+export function insightsFixture(over: Partial<InsightsMonthDto> = {}): InsightsMonthDto {
+  return {
+    month: "2026-11",
+    through: "2026-11-16",
+    previous: { from: "2026-10-01", to: "2026-10-16" },
+    spent: 1_822_000,
+    previousSpent: 1_804_000,
+    categories: [
+      { category: "groceries", spent: 880_000, previousSpent: 900_000, count: 12 },
+      { category: "cafe", spent: 320_000, previousSpent: 210_000, count: 14 },
+      { category: "transport", spent: 215_000, previousSpent: 245_000, count: 8 },
+      { category: "subscriptions", spent: 164_000, previousSpent: 164_000, count: 4 },
+      { category: "leisure", spent: 138_000, previousSpent: 180_000, count: 3 },
+      { category: "health", spent: 60_000, previousSpent: 0, count: 1 },
+      { category: "utilities", spent: 40_000, previousSpent: 50_000, count: 1 },
+      { category: "telecom", spent: 30_000, previousSpent: 30_000, count: 1 },
+      { category: "shopping", spent: 0, previousSpent: 30_000, count: 0 },
+      { category: "refund", spent: -25_000, previousSpent: -5_000, count: 1 },
+    ],
+    ...over,
+  };
+}
+
 export function loanFixture(over: Partial<LoanRowDto> = {}): LoanRowDto {
   return { id: 7, amount: 500_000, remaining: 500_000, receivedOn: "2026-11-01", repaidOn: null, repaidDateKnown: true, repaidAmount: 0, serviceCost: 0, title: "Друг", manual: true, ...over };
 }
@@ -204,6 +231,7 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     rules: jest.fn(async () => []),
     deleteRule: jest.fn(async () => undefined),
     ledgerCheck: jest.fn(async () => null),
+    insights: jest.fn(async () => insightsFixture()),
     ...over,
   } as never;
 }

@@ -20,12 +20,20 @@ export const INCOME_EVENTS_KEY = ["income-events"] as const;
 export const RECURRING_KEY = ["recurring"] as const;
 export const CASH_KEY = ["cash"] as const;
 export const LEDGER_CHECK_KEY = ["ledger-check"] as const;
+/** «Итоги» of a month (task В2): spending by category, so whatever moves a day's spending refreshes it too. */
+export const INSIGHTS_KEY = ["insights"] as const;
 /** Debounce between the last slider move and the preview request. */
 export const PREVIEW_DELAY_MS = 300;
 
 export function useToday() {
   const api = useApi();
   return useQuery({ queryKey: TODAY_KEY, queryFn: () => api.today() });
+}
+
+/** A month's «Итоги»; without a month the current one, as the server counts it. Null from an older server. */
+export function useInsights(month?: string) {
+  const api = useApi();
+  return useQuery({ queryKey: [...INSIGHTS_KEY, month ?? "current"], queryFn: () => api.insights(month) });
 }
 
 export function useCalendar(month: string, enabled = true) {
@@ -179,7 +187,7 @@ export function useEditTransaction() {
       api.editTransaction(id, patch),
     // A new type undoes an answer about where cash came from (Б21): the wallet and Binance may change too.
     onSuccess: () =>
-      Promise.all([TRANSACTIONS_KEY, TODAY_KEY, CASH_KEY, MANUAL_BALANCES_KEY].map((queryKey) => client.invalidateQueries({ queryKey }))),
+      Promise.all([TRANSACTIONS_KEY, TODAY_KEY, CASH_KEY, MANUAL_BALANCES_KEY, INSIGHTS_KEY].map((queryKey) => client.invalidateQueries({ queryKey }))),
   });
 }
 
@@ -198,6 +206,7 @@ export function useLabelRecipient() {
         client.invalidateQueries({ queryKey: TRANSACTIONS_KEY }),
         client.invalidateQueries({ queryKey: TODAY_KEY }),
         client.invalidateQueries({ queryKey: RECIPIENTS_KEY }),
+        client.invalidateQueries({ queryKey: INSIGHTS_KEY }),
       ]),
   });
 }
@@ -456,6 +465,7 @@ function useCashMutation<V>(mutationFn: (vars: V) => Promise<unknown>) {
         client.invalidateQueries({ queryKey: TODAY_KEY }),
         client.invalidateQueries({ queryKey: TRANSACTIONS_KEY }),
         client.invalidateQueries({ queryKey: CALENDAR_KEY }),
+        client.invalidateQueries({ queryKey: INSIGHTS_KEY }),
       ]),
   });
 }
@@ -498,7 +508,7 @@ export function useChangeDepositAnswer() {
     mutationFn: ({ id, answer }: { id: number; answer: CashDepositAnswerName }) => api.changeDepositAnswer(id, answer),
     onSuccess: () =>
       Promise.all(
-        [CASH_KEY, TODAY_KEY, TRANSACTIONS_KEY, MANUAL_BALANCES_KEY, INCOME_EVENTS_KEY, CALENDAR_KEY, CAP_PREVIEW_KEY].map((queryKey) =>
+        [CASH_KEY, TODAY_KEY, TRANSACTIONS_KEY, MANUAL_BALANCES_KEY, INCOME_EVENTS_KEY, CALENDAR_KEY, INSIGHTS_KEY, CAP_PREVIEW_KEY].map((queryKey) =>
           client.invalidateQueries({ queryKey }),
         ),
       ),
@@ -536,7 +546,7 @@ export function usePayWith() {
     mutationFn: ({ paymentId, transactionIds }: { paymentId: number; transactionIds: number[] }) => api.payWith(paymentId, transactionIds),
     onSuccess: () =>
       Promise.all(
-        [CASH_KEY, TODAY_KEY, PAYMENTS_KEY, TRANSACTIONS_KEY, CALENDAR_KEY, CAP_PREVIEW_KEY].map((queryKey) => client.invalidateQueries({ queryKey })),
+        [CASH_KEY, TODAY_KEY, PAYMENTS_KEY, TRANSACTIONS_KEY, CALENDAR_KEY, INSIGHTS_KEY, CAP_PREVIEW_KEY].map((queryKey) => client.invalidateQueries({ queryKey })),
       ),
   });
 }
@@ -582,7 +592,7 @@ export function useDeleteRule() {
     mutationFn: (id: number) => api.deleteRule(id),
     onSuccess: () =>
       Promise.all(
-        [RULES_KEY, TODAY_KEY, TRANSACTIONS_KEY, CALENDAR_KEY, CASH_KEY, PAYMENTS_KEY].map((queryKey) => client.invalidateQueries({ queryKey })),
+        [RULES_KEY, TODAY_KEY, TRANSACTIONS_KEY, CALENDAR_KEY, INSIGHTS_KEY, CASH_KEY, PAYMENTS_KEY].map((queryKey) => client.invalidateQueries({ queryKey })),
       ),
   });
 }
