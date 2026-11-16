@@ -462,8 +462,14 @@ export class TodayService {
     );
     let cards = 0, fop = 0, credit = 0;
     for (const a of accounts) {
-      const own = uah(a.balance - a.credit_limit, a.currency);
+      const native = a.balance - a.credit_limit;
+      const own = uah(native, a.currency);
       const item: OwnMoneyItemDto = { kind: a.kind, name: ACCOUNT_NAMES[a.kind], own };
+      // A currency account shows its own amount under the hryvnias, like Binance.
+      if (a.currency !== "UAH") {
+        item.currency = a.currency;
+        item.amount = native;
+      }
       if (a.kind === "fop") fop += own;
       else {
         cards += own;
@@ -471,6 +477,8 @@ export class TodayService {
         credit += limit;
         if (limit > 0) item.creditLimit = limit;
       }
+      // monobank opens one account per currency; an empty one without a credit limit is not a place money lies.
+      if (native === 0 && a.credit_limit <= 0) continue;
       items.push(item);
     }
     // The Binance balance and any other manual balance that counts as own money share one slot.
