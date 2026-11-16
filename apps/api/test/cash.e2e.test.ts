@@ -244,6 +244,76 @@ describe("counting the pocket", () => {
   });
 });
 
+describe("a correction of the wallet keeps its sign when changed", () => {
+  const startRow = async () => (await row(`SELECT id FROM transactions WHERE description='Начальный остаток'`)).id as number;
+  const surplusRow = async () => {
+    await api.post("/cash/count", { amount: 795_000 }).expect(201);
+    return (await row(`SELECT id FROM transactions WHERE description='Сверка: больше, чем записано'`)).id as number;
+  };
+
+  beforeEach(async () => {
+    await start(500_000).expect(201);
+  });
+
+  it("the opening balance: a new note or date leaves the amount and the wallet as they were", async () => {
+    const id = await startRow();
+    const changed = (await api.patch(`/cash/operations/${id}`, { note: "Что было в кармане", date: "2026-11-08" }).expect(200)).body;
+    expect(changed).toMatchObject({ amount: 500_000, type: "own_transfer", category: "own", description: "Что было в кармане", localDate: "2026-11-08" });
+    expect((await wallet()).balance).toBe(500_000);
+  });
+
+  it("a count surplus: a new note or date leaves the amount and the wallet as they were", async () => {
+    const id = await surplusRow();
+    expect((await wallet()).balance).toBe(795_000);
+    const changed = (await api.patch(`/cash/operations/${id}`, { note: "Нашёл в куртке", date: "2026-11-09" }).expect(200)).body;
+    expect(changed).toMatchObject({ amount: 295_000, type: "own_transfer", description: "Нашёл в куртке", localDate: "2026-11-09" });
+    expect((await wallet()).balance).toBe(795_000);
+    // An emptied note keeps what the row was called.
+    expect((await api.patch(`/cash/operations/${id}`, { note: "" }).expect(200)).body.description).toBe("Нашёл в куртке");
+  });
+
+  it("a new amount stays positive", async () => {
+    const id = await surplusRow();
+    expect((await api.patch(`/cash/operations/${id}`, { amount: 100_000 }).expect(200)).body.amount).toBe(100_000);
+    expect((await wallet()).balance).toBe(600_000);
+    expect((await api.patch(`/cash/operations/${await startRow()}`, { amount: 400_000 }).expect(200)).body.amount).toBe(400_000);
+    expect((await wallet()).balance).toBe(500_000);
+  });
+
+  it("its kind cannot be changed: it is a correction, not an operation", async () => {
+    const id = await surplusRow();
+    for (const kind of ["own_out", "spend", "received"]) {
+      await api.patch(`/cash/operations/${id}`, { kind, category: "cafe", note: "x" }).expect(422);
+    }
+    await api.patch(`/cash/operations/${id}`, { kind: "exchange", usdc: 100, amount: 100 }).expect(422);
+    await api.patch(`/cash/operations/${id}`, { usdc: 100 }).expect(422);
+    expect(await row(`SELECT type, amount::int AS amount, description FROM transactions WHERE id=$1`, [id])).toEqual({
+      type: "own_transfer", amount: 295_000, description: "Сверка: больше, чем записано",
+    });
+    expect((await wallet()).balance).toBe(795_000);
+    // It can still be deleted.
+    await api.del(`/cash/operations/${id}`).expect(200);
+    expect((await wallet()).balance).toBe(500_000);
+  });
+
+  it("«Отдал в свои» stays negative when its note changes, and can still change its kind", async () => {
+    const { id } = (await op({ kind: "own_out", amount: 50_000 }).expect(201)).body as { id: number };
+    expect((await api.patch(`/cash/operations/${id}`, { note: "Купил USDC" }).expect(200)).body.amount).toBe(-50_000);
+    expect((await api.patch(`/cash/operations/${id}`, { kind: "own_out", amount: 60_000, note: "Купил USDC" }).expect(200)).body.amount).toBe(-60_000);
+    expect((await wallet()).balance).toBe(440_000);
+    expect((await api.patch(`/cash/operations/${id}`, { kind: "received" }).expect(200)).body).toMatchObject({ amount: 60_000, type: "person_in" });
+  });
+
+  it("an exchange changed by note keeps its sign and its dollars", async () => {
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-10T09:00:00Z', 41.5)`);
+    const { id } = (await op({ kind: "exchange", usdc: 100_000, amount: 4_100_000 }).expect(201)).body as { id: number };
+    const changed = (await api.patch(`/cash/operations/${id}`, { kind: "exchange", usdc: 100_000, amount: 4_100_000, note: "Обменник" }).expect(200)).body;
+    expect(changed).toMatchObject({ amount: 4_100_000, exchange: { usdc: 100_000 } });
+    expect((await api.patch(`/cash/operations/${id}`, { note: "Обменник на Подоле" }).expect(200)).body.amount).toBe(4_100_000);
+    expect((await wallet()).balance).toBe(4_600_000);
+  });
+});
+
 describe("cash paid in at a terminal", () => {
   it("before the start nothing is asked; from the start the owner says where the cash came from", async () => {
     const c = await card();

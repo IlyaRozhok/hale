@@ -49,6 +49,13 @@ interface Row {
 /** received and an exchange add to the wallet; a purchase and own_out take from it. */
 const signed = (kind: CashOperationKind, amount: number) => (kind === "received" || kind === "exchange" ? amount : -amount);
 
+/**
+ * The opening balance and a count that found more («Сверка: больше, чем записано»): an own transfer into the
+ * wallet that is no exchange. It corrects the balance and is no operation of any kind, so it keeps its kind and
+ * its plus sign when changed.
+ */
+const isCorrection = (row: { type: string; amount: number }, exchange: boolean) => row.type === "own_transfer" && row.amount > 0 && !exchange;
+
 /** The cash wallet: its start, operations entered by hand, counting the pocket, and deposits from it. */
 @Injectable()
 export class CashService {
@@ -114,6 +121,18 @@ export class CashService {
       const row = await this.manualRow(m, id);
       if (row.type === "obligation") throw new ConflictException("a planned payment is deleted, not changed");
       const was = await exchangeOf(m, id);
+      if (isCorrection(row, was !== null)) {
+        // Read as own_out it would be saved negative, and the wallet would lose twice the amount.
+        if (p.kind !== undefined || p.usdc !== undefined) throw new UnprocessableEntityException("a correction of the wallet keeps its kind");
+        await this.update(m, id, {
+          type: row.type,
+          amount: p.amount ?? row.amount,
+          category: row.category ?? CATEGORY_OF.own_out,
+          date: p.date === undefined ? row.local_date : this.checkDate(p.date),
+          note: p.note || row.description,
+        });
+        return;
+      }
       const kind = p.kind ?? (was ? "exchange" : (KIND_OF_TYPE[row.type] ?? "own_out"));
       if (p.usdc !== undefined && kind !== "exchange") throw new UnprocessableEntityException("usdc is only for an exchange");
       const usdc = kind === "exchange" ? (p.usdc ?? was?.usdc) : undefined;
@@ -127,12 +146,7 @@ export class CashService {
         date: p.date === undefined ? row.local_date : this.checkDate(p.date),
         note: p.note === undefined ? row.description : p.note || DEFAULT_NOTE[kind],
       };
-      await m.query(
-        `UPDATE transactions SET type=$2, category=$3, amount=$4, amount_uah=$4, local_date=$5, description=$6,
-                occurred_at = CASE WHEN local_date = $5::date THEN occurred_at ELSE ${this.occurredSql("$5")} END
-          WHERE id=$1`,
-        [id, op.type, op.category, op.amount, op.date, op.note],
-      );
+      await this.update(m, id, op);
       if (was || kind === "exchange") {
         // The same dollars keep what they took: taken again, an exchange Binance could not cover in full would
         // take the rest from money that came to Binance since.
@@ -361,6 +375,15 @@ export class CashService {
       [`manual:${randomUUID()}`, account, now.toISOString(), op.date, op.note, op.amount, op.type, op.category, today],
     );
     return (r[0] as { id: number }).id;
+  }
+
+  private async update(m: EntityManager, id: number, op: Row): Promise<void> {
+    await m.query(
+      `UPDATE transactions SET type=$2, category=$3, amount=$4, amount_uah=$4, local_date=$5, description=$6,
+              occurred_at = CASE WHEN local_date = $5::date THEN occurred_at ELSE ${this.occurredSql("$5")} END
+        WHERE id=$1`,
+      [id, op.type, op.category, op.amount, op.date, op.note],
+    );
   }
 
   /** No title: titles are how the classifier recognises the owner's own accounts in bank texts. */
