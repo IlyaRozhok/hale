@@ -45,7 +45,7 @@ beforeEach(async () => {
               scheduled_payments, recurring_payments, manual_balances, loans, bridge_plans, daily_snapshots, goals, cash_cards
      RESTART IDENTITY CASCADE`,
   );
-  await ds.query(`UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, cash_start=NULL, tracking_start='2026-01-01'`);
+  await ds.query(`UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, cash_start=NULL, cash_started_at=NULL, tracking_start='2026-01-01'`);
   at("2026-11-10T10:00:00Z");
 });
 
@@ -123,6 +123,69 @@ describe("cash withdrawals", () => {
     const days = (await api.get("/today/calendar?month=2026-11").expect(200)).body.days as { date: string; spent: number }[];
     expect(days.find((d) => d.date === "2026-11-09")!.spent).toBe(100_000);
     expect(days.find((d) => d.date === "2026-11-10")!.spent).toBe(0);
+  });
+
+  // Б39: the wallet starts at a moment, not a day. Kyiv is UTC+2 in November: 10:00 Kyiv is 08:00Z.
+  describe("on the day the wallet starts (Б39)", () => {
+    const spentOn = async (date: string) =>
+      ((await api.get("/today/calendar?month=2026-11").expect(200)).body.days as { date: string; spent: number }[]).find((d) => d.date === date)!.spent;
+
+    it("a withdrawal at 10:00 and a start at 15:00 with ₴1,000: the wallet is ₴1,000, the day spent nothing", async () => {
+      const c = await card();
+      await bankTx(c, -100_000, "cash_out", "2026-11-10", { time: "08:00:00" });
+      at("2026-11-10T13:00:00Z");
+      await start(100_000).expect(201);
+      expect(await wallet()).toEqual({ started: true, start: "2026-11-10", balance: 100_000 });
+      expect(await spentOn("2026-11-10")).toBe(0);
+      const t = await today();
+      expect(t.state.leftToday).toBe(t.state.dailyLimit);
+      expect(t.accounts.cash).toBe(100_000);
+      // Neither spending nor a wallet change: not in «Траты».
+      expect((await api.get("/transactions?group=spend").expect(200)).body.items).toEqual([]);
+    });
+
+    it("a start at 09:00 and a withdrawal at 10:00: the withdrawal adds to the wallet", async () => {
+      const c = await card();
+      at("2026-11-10T07:00:00Z");
+      await start(100_000).expect(201);
+      at("2026-11-10T08:00:00Z");
+      await bankTx(c, -100_000, "cash_out", "2026-11-10", { time: "08:00:00" });
+      expect((await wallet()).balance).toBe(200_000);
+      expect(await spentOn("2026-11-10")).toBe(0);
+    });
+
+    it("a start dated today, given its date, starts now too", async () => {
+      const c = await card();
+      await bankTx(c, -100_000, "cash_out", "2026-11-10", { time: "08:00:00" });
+      at("2026-11-10T13:00:00Z");
+      await start(100_000, "2026-11-10").expect(201);
+      expect((await wallet()).balance).toBe(100_000);
+    });
+
+    it("a start dated an earlier day takes the whole of that day, as before", async () => {
+      const c = await card();
+      await bankTx(c, -100_000, "cash_out", "2026-11-09", { time: "20:00:00" });
+      at("2026-11-10T13:00:00Z");
+      await start(100_000, "2026-11-09").expect(201);
+      expect((await wallet()).balance).toBe(200_000);
+      expect(await spentOn("2026-11-09")).toBe(0);
+    });
+
+    it("a transfer to the owner's card at another bank before the start is not asked about and does not reach the wallet", async () => {
+      const c = await card();
+      const before = await bankTx(c, -300_000, "own_transfer", "2026-11-10", { description: "545708****4563", time: "08:00:00" });
+      at("2026-11-10T13:00:00Z");
+      await start(100_000).expect(201);
+      const questions = async () => ((await today()).questions as { id: string; kind: string }[]).filter((q) => q.kind === "cash_card");
+      expect(await questions()).toEqual([]);
+      await api.post(`/cash/cards/${before}`, { answer: "yes" }).expect(422);
+      at("2026-11-10T14:00:00Z");
+      const after = await bankTx(c, -200_000, "own_transfer", "2026-11-10", { description: "545708****4563", time: "14:00:00" });
+      expect((await questions()).map((q) => q.id)).toEqual([`cash_card:${after}`]);
+      await api.post(`/cash/cards/${after}`, { answer: "yes" }).expect(201);
+      // The card is now «yes», and still only the transfer after the start fills the wallet.
+      expect((await wallet()).balance).toBe(300_000);
+    });
   });
 });
 

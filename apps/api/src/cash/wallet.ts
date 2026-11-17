@@ -19,13 +19,23 @@ export const internalTransferSql = (t = "t"): string =>
          OR EXISTS (SELECT 1 FROM accounts oa WHERE oa.iban IS NOT NULL AND oa.iban = ${t}.counter_iban)))`;
 
 /**
+ * SQL condition over `t` (transactions): the operation happened since the wallet start, that is on or after its
+ * first day and at or after the moment it started (Б39). Cash taken earlier on the first day is already inside the
+ * opening balance. Without a moment (settings written by hand) the whole first day counts. Mirrors the start check
+ * of walletChange in domain/ledger.ts.
+ */
+export const sinceWalletStartSql = (t = "t"): string =>
+  `(${t}.local_date >= (SELECT cash_start FROM settings WHERE id=1)
+    AND ${t}.occurred_at >= (SELECT COALESCE(cash_started_at, '-infinity') FROM settings WHERE id=1))`;
+
+/**
  * SQL condition over `t` (transactions) and `a` (its account): money sent to the owner's own card at
  * another bank since the wallet start. Its other leg is not at monobank, so it may have been taken
  * out there as cash.
  */
 export const cardTransferSql = (t = "t", a = "a"): string =>
   `(${t}.type = 'own_transfer' AND ${t}.amount < 0 AND ${a}.kind NOT IN ('jar','cash') AND NOT ${t}.from_wallet
-    AND ${t}.local_date >= (SELECT cash_start FROM settings WHERE id=1)
+    AND ${sinceWalletStartSql(t)}
     AND NOT ${internalTransferSql(t)})`;
 
 /** SQL for the cash such a transfer gave: the amount set for it, else all of it if the card's answer is yes, else 0. */
@@ -36,14 +46,14 @@ export const cardCashSql = (t = "t"): string =>
 /**
  * SQL for every change to the wallet, one row (d date, x bigint kopecks) each, dated by the operation's Kyiv day:
  * rows on the wallet (opening balance, operations entered by hand, counts), plus cash withdrawn at ATMs since the
- * start and cash taken from the owner's card at another bank, less deposits the owner said came from the wallet.
+ * start (sinceWalletStartSql) and cash taken from the owner's card at another bank, less deposits the owner said came from the wallet.
  * walletBalance adds them up; the ledger check adds them up by day.
  */
 export const walletChangesSql = (): string =>
   `SELECT t.local_date AS d, t.amount AS x FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.kind='cash'
    UNION ALL
    SELECT t.local_date, -t.amount_uah FROM transactions t JOIN accounts a ON a.id=t.account_id
-    WHERE a.kind NOT IN ('jar','cash') AND t.type='cash_out' AND t.local_date >= (SELECT cash_start FROM settings WHERE id=1)
+    WHERE a.kind NOT IN ('jar','cash') AND t.type='cash_out' AND ${sinceWalletStartSql()}
    UNION ALL
    SELECT t.local_date, ${cardCashSql()} FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE ${cardTransferSql()}
    UNION ALL

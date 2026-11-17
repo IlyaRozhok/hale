@@ -46,7 +46,7 @@ beforeEach(async () => {
      RESTART IDENTITY CASCADE`,
   );
   await ds.query(
-    `UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, cash_start=NULL, last_sync_at=NULL, last_contact_at=NULL, tracking_start='2026-01-01'`,
+    `UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, cash_start=NULL, cash_started_at=NULL, last_sync_at=NULL, last_contact_at=NULL, tracking_start='2026-01-01'`,
   );
   at("2026-11-02T10:00:00Z");
 });

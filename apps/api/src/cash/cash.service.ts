@@ -72,15 +72,26 @@ export class CashService {
     return { started: w.start !== null, start: w.start, balance: w.balance };
   }
 
-  /** Starts once. The day gets a fresh limit: the wallet is new own money. */
+  /**
+   * Starts once. The day gets a fresh limit: the wallet is new own money.
+   * Started today, it starts now: the opening balance already holds cash withdrawn earlier today, so that
+   * withdrawal does not go into the wallet again (Б39). Started on an earlier day, it starts at that day's
+   * beginning: the balance is what the owner had that day, and no time is guessed.
+   */
   async start(p: CashStartInput): Promise<CashWalletDto> {
-    const today = this.today();
+    const now = this.clock.now();
+    const today = kyivDate(now);
     const date = p.date ?? today;
     if (date > today) throw new UnprocessableEntityException("the start cannot be in the future");
     return this.ds.transaction(async (m) => {
       const s = (await m.query(`SELECT cash_start FROM settings WHERE id=1 FOR UPDATE`))[0] as { cash_start: string | null };
       if (s.cash_start !== null) throw new ConflictException("the wallet is already started");
-      await m.query(`UPDATE settings SET cash_start=$1 WHERE id=1`, [date]);
+      await m.query(
+        `UPDATE settings SET cash_start=$1,
+                cash_started_at = CASE WHEN $3 THEN $2::timestamptz ELSE ${kyivInstantSql("$1::date::timestamp")} END
+          WHERE id=1`,
+        [date, now.toISOString(), date === today],
+      );
       const account = await this.account(m);
       if (p.amount > 0) await this.insert(m, account, { type: "own_transfer", amount: p.amount, category: "own", date, note: "Начальный остаток" });
       await this.limit.invalidate("cash", m);

@@ -4,7 +4,7 @@ import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
 import type { TxType } from "../src/domain/classify";
-import { type AccountKind, type LedgerContext, type LedgerRow, ACCOUNT_KINDS, countsAgainstLimit, ledgerEffect, limitSpentByDay } from "../src/domain/ledger";
+import { type AccountKind, type LedgerContext, type LedgerRow, ACCOUNT_KINDS, countsAgainstLimit, ledgerEffect, limitSpentByDay, walletChange } from "../src/domain/ledger";
 import { Clock } from "../src/time/clock";
 
 // «Потрачено» in the calendar and today's spent are counted in Postgres by the limit SQL, and the «Траты»
@@ -43,7 +43,7 @@ beforeEach(async () => {
      RESTART IDENTITY CASCADE`,
   );
   await ds.query(
-    `UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, cash_start=NULL,
+    `UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, cash_start=NULL, cash_started_at=NULL,
        last_sync_at=NULL, last_contact_at=NULL, tracking_start='2026-01-01'`,
   );
 });
@@ -58,6 +58,8 @@ interface Seed {
   kind: AccountKind;
   amountUah: number | null;
   date: string;
+  /** UTC time of day; 10:00:00 (12:00 Kyiv) when left out. */
+  time?: string;
 }
 
 /** One account of every kind; returns the id by kind. */
@@ -79,7 +81,7 @@ async function seed(rows: readonly Seed[], cashStart: string | null): Promise<vo
     await ds.query(
       `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, raw)
        VALUES ($1,$2,$3,$4,'x',$5,$6,$7,'{}')`,
-      [`tx-${seq}`, ids.get(r.kind), `${r.date}T10:00:00Z`, r.date, r.amountUah ?? -1, r.amountUah, r.type],
+      [`tx-${seq}`, ids.get(r.kind), `${r.date}T${r.time ?? "10:00:00"}Z`, r.date, r.amountUah ?? -1, r.amountUah, r.type],
     );
   }
 }
@@ -91,15 +93,23 @@ interface StoredRow extends LedgerRow {
 /** The rows as they are in the database now, in the ledger's terms. */
 async function storedRows(): Promise<StoredRow[]> {
   const rows = (await ds.query(
-    `SELECT t.id, t.type, a.kind, t.amount_uah::float8 AS amount_uah, t.local_date::text AS date, t.category
+    `SELECT t.id, t.type, a.kind, t.amount_uah::float8 AS amount_uah, t.local_date::text AS date, t.category, t.occurred_at
        FROM transactions t JOIN accounts a ON a.id=t.account_id`,
-  )) as { id: number; type: TxType | null; kind: AccountKind; amount_uah: number | null; date: string; category: string | null }[];
-  return rows.map((r) => ({ id: r.id, type: r.type, accountKind: r.kind, amountUah: r.amount_uah, localDate: r.date, category: r.category }));
+  )) as { id: number; type: TxType | null; kind: AccountKind; amount_uah: number | null; date: string; category: string | null; occurred_at: Date }[];
+  return rows.map((r) => ({
+    id: r.id,
+    type: r.type,
+    accountKind: r.kind,
+    amountUah: r.amount_uah,
+    localDate: r.date,
+    occurredAt: r.occurred_at.getTime(),
+    category: r.category,
+  }));
 }
 
 async function context(): Promise<LedgerContext> {
-  const cashStart = ((await ds.query(`SELECT cash_start::text AS s FROM settings WHERE id=1`)) as { s: string | null }[])[0]!.s;
-  return { cashStart };
+  const s = ((await ds.query(`SELECT cash_start::text AS s, cash_started_at AS at FROM settings WHERE id=1`)) as { s: string | null; at: Date | null }[])[0]!;
+  return { cashStart: s.s, cashStartedAt: s.at === null ? null : s.at.getTime() };
 }
 
 /** What the service says: the calendar's spent for every day up to today, and today's spent on «Сегодня». */
@@ -207,6 +217,46 @@ describe("the limit in the database is the ledger's", () => {
       expect(got.calendar, `seed ${s}`).toEqual(want);
       expect(got.today, `seed ${s}`).toBe(want.get(TODAY));
     }
+  });
+});
+
+describe("the wallet in the database is the ledger's (Б39)", () => {
+  /** Withdrawals on every bank account kind before, around and after a start at 11:00 Kyiv (09:00Z) on 10 November, and rows on the wallet. */
+  function walletRows(): Seed[] {
+    const rows: Seed[] = [];
+    for (const kind of ACCOUNT_KINDS.filter((k) => k !== "cash")) {
+      rows.push({ type: "cash_out", kind, amountUah: -10_000, date: "2026-11-09", time: "20:00:00" });
+      rows.push({ type: "cash_out", kind, amountUah: -20_000, date: "2026-11-10", time: "07:00:00" });
+      rows.push({ type: "cash_out", kind, amountUah: -40_000, date: "2026-11-10", time: "09:00:00" });
+      rows.push({ type: "cash_out", kind, amountUah: -80_000, date: "2026-11-10", time: "12:00:00" });
+      rows.push({ type: "cash_out", kind, amountUah: -160_000, date: "2026-11-11", time: "06:00:00" });
+    }
+    rows.push({ type: "own_transfer", kind: "cash", amountUah: 500_000, date: "2026-11-10", time: "09:00:00" });
+    rows.push({ type: "spend", kind: "cash", amountUah: -3_000, date: "2026-11-10", time: "08:00:00" });
+    return rows;
+  }
+  const walletServed = async () => (await get("/cash").expect(200)).body.balance as number;
+  const walletExpected = async () => {
+    const ctx = await context();
+    return (await storedRows()).reduce((s, r) => s + walletChange(r, ctx), 0);
+  };
+
+  it("started at a moment: withdrawals before it on its day stay out of the wallet, in the database and in the ledger", async () => {
+    await seed(walletRows(), "2026-11-10");
+    await ds.query(`UPDATE settings SET cash_started_at='2026-11-10T09:00:00Z'`);
+    // On the black, white, fop and 'other' accounts (jars never feed the wallet): 40 + 80 + 160 thousand each.
+    const want = 4 * (40_000 + 80_000 + 160_000) + 500_000 - 3_000;
+    expect(await walletExpected()).toBe(want);
+    expect(await walletServed()).toBe(want);
+    // The spending side stays by day: none of the start day's withdrawals counts.
+    await check();
+  });
+
+  it("without a moment (a start before Б39) the whole start day goes into the wallet, in both", async () => {
+    await seed(walletRows(), "2026-11-10");
+    const want = 4 * (20_000 + 40_000 + 80_000 + 160_000) + 500_000 - 3_000;
+    expect(await walletExpected()).toBe(want);
+    expect(await walletServed()).toBe(want);
   });
 });
 

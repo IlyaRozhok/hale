@@ -150,6 +150,8 @@ export class Settings {
   @Column({ type: "timestamptz", nullable: true }) last_contact_at!: Date | null;
   @Column({ type: "date", default: () => "CURRENT_DATE" }) tracking_start!: string;
   @Column({ type: "date", nullable: true }) cash_start!: string | null;
+  /** The moment the wallet started (Б39): withdrawals before it on its first day are inside the opening balance. */
+  @Column({ type: "timestamptz", nullable: true }) cash_started_at!: Date | null;
 }
 
 @Entity("bridge_plans")

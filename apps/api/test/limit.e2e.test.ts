@@ -55,7 +55,7 @@ beforeEach(async () => {
   );
   await ds.query(
     `UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, limit_visual='mercury',
-                         cash_start=NULL, last_sync_at=NULL, last_contact_at=NULL, tracking_start='2026-01-01'`,
+                         cash_start=NULL, cash_started_at=NULL, last_sync_at=NULL, last_contact_at=NULL, tracking_start='2026-01-01'`,
   );
   at(`${TODAY}T10:00:00Z`);
 });

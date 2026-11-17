@@ -6,6 +6,7 @@ import { PaymentClosedByLinks1795392000000 } from "../src/db/migrations/0022-pay
 import { LoanDueOn1795564800000 } from "../src/db/migrations/0024-loan-due-on";
 import { IncomeEventDateByHand1795737600000 } from "../src/db/migrations/0026-income-event-date-by-hand";
 import { RecurringStart1795824000000 } from "../src/db/migrations/0027-recurring-start";
+import { CashStartedAt1795910400000 } from "../src/db/migrations/0028-cash-started-at";
 import { kyivDate } from "../src/domain/money";
 import { createTestDatabase } from "./db";
 
@@ -190,5 +191,28 @@ describe("migrations", () => {
     expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE column_name='starts_on'`)).toEqual([]);
     expect(await ds.query(payments)).toEqual(was);
     await ds.destroy();
+  });
+
+  it("0028 starts a started wallet at the beginning of its first Kyiv day and leaves a wallet not started alone (Б39)", async () => {
+    const at = async (cashStart: string | null) => {
+      const url = await createTestDatabase();
+      const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(CashStartedAt1795910400000)) });
+      await before.initialize();
+      await before.runMigrations();
+      await before.query(`UPDATE settings SET cash_start=$1 WHERE id=1`, [cashStart]);
+      await before.destroy();
+      const ds = createDataSource(url);
+      await ds.initialize();
+      await ds.runMigrations();
+      const r = (await ds.query(`SELECT cash_start::text AS d, cash_started_at AS at FROM settings WHERE id=1`))[0] as { d: string | null; at: Date | null };
+      for (let i = migrations.indexOf(CashStartedAt1795910400000); i < migrations.length; i++) await ds.undoLastMigration();
+      expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE column_name='cash_started_at'`)).toEqual([]);
+      expect((await ds.query(`SELECT cash_start::text AS d FROM settings WHERE id=1`))[0].d).toBe(cashStart);
+      await ds.destroy();
+      return r;
+    };
+    // Midnight in Kyiv is 22:00 UTC the day before in winter time: exactly the day-based rule the wallet had.
+    expect(await at("2026-11-10")).toEqual({ d: "2026-11-10", at: new Date("2026-11-09T22:00:00Z") });
+    expect(await at(null)).toEqual({ d: null, at: null });
   });
 });
