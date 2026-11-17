@@ -189,15 +189,38 @@ export class CashService {
     return { deleted: true };
   }
 
-  /** What is in the pocket: less is spent today as not recorded, more just corrects the balance. */
+  /**
+   * What is in the pocket: less is spent today as not recorded, more just corrects the balance.
+   * Every count, one that finds no difference too, is remembered by its moment (settings.cash_counted_at), and the
+   * row it writes keeps in `raw` its own moment and the one of the count before it (task Б40): an answer «Из
+   * кошелька» given later finds by them the first count after its deposit, whatever the row's note becomes.
+   */
   async count(p: CashCountInput): Promise<CashWalletDto> {
     return this.ds.transaction(async (m) => {
       const account = await this.startedAccount(m);
+      const prev = (await m.query(`SELECT COALESCE(cash_counted_at, cash_started_at) AS at FROM settings WHERE id=1 FOR UPDATE`))[0] as {
+        at: Date | null;
+      };
       const { balance } = await walletBalance(m);
       const diff = p.amount - balance;
       const date = this.today();
-      if (diff < 0) await this.insert(m, account, { type: "spend", amount: diff, category: "uncategorized", date, note: "Не записано" });
-      if (diff > 0) await this.insert(m, account, { type: "own_transfer", amount: diff, category: "own", date, note: "Сверка: больше, чем записано" });
+      const now = this.clock.now();
+      // The deposits since the start that did not lower the wallet when the pocket was counted: only these can be
+      // what the count found missing (review round 1: one answered «Из кошелька» before it was already recorded).
+      const open = (
+        await m.query(
+          `SELECT COALESCE(jsonb_agg(t.id ORDER BY t.id), '[]') AS ids FROM transactions t JOIN accounts a ON a.id = t.account_id
+            WHERE a.kind NOT IN ('cash','jar') AND t.amount > 0 AND NOT t.from_wallet
+              AND t.local_date >= (SELECT cash_start FROM settings WHERE id=1)
+              AND (t.type = 'cash_in' OR EXISTS (SELECT 1 FROM cash_answers c WHERE c.transaction_id = t.id))`,
+        )
+      )[0] as { ids: number[] };
+      const raw = (kind: "short" | "more") => ({ cash_count: kind, at: now.toISOString(), after: prev.at?.toISOString() ?? null, open: open.ids });
+      if (diff < 0) await this.insert(m, account, { type: "spend", amount: diff, category: "uncategorized", date, note: "Не записано" }, raw("short"));
+      if (diff > 0) {
+        await this.insert(m, account, { type: "own_transfer", amount: diff, category: "own", date, note: "Сверка: больше, чем записано" }, raw("more"));
+      }
+      await m.query(`UPDATE settings SET cash_counted_at=$1 WHERE id=1`, [now.toISOString()]);
       return this.wallet(m);
     });
   }
@@ -226,7 +249,11 @@ export class CashService {
     });
   }
 
-  /** A cash deposit at a terminal paid from the wallet: an own transfer that lowers the wallet. Asked again, nothing changes. */
+  /**
+   * A cash deposit at a terminal paid from the wallet: an own transfer that lowers the wallet. Asked again, nothing changes.
+   * When the answer takes the deposit off a count's «Не записано» (Б40), spending changed, and the day is fixed afresh
+   * as an answer from the operation's card does.
+   */
   async fromWallet(id: number): Promise<CashWalletDto> {
     return this.ds.transaction(async (m) => {
       await this.startedAccount(m);
@@ -236,7 +263,7 @@ export class CashService {
       if (!t) throw new NotFoundException("transaction not found");
       if (t.from_wallet) return this.wallet(m);
       if (t.type !== "cash_in" || t.amount <= 0) throw new UnprocessableEntityException("only a cash deposit can come from the wallet");
-      await answerWallet(m, id);
+      if ((await answerWallet(m, id)) > 0) await this.limit.invalidate("cash", m);
       return this.wallet(m);
     });
   }
@@ -375,15 +402,15 @@ export class CashService {
     return kyivInstantSql(`(${dateArg}::date + time '12:00')`);
   }
 
-  private async insert(m: EntityManager, account: number, op: Row): Promise<number> {
+  private async insert(m: EntityManager, account: number, op: Row, raw: object = {}): Promise<number> {
     const now = this.clock.now();
     const today = this.today() === op.date;
     const r = await m.query(
       `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, category,
                                  type_source, usdc_checked, needs_label, raw)
-       VALUES ($1,$2, CASE WHEN $9 THEN $3::timestamptz ELSE ${this.occurredSql("$4")} END, $4, $5, $6, $6, $7, $8, 'owner', true, false, '{}')
+       VALUES ($1,$2, CASE WHEN $9 THEN $3::timestamptz ELSE ${this.occurredSql("$4")} END, $4, $5, $6, $6, $7, $8, 'owner', true, false, $10::jsonb)
        RETURNING id`,
-      [`manual:${randomUUID()}`, account, now.toISOString(), op.date, op.note, op.amount, op.type, op.category, today],
+      [`manual:${randomUUID()}`, account, now.toISOString(), op.date, op.note, op.amount, op.type, op.category, today, JSON.stringify(raw)],
     );
     return (r[0] as { id: number }).id;
   }

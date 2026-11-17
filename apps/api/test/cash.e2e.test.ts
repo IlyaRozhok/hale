@@ -8,6 +8,7 @@ import { TodayService } from "../src/today/today.service";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
 import { PlanService } from "../src/plan/plan.service";
 import { LimitService } from "../src/today/limit.service";
+import { LedgerCheckService } from "../src/check/check.service";
 
 let app: INestApplication;
 let ds: DataSource;
@@ -45,7 +46,7 @@ beforeEach(async () => {
               scheduled_payments, recurring_payments, manual_balances, loans, bridge_plans, daily_snapshots, goals, cash_cards
      RESTART IDENTITY CASCADE`,
   );
-  await ds.query(`UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, cash_start=NULL, cash_started_at=NULL, tracking_start='2026-01-01'`);
+  await ds.query(`UPDATE settings SET lifestyle_cap=100000000, food_floor=45000, tax_rate_bp=600, esv_quarter=0, cash_start=NULL, cash_started_at=NULL, cash_counted_at=NULL, tracking_start='2026-01-01'`);
   at("2026-11-10T10:00:00Z");
 });
 
@@ -1056,6 +1057,203 @@ describe("changing the answer to «Откуда наличные?» (Б21)", () 
     const fresh = await bankTx(c, DEPOSIT, "cash_in", "2026-11-10", terminal);
     expect((await tx(fresh)).cashAnswer).toBeNull();
     expect((await answer(fresh, "wallet").expect(201)).body.cashAnswer).toEqual({ answer: "wallet", canBinance: false, binanceOnChange: null });
+  });
+});
+
+describe("a count before the answer «Из кошелька» (Б40)", () => {
+  const terminal = { description: "Термінал City24", mcc: 4829 };
+  const answer = (id: number, a: string) => api.post(`/cash/deposits/${id}/answer`, { answer: a });
+  const count = (amount: number) => api.post("/cash/count", { amount }).expect(201);
+  /** The wallet's spending rows («Не записано» and the like), as the owner sees them. */
+  const shortfalls = () =>
+    ds.query(
+      `SELECT t.id, t.description, t.category, t.amount::int AS amount, t.amount_uah::int AS amount_uah, t.local_date::text AS local_date, t.occurred_at
+         FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.kind='cash' AND t.type='spend' ORDER BY t.id`,
+    );
+  const spentOn = async (date: string) =>
+    ((await api.get("/today/calendar?month=2026-11").expect(200)).body.days as { date: string; spent: number }[]).find((d) => d.date === date)!.spent;
+  /**
+   * The nightly check, but for the lone own transfer: a deposit answered «Из кошелька» is one on its card with
+   * no other leg in the bank, which that check reports with or without a count.
+   */
+  const issues = async () => (await app.get(LedgerCheckService).run()).issues.filter((i) => i.kind !== "own_transfers");
+  /** The wallet started at 10:00 with ₴5,000; ₴500 paid in at a terminal at 11:00. */
+  const setup = async (amount = 50_000) => {
+    const c = await card();
+    await start(500_000).expect(201);
+    const deposit = await bankTx(c, amount, "cash_in", "2026-11-10", { ...terminal, time: "11:00:00" });
+    return { c, deposit };
+  };
+
+  it("answered from the question: the wallet is what was counted, and the deposit is not spending", async () => {
+    const { deposit } = await setup();
+    at("2026-11-10T12:00:00Z");
+    expect((await count(450_000)).body.balance).toBe(450_000);
+    expect(await spentOn("2026-11-10")).toBe(50_000);
+    await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
+    expect((await wallet()).balance).toBe(450_000);
+    expect(await shortfalls()).toEqual([]);
+    expect(await spentOn("2026-11-10")).toBe(0);
+    expect(await issues()).toEqual([]);
+  });
+
+  it("from the card, then «Другое» brings the «Не записано» row back exactly, then «Из кошелька» absorbs it again", async () => {
+    const { deposit } = await setup();
+    at("2026-11-10T12:00:00Z");
+    await count(450_000);
+    const was = await shortfalls();
+    expect(was).toMatchObject([{ description: "Не записано", category: "uncategorized", amount: -50_000, amount_uah: -50_000 }]);
+    await answer(deposit, "wallet").expect(201);
+    expect((await wallet()).balance).toBe(450_000);
+    expect(await shortfalls()).toEqual([]);
+    await answer(deposit, "other").expect(201);
+    expect(await shortfalls()).toEqual(was);
+    expect((await wallet()).balance).toBe(450_000);
+    expect(await spentOn("2026-11-10")).toBe(50_000);
+    await answer(deposit, "wallet").expect(201);
+    expect(await shortfalls()).toEqual([]);
+    expect((await wallet()).balance).toBe(450_000);
+    expect(await spentOn("2026-11-10")).toBe(0);
+    expect(await issues()).toEqual([]);
+  });
+
+  it("a shortfall bigger than the deposit is reduced by the deposit, and undone back", async () => {
+    const { deposit } = await setup();
+    at("2026-11-10T12:00:00Z");
+    await count(420_000);
+    await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
+    expect(await shortfalls()).toMatchObject([{ description: "Не записано", amount: -30_000, amount_uah: -30_000 }]);
+    expect((await wallet()).balance).toBe(420_000);
+    expect(await spentOn("2026-11-10")).toBe(30_000);
+    await answer(deposit, "other").expect(201);
+    expect(await shortfalls()).toMatchObject([{ amount: -80_000, amount_uah: -80_000 }]);
+    expect((await wallet()).balance).toBe(420_000);
+  });
+
+  it("two deposits before one count share its shortfall, and give it back in any order", async () => {
+    const { c, deposit: a } = await setup();
+    const b = await bankTx(c, 30_000, "cash_in", "2026-11-10", { ...terminal, time: "11:30:00" });
+    at("2026-11-10T12:00:00Z");
+    await count(420_000);
+    const was = await shortfalls();
+    await answer(a, "wallet").expect(201);
+    await answer(b, "wallet").expect(201);
+    expect(await shortfalls()).toEqual([]);
+    expect((await wallet()).balance).toBe(420_000);
+    await answer(a, "other").expect(201);
+    expect(await shortfalls()).toMatchObject([{ id: was[0].id, amount: -50_000 }]);
+    await answer(b, "other").expect(201);
+    expect(await shortfalls()).toEqual(was);
+    expect((await wallet()).balance).toBe(420_000);
+  });
+
+  it("a count before the deposit absorbs nothing", async () => {
+    const c = await card();
+    await start(500_000).expect(201);
+    at("2026-11-10T10:30:00Z");
+    await count(450_000);
+    const deposit = await bankTx(c, 50_000, "cash_in", "2026-11-10", { ...terminal, time: "11:00:00" });
+    at("2026-11-10T12:00:00Z");
+    await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
+    expect(await shortfalls()).toMatchObject([{ amount: -50_000 }]);
+    expect((await wallet()).balance).toBe(400_000);
+  });
+
+  it("the first count after the deposit found more, or nothing: a later shortfall is not absorbed", async () => {
+    for (const first of [510_000, 500_000]) {
+      await ds.query(`TRUNCATE transactions, accounts RESTART IDENTITY CASCADE`);
+      await ds.query(`UPDATE settings SET cash_start=NULL, cash_started_at=NULL, cash_counted_at=NULL`);
+      at("2026-11-10T10:00:00Z");
+      const { deposit } = await setup();
+      at("2026-11-10T12:00:00Z");
+      await count(first);
+      at("2026-11-10T13:00:00Z");
+      await count(first - 50_000);
+      await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
+      expect(await shortfalls()).toMatchObject([{ amount: -50_000 }]);
+      expect((await wallet()).balance).toBe(first - 100_000);
+    }
+  });
+
+  it("answered first and counted afterwards: as before, the count finds nothing", async () => {
+    const { deposit } = await setup();
+    await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
+    at("2026-11-10T12:00:00Z");
+    await count(450_000);
+    expect(await shortfalls()).toEqual([]);
+    expect((await wallet()).balance).toBe(450_000);
+  });
+
+  it("answered «Из кошелька» before the count: the count's shortfall is real spending and survives the answer toggled (review round 1)", async () => {
+    const { deposit } = await setup();
+    at("2026-11-10T11:30:00Z");
+    await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
+    at("2026-11-10T12:00:00Z");
+    await count(430_000);
+    await answer(deposit, "other").expect(201);
+    await answer(deposit, "wallet").expect(201);
+    expect((await wallet()).balance).toBe(430_000);
+    expect(await shortfalls()).toMatchObject([{ amount: -20_000 }]);
+  });
+
+  it("of two deposits only the one still open at the count takes from its shortfall (review round 1)", async () => {
+    const { c, deposit: a } = await setup();
+    at("2026-11-10T11:15:00Z");
+    await api.post(`/cash/deposits/${a}/from-wallet`).expect(201);
+    const b = await bankTx(c, 30_000, "cash_in", "2026-11-10", { ...terminal, time: "11:30:00" });
+    at("2026-11-10T12:00:00Z");
+    await count(400_000); // ₴300 for B, ₴200 not recorded
+    await answer(a, "other").expect(201);
+    await answer(a, "wallet").expect(201);
+    expect(await shortfalls()).toMatchObject([{ amount: -50_000 }]);
+    await answer(b, "wallet").expect(201);
+    expect(await shortfalls()).toMatchObject([{ amount: -20_000 }]);
+    expect((await wallet()).balance).toBe(400_000);
+  });
+
+  it("«Другое» before the count and «Из кошелька» after it: the count did miss the deposit, so it is absorbed", async () => {
+    const { deposit } = await setup();
+    at("2026-11-10T11:30:00Z");
+    await answer(deposit, "other").expect(201);
+    at("2026-11-10T12:00:00Z");
+    await count(450_000);
+    await answer(deposit, "wallet").expect(201);
+    expect(await shortfalls()).toEqual([]);
+    expect((await wallet()).balance).toBe(450_000);
+  });
+
+  it("a «Не записано» row linked to a planned payment is left alone", async () => {
+    const { deposit } = await setup();
+    at("2026-11-10T12:00:00Z");
+    await count(450_000);
+    const [r] = await shortfalls();
+    const p = (
+      await ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Квартплата',50000,'UAH','2026-11-20') RETURNING id`)
+    )[0].id;
+    await ds.query(`INSERT INTO payment_dismissals (payment_id, transaction_id) VALUES ($1,$2)`, [p, r.id]);
+    await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
+    expect(await shortfalls()).toMatchObject([{ id: r.id, amount: -50_000 }]);
+  });
+
+  it("a «Не записано» row the owner deleted is not brought back by a changed answer", async () => {
+    const { deposit } = await setup();
+    at("2026-11-10T12:00:00Z");
+    await count(420_000);
+    await answer(deposit, "wallet").expect(201);
+    const [rest] = await shortfalls();
+    await api.del(`/cash/operations/${rest.id}`).expect(200);
+    await answer(deposit, "other").expect(201);
+    expect(await shortfalls()).toEqual([]);
+  });
+
+  it("the count row is recognised whatever its note becomes", async () => {
+    const { deposit } = await setup();
+    at("2026-11-10T12:00:00Z");
+    await count(450_000);
+    const [r] = await shortfalls();
+    await api.patch(`/cash/operations/${r.id}`, { note: "Потерял" }).expect(200);
+    await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
+    expect(await shortfalls()).toEqual([]);
   });
 });
 
