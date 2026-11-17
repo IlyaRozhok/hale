@@ -150,6 +150,16 @@ describe("loneLegsCheck (invariant 2)", () => {
     // Going out with such a text, or coming in without it, still counts.
     expect(loneLegsCheck([leg("2026-11-02", -50_000, "Від: Іван Петренко"), leg("2026-11-04", 50_000, "З білої картки")])).toEqual({ count: 2, since: "2026-11-02" });
   });
+
+  it("leaves out money coming in with the owner's own name only in the bank's counterparty field (Б38)", () => {
+    const named = (localDate: string, amount: number, counterName: string) => ({ ...leg(localDate, amount, "Переказ коштів"), counterName });
+    const own = ["Test Owner"];
+    expect(loneLegsCheck([named("2026-11-02", 50_000, "OWNER TEST")], own)).toEqual({ count: 0, since: null });
+    // A stranger, a namesake who shares only the first name, or the owner's name on money going out still count.
+    expect(
+      loneLegsCheck([named("2026-11-02", 50_000, "Anna Petrenko"), named("2026-11-03", 50_000, "Test Client"), named("2026-11-04", -50_000, "Test Owner")], own),
+    ).toEqual({ count: 3, since: "2026-11-02" });
+  });
 });
 
 const ctx: LedgerContext = { cashStart: null };

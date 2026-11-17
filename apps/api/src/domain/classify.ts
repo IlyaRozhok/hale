@@ -137,7 +137,8 @@ export function ruleMatches(rule: Pick<ClassifyRule, "matchKind" | "matchValue" 
   }
 }
 
-function mentionsOwnName(text: string, ownNames: readonly string[]): boolean {
+/** Every word of one of the owner's names is in the text, in any order: a namesake is not the owner. */
+export function mentionsOwnName(text: string, ownNames: readonly string[]): boolean {
   const tokens = new Set(words(text));
   return ownNames.some((n) => {
     const t = words(n);

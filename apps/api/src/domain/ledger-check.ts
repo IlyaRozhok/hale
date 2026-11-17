@@ -1,7 +1,7 @@
 // The nightly ledger check (task Б11, audit 6.5 step 2): invariants 1-4 and 7, as pure functions over what the
 // service read. They only compare; nothing here changes how money or the limit is counted. Each result is an
 // amount and the first day it applies, enough for one sentence in Settings; `since` is null when all is well.
-import { FROM_PREFIX } from "./classify";
+import { FROM_PREFIX, mentionsOwnName } from "./classify";
 import { type LedgerContext, type LedgerRow, ledgerEffect } from "./ledger";
 import type { Minor } from "./money";
 
@@ -119,15 +119,20 @@ export interface LoneLeg {
   /** Signed; positive is money in. */
   amount: Minor;
   description: string;
+  /** The bank's counterparty field. */
+  counterName?: string | null;
 }
 
 /**
  * Invariant 2: legs of transfers between own accounts with no other leg here, counted with the oldest Kyiv day.
- * Money coming in from the owner's account at another bank («Від: …», as classify reads it) is left out: its
- * other leg is never in the base. Everything else counts.
+ * Money coming in from the owner's account at another bank is left out, as classify reads it: «Від: …» in the
+ * description, or (Б38) one of the owner's names in the bank's counterparty field. Its other leg is never in the
+ * base. Everything else counts.
  */
-export function loneLegsCheck(legs: readonly LoneLeg[]): { count: number; since: string | null } {
-  const counted = legs.filter((l) => !(l.amount > 0 && FROM_PREFIX.test(l.description.trim())));
+export function loneLegsCheck(legs: readonly LoneLeg[], ownNames: readonly string[] = []): { count: number; since: string | null } {
+  const fromOutside = (l: LoneLeg) =>
+    l.amount > 0 && (FROM_PREFIX.test(l.description.trim()) || mentionsOwnName(l.counterName ?? "", ownNames));
+  const counted = legs.filter((l) => !fromOutside(l));
   const since = counted.reduce<string | null>((min, l) => (min === null || l.localDate < min ? l.localDate : min), null);
   return { count: counted.length, since };
 }

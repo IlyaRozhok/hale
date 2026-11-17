@@ -189,16 +189,19 @@ export class LedgerCheckService {
   /**
    * Invariant 2: a transfer between own accounts with no other leg here (the pair rule of domain/own-pair.ts).
    * Left out: the wallet's own rows, transfers to a card the owner said is his at another bank (cash_cards), and
-   * (in loneLegsCheck) money coming in from his account at another bank: their other leg is outside by nature.
+   * (in loneLegsCheck) money coming in from his account at another bank, by «Від: …» or his name in counter_name: their other leg is outside by nature.
    */
   private async ownTransfers(m: EntityManager): Promise<ResultRow> {
-    const rows: { date: string; amount: number; description: string }[] = await m.query(
-      `SELECT t.local_date::text AS date, t.amount::float8 AS amount, t.description FROM transactions t JOIN accounts ta ON ta.id = t.account_id
+    const rows: { date: string; amount: number; description: string; counter_name: string | null }[] = await m.query(
+      `SELECT t.local_date::text AS date, t.amount::float8 AS amount, t.description, t.counter_name FROM transactions t JOIN accounts ta ON ta.id = t.account_id
         WHERE t.type = 'own_transfer' AND ta.kind <> 'cash'
           AND NOT EXISTS (SELECT 1 FROM transactions o JOIN accounts oa ON oa.id = o.account_id WHERE ${ownPairSql("t", "ta", "o", "oa")})
           AND NOT EXISTS (SELECT 1 FROM cash_cards c WHERE c.counter_key = ${counterKeySql("t")})`,
     );
-    const r = loneLegsCheck(rows.map((x) => ({ localDate: x.date, amount: x.amount, description: x.description })));
+    const r = loneLegsCheck(
+      rows.map((x) => ({ localDate: x.date, amount: x.amount, description: x.description, counterName: x.counter_name })),
+      this.config.OWNER_NAMES,
+    );
     return { invariant: "own_transfers", ok: r.count === 0, accountId: null, amount: 0, since: r.since, details: { count: r.count, currency: "UAH" } };
   }
 
