@@ -12,6 +12,7 @@ import { DataSource, type EntityManager } from "typeorm";
 import { ruleMatches } from "../domain/classify";
 import { reopensOnUnlink } from "../domain/payment-cover";
 import {
+  type HeldTaxLink,
   type PayableTx,
   type Payment,
   type PaymentKind,
@@ -20,6 +21,7 @@ import {
   matchTaxShare,
   monthlyDueDates,
   monthlyEvents,
+  repairTaxLinks,
 } from "../domain/recurring-match";
 import { kyivDate } from "../domain/money";
 import { estimateDueOn, precedingQuarter, quarterBounds, quarterOf } from "../domain/quarter";
@@ -189,6 +191,59 @@ export class PlanService implements OnApplicationBootstrap {
         ORDER BY t.occurred_at DESC, t.id DESC`,
     );
     for (const r of rows) await this.onClassified(r.id, "tax");
+    await this.takeBackTaxLinks();
+  }
+
+  /**
+   * Task Б42, for links made before the rule: an open tax row with a part of its own takes back the one
+   * payment a hand-closed row holds that completes it (repairTaxLinks), and closes. One move per transaction,
+   * each fixing the day afresh; the hand-closed row keeps its mark. Safe to repeat: every move closes a row.
+   */
+  private async takeBackTaxLinks(): Promise<void> {
+    for (let moved = true; moved; ) {
+      moved = await this.ds.transaction(async (m) => {
+        const payments = await this.lockTaxRows(m);
+        const move = repairTaxLinks(payments, await this.heldTaxLinks(m));
+        if (!move) return false;
+        await m.query(`UPDATE payment_links SET payment_id=$1 WHERE transaction_id=$2`, [move.payment.id, move.txId]);
+        await m.query(
+          `UPDATE scheduled_payments SET closed_by_links = true,
+                  paid_at = (SELECT max(t.occurred_at) FROM payment_links l JOIN transactions t ON t.id = l.transaction_id
+                              WHERE l.payment_id = $1) WHERE id=$1 AND paid_at IS NULL`,
+          [move.payment.id],
+        );
+        await this.limit.invalidate("payment_paid", m);
+        return true;
+      });
+    }
+  }
+
+  /** Tax rows not settled through their own operation, locked, with what payment_links already paid on each. */
+  private lockTaxRows(m: EntityManager): Promise<Payment[]> {
+    return m.query(
+      `SELECT p.id, p.kind, p.name, p.amount::float8 AS amount, p.currency, p.due_on::text AS due_on, p.paid_at,
+              p.transaction_id, p.match_hint, p.tax_quarter, p.is_estimate, p.closed_by_links,
+              (SELECT COALESCE(SUM(-COALESCE(x.amount_uah, x.amount)), 0) FROM payment_links l
+                 JOIN transactions x ON x.id = l.transaction_id WHERE l.payment_id = p.id)::float8 AS linked
+         FROM scheduled_payments p WHERE p.kind='tax' AND p.transaction_id IS NULL ORDER BY p.due_on, p.id FOR UPDATE OF p`,
+    );
+  }
+
+  /**
+   * Tax payments linked to tax rows the owner closed by hand (Б42). payment_links keeps no source; the matcher
+   * links only tax-typed rows, and the «Оплачено» sheet retypes what the owner chose to obligation, so only
+   * the matcher's links are here.
+   */
+  private async heldTaxLinks(m: EntityManager): Promise<HeldTaxLink[]> {
+    const rows: (PayableTx & { paymentId: number })[] = await m.query(
+      `SELECT l.payment_id AS "paymentId", t.id, t.type, t.amount::float8 AS amount, a.currency,
+              t.amount_uah::float8 AS "amountUah", t.local_date::text AS "localDate", '' AS text
+         FROM payment_links l JOIN scheduled_payments p ON p.id = l.payment_id
+         JOIN transactions t ON t.id = l.transaction_id JOIN accounts a ON a.id = t.account_id
+        WHERE p.kind='tax' AND p.paid_at IS NOT NULL AND NOT p.closed_by_links AND t.type='tax' AND t.amount < 0
+        ORDER BY t.id`,
+    );
+    return rows.map(({ paymentId, ...tx }) => ({ paymentId, tx }));
   }
 
   /**
@@ -490,7 +545,7 @@ export class PlanService implements OnApplicationBootstrap {
       // Tax rows stay candidates after the owner marked them paid: they can still claim their bank row.
       const open: Payment[] = await m.query(
         `SELECT p.id, p.kind, p.name, p.amount::float8 AS amount, p.currency, p.due_on::text AS due_on, p.paid_at,
-                p.transaction_id, p.match_hint, p.tax_quarter, p.is_estimate,
+                p.transaction_id, p.match_hint, p.tax_quarter, p.is_estimate, p.closed_by_links,
                 (SELECT COALESCE(SUM(-COALESCE(x.amount_uah, x.amount)), 0) FROM payment_links l
                    JOIN transactions x ON x.id = l.transaction_id WHERE l.payment_id = p.id)::float8 AS linked
            FROM scheduled_payments p WHERE p.transaction_id IS NULL AND (p.paid_at IS NULL OR p.kind='tax')
@@ -537,9 +592,11 @@ export class PlanService implements OnApplicationBootstrap {
           AND NOT EXISTS (SELECT 1 FROM payment_links l WHERE l.transaction_id = t.id)`,
       [tx.id],
     );
-    const share = matchTaxShare(tx, open, others);
+    const share = matchTaxShare(tx, open, others, await this.heldTaxLinks(m));
     if (!share) return;
     if (share.release) await m.query(`DELETE FROM payment_links WHERE payment_id=$1`, [share.payment.id]);
+    // A payment taken back from a hand-closed row leaves it; that row keeps its mark (Б42).
+    if (share.moved) await m.query(`DELETE FROM payment_links WHERE transaction_id = ANY($1::int[])`, [share.moved]);
     await m.query(`INSERT INTO payment_links (payment_id, transaction_id) SELECT $1, unnest($2::int[])`, [share.payment.id, share.ids]);
     if (share.closes) {
       // Closed by its links: it opens again if it loses one and the rest no longer cover it (task Б26).

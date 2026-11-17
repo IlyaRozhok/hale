@@ -22,6 +22,8 @@ export interface Payment {
   is_estimate?: boolean;
   /** Minor units already paid by operations in `payment_links`; 0 or absent when none. */
   linked?: number;
+  /** Paid because its linked operations covered it (Б26), not by the owner's «Оплачено». */
+  closed_by_links?: boolean;
 }
 
 export interface PayableTx {
@@ -244,6 +246,20 @@ export interface TaxShare {
   closes: boolean;
   /** The operations linked before as a part are let go: this payment alone settles the row. */
   release: boolean;
+  /** Of `ids`, the one taken off a row the owner closed by hand (Б42); absent when none. */
+  moved?: number[];
+}
+
+/** A tax payment linked through payment_links to the row `paymentId`. */
+export interface HeldTaxLink {
+  paymentId: number;
+  tx: PayableTx;
+}
+
+/** Task Б42: the link `txId` leaves the hand-closed row that holds it and closes `payment`. */
+export interface TaxMove {
+  payment: Payment;
+  txId: number;
 }
 
 /** Hryvnia paid by an outgoing row, positive; null when unknown. */
@@ -277,8 +293,18 @@ function inTaxWindow(tx: PayableTx, p: Payment): boolean {
  * Links are whole operations: a payment that would take a row's total past its bound is not linked at
  * all, and counts against the current quarter as before. Only an open row is closed here (`closes`); one
  * the owner closed keeps his mark.
+ *
+ * Task Б42: right after 1-3 over open rows, an open row whose links, this payment and one tax payment that
+ * a hand-closed row holds (`held`, see takeBack) add up to it within its own tolerance takes that payment
+ * back and closes (`moved`). An earlier part of the open row could have landed on the hand-closed row,
+ * since that row takes up to 10% over; without this the open row would wait for «Оплачено» forever.
  */
-export function matchTaxShare(tx: PayableTx, payments: readonly Payment[], others: readonly PayableTx[]): TaxShare | null {
+export function matchTaxShare(
+  tx: PayableTx,
+  payments: readonly Payment[],
+  others: readonly PayableTx[],
+  held: readonly HeldTaxLink[] = [],
+): TaxShare | null {
   const x = paidUah(tx);
   if (tx.type !== "tax" || tx.amount >= 0 || x === null) return null;
   const tol = (p: Payment) => taxTolerance(p);
@@ -317,10 +343,55 @@ export function matchTaxShare(tx: PayableTx, payments: readonly Payment[], other
   };
   const open = uncovered.filter((p) => !byHand(p));
   const closed = uncovered.filter(byHand);
-  const found = settle(open) ?? settle(closed) ?? part(open) ?? part(closed);
+  const back = (): TaxShare | null => {
+    for (const p of open) {
+      const y = takeBack(p, linked(p) + x, payments, held);
+      if (y) return { payment: p, ids: [tx.id, y.id], closes: true, release: false, moved: [y.id] };
+    }
+    return null;
+  };
+  const found = settle(open) ?? back() ?? settle(closed) ?? part(open) ?? part(closed);
   if (found) return found;
   for (const p of inWindow) {
     if (byHand(p) && taxCovered(p, linked(p)) && linked(p) + x <= taxCap(p)) return share(p, [tx.id]);
+  }
+  return null;
+}
+
+/**
+ * Task Б42: the tax payment held by a row the owner closed by hand («Оплачено», not closed by its links)
+ * that brings `base` to the open row `p` within its own `taxTolerance`, the band it closes by anyway. Only
+ * tax-typed payments in `p`'s window count: the matcher links only those, and an operation the owner chose
+ * in the «Оплачено» sheet becomes an obligation. The closest total wins, then the lower id.
+ */
+function takeBack(p: Payment, base: number, payments: readonly Payment[], held: readonly HeldTaxLink[]): PayableTx | null {
+  const holders = new Set(payments.filter((h) => h.kind === "tax" && h.paid_at !== null && h.closed_by_links !== true).map((h) => h.id));
+  let best: { tx: PayableTx; gap: number } | null = null;
+  for (const h of held) {
+    if (h.paymentId === p.id || !holders.has(h.paymentId) || !inTaxWindow(h.tx, p)) continue;
+    const y = paidUah(h.tx);
+    if (y === null) continue;
+    const gap = Math.abs(base + y - p.amount);
+    if (gap > taxTolerance(p)) continue;
+    if (!best || gap < best.gap || (gap === best.gap && h.tx.id < best.tx.id)) best = { tx: h.tx, gap };
+  }
+  return best ? best.tx : null;
+}
+
+/**
+ * Task Б42, for rows linked before the rule (the hourly retry): an open hryvnia tax row that already has a
+ * part of its own, and that one payment held by a hand-closed row would complete within its tolerance
+ * (see takeBack), takes that payment and closes. The oldest due date first; null when no row can. One move
+ * at a time: the caller applies it and asks again.
+ */
+export function repairTaxLinks(payments: readonly Payment[], held: readonly HeldTaxLink[]): TaxMove | null {
+  const open = payments
+    .filter((p) => p.kind === "tax" && p.currency === "UAH" && p.paid_at === null && p.transaction_id === null)
+    .filter((p) => (p.linked ?? 0) > 0 && !taxCovered(p, p.linked ?? 0))
+    .sort((a, b) => (a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : a.id - b.id));
+  for (const p of open) {
+    const y = takeBack(p, p.linked ?? 0, payments, held);
+    if (y) return { payment: p, txId: y.id };
   }
   return null;
 }

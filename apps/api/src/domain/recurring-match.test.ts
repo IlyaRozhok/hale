@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  type HeldTaxLink,
   type PayableTx,
   type Payment,
   MAX_PAID_QUESTIONS,
@@ -16,6 +17,7 @@ import {
   monthlyEvents,
   monthlyDueDates,
   paidQuestions,
+  repairTaxLinks,
   taxTolerance,
   windowEndDate,
 } from "./recurring-match";
@@ -361,6 +363,106 @@ describe("matchTaxShare", () => {
 
       it("the hand-closed row takes what no open row can", () => {
         expect(matchTaxShare(paying(300_000), [esv(), ep()], [])).toMatchObject({ payment: { id: 1 }, closes: false });
+      });
+    });
+
+    describe("a payment of the open row that went to the hand-closed one comes back (Б42)", () => {
+      // ЄСВ ₴5,707.02 closed by hand, ЄП ₴7,000 open; the bank rows are tax payments in both windows.
+      const esv = (over: Partial<Payment> = {}) =>
+        row({ id: 1, name: "ЄСВ", amount: 570_702, due_on: "2026-10-20", paid_at: "2026-10-20", ...over });
+      const ep = (over: Partial<Payment> = {}) => row({ id: 2, name: "ЄП", amount: 700_000, due_on: "2026-11-19", ...over });
+      const held = (id: number, amount: number, paymentId = 1, over: Partial<PayableTx> = {}): HeldTaxLink => ({
+        paymentId,
+        tx: paying(amount, { id, localDate: "2026-11-13", ...over }),
+      });
+
+      it("H1: ₴6,000 went to ЄСВ, then ₴1,000 brings it to ЄП, which closes; ЄСВ keeps its mark", () => {
+        const hand = esv({ linked: 600_000 });
+        const res = matchTaxShare(paying(100_000), [hand, ep()], [], [held(9, 600_000)]);
+        expect(res).toMatchObject({ payment: { id: 2 }, closes: true, release: false, moved: [9] });
+        expect([...res!.ids].sort((a, b) => a - b)).toEqual([9, 10]);
+        // Without the link to bring back, ₴1,000 is a part of ЄП, as before.
+        expect(matchTaxShare(paying(100_000), [hand, ep()], [])).toEqual({ payment: ep(), ids: [10], closes: false, release: false });
+      });
+
+      it("H7: ЄСВ holds ₴5,000 + ₴1,000; ₴1,240 brings the ₴1,000 to ЄП ₴2,240, ЄСВ keeps ₴5,000", () => {
+        const hand = esv({ linked: 600_000 });
+        const open = ep({ amount: 224_000 });
+        const res = matchTaxShare(paying(124_000), [hand, open], [], [held(5, 500_000), held(9, 100_000)]);
+        expect(res).toMatchObject({ payment: { id: 2 }, closes: true, moved: [9] });
+        expect([...res!.ids].sort((a, b) => a - b)).toEqual([9, 10]);
+      });
+
+      it("moves nothing when the sum misses the open row by more than ₴20", () => {
+        const hand = esv({ linked: 600_000 });
+        expect(matchTaxShare(paying(97_900), [hand, ep()], [], [held(9, 600_000)])).toEqual({
+          payment: ep(),
+          ids: [10],
+          closes: false,
+          release: false,
+        });
+        expect(matchTaxShare(paying(102_100), [hand, ep()], [], [held(9, 600_000)])).toMatchObject({ closes: false, ids: [10] });
+        // ₴20 off is still the open row's own tolerance.
+        expect(matchTaxShare(paying(98_000), [hand, ep()], [], [held(9, 600_000)])).toMatchObject({ payment: { id: 2 }, moved: [9] });
+      });
+
+      it("an estimate takes a link back within its 10%", () => {
+        const est = ep({ is_estimate: true });
+        expect(matchTaxShare(paying(40_000), [esv({ linked: 600_000 }), est], [], [held(9, 600_000)])).toMatchObject({
+          payment: { id: 2 },
+          moved: [9],
+        });
+      });
+
+      it("never takes a link off an open row, or off a row its links closed", () => {
+        const other = row({ id: 3, name: "Other", amount: 900_000, due_on: "2026-11-18", linked: 600_000 });
+        expect(matchTaxShare(paying(100_000), [other, ep()], [], [held(9, 600_000, 3)])).toMatchObject({ payment: { id: 3 }, closes: false });
+        const byLinks = esv({ linked: 600_000, closed_by_links: true });
+        expect(matchTaxShare(paying(100_000), [byLinks, ep()], [], [held(9, 600_000)])).toMatchObject({ payment: { id: 2 }, closes: false });
+        expect(matchTaxShare(paying(100_000), [byLinks, ep()], [], [held(9, 600_000)])).not.toHaveProperty("moved");
+      });
+
+      it("never takes a link that is not a tax payment, or not in the open row's window", () => {
+        const hand = esv({ linked: 600_000 });
+        expect(matchTaxShare(paying(100_000), [hand, ep()], [], [held(9, 600_000, 1, { type: "obligation" })])).toMatchObject({ closes: false });
+        expect(matchTaxShare(paying(100_000), [hand, ep()], [], [held(9, 600_000, 1, { localDate: "2026-09-30" })])).toMatchObject({ closes: false });
+      });
+
+      it("a payment that settles the open row alone does not move anything", () => {
+        expect(matchTaxShare(paying(700_000), [esv({ linked: 600_000 }), ep()], [], [held(9, 600_000)])).toEqual({
+          payment: ep(),
+          ids: [10],
+          closes: true,
+          release: false,
+        });
+      });
+
+      it("prefers the earliest open row, then the link closest to its amount, then the lower id", () => {
+        const hand = esv({ linked: 1_200_000 });
+        const later = ep({ id: 3, due_on: "2026-11-25" });
+        const res = matchTaxShare(paying(100_000), [hand, later, ep()], [], [held(9, 600_000), held(8, 601_000)]);
+        expect(res).toMatchObject({ payment: { id: 2 }, moved: [9] });
+        const tie = matchTaxShare(paying(100_000), [hand, ep()], [], [held(9, 601_000), held(8, 599_000)]);
+        expect(tie).toMatchObject({ moved: [8] });
+      });
+
+      describe("the hourly repair of rows linked the old way", () => {
+        it("H1: ЄП holds ₴1,000, ЄСВ holds ₴6,000: the ₴6,000 goes to ЄП", () => {
+          const open = ep({ linked: 100_000 });
+          expect(repairTaxLinks([esv({ linked: 600_000 }), open], [held(9, 600_000), held(10, 100_000, 2)])).toEqual({ payment: open, txId: 9 });
+        });
+
+        it("H7: ЄП holds ₴1,240, ЄСВ holds ₴5,000 + ₴1,000: the ₴1,000 goes to ЄП", () => {
+          const open = ep({ amount: 224_000, linked: 124_000 });
+          expect(repairTaxLinks([esv({ linked: 600_000 }), open], [held(5, 500_000), held(9, 100_000)])).toEqual({ payment: open, txId: 9 });
+        });
+
+        it("moves nothing to an open row without parts of its own, or one the sum misses", () => {
+          expect(repairTaxLinks([esv({ linked: 700_000 }), ep()], [held(9, 700_000)])).toBeNull();
+          expect(repairTaxLinks([esv({ linked: 600_000 }), ep({ linked: 97_900 })], [held(9, 600_000)])).toBeNull();
+          expect(repairTaxLinks([esv({ linked: 600_000 }), ep({ linked: 100_000, paid_at: "2026-11-14" })], [held(9, 600_000)])).toBeNull();
+          expect(repairTaxLinks([esv({ linked: 600_000, closed_by_links: true }), ep({ linked: 100_000 })], [held(9, 600_000)])).toBeNull();
+        });
       });
     });
 
