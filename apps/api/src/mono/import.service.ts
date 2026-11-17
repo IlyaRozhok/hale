@@ -5,7 +5,7 @@ import { JOB_CLOCK, type JobClock, JobRunner, isFinalFailure } from "./jobs/job-
 import { MonoClient } from "./mono.client";
 import type { MonoClientInfo, MonoStatementItem } from "./mono.schemas";
 import { ReclassifyService } from "../transactions/reclassify.service";
-import { CURRENCY_ALPHA, kyivDate } from "../domain/money";
+import { CURRENCY_ALPHA, hryvniaLeg, kyivDate } from "../domain/money";
 import { planWindows, splitWindow } from "./windows";
 
 export const WINDOW_JOB_KIND = "history.window";
@@ -153,19 +153,35 @@ export class ImportService implements OnModuleInit {
     return this.ds.getRepository(Transaction).findOneByOrFail({ id: tx.id });
   }
 
+  /**
+   * The rate in force at `at`: the latest one fetched by then; for history older than every stored rate,
+   * the earliest one; null when there is no rate for the currency at all.
+   */
+  private async rateAt(currency: string, at: Date): Promise<number | null> {
+    const rows: { rate: string }[] = await this.ds.query(
+      `(SELECT rate, 0 AS pref FROM fx_rates WHERE currency=$1 AND fetched_at <= $2 ORDER BY fetched_at DESC LIMIT 1)
+       UNION ALL
+       (SELECT rate, 1 AS pref FROM fx_rates WHERE currency=$1 AND fetched_at > $2 ORDER BY fetched_at ASC LIMIT 1)
+       ORDER BY pref LIMIT 1`,
+      [currency, at],
+    );
+    return rows[0] ? Number(rows[0].rate) : null;
+  }
+
   private async upsertRow(accountId: number, item: MonoStatementItem, live = false): Promise<Transaction> {
     const account = await this.ds.getRepository(Account).findOneByOrFail({ id: accountId });
+    const occurredAt = new Date(item.time * 1000);
     let fxRate: number | null = null;
     let amountUah: number | null = item.amount;
     if (account.currency !== "UAH") {
-      const rows: { rate: string }[] = await this.ds.query(
-        `SELECT rate FROM fx_rates WHERE currency=$1 ORDER BY fetched_at DESC LIMIT 1`,
-        [account.currency],
-      );
-      fxRate = rows[0] ? Number(rows[0].rate) : null;
-      amountUah = fxRate === null ? null : Math.round(item.amount * fxRate);
+      const leg = hryvniaLeg(item);
+      if (leg) {
+        ({ fxRate, amountUah } = leg);
+      } else {
+        fxRate = await this.rateAt(account.currency, occurredAt);
+        amountUah = fxRate === null ? null : Math.round(item.amount * fxRate);
+      }
     }
-    const occurredAt = new Date(item.time * 1000);
 
     // type, category, type_source and credit_limit_at are only set on insert; later syncs never overwrite them.
     // balance_after follows the bank on every sync, like amount: the bank's balance after an item is not

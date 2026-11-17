@@ -47,6 +47,23 @@ export function toUah(
   return { uah: Math.round(amount * entry.rate), stale: age > STALE_AFTER_MS };
 }
 
+/**
+ * The hryvnia side of an operation on a foreign-currency account that was itself made in hryvnias
+ * (monobank's `currencyCode` 980), e.g. dollars sold to the owner's own hryvnia card. monobank gives that
+ * side exactly as `operationAmount`, with the same sign as `amount`; the implied rate is kept so a later
+ * sync that recomputes `amount × rate` lands on the same hryvnias. Null when the operation was in another
+ * currency, the amount is zero, or the two sides disagree in sign.
+ */
+export function hryvniaLeg(item: {
+  amount: Minor;
+  operationAmount: Minor;
+  currencyCode: number;
+}): { amountUah: Minor; fxRate: number } | null {
+  if (item.currencyCode !== UAH) return null;
+  if (item.amount === 0 || Math.sign(item.amount) !== Math.sign(item.operationAmount)) return null;
+  return { amountUah: item.operationAmount, fxRate: item.operationAmount / item.amount };
+}
+
 function dayNumber(date: string): number {
   const [y, m, d] = date.split("-").map(Number);
   return Date.UTC(y!, m! - 1, d!) / DAY_MS;

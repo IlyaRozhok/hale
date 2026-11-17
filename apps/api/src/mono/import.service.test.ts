@@ -127,9 +127,9 @@ describe("import run", () => {
     expect(tx.type_source).toBe("auto");
   });
 
-  it("converts foreign currency with the latest fx rate, null when none", async () => {
+  it("converts foreign currency with the rate in force at the operation's time, null when none", async () => {
     const t = NOW_S - 3600;
-    const usd = (id: string) => [item(id, t, { amount: -1000, currencyCode: 840 })];
+    const usd = (id: string) => [item(id, t, { amount: -1000, operationAmount: -1000, currencyCode: 840 })];
     const first = setup(async (id) => (id === "acc-usd" ? usd("usd1") : []));
     await first.service.enqueueHistory(daysAgo(10));
     await drain(first.runner);
@@ -138,6 +138,7 @@ describe("import run", () => {
     expect(tx.fx_rate).toBeNull();
 
     await ds.query("TRUNCATE jobs, transactions RESTART IDENTITY CASCADE");
+    // 41.5 was fetched after the operation, 40 a day before it: the operation takes 40.
     await ds.query("INSERT INTO fx_rates VALUES ('USD', $1, 41.5), ('USD', $2, 40)", [
       new Date(NOW_MS - 1000),
       new Date(NOW_MS - 86_400_000),
@@ -146,8 +147,60 @@ describe("import run", () => {
     await second.service.enqueueHistory(daysAgo(10));
     await drain(second.runner);
     tx = await ds.getRepository(Transaction).findOneByOrFail({ external_id: "usd2" });
-    expect(tx.fx_rate).toBe(41.5);
-    expect(tx.amount_uah).toBe(-41500);
+    expect(tx.fx_rate).toBe(40);
+    expect(tx.amount_uah).toBe(-40000);
+  });
+
+  it("converts an operation from 30 days ago at that day's rate, not today's", async () => {
+    const t = Math.floor(daysAgo(30).getTime() / 1000) + 3600;
+    await ds.query("INSERT INTO fx_rates VALUES ('USD', $1, 39.2), ('USD', $2, 41.8), ('USD', $3, 38)", [
+      daysAgo(30),
+      daysAgo(0),
+      daysAgo(60),
+    ]);
+    const { service, runner } = setup(async (id) =>
+      id === "acc-usd" ? [item("usd-old", t, { amount: -2500, operationAmount: -2500, currencyCode: 840 })] : [],
+    );
+    await service.enqueueHistory(daysAgo(40));
+    await drain(runner);
+    const tx = await ds.getRepository(Transaction).findOneByOrFail({ external_id: "usd-old" });
+    expect(tx.fx_rate).toBe(39.2);
+    expect(tx.amount_uah).toBe(-98000);
+  });
+
+  it("uses the earliest stored rate for history older than every rate", async () => {
+    const t = Math.floor(daysAgo(50).getTime() / 1000);
+    await ds.query("INSERT INTO fx_rates VALUES ('USD', $1, 39), ('USD', $2, 41)", [daysAgo(20), daysAgo(0)]);
+    const { service, runner } = setup(async (id) =>
+      id === "acc-usd" ? [item("usd-older", t, { amount: -1000, operationAmount: -1000, currencyCode: 840 })] : [],
+    );
+    await service.enqueueHistory(daysAgo(60));
+    await drain(runner);
+    const tx = await ds.getRepository(Transaction).findOneByOrFail({ external_id: "usd-older" });
+    expect(tx.fx_rate).toBe(39);
+    expect(tx.amount_uah).toBe(-39000);
+  });
+
+  it("takes the hryvnia amount of an operation made in hryvnias, whatever the stored rates", async () => {
+    // $100 sold to the own hryvnia card a month ago at the bank's 41.27; stored rates say otherwise.
+    const t = Math.floor(daysAgo(30).getTime() / 1000);
+    await ds.query("INSERT INTO fx_rates VALUES ('USD', $1, 39.5), ('USD', $2, 42)", [daysAgo(31), daysAgo(0)]);
+    const { service, runner } = setup(async (id) =>
+      id === "acc-usd"
+        ? [item("usd-sell", t, { amount: -10000, operationAmount: -412700, currencyCode: 980, description: "На чорну картку" })]
+        : [],
+    );
+    await service.enqueueHistory(daysAgo(40));
+    await drain(runner);
+    const tx = await ds.getRepository(Transaction).findOneByOrFail({ external_id: "usd-sell" });
+    expect(tx.amount_uah).toBe(-412700);
+    expect(tx.fx_rate).toBe(41.27);
+    // a later sync of the same row recomputes from the stored rate and lands on the same hryvnias
+    const again = await service.upsertStatementItem(
+      tx.account_id,
+      item("usd-sell", t, { amount: -10000, operationAmount: -412700, currencyCode: 980 }),
+    );
+    expect(again.amount_uah).toBe(-412700);
   });
 
   it("resumes an interrupted import from the unfinished windows", async () => {
@@ -260,26 +313,26 @@ describe("upsertStatementItem fx recompute", () => {
     const acc = await ds.getRepository(Account).findOneByOrFail({ external_id: "acc-usd" });
     await ds.query("INSERT INTO fx_rates VALUES ('USD', $1, 40)", [daysAgo(0)]);
     const t = NOW_S - 100;
-    const first = await service.upsertStatementItem(acc.id, item("fx1", t, { hold: true, amount: -100 }));
+    const first = await service.upsertStatementItem(acc.id, item("fx1", t, { hold: true, amount: -100, operationAmount: -100, currencyCode: 840 }));
     expect(first.amount_uah).toBe(-4000);
     // a newer rate appears; the row keeps its stored rate
     await ds.query("INSERT INTO fx_rates VALUES ('USD', $1, 50)", [new Date(NOW_MS + 1000)]);
-    const same = await service.upsertStatementItem(acc.id, item("fx1", t, { hold: true, amount: -100 }));
+    const same = await service.upsertStatementItem(acc.id, item("fx1", t, { hold: true, amount: -100, operationAmount: -100, currencyCode: 840 }));
     expect(same.fx_rate).toBe(40);
     expect(same.amount_uah).toBe(-4000);
-    const second = await service.upsertStatementItem(acc.id, item("fx1", t, { hold: false, amount: -120 }));
+    const second = await service.upsertStatementItem(acc.id, item("fx1", t, { hold: false, amount: -120, operationAmount: -120, currencyCode: 840 }));
     expect(second.amount).toBe(-120);
     expect(second.fx_rate).toBe(40);
     expect(second.amount_uah).toBe(-4800);
     // no rate at all any more: still the stored rate
     await ds.query("TRUNCATE fx_rates");
-    const third = await service.upsertStatementItem(acc.id, item("fx1", t, { amount: -130 }));
+    const third = await service.upsertStatementItem(acc.id, item("fx1", t, { amount: -130, operationAmount: -130, currencyCode: 840 }));
     expect(third.amount_uah).toBe(-5200);
     // a row with no stored rate picks up the current one
-    const fresh = await service.upsertStatementItem(acc.id, item("fx2", t, { amount: -10 }));
+    const fresh = await service.upsertStatementItem(acc.id, item("fx2", t, { amount: -10, operationAmount: -10, currencyCode: 840 }));
     expect(fresh.amount_uah).toBeNull();
     await ds.query("INSERT INTO fx_rates VALUES ('USD', $1, 50)", [new Date(NOW_MS + 2000)]);
-    const filled = await service.upsertStatementItem(acc.id, item("fx2", t, { amount: -10 }));
+    const filled = await service.upsertStatementItem(acc.id, item("fx2", t, { amount: -10, operationAmount: -10, currencyCode: 840 }));
     expect(filled.fx_rate).toBe(50);
     expect(filled.amount_uah).toBe(-500);
   });
