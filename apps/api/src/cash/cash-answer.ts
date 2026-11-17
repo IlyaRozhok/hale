@@ -142,9 +142,12 @@ export async function keepAnswer(
  * deposited cash missing and wrote it off as «Не записано». Answered «Из кошелька», the deposit lowers the wallet
  * itself: it takes its amount off the shortfall of the first count after it, never more than either (countAbsorbed),
  * and deletes the row when nothing is left of it. Only the first count after the deposit: later ones were made
- * against a wallet that already held that discrepancy. A count row is known by the marker `count` writes into its
- * `raw` (the moment of the count and of the count before it), not by its note, which the owner can change; rows
- * written before the marker are never touched. A row the owner retyped away from spending is left alone.
+ * against a wallet that already held that discrepancy. And only when the deposit was still not lowering the wallet
+ * at that count (it is in the row's `open` list): one answered «Из кошелька» before the count was already recorded,
+ * and that count's shortfall is real spending. A count row is known by the marker `count` writes into its `raw`
+ * (the moment of the count and of the count before it, the open deposits), not by its note, which the owner can
+ * change; rows written before the marker are never touched. A row the owner retyped away from spending, or one
+ * anything else points at (a payment, a loan, an income), is left alone: deleting it would drop those links.
  */
 async function absorbCount(m: EntityManager, depositId: number): Promise<CountAbsorbed | null> {
   const c = (
@@ -154,6 +157,13 @@ async function absorbCount(m: EntityManager, depositId: number): Promise<CountAb
         WHERE d.id = $1 AND a.kind = 'cash' AND c.raw->>'cash_count' = 'short' AND c.type = 'spend' AND c.amount < 0
           AND (c.raw->>'at')::timestamptz > d.occurred_at
           AND COALESCE((c.raw->>'after')::timestamptz, '-infinity') <= d.occurred_at
+          AND c.raw->'open' @> jsonb_build_array(d.id)
+          AND NOT EXISTS (SELECT 1 FROM payment_links l WHERE l.transaction_id = c.id)
+          AND NOT EXISTS (SELECT 1 FROM payment_dismissals pd WHERE pd.transaction_id = c.id)
+          AND NOT EXISTS (SELECT 1 FROM scheduled_payments sp WHERE sp.transaction_id = c.id)
+          AND NOT EXISTS (SELECT 1 FROM loans lo WHERE lo.source_transaction_id = c.id)
+          AND NOT EXISTS (SELECT 1 FROM loan_repayments lr WHERE lr.transaction_id = c.id)
+          AND NOT EXISTS (SELECT 1 FROM income_events e WHERE e.matched_transaction_id = c.id)
         ORDER BY (c.raw->>'at')::timestamptz LIMIT 1 FOR UPDATE OF c`,
       [depositId],
     )
@@ -174,7 +184,8 @@ async function absorbCount(m: EntityManager, depositId: number): Promise<CountAb
  * Gives a count row back the kopecks an answer took off it (Б40). Deleted by an answer (this one, or another
  * deposit's before the same count), it comes back with its id and everything else, holding just these kopecks;
  * the kept copies are then dropped, so a row the owner deletes later stays deleted. A row the owner deleted is
- * not brought back.
+ * not brought back. One the owner changed after the answer (a new amount, kind or category) still gets these
+ * kopecks back as they are: the undo gives back exactly what the answer took.
  */
 async function giveBackCount(m: EntityManager, countId: number, cents: number): Promise<void> {
   const updated = (await m.query(`UPDATE transactions SET amount = amount - $2, amount_uah = amount_uah - $2 WHERE id = $1`, [

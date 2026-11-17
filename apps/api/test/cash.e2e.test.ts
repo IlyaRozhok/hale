@@ -1184,6 +1184,57 @@ describe("a count before the answer «Из кошелька» (Б40)", () => {
     expect((await wallet()).balance).toBe(450_000);
   });
 
+  it("answered «Из кошелька» before the count: the count's shortfall is real spending and survives the answer toggled (review round 1)", async () => {
+    const { deposit } = await setup();
+    at("2026-11-10T11:30:00Z");
+    await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
+    at("2026-11-10T12:00:00Z");
+    await count(430_000);
+    await answer(deposit, "other").expect(201);
+    await answer(deposit, "wallet").expect(201);
+    expect((await wallet()).balance).toBe(430_000);
+    expect(await shortfalls()).toMatchObject([{ amount: -20_000 }]);
+  });
+
+  it("of two deposits only the one still open at the count takes from its shortfall (review round 1)", async () => {
+    const { c, deposit: a } = await setup();
+    at("2026-11-10T11:15:00Z");
+    await api.post(`/cash/deposits/${a}/from-wallet`).expect(201);
+    const b = await bankTx(c, 30_000, "cash_in", "2026-11-10", { ...terminal, time: "11:30:00" });
+    at("2026-11-10T12:00:00Z");
+    await count(400_000); // ₴300 for B, ₴200 not recorded
+    await answer(a, "other").expect(201);
+    await answer(a, "wallet").expect(201);
+    expect(await shortfalls()).toMatchObject([{ amount: -50_000 }]);
+    await answer(b, "wallet").expect(201);
+    expect(await shortfalls()).toMatchObject([{ amount: -20_000 }]);
+    expect((await wallet()).balance).toBe(400_000);
+  });
+
+  it("«Другое» before the count and «Из кошелька» after it: the count did miss the deposit, so it is absorbed", async () => {
+    const { deposit } = await setup();
+    at("2026-11-10T11:30:00Z");
+    await answer(deposit, "other").expect(201);
+    at("2026-11-10T12:00:00Z");
+    await count(450_000);
+    await answer(deposit, "wallet").expect(201);
+    expect(await shortfalls()).toEqual([]);
+    expect((await wallet()).balance).toBe(450_000);
+  });
+
+  it("a «Не записано» row linked to a planned payment is left alone", async () => {
+    const { deposit } = await setup();
+    at("2026-11-10T12:00:00Z");
+    await count(450_000);
+    const [r] = await shortfalls();
+    const p = (
+      await ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Квартплата',50000,'UAH','2026-11-20') RETURNING id`)
+    )[0].id;
+    await ds.query(`INSERT INTO payment_dismissals (payment_id, transaction_id) VALUES ($1,$2)`, [p, r.id]);
+    await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
+    expect(await shortfalls()).toMatchObject([{ id: r.id, amount: -50_000 }]);
+  });
+
   it("a «Не записано» row the owner deleted is not brought back by a changed answer", async () => {
     const { deposit } = await setup();
     at("2026-11-10T12:00:00Z");

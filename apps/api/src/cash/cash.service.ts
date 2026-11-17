@@ -205,7 +205,17 @@ export class CashService {
       const diff = p.amount - balance;
       const date = this.today();
       const now = this.clock.now();
-      const raw = (kind: "short" | "more") => ({ cash_count: kind, at: now.toISOString(), after: prev.at?.toISOString() ?? null });
+      // The deposits since the start that did not lower the wallet when the pocket was counted: only these can be
+      // what the count found missing (review round 1: one answered «Из кошелька» before it was already recorded).
+      const open = (
+        await m.query(
+          `SELECT COALESCE(jsonb_agg(t.id ORDER BY t.id), '[]') AS ids FROM transactions t JOIN accounts a ON a.id = t.account_id
+            WHERE a.kind NOT IN ('cash','jar') AND t.amount > 0 AND NOT t.from_wallet
+              AND t.local_date >= (SELECT cash_start FROM settings WHERE id=1)
+              AND (t.type = 'cash_in' OR EXISTS (SELECT 1 FROM cash_answers c WHERE c.transaction_id = t.id))`,
+        )
+      )[0] as { ids: number[] };
+      const raw = (kind: "short" | "more") => ({ cash_count: kind, at: now.toISOString(), after: prev.at?.toISOString() ?? null, open: open.ids });
       if (diff < 0) await this.insert(m, account, { type: "spend", amount: diff, category: "uncategorized", date, note: "Не записано" }, raw("short"));
       if (diff > 0) {
         await this.insert(m, account, { type: "own_transfer", amount: diff, category: "own", date, note: "Сверка: больше, чем записано" }, raw("more"));
