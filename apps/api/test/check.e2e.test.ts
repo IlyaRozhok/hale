@@ -32,7 +32,7 @@ beforeAll(async () => {
   const url = await createMigratedDatabase();
   ds = new DS({ type: "postgres", url });
   await ds.initialize();
-  on = await createTestApp(url, { config: { LEDGER_CHECK_ENABLED: true } });
+  on = await createTestApp(url, { config: { LEDGER_CHECK_ENABLED: true, OWNER_NAMES: ["Test Owner"] } });
   off = await createTestApp(url);
   const skewed = {
     byDay: async (m: EntityManager, from: string, to: string) => {
@@ -178,6 +178,15 @@ describe("POST /check/run and GET /check/latest", () => {
     await tx(white, "2026-11-03T08:00:00Z", 20_000, "own_transfer", "own", null, "Від: Іван Петренко");
     const r = await run();
     expect(r.body.issues).toEqual([{ kind: "own_transfers", amount: 0, currency: "UAH", since: "2026-11-08", count: 1 }]);
+  });
+
+  it("money in with the owner's own name only in the bank's counterparty field is not a lone leg; a stranger's is (Б38)", async () => {
+    const own = await tx(white, "2026-11-03T08:00:00Z", 20_000, "own_transfer", "own", null, "Переказ коштів");
+    await ds.query(`UPDATE transactions SET counter_name='OWNER TEST' WHERE id=$1`, [own]);
+    expect((await run()).body.issues).toEqual([]);
+    const stranger = await tx(white, "2026-11-04T08:00:00Z", 20_000, "own_transfer", "own", null, "Переказ коштів");
+    await ds.query(`UPDATE transactions SET counter_name='Test Client' WHERE id=$1`, [stranger]);
+    expect((await run()).body.issues).toEqual([{ kind: "own_transfers", amount: 0, currency: "UAH", since: "2026-11-04", count: 1 }]);
   });
 
   it("a transfer to the owner's card at another bank (he answered about it) is not a lone leg", async () => {

@@ -137,7 +137,8 @@ export function ruleMatches(rule: Pick<ClassifyRule, "matchKind" | "matchValue" 
   }
 }
 
-function mentionsOwnName(text: string, ownNames: readonly string[]): boolean {
+/** Every word of one of the owner's names is in the text, in any order: a namesake is not the owner. */
+export function mentionsOwnName(text: string, ownNames: readonly string[]): boolean {
   const tokens = new Set(words(text));
   return ownNames.some((n) => {
     const t = words(n);
@@ -215,7 +216,11 @@ export function classify(tx: ClassifyInput, ctx: ClassifyContext): ClassifyResul
 
   // 2. Own accounts, jars and fop
   const ownIban = !!tx.counterIban && ctx.ownIbans.has(tx.counterIban);
-  const fromOwnName = FROM_PREFIX.test(d) && mentionsOwnName(d, ctx.ownNames);
+  // Money in from the owner himself: «Від: <own name>» in the description, or (Б38) his name in the bank's
+  // counterparty field alone. Every word of an own name must be there, so a namesake client is not caught.
+  const fromOwnName =
+    (FROM_PREFIX.test(d) && mentionsOwnName(d, ctx.ownNames)) ||
+    (incoming && mentionsOwnName(tx.counterName ?? "", ctx.ownNames));
   const jarTopup = JAR_TOPUP.exec(d);
   const ownJarTopup = !!jarTopup && ctx.ownJars.some((j) => lc(j) === lc(jarTopup[1] ?? ""));
   if (
