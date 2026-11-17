@@ -869,6 +869,108 @@ describe("tax reserve and own money", () => {
         expect((await today()).state.free).toBe(q4Whole(571_000 + 550_000));
       });
 
+      describe("a part of an open ЄП that went to the hand-closed ЄСВ comes back (Б42)", () => {
+        const rows = async () => ({
+          esv: await taxRow(570_702, { name: "ЄСВ", due: "2026-10-20", paid: "2026-10-20T12:00:00Z" }),
+          ep: await taxRow(700_000, { name: "ЄП", due: "2026-11-19" }),
+        });
+        const mark = (id: number) => row(`SELECT paid_at, closed_by_links FROM scheduled_payments WHERE id=$1`, [id]);
+        const link = (paymentId: number, txId: number) =>
+          ds.query(`INSERT INTO payment_links (payment_id, transaction_id) VALUES ($1,$2)`, [paymentId, txId]);
+
+        it("H1: ₴6,000 goes to ЄСВ, then ₴1,000 brings it to ЄП, which closes; the day is fixed afresh, ЄСВ keeps its mark", async () => {
+          await big();
+          const { esv, ep } = await rows();
+          const esvMark = await mark(esv);
+          const a = await pay(600_000);
+          // ₴6,000 fits ЄСВ's band (up to 10% over), and ЄП alone it does not pay.
+          expect(await links(esv)).toEqual([a]);
+          await staleLimit();
+          const b = await pay(100_000);
+          expect(await links(ep)).toEqual([a, b]);
+          expect(await state(ep)).toMatchObject({ paid: true, paid_on: "2026-11-14", transaction_id: null });
+          expect(await closedByLinks(ep)).toBe(true);
+          expect(await links(esv)).toEqual([]);
+          expect(await mark(esv)).toEqual(esvMark);
+          expect(await limit()).not.toBe(1);
+          expect((await today()).state.free).toBe(q4Whole(700_000));
+          // Seen again, nothing moves.
+          await plan().hourlyJob();
+          expect(await links(ep)).toEqual([a, b]);
+          expect(await ds.query(`SELECT 1 FROM payment_links`)).toHaveLength(2);
+        });
+
+        it("H7: ЄСВ holds ₴5,000 + ₴1,000, then ₴1,240 closes ЄП ₴2,240 with the ₴1,000; ЄСВ keeps ₴5,000", async () => {
+          await big();
+          const esv = await taxRow(570_702, { name: "ЄСВ", due: "2026-10-20", paid: "2026-10-20T12:00:00Z" });
+          const ep = await taxRow(224_000, { name: "ЄП", due: "2026-11-19" });
+          const c = await pay(500_000);
+          const a = await pay(100_000);
+          expect(await links(esv)).toEqual([c, a]);
+          const b = await pay(124_000);
+          expect(await links(ep)).toEqual([a, b]);
+          expect(await state(ep)).toMatchObject({ paid: true });
+          expect(await links(esv)).toEqual([c]);
+          expect(await state(esv)).toMatchObject({ paid: true });
+        });
+
+        it("the hourly job repairs H1 linked the old way: ₴6,000 on ЄСВ, ₴1,000 a part of ЄП", async () => {
+          await big();
+          const { esv, ep } = await rows();
+          const esvMark = await mark(esv);
+          const a = await tx(card, -600_000, "tax", { date: "2026-11-13" });
+          const b = await tx(card, -100_000, "tax", { date: "2026-11-14" });
+          await link(esv, a);
+          await link(ep, b);
+          await setBalance(card, 2_000_000 - 700_000);
+          // ЄП, still open, keeps its whole ₴7,000 reserved on top of what was paid.
+          expect((await today()).state.free).toBe(q4Whole(700_000) - 700_000);
+          await staleLimit();
+          await plan().hourlyJob();
+          expect(await links(ep)).toEqual([a, b]);
+          expect(await state(ep)).toMatchObject({ paid: true, paid_on: "2026-11-14", transaction_id: null });
+          expect(await closedByLinks(ep)).toBe(true);
+          expect(await links(esv)).toEqual([]);
+          expect(await mark(esv)).toEqual(esvMark);
+          expect(await limit()).not.toBe(1);
+          expect((await today()).state.free).toBe(q4Whole(700_000));
+          // The next run changes nothing.
+          await staleLimit();
+          await plan().hourlyJob();
+          expect(await links(ep)).toEqual([a, b]);
+          expect(await limit()).toBe(1);
+        });
+
+        it("the hourly job repairs H7 linked the old way", async () => {
+          await big();
+          const esv = await taxRow(570_702, { name: "ЄСВ", due: "2026-10-20", paid: "2026-10-20T12:00:00Z" });
+          const ep = await taxRow(224_000, { name: "ЄП", due: "2026-11-19" });
+          const c = await tx(card, -500_000, "tax", { date: "2026-11-12" });
+          const a = await tx(card, -100_000, "tax", { date: "2026-11-13" });
+          const b = await tx(card, -124_000, "tax", { date: "2026-11-14" });
+          await link(esv, c);
+          await link(esv, a);
+          await link(ep, b);
+          await plan().hourlyJob();
+          expect(await links(ep)).toEqual([a, b]);
+          expect(await state(ep)).toMatchObject({ paid: true });
+          expect(await links(esv)).toEqual([c]);
+        });
+
+        it("a sum more than ₴20 off ЄП moves nothing", async () => {
+          await big();
+          const { esv, ep } = await rows();
+          const a = await pay(600_000);
+          const b = await pay(97_900);
+          expect(await links(esv)).toEqual([a]);
+          expect(await links(ep)).toEqual([b]);
+          expect(await state(ep)).toMatchObject({ paid: false });
+          await plan().hourlyJob();
+          expect(await links(esv)).toEqual([a]);
+          expect(await links(ep)).toEqual([b]);
+        });
+      });
+
       it("a tax payment more than 30 days after the row's due date stays with Q4", async () => {
         await big();
         at("2026-12-22T10:00:00Z");
