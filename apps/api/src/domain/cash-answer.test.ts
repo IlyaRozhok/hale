@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type CashAnswerFacts, binanceOnChange, cashAnswerOf, isAnswerableDeposit } from "./cash-answer";
+import { type CashAnswerFacts, binanceOnChange, cashAnswerOf, countAbsorbed, isAnswerableDeposit } from "./cash-answer";
 import { isCashDeposit } from "./classify";
 
 const facts = (over: Partial<CashAnswerFacts> = {}): CashAnswerFacts => ({
@@ -101,5 +101,19 @@ describe("binanceOnChange", () => {
     expect(binanceOnChange({ answer: "wallet", stored: false, binanceCents: 0 })).toBeNull();
     expect(binanceOnChange({ answer: "other", stored: true, binanceCents: 0 })).toBeNull();
     expect(binanceOnChange(null)).toBeNull();
+  });
+});
+
+describe("countAbsorbed (Б40)", () => {
+  it("takes the deposit off the shortfall of the first count after it, never more than either", () => {
+    expect(countAbsorbed(50_000, 50_000)).toBe(50_000);
+    expect(countAbsorbed(50_000, 80_000)).toBe(50_000);
+    expect(countAbsorbed(50_000, 30_000)).toBe(30_000);
+  });
+
+  it("absorbs nothing without a shortfall or a deposit", () => {
+    expect(countAbsorbed(50_000, 0)).toBe(0);
+    expect(countAbsorbed(0, 50_000)).toBe(0);
+    expect(countAbsorbed(50_000, -10_000)).toBe(0);
   });
 });

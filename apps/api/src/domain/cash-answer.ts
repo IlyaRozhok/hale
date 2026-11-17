@@ -68,3 +68,10 @@ export function binanceOnChange(a: CashAnswer | null): "returns" | "untouched" |
   if (!a.stored) return "untouched";
   return a.binanceCents !== 0 ? "returns" : null;
 }
+
+/**
+ * Kopecks an answer «Из кошелька» takes off the shortfall («Не записано», a positive amount here) of the first
+ * count of the pocket after the deposit (task Б40): that count already found the deposited cash missing, so the
+ * wallet must not lose it a second time. Never more than the deposit or the shortfall; nothing without either.
+ */
+export const countAbsorbed = (deposit: number, shortfall: number): number => Math.max(0, Math.min(deposit, shortfall));

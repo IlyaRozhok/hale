@@ -152,6 +152,8 @@ export class Settings {
   @Column({ type: "date", nullable: true }) cash_start!: string | null;
   /** The moment the wallet started (Б39): withdrawals before it on its first day are inside the opening balance. */
   @Column({ type: "timestamptz", nullable: true }) cash_started_at!: Date | null;
+  /** The moment of the last count of the pocket (Б40): the next count row keeps it, to know which count came first after a deposit. */
+  @Column({ type: "timestamptz", nullable: true }) cash_counted_at!: Date | null;
 }
 
 @Entity("bridge_plans")

@@ -7,6 +7,7 @@ import { LoanDueOn1795564800000 } from "../src/db/migrations/0024-loan-due-on";
 import { IncomeEventDateByHand1795737600000 } from "../src/db/migrations/0026-income-event-date-by-hand";
 import { RecurringStart1795824000000 } from "../src/db/migrations/0027-recurring-start";
 import { CashStartedAt1795910400000 } from "../src/db/migrations/0028-cash-started-at";
+import { CashCountAbsorbed1795996800000 } from "../src/db/migrations/0029-cash-count-absorbed";
 import { kyivDate } from "../src/domain/money";
 import { createTestDatabase } from "./db";
 
@@ -214,5 +215,42 @@ describe("migrations", () => {
     // Midnight in Kyiv is 22:00 UTC the day before in winter time: exactly the day-based rule the wallet had.
     expect(await at("2026-11-10")).toEqual({ d: "2026-11-10", at: new Date("2026-11-09T22:00:00Z") });
     expect(await at(null)).toEqual({ d: null, at: null });
+  });
+
+  it("0029 counts a started wallet as counted now, and leaves every kept answer absorbing nothing (Б40)", async () => {
+    const at = async (cashStart: string | null) => {
+      const url = await createTestDatabase();
+      const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(CashCountAbsorbed1795996800000)) });
+      await before.initialize();
+      await before.runMigrations();
+      await before.query(`UPDATE settings SET cash_start=$1 WHERE id=1`, [cashStart]);
+      const account = (await before.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ('a','black','UAH',0) RETURNING id`))[0].id;
+      const tx = (
+        await before.query(
+          `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, amount, amount_uah, type, from_wallet, raw)
+           VALUES ('t',$1,'2026-11-10T10:00:00Z','2026-11-10',50000,50000,'own_transfer',true,'{}') RETURNING id`,
+          [account],
+        )
+      )[0].id;
+      await before.query(
+        `INSERT INTO cash_answers (transaction_id, answer, type_before, needs_label_before, usdc_checked_before) VALUES ($1,'wallet','cash_in',false,false)`,
+        [tx],
+      );
+      await before.destroy();
+      const ds = createDataSource(url);
+      await ds.initialize();
+      const ran = Date.now();
+      await ds.runMigrations();
+      const s = (await ds.query(`SELECT cash_counted_at AS at FROM settings WHERE id=1`))[0] as { at: Date | null };
+      const a = (await ds.query(`SELECT answer, count_transaction_id, count_absorbed::int AS absorbed, count_row FROM cash_answers`))[0];
+      await ds.undoLastMigration();
+      expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE column_name IN ('cash_counted_at','count_absorbed','count_row')`)).toEqual([]);
+      expect(await ds.query(`SELECT answer FROM cash_answers`)).toEqual([{ answer: "wallet" }]);
+      await ds.destroy();
+      return { counted: s.at === null ? null : s.at.getTime() >= ran - 60_000, answer: a };
+    };
+    const answer = { answer: "wallet", count_transaction_id: null, absorbed: 0, count_row: null };
+    expect(await at("2026-11-10")).toEqual({ counted: true, answer });
+    expect(await at(null)).toEqual({ counted: null, answer });
   });
 });
