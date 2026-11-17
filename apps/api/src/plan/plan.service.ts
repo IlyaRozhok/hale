@@ -25,7 +25,7 @@ import { kyivDate } from "../domain/money";
 import { estimateDueOn, precedingQuarter, quarterBounds, quarterOf } from "../domain/quarter";
 import { taxReserve } from "../domain/tax";
 import { Clock, KYIV_TZ } from "../time/clock";
-import { LimitService } from "../today/limit.service";
+import { LimitService, type LimitReason } from "../today/limit.service";
 import { quarterTaxFacts } from "../today/tax-facts";
 import { INTEREST_TEXT, SHORT_LOAN_TEXT } from "./short-loan";
 import { ScheduledPayment, type IncomeEvent } from "../db/entities";
@@ -423,8 +423,12 @@ export class PlanService implements OnApplicationBootstrap {
   /**
    * Runs after a row has been given its type. Settles a planned payment, records a new loan or
    * marks the fop income event received. Safe to call again for the same row.
+   *
+   * `byOwner`: the type was given by the owner's hand (an edit, an answer about a recipient), so a loan
+   * recorded, a payment closed or a short loan repaid here fixes the day afresh in the same transaction
+   * (task Б35). Automatic classification leaves it false: money that arrives on its own keeps the day's limit.
    */
-  async onClassified(txId: number, typeHint?: string): Promise<void> {
+  async onClassified(txId: number, typeHint?: string, byOwner = false): Promise<void> {
     if (typeHint === "spend") {
       // Most rows are plain spend: only open a transaction if an installment could be involved.
       const maybe = await this.ds.query(
@@ -448,54 +452,73 @@ export class PlanService implements OnApplicationBootstrap {
         )
       )[0] as (TxRow & { type_source: string | null }) | undefined;
       if (!t?.type) return;
-
-      if (t.type === "loan_in") {
-        await m.query(
-          `INSERT INTO loans (amount, received_on, source_transaction_id, note, kind)
-           SELECT $2, $3, $1, 'loan_in', $4 WHERE NOT EXISTS (SELECT 1 FROM loans WHERE source_transaction_id=$1)
-           ON CONFLICT DO NOTHING`,
-          [t.id, Math.abs(t.amount_uah ?? t.amount), t.local_date, SHORT_LOAN_TEXT.test(t.text) ? "short" : "other"],
-        );
-      } else if (t.type === "income" && t.account_kind === "fop") {
-        await this.markFopEvents(m, t);
-      } else if (t.type === "person_transfer") {
-        if (typeHint !== "person_transfer" && !(await this.isPlannedRecipient(txId))) return;
-        await this.settleFromPlannedRecipient(m, t);
-      } else if (t.type === "obligation" || t.type === "debt_payment" || t.type === "tax" || t.type === "spend") {
-        if (t.type === "debt_payment") await this.repayShortLoans(m, t);
-        const linked = await m.query(
-          `SELECT 1 FROM scheduled_payments WHERE transaction_id=$1 UNION ALL SELECT 1 FROM payment_links WHERE transaction_id=$1`,
-          [t.id],
-        );
-        if (linked.length > 0) {
-          if (t.type === "spend") await this.retypeAsDebt(m, t.id);
-          return;
-        }
-        // Tax rows stay candidates after the owner marked them paid: they can still claim their bank row.
-        const open: Payment[] = await m.query(
-          `SELECT p.id, p.kind, p.name, p.amount::float8 AS amount, p.currency, p.due_on::text AS due_on, p.paid_at,
-                  p.transaction_id, p.match_hint, p.tax_quarter, p.is_estimate,
-                  (SELECT COALESCE(SUM(-COALESCE(x.amount_uah, x.amount)), 0) FROM payment_links l
-                     JOIN transactions x ON x.id = l.transaction_id WHERE l.payment_id = p.id)::float8 AS linked
-             FROM scheduled_payments p WHERE p.transaction_id IS NULL AND (p.paid_at IS NULL OR p.kind='tax')
-            ORDER BY p.due_on, p.id FOR UPDATE OF p`,
-        );
-        if (t.type === "spend" && t.type_source === "owner") return;
-        const payable = { id: t.id, type: t.type, amount: t.amount, currency: t.currency, amountUah: t.amount_uah, localDate: t.local_date, text: t.text };
-        const hit = matchTaxPayment(payable, open) ?? matchPayment(payable, open, await this.rates(m));
-        if (hit) {
-          await m.query(
-            `UPDATE scheduled_payments SET paid_at=COALESCE(paid_at, $2), transaction_id=$3 WHERE id=$1`,
-            [hit.id, t.occurred_at, t.id],
-          );
-          if (t.type === "spend") await this.retypeAsDebt(m, t.id);
-          // A tax row claiming its payment moves it off this quarter's accrual, closed or not: the day is fixed afresh.
-          if (hit.kind === "tax") await this.limit.invalidate("payment_paid", m);
-        } else if (t.type === "tax") {
-          await this.settleTaxShare(m, payable, t.occurred_at, open);
-        }
-      }
+      const changed = await this.classifyRow(m, t, typeHint);
+      if (byOwner && changed) await this.limit.invalidate(changed, m);
     });
+  }
+
+  /**
+   * onClassified's work on one row, in its transaction. Returns what it changed in money that the day's limit
+   * has not seen yet (a loan recorded or repaid, a payment closed); null when nothing changed, or when the
+   * change already fixed the day afresh here (a tax).
+   */
+  private async classifyRow(m: EntityManager, t: TxRow & { type_source: string | null }, typeHint?: string): Promise<LimitReason | null> {
+    if (t.type === "loan_in") {
+      const made: unknown[] = await m.query(
+        `INSERT INTO loans (amount, received_on, source_transaction_id, note, kind)
+         SELECT $2, $3, $1, 'loan_in', $4 WHERE NOT EXISTS (SELECT 1 FROM loans WHERE source_transaction_id=$1)
+         ON CONFLICT DO NOTHING RETURNING id`,
+        [t.id, Math.abs(t.amount_uah ?? t.amount), t.local_date, SHORT_LOAN_TEXT.test(t.text) ? "short" : "other"],
+      );
+      return made.length > 0 ? "loan" : null;
+    } else if (t.type === "income" && t.account_kind === "fop") {
+      await this.markFopEvents(m, t);
+    } else if (t.type === "person_transfer") {
+      if (typeHint !== "person_transfer" && !(await this.isPlannedRecipient(t.id))) return null;
+      return (await this.settleFromPlannedRecipient(m, t)) ? "payment_paid" : null;
+    } else if (t.type === "obligation" || t.type === "debt_payment" || t.type === "tax" || t.type === "spend") {
+      const repaid = t.type === "debt_payment" && (await this.repayShortLoans(m, t));
+      const loanReason: LimitReason | null = repaid ? "loan" : null;
+      const linked = await m.query(
+        `SELECT 1 FROM scheduled_payments WHERE transaction_id=$1 UNION ALL SELECT 1 FROM payment_links WHERE transaction_id=$1`,
+        [t.id],
+      );
+      if (linked.length > 0) {
+        if (t.type === "spend") await this.retypeAsDebt(m, t.id);
+        return loanReason;
+      }
+      // Tax rows stay candidates after the owner marked them paid: they can still claim their bank row.
+      const open: Payment[] = await m.query(
+        `SELECT p.id, p.kind, p.name, p.amount::float8 AS amount, p.currency, p.due_on::text AS due_on, p.paid_at,
+                p.transaction_id, p.match_hint, p.tax_quarter, p.is_estimate,
+                (SELECT COALESCE(SUM(-COALESCE(x.amount_uah, x.amount)), 0) FROM payment_links l
+                   JOIN transactions x ON x.id = l.transaction_id WHERE l.payment_id = p.id)::float8 AS linked
+           FROM scheduled_payments p WHERE p.transaction_id IS NULL AND (p.paid_at IS NULL OR p.kind='tax')
+          ORDER BY p.due_on, p.id FOR UPDATE OF p`,
+      );
+      if (t.type === "spend" && t.type_source === "owner") return loanReason;
+      const payable = { id: t.id, type: t.type, amount: t.amount, currency: t.currency, amountUah: t.amount_uah, localDate: t.local_date, text: t.text };
+      const hit = matchTaxPayment(payable, open) ?? matchPayment(payable, open, await this.rates(m));
+      if (hit) {
+        await m.query(
+          `UPDATE scheduled_payments SET paid_at=COALESCE(paid_at, $2), transaction_id=$3 WHERE id=$1`,
+          [hit.id, t.occurred_at, t.id],
+        );
+        if (t.type === "spend") await this.retypeAsDebt(m, t.id);
+        // A tax row claiming its payment moves it off this quarter's accrual, closed or not: the day is fixed afresh.
+        if (hit.kind === "tax") {
+          await this.limit.invalidate("payment_paid", m);
+          return null;
+        }
+        return "payment_paid";
+      } else if (t.type === "tax") {
+        // A share that links fixes the day afresh itself.
+        await this.settleTaxShare(m, payable, t.occurred_at, open);
+        return null;
+      }
+      return loanReason;
+    }
+    return null;
   }
 
   /**
@@ -566,11 +589,13 @@ export class PlanService implements OnApplicationBootstrap {
 
   /**
    * Money to a close person counts against the day, except what the plan already set aside: a transfer
-   * that settles a planned payment becomes that payment, so it is not counted twice.
+   * that settles a planned payment becomes that payment, so it is not counted twice. True when it closed a
+   * payment just now.
    */
-  private async settleFromPlannedRecipient(m: EntityManager, t: TxRow): Promise<void> {
+  private async settleFromPlannedRecipient(m: EntityManager, t: TxRow): Promise<boolean> {
     const linked = await m.query(`SELECT 1 FROM scheduled_payments WHERE transaction_id=$1`, [t.id]);
     let settled = linked.length > 0;
+    let closed = false;
     if (!settled) {
       const open: Payment[] = await m.query(
         `SELECT id, kind, name, amount::float8 AS amount, currency, due_on::text AS due_on, paid_at, transaction_id, match_hint
@@ -584,18 +609,21 @@ export class PlanService implements OnApplicationBootstrap {
       if (hit) {
         await m.query(`UPDATE scheduled_payments SET paid_at=$2, transaction_id=$3 WHERE id=$1`, [hit.id, t.occurred_at, t.id]);
         settled = true;
+        closed = true;
       }
     }
     if (settled) await m.query(`UPDATE transactions SET type='obligation', category='transfer' WHERE id=$1`, [t.id]);
+    return closed;
   }
 
   /**
    * A repayment of a short loan (Кредит до завтра, МФО) pays the oldest open short loans first, up to
    * its amount; a loan stays open (with `repaid_amount` growing) until fully covered. Applied once per row,
-   * and only once there is a loan to pay: a repayment seen before its loan waits for the next pass.
+   * and only once there is a loan to pay: a repayment seen before its loan waits for the next pass. True when
+   * it paid a loan just now.
    */
-  private async repayShortLoans(m: EntityManager, t: TxRow): Promise<void> {
-    if (t.amount >= 0 || !SHORT_LOAN_TEXT.test(t.text) || INTEREST_TEXT.test(t.text)) return;
+  private async repayShortLoans(m: EntityManager, t: TxRow): Promise<boolean> {
+    if (t.amount >= 0 || !SHORT_LOAN_TEXT.test(t.text) || INTEREST_TEXT.test(t.text)) return false;
     // A loan taken after the repayment (a rollover later that day) is not what it repaid.
     const loans: { id: number; amount: number; repaid_amount: number }[] = await m.query(
       `SELECT l.id, l.amount::float8 AS amount, l.repaid_amount::float8 AS repaid_amount
@@ -604,12 +632,12 @@ export class PlanService implements OnApplicationBootstrap {
         ORDER BY l.received_on, l.id FOR UPDATE OF l`,
       [t.local_date, t.occurred_at],
     );
-    if (loans.length === 0) return;
+    if (loans.length === 0) return false;
     const fresh = await m.query(
       `INSERT INTO loan_repayments (transaction_id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING transaction_id`,
       [t.id],
     );
-    if (fresh.length === 0) return;
+    if (fresh.length === 0) return false;
     let left = Math.abs(t.amount_uah ?? t.amount);
     for (const l of loans) {
       if (left <= 0) break;
@@ -620,6 +648,7 @@ export class PlanService implements OnApplicationBootstrap {
         l.id, total, t.occurred_at,
       ]);
     }
+    return true;
   }
 
   /** A store installment that classify() saw as spend is a debt payment; owner rows stay as they are. */

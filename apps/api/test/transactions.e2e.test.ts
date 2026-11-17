@@ -914,3 +914,104 @@ describe("the same sum from someone else is no transfer between own accounts (Б
     expect(await listed("income")).toEqual([]);
   });
 });
+
+describe("an owner retype that makes a loan or closes a payment fixes the day afresh (Б35)", () => {
+  // 14 November. A sentinel limit of 1 stands for the morning's figure: a re-fix replaces it.
+  const AT = "2026-11-14T10:00:00.000Z";
+  const dayLimit = async () => (await row(`SELECT daily_limit::int AS l FROM daily_snapshots WHERE local_date='2026-11-14'`)).l as number;
+  const sentinel = () =>
+    ds.query(
+      `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ('2026-11-14', 1, 'normal') ON CONFLICT (local_date) DO UPDATE SET daily_limit=1`,
+    );
+  const loans = () => ds.query(`SELECT source_transaction_id, amount::int AS amount FROM loans ORDER BY id`);
+  beforeEach(async () => {
+    app.get(Clock).fixed = new Date("2026-11-14T10:00:00Z");
+    await ds.query(`TRUNCATE daily_snapshots`);
+  });
+  afterEach(() => {
+    app.get(Clock).fixed = null;
+  });
+
+  it("a row retyped to loan_in by hand records the loan and fixes the day at once", async () => {
+    const a = await account();
+    const t = await tx(a, { amount: 300_000, type: "person_in", description: "Від: Петро", at: AT });
+    await sentinel();
+
+    await api.patch(`/transactions/${t}`, { type: "loan_in" }).expect(200);
+    expect(await loans()).toEqual([{ source_transaction_id: t, amount: 300_000 }]);
+    expect(await dayLimit()).not.toBe(1);
+  });
+
+  it("a row retyped away from loan_in by hand drops its loan and fixes the day; retyped back, the loan returns", async () => {
+    const a = await account();
+    const t = await tx(a, { amount: 300_000, type: "person_in", description: "Від: Петро", at: AT });
+    await api.patch(`/transactions/${t}`, { type: "loan_in" }).expect(200);
+    expect(await loans()).toHaveLength(1);
+    await sentinel();
+
+    await api.patch(`/transactions/${t}`, { type: "person_in" }).expect(200);
+    expect(await loans()).toEqual([]);
+    expect(await dayLimit()).not.toBe(1);
+
+    await sentinel();
+    await api.patch(`/transactions/${t}`, { type: "loan_in" }).expect(200);
+    expect(await loans()).toEqual([{ source_transaction_id: t, amount: 300_000 }]);
+    expect(await dayLimit()).not.toBe(1);
+  });
+
+  it("a loan already partly repaid stays when its row is retyped", async () => {
+    const a = await account();
+    const t = await tx(a, { amount: 300_000, type: "person_in", description: "Від: Петро", at: AT });
+    await api.patch(`/transactions/${t}`, { type: "loan_in" }).expect(200);
+    await ds.query(`UPDATE loans SET repaid_amount = 100000`);
+
+    await api.patch(`/transactions/${t}`, { type: "person_in" }).expect(200);
+    expect(await loans()).toEqual([{ source_transaction_id: t, amount: 300_000 }]);
+  });
+
+  it("a row retyped to obligation by hand closes the planned payment and fixes the day at once", async () => {
+    const a = await account();
+    await ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Rent',1700000,'UAH','2026-11-14')`,
+    );
+    const t = await tx(a, { amount: -1_700_000, description: "Landlord", at: AT });
+    await sentinel();
+
+    await api.patch(`/transactions/${t}`, { type: "obligation" }).expect(200);
+    expect((await row(`SELECT transaction_id FROM scheduled_payments`)).transaction_id).toBe(t);
+    expect(await dayLimit()).not.toBe(1);
+  });
+
+  it("an obligation answer about a recipient closes the planned payment and fixes the day at once", async () => {
+    const a = await account();
+    const t = await tx(a, { name: "Olena K", description: "Переказ", type: "person_transfer", needsLabel: true, amount: -80_000, at: AT });
+    const key = ((await api.get("/transactions").expect(200)).body.items as { id: number; counterKey: string }[]).find((i) => i.id === t)!.counterKey;
+    await ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Support',80000,'UAH','2026-11-14')`,
+    );
+    await sentinel();
+
+    await api.post("/recipients/label", { counterKey: key, label: "obligation" }).expect(201);
+    expect((await row(`SELECT transaction_id FROM scheduled_payments`)).transaction_id).toBe(t);
+    expect(await dayLimit()).not.toBe(1);
+  });
+
+  it("a plain retype that settles nothing leaves the day's limit as it was", async () => {
+    const a = await account();
+    const t = await tx(a, { amount: -10_000, at: AT });
+    await sentinel();
+
+    await api.patch(`/transactions/${t}`, { type: "cash_out", category: "cash" }).expect(200);
+    expect(await dayLimit()).toBe(1);
+  });
+
+  it("an automatic classification that records a loan keeps the morning's limit", async () => {
+    const a = await account();
+    const t = await tx(a, { amount: 300_000, type: "loan_in", description: "Кредит", at: AT });
+    await sentinel();
+
+    await app.get(PlanService).onClassified(t, "loan_in");
+    expect(await loans()).toHaveLength(1);
+    expect(await dayLimit()).toBe(1);
+  });
+});

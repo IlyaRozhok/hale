@@ -19,7 +19,7 @@ import { creditPart } from "../domain/credit";
 import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
 import { binanceOnChange, cashAnswerOf } from "../domain/cash-answer";
 import { PlanService } from "../plan/plan.service";
-import { LimitService } from "../today/limit.service";
+import { LimitService, type LimitReason } from "../today/limit.service";
 import { type CashAnswerRow, binanceEvent, cashAnswerColumnsSql, cashAnswerFacts, undoAnswer } from "../cash/cash-answer";
 import { exchangeUsdcSql } from "../cash/cash-exchange";
 import { cardCashSql, cardTransferSql } from "../cash/wallet";
@@ -264,8 +264,8 @@ export class TransactionsService {
       const scope = p.applyToSimilar ? similarScope(id, base, ruleType!) : { id };
       const undone = p.type ? await this.undoCashAnswers(m, scope, p.type) : false;
       const ids = await this.apply(m, scope, p.type ?? null, p.category ?? null);
-      const freed = p.type ? await this.unsettle(m, ids, p.type) : false;
-      if (undone || freed) await this.limit.invalidate(freed ? "payment_paid" : "cash", m);
+      const freed = p.type ? await this.unsettle(m, ids, p.type) : null;
+      if (undone || freed) await this.limit.invalidate(freed ?? "cash", m);
       return ids;
     });
     if (p.type) await this.settle(changed, p.type);
@@ -352,7 +352,8 @@ export class TransactionsService {
         await this.saveRule(m, rule.kind === "merchant" ? "recipient" : rule.kind, rule.value, type, null, label, "out");
       }
       const ids = await this.apply(m, { key: counterKey, relabel: true }, type, null);
-      if (await this.unsettle(m, ids, type)) await this.limit.invalidate("payment_paid", m);
+      const freed = await this.unsettle(m, ids, type);
+      if (freed) await this.limit.invalidate(freed, m);
       return ids;
     });
     await this.settle(changed, type);
@@ -415,11 +416,14 @@ export class TransactionsService {
    * Rows retyped to a type that settles nothing free their planned payments, in the edit's transaction. A
    * payment closed through the row itself (transaction_id) opens again. A row linked through payment_links
    * is unlinked, and its payment opens again only if those links closed it and the rest no longer cover it
-   * (task Б26); a payment marked paid by hand stays paid. True when a payment opened: the caller fixes the
-   * day afresh.
+   * (task Б26); a payment marked paid by hand stays paid. Rows retyped away from loan_in take their loan with
+   * them, while nothing was repaid on it (task Б35). Returns what changed, for the caller to fix the day afresh
+   * with, or null.
    */
-  private async unsettle(m: EntityManager, ids: readonly number[], type: string): Promise<boolean> {
-    if (ids.length === 0 || SETTLING_TYPES.has(type)) return false;
+  private async unsettle(m: EntityManager, ids: readonly number[], type: string): Promise<LimitReason | null> {
+    if (ids.length === 0) return null;
+    const dropped = type === "loan_in" ? false : await this.dropLoans(m, ids);
+    if (SETTLING_TYPES.has(type)) return dropped ? "loan" : null;
     const unlinked: { payment_id: number }[] = await m.query(
       `WITH d AS (DELETE FROM payment_links WHERE transaction_id = ANY($1::int[]) RETURNING payment_id) SELECT DISTINCT payment_id FROM d`,
       [ids],
@@ -429,13 +433,27 @@ export class TransactionsService {
       [ids],
     )) as [unknown[], number];
     const reopened = await this.plan.reopenUncovered(m, unlinked.map((u) => u.payment_id));
-    return freed[1] > 0 || reopened;
+    if (freed[1] > 0 || reopened) return "payment_paid";
+    return dropped ? "loan" : null;
+  }
+
+  /**
+   * The loans these rows recorded as loan_in. One with anything repaid stays: its repayments are the owner's
+   * record, and what to do with them is not decided (task Б35). True when one went.
+   */
+  private async dropLoans(m: EntityManager, ids: readonly number[]): Promise<boolean> {
+    const gone = (await m.query(
+      `DELETE FROM loans WHERE source_transaction_id = ANY($1::int[]) AND repaid_amount = 0 AND repaid_at IS NULL`,
+      [ids],
+    )) as [unknown[], number];
+    return gone[1] > 0;
   }
 
   /** Rows given a type the plan cares about are matched to planned payments as after classification. */
   private async settle(ids: readonly number[], type: string): Promise<void> {
     if (ids.length === 0 || !PLAN_TYPES.has(type as TxType)) return;
-    for (const id of ids) await this.plan.onClassified(id, type);
+    // The owner's hand: a loan recorded or a payment closed here fixes the day afresh at once (task Б35).
+    for (const id of ids) await this.plan.onClassified(id, type, true);
   }
 
   private async saveRule(
