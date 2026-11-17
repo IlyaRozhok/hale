@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, daysBetween, kyivDate, ownMoney, toUah, type Rates } from "./money.js";
+import { addDays, daysBetween, hryvniaLeg, kyivDate, ownMoney, toUah, type Rates } from "./money.js";
 
 describe("ownMoney", () => {
   it("is zero when balance equals the credit limit (untouched credit)", () => {
@@ -37,6 +37,29 @@ describe("toUah", () => {
   });
   it("throws for an unknown currency code", () => {
     expect(() => toUah(100, 999, rates, now)).toThrow(/currency/i);
+  });
+});
+
+describe("hryvniaLeg", () => {
+  it("takes the hryvnia side of a foreign-account operation made in hryvnias, with the implied rate", () => {
+    // $100 sold to the own hryvnia card: −10000 cents, +₴4,150.00 on the other side.
+    expect(hryvniaLeg({ amount: -10_000, operationAmount: -415_000, currencyCode: 980 })).toEqual({
+      amountUah: -415_000,
+      fxRate: 41.5,
+    });
+    expect(hryvniaLeg({ amount: 2_500, operationAmount: 103_210, currencyCode: 980 })).toEqual({
+      amountUah: 103_210,
+      fxRate: 41.284,
+    });
+  });
+  it("is null when the operation was not in hryvnias", () => {
+    expect(hryvniaLeg({ amount: -1_000, operationAmount: -1_000, currencyCode: 840 })).toBeNull();
+    expect(hryvniaLeg({ amount: -1_000, operationAmount: -900, currencyCode: 978 })).toBeNull();
+  });
+  it("is null for a zero amount or sides of opposite sign", () => {
+    expect(hryvniaLeg({ amount: 0, operationAmount: -415_000, currencyCode: 980 })).toBeNull();
+    expect(hryvniaLeg({ amount: -10_000, operationAmount: 0, currencyCode: 980 })).toBeNull();
+    expect(hryvniaLeg({ amount: -10_000, operationAmount: 415_000, currencyCode: 980 })).toBeNull();
   });
 });
 
