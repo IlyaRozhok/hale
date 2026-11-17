@@ -53,6 +53,40 @@ describe("own money", () => {
     expect(classify(tx({ description: "Поповнення «Trip»", mcc: 4829 }), ctx()).type).toBe("own_transfer");
   });
 
+  describe("own name only in the bank's counterparty field (Б38)", () => {
+    it("money in on the fop account from the owner is own_transfer, not income", () => {
+      const r = classify(
+        tx({ accountKind: "fop", amount: 500_000, mcc: 4829, description: "Переказ коштів", counterName: "OWNER TEST" }),
+        ctx(),
+      );
+      expect(r).toMatchObject({ type: "own_transfer", category: "own", needsLabel: false });
+    });
+
+    it("the same on a black card is own_transfer", () => {
+      const r = classify(tx({ amount: 500_000, mcc: 4829, description: "Переказ коштів", counterName: "Test Owner" }), ctx());
+      expect(r.type).toBe("own_transfer");
+    });
+
+    it("a client who shares only the first name is still income on the fop account", () => {
+      const r = classify(
+        tx({ accountKind: "fop", amount: 500_000, mcc: 4829, description: "Оплата послуг", counterName: "Test Client" }),
+        ctx(),
+      );
+      expect(r.type).toBe("income");
+    });
+
+    it("an owner rule still wins over the own name", () => {
+      const c = ctx({ rules: [{ matchKind: "recipient", matchValue: "Test Owner", type: "income", category: "income" }] });
+      const r = classify(tx({ accountKind: "fop", amount: 500_000, mcc: 4829, description: "Переказ", counterName: "Test Owner" }), c);
+      expect(r).toMatchObject({ type: "income", source: "owner" });
+    });
+
+    it("outgoing money to the owner's name is not changed by this rule", () => {
+      const r = classify(tx({ amount: -500_000, mcc: 4829, description: "Переказ", counterName: "Test Owner" }), ctx());
+      expect(r.type).toBe("person_transfer");
+    });
+  });
+
   it("an outgoing card transfer paired with an opposite row on another own account is own_transfer", () => {
     const base = tx({ description: "Переказ на картку", mcc: 4829 });
     expect(classify(base, ctx()).type).toBe("person_transfer");
