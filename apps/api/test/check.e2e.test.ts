@@ -94,7 +94,7 @@ beforeEach(async () => {
               scheduled_payments, recurring_payments, manual_balances, loans, bridge_plans, daily_snapshots, goals
      RESTART IDENTITY CASCADE`,
   );
-  await ds.query(`UPDATE settings SET cash_start='2026-11-01', tracking_start='2026-10-01'`);
+  await ds.query(`UPDATE settings SET cash_start='2026-11-01', cash_started_at=NULL, tracking_start='2026-10-01'`);
   black = await account("black", "black", 45_000);
   white = await account("white", "white", 8_000);
   cash = await account("manual:cash", "cash", null);
@@ -170,6 +170,19 @@ describe("POST /check/run and GET /check/latest", () => {
     await tx(cash, "2026-11-09T12:00:00Z", -40_000, "spend", "groceries", null, "Рынок");
     const r = await run();
     expect(r.body.issues).toEqual([{ kind: "cash_wallet", amount: -10_000, currency: "UAH", since: "2026-11-09" }]);
+  });
+
+  it("a withdrawal on the start day before the start moment is neither spending nor wallet: nothing is found (Б39)", async () => {
+    // The wallet started at 12:00 Kyiv on 1 November; its opening balance already holds cash taken at 09:00.
+    await ds.query(`UPDATE settings SET cash_started_at='2026-11-01T10:00:00Z'`);
+    const other = await account("other-bank", "white", null);
+    await tx(other, "2026-11-01T07:00:00Z", -100_000, "cash_out", null, null, "Банкомат");
+    const wallet = async () => (await request(http(on)).get("/cash").set("Authorization", auth).expect(200)).body.balance as number;
+    expect(await wallet()).toBe(30_000);
+    expect((await run()).body.issues).toEqual([]);
+    await tx(other, "2026-11-01T11:00:00Z", -40_000, "cash_out", null, null, "Банкомат");
+    expect(await wallet()).toBe(70_000);
+    expect((await run()).body.issues).toEqual([]);
   });
 
   it("counts a leg of a transfer between own accounts with no other leg, with the oldest day", async () => {

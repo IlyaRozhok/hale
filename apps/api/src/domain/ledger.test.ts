@@ -18,6 +18,7 @@ import {
   limitSpentByDay,
   limitSql,
   spendGroupSql,
+  walletChange,
 } from "./ledger";
 
 const CASH_START = "2026-11-10";
@@ -142,6 +143,44 @@ describe("ledgerEffect: own money", () => {
     for (const localDate of [CASH_START, "2026-11-11"]) {
       expect(ledgerEffect(row({ type: "cash_out", accountKind: "jar", amountUah: -100_000, localDate }), WITH_WALLET).ownMoney).toBe(0);
     }
+  });
+
+  describe("on the start day, by the start moment (Б39)", () => {
+    // Started at 15:00 Kyiv (13:00Z); the opening balance already holds cash withdrawn earlier that day.
+    const STARTED_AT: LedgerContext = { cashStart: CASH_START, cashStartedAt: Date.parse(`${CASH_START}T13:00:00Z`) };
+    const withdrawal = (time: string) => row({ type: "cash_out", amountUah: -100_000, localDate: CASH_START, occurredAt: Date.parse(`${CASH_START}T${time}Z`) });
+
+    it("a withdrawal before the moment leaves the card and does not reach the wallet: the opening balance holds it", () => {
+      const e = ledgerEffect(withdrawal("08:00:00"), STARTED_AT);
+      expect(walletChange(withdrawal("08:00:00"), STARTED_AT)).toBe(0);
+      expect(e.ownMoney).toBe(-100_000);
+      // Not spending either, as before: the start day stays day-based on the spending side.
+      expect(e.limitSpend).toBe(0);
+      expect(e.inSpendGroup).toBe(false);
+    });
+
+    it("a withdrawal at or after the moment goes into the wallet", () => {
+      for (const time of ["13:00:00", "14:00:00"]) {
+        expect(walletChange(withdrawal(time), STARTED_AT), time).toBe(100_000);
+        expect(ledgerEffect(withdrawal(time), STARTED_AT).ownMoney, time).toBe(0);
+      }
+    });
+
+    it("without a moment the whole start day counts, as before", () => {
+      expect(walletChange(withdrawal("08:00:00"), WITH_WALLET)).toBe(100_000);
+      expect(walletChange(withdrawal("08:00:00"), { cashStart: CASH_START, cashStartedAt: null })).toBe(100_000);
+    });
+
+    it("the next day counts whatever the time", () => {
+      const next = row({ type: "cash_out", amountUah: -100_000, localDate: "2026-11-11", occurredAt: Date.parse("2026-11-10T22:30:00Z") });
+      expect(walletChange(next, STARTED_AT)).toBe(100_000);
+    });
+
+    it("rows on the wallet and deposits from it do not depend on the moment", () => {
+      const early = Date.parse(`${CASH_START}T08:00:00Z`);
+      expect(walletChange(row({ accountKind: "cash", amountUah: 50_000, localDate: CASH_START, occurredAt: early }), STARTED_AT)).toBe(50_000);
+      expect(walletChange(row({ type: "cash_in", amountUah: 30_000, fromWallet: true, occurredAt: early }), STARTED_AT)).toBe(-30_000);
+    });
   });
 
   it("a withdrawal before the wallet start leaves own money", () => {

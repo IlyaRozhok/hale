@@ -42,6 +42,11 @@ export const CASH_START_SQL = "(SELECT cash_start FROM settings WHERE id=1)";
 export interface LedgerContext {
   /** The cash wallet's first day ('YYYY-MM-DD'), or null while there is no wallet. */
   cashStart: string | null;
+  /**
+   * The moment the wallet started (epoch ms, settings.cash_started_at; Б39). Only what the wallet receives from the
+   * cards depends on it; the limit stays by day. Left out or null, the whole first day counts.
+   */
+  cashStartedAt?: number | null;
 }
 
 /** Ids the caller found for the row; the ledger only names them. */
@@ -65,6 +70,8 @@ export interface LedgerRow {
   amountUah: Minor | null;
   /** Kyiv day, 'YYYY-MM-DD'. */
   localDate: string;
+  /** When it happened (epoch ms, occurred_at). Needed only to judge a withdrawal on the wallet's first day against its start moment. */
+  occurredAt?: number;
   category: string | null;
   /** A deposit the owner said came from the cash wallet. */
   fromWallet?: boolean;
@@ -115,14 +122,26 @@ export function inSpendGroup(row: LedgerRow, ctx: LedgerContext): boolean {
 }
 
 /**
- * The wallet side of a row, as walletBalance in cash/wallet.ts adds it up: rows on the wallet, card
- * withdrawals from the wallet start, cash from transfers to another bank, less deposits from the wallet.
+ * A card operation happened since the wallet start: on or after its first day, and at or after its start moment
+ * when both are known (Б39). Mirrors sinceWalletStartSql in cash/wallet.ts.
  */
-function walletChange(row: LedgerRow, amount: Minor, cashStart: string | null): Minor {
-  if (cashStart === null) return 0;
+function sinceWalletStart(row: LedgerRow, ctx: LedgerContext): boolean {
+  if (ctx.cashStart === null || row.localDate < ctx.cashStart) return false;
+  return ctx.cashStartedAt == null || row.occurredAt === undefined || row.occurredAt >= ctx.cashStartedAt;
+}
+
+/**
+ * The wallet side of a row, as walletBalance in cash/wallet.ts adds it up: rows on the wallet, card
+ * withdrawals since the wallet start, cash from transfers to another bank, less deposits from the wallet.
+ * A withdrawal before the start moment on the first day is neither spending nor a wallet change: the opening
+ * balance holds its cash. 0 without a hryvnia amount, as SUM skips it.
+ */
+export function walletChange(row: LedgerRow, ctx: LedgerContext): Minor {
+  if (ctx.cashStart === null || row.amountUah === null) return 0;
+  const amount = row.amountUah;
   let change = 0;
   if (row.accountKind === "cash") change += amount;
-  if (row.type === CASH_OUT && row.accountKind !== "cash" && row.accountKind !== "jar" && row.localDate >= cashStart) change -= amount;
+  if (row.type === CASH_OUT && row.accountKind !== "cash" && row.accountKind !== "jar" && sinceWalletStart(row, ctx)) change -= amount;
   change += row.walletCash ?? 0;
   if (row.fromWallet) change -= amount;
   return change;
@@ -131,7 +150,7 @@ function walletChange(row: LedgerRow, amount: Minor, cashStart: string | null): 
 function ownMoneyChange(row: LedgerRow, ctx: LedgerContext): Minor | null {
   if (row.amountUah === null) return null;
   const onAccount = row.accountKind !== "cash" && OWN_MONEY_ACCOUNT_KINDS.has(row.accountKind) ? row.amountUah : 0;
-  return onAccount + walletChange(row, row.amountUah, ctx.cashStart);
+  return onAccount + walletChange(row, ctx);
 }
 
 function linksOf(input: LedgerLinksInput | undefined): LedgerLink[] {

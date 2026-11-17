@@ -122,8 +122,11 @@ export class LedgerCheckService {
   }
 
   private async check(m: EntityManager, today: string): Promise<ResultRow[]> {
-    const settings = (await m.query(`SELECT cash_start::text AS cash_start FROM settings WHERE id=1`))[0] as { cash_start: string | null };
-    const ctx: LedgerContext = { cashStart: settings.cash_start };
+    const settings = (await m.query(`SELECT cash_start::text AS cash_start, cash_started_at FROM settings WHERE id=1`))[0] as {
+      cash_start: string | null;
+      cash_started_at: Date | null;
+    };
+    const ctx: LedgerContext = { cashStart: settings.cash_start, cashStartedAt: settings.cash_started_at?.getTime() ?? null };
     const from = addDays(today, 1 - CHECK_WINDOW_DAYS);
     return [
       ...(await this.bankBalances(m)),
@@ -210,12 +213,26 @@ export class LedgerCheckService {
    * ScreenSpent, which runs the services' own queries.
    */
   private async spending(m: EntityManager, ctx: LedgerContext, from: string, to: string): Promise<ResultRow[]> {
-    const rows: { type: TxType | null; kind: AccountKind; amount_uah: number | null; local_date: string; category: string | null }[] = await m.query(
-      `SELECT t.type, a.kind, t.amount_uah::float8 AS amount_uah, t.local_date::text AS local_date, t.category
+    const rows: {
+      type: TxType | null;
+      kind: AccountKind;
+      amount_uah: number | null;
+      local_date: string;
+      occurred_at: Date;
+      category: string | null;
+    }[] = await m.query(
+      `SELECT t.type, a.kind, t.amount_uah::float8 AS amount_uah, t.local_date::text AS local_date, t.occurred_at, t.category
          FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.local_date BETWEEN $1 AND $2`,
       [from, to],
     );
-    const ledger: LedgerRow[] = rows.map((r) => ({ type: r.type, accountKind: r.kind, amountUah: r.amount_uah, localDate: r.local_date, category: r.category }));
+    const ledger: LedgerRow[] = rows.map((r) => ({
+      type: r.type,
+      accountKind: r.kind,
+      amountUah: r.amount_uah,
+      localDate: r.local_date,
+      occurredAt: r.occurred_at.getTime(),
+      category: r.category,
+    }));
     const categories = categoriesCheck(ledger, ctx);
     const days = daySpentCheck(limitSpentByDay(ledger, ctx), await this.screens.byDay(m, from, to));
     return [
