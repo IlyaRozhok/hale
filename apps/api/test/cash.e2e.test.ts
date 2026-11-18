@@ -286,13 +286,42 @@ describe("counting the pocket", () => {
     await start(500_000).expect(201);
   });
 
-  it("less than recorded: the difference is spent today as not recorded", async () => {
-    const before = (await today()).state.leftToday;
-    expect((await api.post("/cash/count", { amount: 420_000 }).expect(201)).body.balance).toBe(420_000);
-    expect((await today()).state.leftToday).toBe(before - 80_000);
-    expect(await row(`SELECT description, type, amount::int AS amount FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.kind='cash' ORDER BY t.id DESC LIMIT 1`)).toEqual({
-      description: "Не записано", type: "spend", amount: -80_000,
+  it("less than recorded: the difference is written today as «Не записано», out of the day's limit (Б47 (2))", async () => {
+    // ₴10,000 on the card and ₴5,000 in the pocket: a day limit of about ₴500, less than the ₴600 found missing.
+    await card(1_000_000);
+    await op({ kind: "spend", amount: 5_000, category: "cafe" }).expect(201);
+    const before = (await today()).state;
+    expect(before.dailyLimit).toBeLessThan(60_000);
+    expect((await api.post("/cash/count", { amount: 435_000 }).expect(201)).body.balance).toBe(435_000);
+    expect(await row(`SELECT description, type, category, amount::int AS amount, local_date::text AS date FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.kind='cash' ORDER BY t.id DESC LIMIT 1`)).toEqual({
+      description: "Не записано", type: "spend", category: "uncategorized", amount: -60_000, date: "2026-11-10",
     });
+    // «Сегодня»: the limit, «потрачено» and what is left are as before the count; the wallet is ₴600 lower.
+    const after = await today();
+    expect(after.state.dailyLimit).toBe(before.dailyLimit);
+    expect(after.state.leftToday).toBe(before.leftToday);
+    expect(after.state.dailyLimit - after.state.leftToday).toBe(5_000);
+    expect(after.accounts.cash).toBe(435_000);
+    // The calendar's «потрачено» for the day is the same 5,000, so the shortfall cannot take the day over its limit.
+    const days = async () => (await api.get("/today/calendar?month=2026-11").expect(200)).body.days as { date: string; spent: number; status: string }[];
+    expect((await days()).find((d) => d.date === "2026-11-10")!.spent).toBe(5_000);
+    // «Операции» › «Траты»: the row is listed, marked out of the limit, and the day's total is «потрачено».
+    const spend = (await api.get("/transactions?group=spend").expect(200)).body as {
+      items: { description: string; inLimit: boolean }[];
+      dayTotals: Record<string, number>;
+      summary: { total: number; count: number };
+    };
+    expect(spend.items.find((i) => i.description === "Не записано")).toMatchObject({ inLimit: false });
+    expect(spend.dayTotals).toEqual({ "2026-11-10": -5_000 });
+    // The nightly check finds the screens and the ledger in agreement.
+    expect((await app.get(LedgerCheckService).run()).issues.filter((i) => i.kind === "day_spent" || i.kind === "categories")).toEqual([]);
+    // The next day: the past day is within its limit, and the new limit is lower by the money that is gone.
+    at("2026-11-11T10:00:00Z");
+    const tomorrow = (await today()).state.dailyLimit as number;
+    expect((await days()).find((d) => d.date === "2026-11-10")!.status).toBe("within");
+    await ds.query(`DELETE FROM transactions WHERE description='Не записано'`);
+    await ds.query(`DELETE FROM daily_snapshots WHERE local_date='2026-11-11'`);
+    expect((await today()).state.dailyLimit).toBeGreaterThan(tomorrow);
   });
 
   it("more than recorded: the balance is corrected, the limit is not", async () => {
@@ -1287,7 +1316,9 @@ describe("a count before the answer «Из кошелька» (Б40)", () => {
     const { deposit } = await setup();
     at("2026-11-10T12:00:00Z");
     expect((await count(450_000)).body.balance).toBe(450_000);
-    expect(await spentOn("2026-11-10")).toBe(50_000);
+    // The shortfall is out of the day's limit (Б47 (2)): «потрачено» is zero before the answer and after it.
+    expect(await shortfalls()).toMatchObject([{ description: "Не записано", amount: -50_000 }]);
+    expect(await spentOn("2026-11-10")).toBe(0);
     await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
     expect((await wallet()).balance).toBe(450_000);
     expect(await shortfalls()).toEqual([]);
@@ -1307,7 +1338,7 @@ describe("a count before the answer «Из кошелька» (Б40)", () => {
     await answer(deposit, "other").expect(201);
     expect(await shortfalls()).toEqual(was);
     expect((await wallet()).balance).toBe(450_000);
-    expect(await spentOn("2026-11-10")).toBe(50_000);
+    expect(await spentOn("2026-11-10")).toBe(0);
     await answer(deposit, "wallet").expect(201);
     expect(await shortfalls()).toEqual([]);
     expect((await wallet()).balance).toBe(450_000);
@@ -1322,7 +1353,7 @@ describe("a count before the answer «Из кошелька» (Б40)", () => {
     await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
     expect(await shortfalls()).toMatchObject([{ description: "Не записано", amount: -30_000, amount_uah: -30_000 }]);
     expect((await wallet()).balance).toBe(420_000);
-    expect(await spentOn("2026-11-10")).toBe(30_000);
+    expect(await spentOn("2026-11-10")).toBe(0);
     await answer(deposit, "other").expect(201);
     expect(await shortfalls()).toMatchObject([{ amount: -80_000, amount_uah: -80_000 }]);
     expect((await wallet()).balance).toBe(420_000);

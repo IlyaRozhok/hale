@@ -157,13 +157,14 @@ describe("the cash question", () => {
 });
 
 describe("the wallet in Plan", () => {
-  it("shows the balance, and counting less records the gap as spent", async () => {
+  it("shows the balance, and counting less records the gap as «Не записано», out of the day's limit (Б47 (2))", async () => {
     const api = fakeApi(started());
     await renderWith(<Plan />, api);
     await press(/^Наличные/);
     expect(await screen.findByText("По записям ₴2,500, учёт с 01.11")).toBeTruthy();
     await fireEvent.changeText(screen.getByLabelText("Сколько в кармане"), "2000");
-    expect(screen.getByText("₴500 запишется тратой «Не записано» за сегодня.")).toBeTruthy();
+    expect(screen.getByText("₴500 запишется как «Не записано» за сегодня. Лимит дня не изменится.")).toBeTruthy();
+    expect(screen.queryByText(/запишется тратой/)).toBeNull();
     await press("Пересчитал");
     await waitFor(() => expect(api.countCash).toHaveBeenCalledWith(200_000));
   });
