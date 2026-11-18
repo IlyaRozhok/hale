@@ -11,12 +11,14 @@ import {
   TAX_EXACT_TOLERANCE,
   TAX_OVERPAY_SHARE,
   TAX_WINDOW_DAYS,
+  candidateCap,
   matchPayment,
   matchTaxPayment,
   matchTaxShare,
   monthlyEvents,
   monthlyDueDates,
   paidQuestions,
+  paymentUah,
   repairTaxLinks,
   taxTolerance,
   windowEndDate,
@@ -694,6 +696,35 @@ describe("paidQuestions", () => {
         [2, 11],
       ]);
     });
+  });
+});
+
+// Б44: the «Оплачено» sheet and «Это оплата?» offer an operation a little larger than the payment, and foreign payments.
+describe("candidateCap and paymentUah", () => {
+  it("a hryvnia payment takes operations up to ₴20 above its amount", () => {
+    expect(candidateCap({ amount: 1_000_000, currency: "UAH" }, {})).toBe(1_002_000);
+  });
+
+  it("a foreign payment takes hryvnia operations up to 5% above its amount at the rate; no rate, none", () => {
+    // $20 at 41.5 = ₴830; ₴850 fits, ₴880 does not.
+    const usd = { amount: 2_000, currency: "USD" };
+    expect(paymentUah(usd, { USD: 41.5 })).toBe(83_000);
+    expect(candidateCap(usd, { USD: 41.5 })).toBe(87_150);
+    expect(candidateCap(usd, {})).toBeNull();
+    expect(paymentUah(usd, {})).toBeNull();
+    expect(paymentUah(usd, { USD: 0 })).toBeNull();
+  });
+
+  it("a hryvnia payment is its own amount in hryvnias", () => {
+    expect(paymentUah({ amount: 1_000_000, currency: "UAH" }, { USD: 41.5 })).toBe(1_000_000);
+  });
+
+  it("a payment's question still takes a ₴850 debit for $20 at 41.5 near its due date", () => {
+    const usd = pay({ kind: "obligation", currency: "USD", amount: 2_000, due_on: "2026-11-10" });
+    const debit = (uah: number): PayableTx => ({ id: 10, type: "person_transfer", amount: -uah, currency: "UAH", amountUah: -uah, localDate: "2026-11-08", text: "" });
+    const ask = (t: PayableTx) => paidQuestions([usd], new Map([[1, [t]]]), new Set(), "2026-11-08", { USD: 41.5 }).map((q) => q.tx.id);
+    expect(ask(debit(85_000))).toEqual([10]);
+    expect(ask(debit(88_000))).toEqual([]);
   });
 });
 

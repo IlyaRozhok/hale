@@ -744,6 +744,86 @@ describe("a planned payment paid with chosen operations", () => {
   });
 });
 
+// Б44: an operation a little larger than the payment, and a payment in another currency, are offered too.
+describe("operations larger than the payment, and foreign payments (Б44)", () => {
+  const plan = async (amount: number, currency = "UAH", due = "2026-11-08") =>
+    (await ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Подписка',$1,$2,$3) RETURNING id`, [
+      amount, currency, due,
+    ]))[0].id as number;
+  const candidates = async (id: number) =>
+    ((await api.get(`/cash/payments/${id}/candidates`).expect(200)).body as { id: number }[]).map((t) => t.id);
+  const paid = async (id: number) => (await row(`SELECT paid_at IS NOT NULL AS paid FROM scheduled_payments WHERE id=$1`, [id])).paid as boolean;
+  const usdRate = (rate = 41.5) => ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-09T09:00:00Z', $1)`, [rate]);
+
+  it("a hryvnia payment is offered a transfer up to ₴20 above it, not more; smaller and equal ones stay", async () => {
+    const c = await card();
+    const id = await plan(1_000_000);
+    const over = await bankTx(c, -1_001_500, "person_transfer", "2026-11-08", { time: "12:00:00" });
+    await bankTx(c, -1_002_100, "person_transfer", "2026-11-08", { time: "11:00:00" }); // ₴21 above
+    const equal = await bankTx(c, -1_000_000, "person_transfer", "2026-11-07");
+    const part = await bankTx(c, -400_000, "cash_out", "2026-11-06");
+    expect(await candidates(id)).toEqual([over, equal, part]);
+    expect((await api.post(`/cash/payments/${id}/links`, { transactionIds: [over] }).expect(201)).body).toEqual({ linked: 1, closed: true, remaining: 0 });
+  });
+
+  it("a $20 payment at 41.5 is offered a ₴850 debit, not ₴880; with no rate, nothing", async () => {
+    const c = await card();
+    const id = await plan(2_000, "USD");
+    const near = await bankTx(c, -85_000, "person_transfer", "2026-11-08", { time: "12:00:00" });
+    await bankTx(c, -88_000, "person_transfer", "2026-11-08", { time: "11:00:00" });
+    const small = await bankTx(c, -40_000, "person_transfer", "2026-11-07");
+    expect(await candidates(id)).toEqual([]);
+    await usdRate();
+    expect(await candidates(id)).toEqual([near, small]);
+  });
+
+  it("paying a foreign payment through the sheet closes it by hryvnias at the rate", async () => {
+    const c = await card();
+    await usdRate();
+    const whole = await plan(2_000, "USD");
+    const near = await bankTx(c, -85_000, "person_transfer", "2026-11-08");
+    expect((await api.post(`/cash/payments/${whole}/links`, { transactionIds: [near] }).expect(201)).body).toEqual({ linked: 1, closed: true, remaining: 0 });
+    expect(await paid(whole)).toBe(true);
+
+    // In parts: ₴400 of ₴830 leaves ₴430 to pay, in hryvnias; the next ₴420 is within ₴20 and closes it.
+    const parts = await plan(2_000, "USD");
+    const first = await bankTx(c, -40_000, "person_transfer", "2026-11-07");
+    const second = await bankTx(c, -42_000, "person_transfer", "2026-11-06");
+    expect((await api.post(`/cash/payments/${parts}/links`, { transactionIds: [first] }).expect(201)).body).toEqual({ linked: 1, closed: false, remaining: 43_000 });
+    expect(await paid(parts)).toBe(false);
+    expect((await api.post(`/cash/payments/${parts}/links`, { transactionIds: [second] }).expect(201)).body).toEqual({ linked: 1, closed: true, remaining: 0 });
+    expect(await paid(parts)).toBe(true);
+  });
+
+  it("a foreign payment closed by two operations opens again when one is retyped, by hryvnias at the rate; the day takes it back", async () => {
+    const c = await card();
+    await usdRate();
+    const id = await plan(2_000, "USD");
+    const first = await bankTx(c, -40_000, "person_transfer", "2026-11-07");
+    const second = await bankTx(c, -43_000, "person_transfer", "2026-11-08");
+    await api.post(`/cash/payments/${id}/links`, { transactionIds: [first, second] }).expect(201);
+    expect(await paid(id)).toBe(true);
+    const closed = (await today()).state.dailyLimit as number;
+
+    // ₴400 left of ₴830: not covered, the payment is open again and its money held from the day.
+    await api.patch(`/transactions/${second}`, { type: "spend" }).expect(200);
+    expect(await paid(id)).toBe(false);
+    expect((await today()).state.dailyLimit).toBeLessThan(closed);
+  });
+
+  it("with no rate a foreign payment closed by links stays closed: nothing reopens on an unknown amount", async () => {
+    const c = await card();
+    await usdRate();
+    const id = await plan(2_000, "USD");
+    const first = await bankTx(c, -40_000, "person_transfer", "2026-11-07");
+    const second = await bankTx(c, -43_000, "person_transfer", "2026-11-08");
+    await api.post(`/cash/payments/${id}/links`, { transactionIds: [first, second] }).expect(201);
+    await ds.query(`DELETE FROM fx_rates`);
+    await api.patch(`/transactions/${second}`, { type: "spend" }).expect(200);
+    expect(await paid(id)).toBe(true);
+  });
+});
+
 describe("the owner's card at another bank", () => {
   const send = (c: number, amount: number, date: string, card = "545708****4563", time = "10:00:00") =>
     bankTx(c, -amount, "own_transfer", date, { description: card, time });

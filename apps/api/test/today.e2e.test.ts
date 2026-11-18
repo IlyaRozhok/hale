@@ -2062,6 +2062,34 @@ describe("questions, upcoming and run-out", () => {
         await tx(card, -1_000_000, "person_transfer", { date: "2026-11-22" });
         expect(paidQs(await today())).toEqual([]);
       });
+
+      // Б44: a transfer a little above the payment, and a payment in dollars, are asked about too.
+      it("takes a transfer up to ₴20 above the payment, but not ₴21", async () => {
+        const card = await account("black", 20_000_000);
+        const rent = await plan("Аренда", 1_000_000, "2026-11-23");
+        const over = await tx(card, -1_001_500, "person_transfer", { date: "2026-11-22", description: "Іван П." });
+        expect(paidQs(await today())).toEqual([
+          { id: `payment_paid:${rent}:${over}`, kind: "payment_paid", text: "Это оплата «Аренда» ₴10,000?", detail: "Іван П. · 22.11" },
+        ]);
+        await ds.query(`DELETE FROM transactions`);
+        await tx(card, -1_002_100, "person_transfer", { date: "2026-11-22" });
+        expect(paidQs(await today())).toEqual([]);
+      });
+
+      it("asks about a $20 payment at 41.5 for a ₴850 debit, naming what left the card; not for ₴880", async () => {
+        const card = await account("black", 20_000_000);
+        await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-21T09:00:00Z', 41.5)`);
+        const sub = (
+          await ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Подписка',2000,'USD','2026-11-23') RETURNING id`)
+        )[0].id as number;
+        const t = await tx(card, -85_000, "person_transfer", { date: "2026-11-22", description: "Netflix" });
+        expect(paidQs(await today())).toEqual([
+          { id: `payment_paid:${sub}:${t}`, kind: "payment_paid", text: "Это оплата «Подписка» ₴850?", detail: "Netflix · 22.11" },
+        ]);
+        await ds.query(`DELETE FROM transactions`);
+        await tx(card, -88_000, "person_transfer", { date: "2026-11-22" });
+        expect(paidQs(await today())).toEqual([]);
+      });
     });
   });
 

@@ -21,7 +21,8 @@ import { Clock, kyivInstantSql } from "../time/clock";
 import { LimitService } from "../today/limit.service";
 import { TransactionsService } from "../transactions/transactions.service";
 import { counterKeySql } from "../transactions/counter-key";
-import { linkedSum, paymentCandidateIds } from "./candidates";
+import { paymentUah } from "../domain/recurring-match";
+import { latestRates, linkedSum, paymentCandidateIds } from "./candidates";
 import { answerOther, answerWallet, binanceEvent, lockAnswer, undoAnswer } from "./cash-answer";
 import { exchangeOf, takeExchange, undoExchange } from "./cash-exchange";
 import { CASH_ACCOUNT_ID, cardTransferSql, walletBalance } from "./wallet";
@@ -351,9 +352,9 @@ export class CashService {
    */
   async payWith(paymentId: number, ids: readonly number[]): Promise<PaymentLinksDto> {
     return this.ds.transaction(async (m) => {
-      const p = (await m.query(`SELECT amount::float8 AS amount, paid_at FROM scheduled_payments WHERE id=$1 FOR UPDATE`, [paymentId]))[0] as
-        | { amount: number; paid_at: Date | null }
-        | undefined;
+      const p = (
+        await m.query(`SELECT amount::float8 AS amount, currency, paid_at FROM scheduled_payments WHERE id=$1 FOR UPDATE`, [paymentId])
+      )[0] as { amount: number; currency: string; paid_at: Date | null } | undefined;
       if (!p) throw new NotFoundException("payment not found");
       if (p.paid_at !== null) throw new ConflictException("the payment is already paid");
       const offered = new Set(await this.candidateIds(m, paymentId));
@@ -364,7 +365,11 @@ export class CashService {
         `UPDATE transactions SET type='obligation', category='transfer', type_source='owner', needs_label=false WHERE id = ANY($1::int[])`,
         [chosen],
       );
-      const cover = paymentCover(p.amount, await linkedSum(m, paymentId));
+      // The linked sum is in hryvnias: a foreign payment is compared at the latest rate (task Б44). It has one,
+      // or no operation would have been offered for it.
+      const amount = paymentUah(p, await latestRates(m));
+      if (amount === null) throw new UnprocessableEntityException("no rate for the payment's currency");
+      const cover = paymentCover(amount, await linkedSum(m, paymentId));
       if (cover.closed) {
         // Closed by its links: it opens again if it loses one and the rest no longer cover it (task Б26).
         await m.query(
