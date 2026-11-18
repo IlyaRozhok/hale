@@ -24,6 +24,13 @@ import {
   paymentUah,
   repairTaxLinks,
 } from "../domain/recurring-match";
+import {
+  type FopIncome,
+  type FopMonthIncome,
+  fopIncomeByPeriod,
+  receivedByLastMonthsMoney,
+  waitsForLateIncome,
+} from "../domain/fop-income";
 import { kyivDate } from "../domain/money";
 import { estimateDueOn, precedingQuarter, quarterBounds, quarterOf } from "../domain/quarter";
 import { taxReserve } from "../domain/tax";
@@ -38,11 +45,23 @@ import { BINANCE } from "./binance";
 export { BINANCE } from "./binance";
 const MATCH_DAYS = 3;
 const PLANNED_RECIPIENT_LABELS = ["close_regular", "shared_budget"];
-/** Fop income per month: its hryvnia sum and its first row. The caller adds conditions and `GROUP BY 1`. */
-const FOP_INCOME_BY_PERIOD = `SELECT to_char(t.local_date,'YYYY-MM') AS period, SUM(t.amount_uah) AS s,
-    (array_agg(t.id ORDER BY t.occurred_at, t.id))[1] AS first_id, min(t.occurred_at) AS first_at
+/** Fop income rows with a hryvnia amount, in order of arrival; which month each is, is domain/fop-income's rule. */
+const FOP_INCOMES = `SELECT t.id, t.local_date::text AS "localDate", t.occurred_at AS "occurredAt", t.amount_uah::float8 AS "amountUah"
   FROM transactions t JOIN accounts a ON a.id = t.account_id
-  WHERE a.kind='fop' AND t.type='income' AND t.amount > 0 AND t.amount_uah IS NOT NULL`;
+  WHERE a.kind='fop' AND t.type='income' AND t.amount > 0 AND t.amount_uah IS NOT NULL ORDER BY t.occurred_at, t.id`;
+
+interface FopEventIncome {
+  id: number;
+  period: string;
+  received: boolean;
+  byBank: boolean;
+  matchedId: number | null;
+  amountUah: number | null;
+  /** The income given to the event's month; undefined when none. */
+  income: FopMonthIncome | undefined;
+  /** The month each fop income row goes to for this event's expected income. */
+  periodOf: Map<number, string>;
+}
 
 interface TxRow {
   id: number;
@@ -100,7 +119,7 @@ export class PlanService implements OnApplicationBootstrap {
     )) as [{ fresh: boolean }];
     await this.generateEvents(today);
     // Events the old rule left waiting after a small fop income are received now (Б33).
-    await this.receiveFopEvents(this.ds.manager, null);
+    await this.receiveFopEvents(this.ds.manager);
     const { firstRows } = await this.recurringRows(today);
     await this.linkTaxTransactions();
     if ((fresh || firstRows) && fixLimit) await this.limit.invalidate("plan");
@@ -736,32 +755,96 @@ export class PlanService implements OnApplicationBootstrap {
    * month's sum in hryvnias. More income later that month raises the sum and keeps the first arrival's time, so
    * the next income date moves on to next month at once and never hangs on a month whose money came. A row
    * without a hryvnia amount waits. Refunds to the fop account are not income (Б5) and do not count.
+   *
+   * Which month an income is follows domain/fop-income (task Б46): last month's money that comes early next month,
+   * before next month's window, receives last month while last month still waits for it, and stays out of next
+   * month's sum.
    */
   private async markFopEvents(m: EntityManager, t: TxRow): Promise<void> {
-    const period = t.local_date.slice(0, 7);
-    await this.receiveFopEvents(m, period);
-    await m.query(
-      `WITH inc AS (${FOP_INCOME_BY_PERIOD} AND to_char(t.local_date,'YYYY-MM')=$1 GROUP BY 1)
-       UPDATE income_events e SET amount_uah = inc.s FROM inc, expected_incomes x
-        WHERE x.id = e.expected_income_id AND x.source='fop' AND e.period = inc.period AND e.status = 'received'
-          AND e.matched_transaction_id IS NOT NULL AND e.amount_uah IS DISTINCT FROM inc.s`,
-      [period],
-    );
+    for (const e of await this.fopEventIncome(m)) {
+      if (!e.income || e.periodOf.get(t.id) !== e.period) continue;
+      if (!e.received) await this.receiveFopEvent(m, e.id, e.income);
+      else if (e.byBank && e.amountUah !== e.income.sum) {
+        await m.query(`UPDATE income_events SET amount_uah=$2 WHERE id=$1 AND status='received' AND matched_transaction_id IS NOT NULL`, [
+          e.id,
+          e.income.sum,
+        ]);
+      }
+    }
   }
 
   /**
-   * Fop events still expected in a month that already has fop income are received, dated by its first income.
-   * One month, or every month (the hourly job: events the old half-the-amount rule left waiting). Safe to repeat;
-   * a received event is never re-dated. Like any bank credit it leaves the day's fixed limit alone.
+   * Fop events still expected whose month already has fop income are received, dated by its first income
+   * (the hourly job: events the old half-the-amount rule, or the calendar-month rule before Б46, left waiting).
+   * Safe to repeat; a received event is never re-dated. Like any bank credit it leaves the day's fixed limit alone.
+   *
+   * It also repairs what the calendar-month rule did before Б46: an event received by last month's late money,
+   * with no income of its own month, is opened again (receivedByLastMonthsMoney) while last month takes that money,
+   * so the next income date is its own window's again. Its date (`expected_on`, `date_set_by_hand`) is untouched.
+   * Both follow from the same attribution, so a second run finds nothing to do.
    */
-  private async receiveFopEvents(m: EntityManager, period: string | null): Promise<void> {
+  private async receiveFopEvents(m: EntityManager): Promise<void> {
+    for (const e of await this.fopEventIncome(m)) {
+      if (receivedByLastMonthsMoney({ period: e.period, received: e.received, matchedId: e.matchedId, hasIncome: e.income !== undefined }, e.periodOf)) {
+        await m.query(
+          `UPDATE income_events SET status='expected', received_at=NULL, amount_uah=NULL, matched_transaction_id=NULL
+            WHERE id=$1 AND status='received' AND matched_transaction_id=$2`,
+          [e.id, e.matchedId],
+        );
+      } else if (!e.received && e.income) await this.receiveFopEvent(m, e.id, e.income);
+    }
+  }
+
+  private async receiveFopEvent(m: EntityManager, id: number, income: FopMonthIncome): Promise<void> {
     await m.query(
-      `WITH inc AS (${FOP_INCOME_BY_PERIOD} AND ($1::text IS NULL OR to_char(t.local_date,'YYYY-MM')=$1) GROUP BY 1)
-       UPDATE income_events e SET status='received', received_at = inc.first_at, amount_uah = inc.s, matched_transaction_id = inc.first_id
-         FROM inc, expected_incomes x
-        WHERE x.id = e.expected_income_id AND x.source='fop' AND e.period = inc.period AND e.status <> 'received'`,
-      [period],
+      `UPDATE income_events SET status='received', received_at=$2, amount_uah=$3, matched_transaction_id=$4 WHERE id=$1 AND status <> 'received'`,
+      [id, income.firstAt, income.sum, income.firstId],
     );
+  }
+
+  /** Every fop event with the fop income its month takes, by domain/fop-income's rule for its expected income. */
+  private async fopEventIncome(m: EntityManager): Promise<FopEventIncome[]> {
+    const events: {
+      id: number;
+      expected_income_id: number;
+      period: string;
+      status: string;
+      matched_transaction_id: number | null;
+      amount_uah: number | null;
+      window_start_day: number;
+      matched_on: string | null;
+    }[] = await m.query(
+      `SELECT e.id, e.expected_income_id, e.period, e.status, e.matched_transaction_id, e.amount_uah::float8 AS amount_uah,
+              x.window_start_day, mt.local_date::text AS matched_on
+         FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id AND x.source='fop'
+         LEFT JOIN transactions mt ON mt.id = e.matched_transaction_id
+        ORDER BY e.expected_income_id, e.period`,
+    );
+    if (events.length === 0) return [];
+    const incomes: FopIncome[] = await m.query(FOP_INCOMES);
+    const out: FopEventIncome[] = [];
+    for (const xid of new Set(events.map((e) => e.expected_income_id))) {
+      const own = events.filter((e) => e.expected_income_id === xid);
+      const waiting = new Set(
+        own
+          .filter((e) => waitsForLateIncome({ period: e.period, received: e.status === "received", matchedOn: e.matched_on }))
+          .map((e) => e.period),
+      );
+      const { periodOf, months } = fopIncomeByPeriod(incomes, own[0]!.window_start_day, waiting);
+      for (const e of own) {
+        out.push({
+          id: e.id,
+          period: e.period,
+          received: e.status === "received",
+          byBank: e.matched_transaction_id !== null,
+          matchedId: e.matched_transaction_id,
+          amountUah: e.amount_uah,
+          income: months.get(e.period),
+          periodOf,
+        });
+      }
+    }
+    return out;
   }
 
   private async rates(m: EntityManager): Promise<Record<string, number>> {
