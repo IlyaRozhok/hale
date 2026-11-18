@@ -237,3 +237,14 @@ export function spentSql(from: string, to: string): string {
   return `SELECT COALESCE(SUM(-t.amount_uah),0)::float8 AS s FROM transactions t JOIN accounts a ON a.id=t.account_id
         WHERE ${limitSql("t", "a")} AND t.local_date BETWEEN ${from} AND ${to}`;
 }
+
+/**
+ * SQL for what counts of the pocket found missing on one Kyiv day (a date parameter, e.g. "$1"), one row (s float8):
+ * the wallet spending rows with the marker (cashCountShortSql), which the limit leaves out. «Сегодня» adds them back,
+ * as it adds back «потрачено», when it fixes the day's limit from the money of now: a count does not change the
+ * limit of its own day (Б47 (2)), only of the days after it.
+ */
+export function cashCountShortfallSql(day: string): string {
+  return `SELECT COALESCE(SUM(-t.amount_uah),0)::float8 AS s FROM transactions t JOIN accounts a ON a.id=t.account_id
+        WHERE a.kind = 'cash' AND t.type = 'spend' AND t.amount_uah IS NOT NULL AND ${cashCountShortSql("t")} AND t.local_date = ${day}`;
+}

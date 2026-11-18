@@ -324,6 +324,30 @@ describe("counting the pocket", () => {
     expect((await today()).state.dailyLimit).toBeGreaterThan(tomorrow);
   });
 
+  it("a shortfall does not lower today's limit when the day is fixed afresh after the count (Б47 (2))", async () => {
+    await card(1_000_000);
+    await op({ kind: "spend", amount: 5_000, category: "cafe" }).expect(201);
+    // The day was fixed when the wallet started, before the card was there: fix it with the card first.
+    await app.get(LimitService).invalidate("settings");
+    const limit = (await today()).state.dailyLimit as number;
+    expect(limit).toBeGreaterThan(45_000);
+    await api.post("/cash/count", { amount: 435_000 }).expect(201);
+    // Any change by hand fixes the day afresh from the facts of now, the wallet ₴600 lower among them.
+    await app.get(LimitService).invalidate("settings");
+    const after = (await today()).state;
+    expect(after.dailyLimit).toBe(limit);
+    expect(after.leftToday).toBe(limit - 5_000);
+    // So does a first fix of the day made after the count.
+    await ds.query(`DELETE FROM daily_snapshots`);
+    expect((await today()).state.dailyLimit).toBe(limit);
+    // The next day the money that is gone lowers the limit.
+    at("2026-11-11T10:00:00Z");
+    const tomorrow = (await today()).state.dailyLimit as number;
+    await ds.query(`DELETE FROM transactions WHERE description='Не записано'`);
+    await ds.query(`DELETE FROM daily_snapshots WHERE local_date='2026-11-11'`);
+    expect((await today()).state.dailyLimit).toBeGreaterThan(tomorrow);
+  });
+
   it("more than recorded: the balance is corrected, the limit is not", async () => {
     const before = (await today()).state.leftToday;
     expect((await api.post("/cash/count", { amount: 530_000 }).expect(201)).body.balance).toBe(530_000);
