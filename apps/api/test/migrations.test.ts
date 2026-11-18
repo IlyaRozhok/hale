@@ -9,6 +9,7 @@ import { RecurringStart1795824000000 } from "../src/db/migrations/0027-recurring
 import { CashStartedAt1795910400000 } from "../src/db/migrations/0028-cash-started-at";
 import { CashCountAbsorbed1795996800000 } from "../src/db/migrations/0029-cash-count-absorbed";
 import { OwnerRuleMark1796083200000 } from "../src/db/migrations/0030-owner-rule-mark";
+import { SettingsClassifierVersion1796169600000 } from "../src/db/migrations/0031-settings-classifier-version";
 import { kyivDate } from "../src/domain/money";
 import { createTestDatabase } from "./db";
 
@@ -285,6 +286,26 @@ describe("migrations", () => {
     for (let i = migrations.indexOf(OwnerRuleMark1796083200000); i < migrations.length; i++) await ds.undoLastMigration();
     expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE column_name='owner_rule_id'`)).toEqual([]);
     expect(await ds.query(rows)).toEqual(was);
+    await ds.destroy();
+  });
+
+  it("0031 records that no row was classified by a numbered classifier yet, and changes nothing else (Б49)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(SettingsClassifierVersion1796169600000)) });
+    await before.initialize();
+    await before.runMigrations();
+    await before.query(`UPDATE settings SET tax_rate_bp=500 WHERE id=1`);
+    const was = await before.query(`SELECT * FROM settings`);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    const after: Record<string, unknown>[] = await ds.query(`SELECT * FROM settings`);
+    expect(after).toEqual([{ ...was[0], classifier_version: 0 }]);
+    for (let i = migrations.indexOf(SettingsClassifierVersion1796169600000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE column_name='classifier_version'`)).toEqual([]);
+    expect(await ds.query(`SELECT * FROM settings`)).toEqual(was);
     await ds.destroy();
   });
 });

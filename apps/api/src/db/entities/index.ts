@@ -156,6 +156,8 @@ export class Settings {
   @Column({ type: "timestamptz", nullable: true }) cash_started_at!: Date | null;
   /** The moment of the last count of the pocket (Б40): the next count row keeps it, to know which count came first after a deposit. */
   @Column({ type: "timestamptz", nullable: true }) cash_counted_at!: Date | null;
+  /** The CLASSIFIER_VERSION the rows were last reclassified with (Б49): an older one queues a reclassify at start. */
+  @Column({ type: "integer", default: 0 }) classifier_version!: number;
 }
 
 @Entity("bridge_plans")

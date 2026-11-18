@@ -10,6 +10,14 @@ import {
 
 export type { Category } from "./merchants";
 
+/**
+ * The version of the classification rules (Б49). Raise it whenever a change in classify(), in how rules match,
+ * or in the own-pair logic (own-pair.ts) should reach rows already stored: at the next start the server sees
+ * that settings.classifier_version is older and queues one reclassify of every row not typed by the owner.
+ * 1: the rules as of Б38 (money in from the owner, his name only in the bank's counterparty field).
+ */
+export const CLASSIFIER_VERSION = 1;
+
 export type TxType =
   | "income"
   | "spend"

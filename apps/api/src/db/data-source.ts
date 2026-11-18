@@ -31,6 +31,7 @@ import { RecurringStart1795824000000 } from "./migrations/0027-recurring-start";
 import { CashStartedAt1795910400000 } from "./migrations/0028-cash-started-at";
 import { CashCountAbsorbed1795996800000 } from "./migrations/0029-cash-count-absorbed";
 import { OwnerRuleMark1796083200000 } from "./migrations/0030-owner-rule-mark";
+import { SettingsClassifierVersion1796169600000 } from "./migrations/0031-settings-classifier-version";
 
 export const migrations = [
   Init1793577600000,
@@ -63,6 +64,7 @@ export const migrations = [
   CashStartedAt1795910400000,
   CashCountAbsorbed1795996800000,
   OwnerRuleMark1796083200000,
+  SettingsClassifierVersion1796169600000,
 ];
 
 export function createDataSource(url: string): DataSource {
