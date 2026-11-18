@@ -1251,6 +1251,36 @@ describe("bridge mode", () => {
     expect(await plans()).toHaveLength(0);
   });
 
+  // Б47 (1), option А: what is due on the income day is cash needed before it, like what is due the day before.
+  const bridgeOn = async (due: string) => {
+    await ds.query(`UPDATE scheduled_payments SET due_on=$1 WHERE name='On income'`, [due]);
+    await ds.query(`DELETE FROM daily_snapshots`);
+    return (await today()).state.bridge;
+  };
+
+  it("a payment due on the income day raises the credit needed like one due the day before", async () => {
+    await setup();
+    await payment("On income", 500_000, "2026-11-20");
+    const onIncome = await bridgeOn("2026-11-20");
+    const dayBefore = await bridgeOn("2026-11-19");
+    expect(onIncome.creditNeeded).toBe(2_007_000 + 500_000);
+    expect(onIncome).toMatchObject({ creditNeeded: dayBefore.creditNeeded, maxDailyWithinCredit: dayBefore.maxDailyWithinCredit });
+    expect((await bridgeOn("2026-11-21")).creditNeeded).toBe(2_007_000);
+  });
+
+  it("a tax estimate due on the income day is cash needed before it, like one due the day before", async () => {
+    await setup();
+    await ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, tax_quarter, is_estimate)
+       VALUES ('tax','On income',500000,'UAH','2026-11-20','2026-Q3',true)`,
+    );
+    const onIncome = await bridgeOn("2026-11-20");
+    const dayBefore = await bridgeOn("2026-11-19");
+    expect(onIncome).toMatchObject({ creditNeeded: dayBefore.creditNeeded, maxDailyWithinCredit: dayBefore.maxDailyWithinCredit });
+    // The day after the income it is an accrual again, not cash needed before the income.
+    expect((await bridgeOn("2026-11-21")).creditNeeded).toBeLessThan(onIncome.creditNeeded);
+  });
+
   it("reports the plan as confirmed once one is saved", async () => {
     await setup();
     const saved = await api.post("/bridge", { dailyAmount: 100_000 }).expect(201);

@@ -538,7 +538,8 @@ export class TodayService {
 
     // payments: unpaid ones feed the limit; the window's payments (paid or not, native amounts) define the bridge basis
     const end = next && next >= date ? next : addDays(date, HORIZON_DAYS);
-    // The payments of the stretch: due before `end`, or on the income day itself (reserved in advance, Б47 (1)).
+    // `end` is only where the runway stops; it is not a window for payments. Every payment and tax row "before the
+    // next income" is picked by `dueEnd`: due before `end`, or on the income day itself (reserved in advance, Б47 (1)).
     const dueEnd = dueWindowEnd(date, next);
     const pays: {
       id: number; name: string; kind: string; amount: number; currency: string; due_on: string; paid: boolean;
@@ -593,7 +594,7 @@ export class TodayService {
     // Rows standing in for an accrual (an estimate, or this quarter entered early) are still not cash
     // needed before the next income, or a bridge plan would jump at the rollover.
     const deferred = unpaid
-      .filter((p) => p.kind === "tax" && p.due_on >= end && (p.is_estimate || p.tax_quarter === thisQuarter))
+      .filter((p) => p.kind === "tax" && p.due_on >= dueEnd && (p.is_estimate || p.tax_quarter === thisQuarter))
       .reduce((s, p) => s + uah(p.amount, p.currency), 0);
 
     const spentToday = await this.spent(m, date, date);
