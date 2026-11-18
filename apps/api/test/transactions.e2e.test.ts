@@ -806,6 +806,18 @@ describe("filters by category and period", () => {
     expect(day.body.summary).toEqual({ total: -25_000, count: 2 });
   });
 
+  it("finds rows with an empty category under «Без категории», and only those besides its own (В8)", async () => {
+    const a = await account();
+    await tx(a, { description: "Empty", amount: -10_000, category: null, at: "2026-11-01T10:00:00.000Z" });
+    await tx(a, { description: "Keyed", amount: -20_000, category: "uncategorized", at: "2026-11-02T10:00:00.000Z" });
+    await tx(a, { description: "Cafe", amount: -40_000, category: "cafe", at: "2026-11-03T10:00:00.000Z" });
+    const res = await api.get("/transactions?group=spend&category=uncategorized").expect(200);
+    expect(res.body.items.map((i: { description: string }) => i.description)).toEqual(["Keyed", "Empty"]);
+    expect(res.body.summary).toEqual({ total: -30_000, count: 2 });
+    const cafe = await api.get("/transactions?category=cafe").expect(200);
+    expect(cafe.body.items.map((i: { description: string }) => i.description)).toEqual(["Cafe"]);
+  });
+
   it("has no summary without a filter, and rejects a bad period", async () => {
     const a = await account();
     await tx(a, { description: "Cafe A", amount: -10_000, category: "cafe" });

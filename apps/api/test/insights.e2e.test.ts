@@ -141,6 +141,39 @@ describe("GET /insights/month", () => {
     expect(after.spent).toBe(await limitSpent("2026-11-01", after.through));
   });
 
+  it("matches the «Траты» list under each category's filter, «Без категории» with empty categories included (В8)", async () => {
+    const black = (await ds.query(`SELECT id FROM accounts WHERE kind='black'`))[0].id as number;
+    await tx(black, "2026-11-14T12:00:00Z", -4_000, "spend", "uncategorized"); // the key itself, next to empty ones
+    await tx(black, "2026-10-03T10:00:00Z", -2_500, "spend", null); // an empty category in the month before
+    await tx(black, "2026-11-15T10:00:00Z", -6_000, "obligation", null); // listed, outside the limit
+    const cash = await account("cash");
+    seq++;
+    await ds.query(
+      `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, category, raw)
+       VALUES ($1,$2,'2026-11-14T10:00:00Z','2026-11-14','Не записано',-60000,-60000,'spend','uncategorized','{"cash_count":"short"}')`,
+      [`tx-${seq}`, cash],
+    );
+    const list = async (category: string, from: string, to: string) =>
+      (await get(`/transactions?group=spend&limit=200&category=${category}&from=${from}&to=${to}`).expect(200)).body;
+
+    for (const q of ["", "?month=2026-10"]) {
+      const { body } = await get(`/insights/month${q}`).expect(200);
+      expect(body.categories.map((c: { category: string }) => c.category)).toContain("uncategorized");
+      for (const c of body.categories as { category: string; spent: number; previousSpent: number; count: number }[]) {
+        const current = await list(c.category, `${body.month}-01`, body.through);
+        expect(current.summary, `${body.month} ${c.category}`).toEqual({ total: 0 - c.spent, count: c.count });
+        const previous = await list(c.category, body.previous.from, body.previous.to);
+        expect(previous.summary.total, `${body.previous.from} ${c.category}`).toBe(0 - c.previousSpent);
+      }
+    }
+
+    // The shortfall and the payment are on the list under «Без категории», marked outside the limit, and not counted.
+    // In the limit: the withdrawal before the wallet start, the empty spend and the one filed under the key itself.
+    const items = (await list("uncategorized", "2026-11-01", "2026-11-16")).items as { amount: number; inLimit: boolean }[];
+    expect(items.filter((i) => !i.inLimit).map((i) => i.amount)).toEqual([-6_000, -60_000]);
+    expect(items.filter((i) => i.inLimit).map((i) => i.amount)).toEqual([-4_000, -1_500, -5_000]);
+  });
+
   it("counts a past month to its last day", async () => {
     const { body } = await get("/insights/month?month=2026-10").expect(200);
     expect(body).toMatchObject({ month: "2026-10", through: "2026-10-31", previous: { from: "2026-09-01", to: "2026-09-30" } });
