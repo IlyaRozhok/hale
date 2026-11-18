@@ -254,7 +254,8 @@ describe("the same facts give the same figures (invariant 8)", () => {
     const r = await today();
     expect(r.date).toBe("2026-11-03");
     expect(r.state).toMatchObject({ mode: "bridge", dailyLimit: 45_000 });
-    expect(r.state.shortageStart).toEqual({});
+    // The new day began in shortage on the shortage's limit: an ordinary shortage day (Б47 (4)).
+    expect(r.state.shortageStart).toBeUndefined();
   });
 
   it("a plan that has ended, before and after the writer closes it", async () => {

@@ -137,7 +137,10 @@ export interface DayMarkInput {
   stored: string | null;
   /** What the last fixed day before today holds; null when there is none. */
   previous: string | null;
-  /** The limit today's row holds; null when the day has no row. Left out together with `limit`: not compared. */
+  /**
+   * The limit today's row holds; for a day with no row, the limit it is being fixed with (its morning one).
+   * Left out together with `limit`: not compared.
+   */
   storedLimit?: Minor | null;
   /** The limit the shortage puts in force today: the engine's, or the plan's being chosen. */
   limit?: Minor;
@@ -145,7 +148,7 @@ export interface DayMarkInput {
 
 /**
  * The mark today's row should carry. The shortage came on today when a day fixed as ordinary is now
- * in shortage, or when the day is fixed (again) in shortage right after an ordinary day. The very
+ * in shortage, or when the day is first fixed in shortage right after an ordinary day. The very
  * first fixed day is never one: there was no limit before it to replace.
  *
  * A day that began in shortage keeps `bridge` even while the money is briefly above zero: were it
@@ -156,6 +159,11 @@ export interface DayMarkInput {
  * recommended sum). It stays an ordinary shortage day, judged by its limit, until that limit changes the same
  * day — a plan chosen with another sum — and then it is the start. With the limits left out the mark is
  * placed as before.
+ *
+ * A day that began in shortage right after an ordinary day is fixed with the shortage's limit from its start
+ * (task Б47 (4), the owner's option А of 18 November): its limit never changes, so it too is an ordinary
+ * shortage day, judged by its limit. Only a day first fixed after it already crossed into shortage onto another
+ * limit (the morning ordinary, the first fix late) is the start.
  */
 export function dayMark(i: DayMarkInput): DayMark {
   if (i.live === "normal") return i.stored === "bridge" ? "bridge" : "normal";
@@ -164,6 +172,6 @@ export function dayMark(i: DayMarkInput): DayMark {
   if (i.stored === "normal") return changed === false ? "bridge" : "bridge_start";
   // A row of `bridge` right after an ordinary day is a day that crossed on the same limit (above).
   if (i.stored === "bridge" && i.previous === "normal" && changed === true) return "bridge_start";
-  if (i.stored === null && i.previous === "normal") return "bridge_start";
+  if (i.stored === null && i.previous === "normal") return changed === false ? "bridge" : "bridge_start";
   return "bridge";
 }
