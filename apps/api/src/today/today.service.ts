@@ -771,10 +771,12 @@ export class TodayService {
       `SELECT payment_id || ':' || transaction_id AS pair FROM payment_dismissals WHERE payment_id = ANY($1::int[])`,
       [payments.map((p) => p.id)],
     );
-    return paidQuestions(payments, candidates, new Set(dismissed.map((d) => d.pair)), f.date).map(({ payment, tx }) => ({
+    // A foreign payment is asked about at the latest rate (task Б44), the rate its candidates were picked by.
+    const rates = Object.fromEntries(Object.entries(await this.rates(m)).map(([c, r]) => [c, r.rate]));
+    return paidQuestions(payments, candidates, new Set(dismissed.map((d) => d.pair)), f.date, rates).map(({ payment, tx }) => ({
       id: `payment_paid:${payment.id}:${tx.id}`,
       kind: "payment_paid" as const,
-      // Only hryvnia payments are offered operations today; a foreign one would be named by what left the card.
+      // A foreign payment is named by what left the card, in hryvnias.
       text: `Это оплата «${payment.name}» ${fmt(payment.currency === "UAH" ? payment.amount : Math.abs(tx.amountUah ?? tx.amount))}?`,
       detail: `${texts.get(tx.id) ?? ""} · ${fmtDay(tx.localDate)}`,
     }));

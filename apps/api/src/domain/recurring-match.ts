@@ -141,6 +141,26 @@ export const PAID_QUESTION_TOLERANCE = 2_000;
 /** No more «Это оплата?» questions than this at once. */
 export const MAX_PAID_QUESTIONS = 2;
 
+/** The payment's amount in hryvnia minor units, a foreign one at the rate (UAH per unit); null without a rate. */
+export function paymentUah(p: Pick<Payment, "amount" | "currency">, rates: Readonly<Record<string, number>>): number | null {
+  if (p.currency === "UAH") return p.amount;
+  const rate = rates[p.currency];
+  return rate && rate > 0 ? Math.round(p.amount * rate) : null;
+}
+
+/**
+ * The largest operation, in hryvnia minor units, the «Оплачено» sheet and «Это оплата?» offer for a payment
+ * (task Б44): a hryvnia payment up to PAID_QUESTION_TOLERANCE (₴20) above its amount, a foreign one up to
+ * APPROX_TOLERANCE (5%) above its amount at the rate, the band matchPayment takes. A linked operation becomes
+ * the payment in full, so what it has over the amount leaves the day's spending: the band stays small.
+ * Null for a foreign payment without a rate: nothing is offered.
+ */
+export function candidateCap(p: Pick<Payment, "amount" | "currency">, rates: Readonly<Record<string, number>>): number | null {
+  if (p.currency === "UAH") return p.amount + PAID_QUESTION_TOLERANCE;
+  const rate = rates[p.currency];
+  return rate && rate > 0 ? Math.floor(p.amount * rate * (1 + APPROX_TOLERANCE)) : null;
+}
+
 export interface PaidQuestion {
   payment: Payment;
   tx: PayableTx;
