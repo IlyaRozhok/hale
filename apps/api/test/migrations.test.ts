@@ -10,6 +10,10 @@ import { CashStartedAt1795910400000 } from "../src/db/migrations/0028-cash-start
 import { CashCountAbsorbed1795996800000 } from "../src/db/migrations/0029-cash-count-absorbed";
 import { OwnerRuleMark1796083200000 } from "../src/db/migrations/0030-owner-rule-mark";
 import { SettingsClassifierVersion1796169600000 } from "../src/db/migrations/0031-settings-classifier-version";
+import { HryvniaLegAmounts1796256000000 } from "../src/db/migrations/0032-hryvnia-leg-amounts";
+import { CLASSIFIER_VERSION } from "../src/domain/classify";
+import { JobRunner } from "../src/mono/jobs/job-runner";
+import { ReclassifyService } from "../src/transactions/reclassify.service";
 import { kyivDate } from "../src/domain/money";
 import { createTestDatabase } from "./db";
 
@@ -306,6 +310,90 @@ describe("migrations", () => {
     for (let i = migrations.indexOf(SettingsClassifierVersion1796169600000); i < migrations.length; i++) await ds.undoLastMigration();
     expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE column_name='classifier_version'`)).toEqual([]);
     expect(await ds.query(`SELECT * FROM settings`)).toEqual(was);
+    await ds.destroy();
+  });
+  it("0032 takes the bank's hryvnias for old operations made in hryvnias on a currency account, and nothing else (Б50)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(HryvniaLegAmounts1796256000000)) });
+    await before.initialize();
+    await before.runMigrations();
+    // The server before this change had already classified the rows with classifier 1.
+    await before.query(`UPDATE settings SET classifier_version=1 WHERE id=1`);
+    const account = async (ext: string, kind: string, currency: string): Promise<number> =>
+      (await before.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ($1,$2,$3,0) RETURNING id`, [ext, kind, currency]))[0].id;
+    const usd = await account("usd", "white", "USD");
+    const card = await account("card", "black", "UAH");
+    const insert = (
+      ext: string,
+      acc: number,
+      at: string,
+      amount: number,
+      amountUah: number | null,
+      fxRate: number | null,
+      raw: object,
+      over: { description?: string; type?: string; typeSource?: string } = {},
+    ) =>
+      before.query(
+        `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, mcc, amount, amount_uah, fx_rate,
+                                   type, type_source, raw)
+         VALUES ($1,$2,$3,$4,$5,4829,$6,$7,$8,$9,$10,$11)`,
+        [ext, acc, at, at.slice(0, 10), over.description ?? "Переказ", amount, amountUah, fxRate, over.type ?? null,
+         over.typeSource ?? "auto", JSON.stringify(raw)],
+      );
+    const item = (amount: number, operationAmount: number, currencyCode: number) => ({ amount, operationAmount, currencyCode });
+    // −$100 sold to the owner's hryvnia card for ₴4,127; stored at a guessed rate of 38 (₴3,800), 8% off.
+    await insert("sell", usd, "2026-10-10T10:00:00Z", -10000, -380000, 38, item(-10000, -412700, 980), { description: "На чорну картку" });
+    await insert("leg", card, "2026-10-10T10:00:30Z", 412700, 412700, null, item(412700, 412700, 980), { description: "З доларового рахунку" });
+    // Typed by the owner: the hryvnias become exact, the type stays his.
+    await insert("owner", usd, "2026-10-12T10:00:00Z", -5000, -190000, 38, item(-5000, -206350, 980), { type: "spend", typeSource: "owner" });
+    // Not to be touched: an operation in dollars, signs that disagree, zero amounts, no bank item, a hryvnia account.
+    await insert("dollars", usd, "2026-10-14T10:00:00Z", -2000, -76000, 38, item(-2000, -2000, 840));
+    await insert("signs", usd, "2026-10-15T10:00:00Z", -2000, -76000, 38, item(-2000, 82000, 980));
+    await insert("zero", usd, "2026-10-16T10:00:00Z", 0, 0, 38, item(0, 41000, 980));
+    // Both sides zero agree in sign; only the guard on a zero amount keeps it from a division by zero.
+    await insert("zeros", usd, "2026-10-16T11:00:00Z", 0, 0, 38, item(0, 0, 980));
+    await insert("bare", usd, "2026-10-17T10:00:00Z", -2000, -76000, 38, {});
+    await insert("uah", card, "2026-10-18T10:00:00Z", -5000, -5000, null, item(-5000, -6000, 980));
+
+    const own = { ownNames: ["Test Owner"], ownIbans: [], ownJars: [] };
+    const types = `SELECT external_id, type FROM transactions WHERE external_id IN ('sell','leg') ORDER BY id`;
+    await new ReclassifyService(before, new JobRunner(before, { now: () => Date.now() }), own).reclassifyPending();
+    // At the guessed rate the two sides are too far apart to be one exchange: money to and from a person.
+    expect(await before.query(types)).toEqual([
+      { external_id: "sell", type: "person_transfer" },
+      { external_id: "leg", type: "person_in" },
+    ]);
+    const rows = `SELECT external_id, amount_uah::float8 AS amount_uah, fx_rate::float8 AS fx_rate, type, type_source
+                    FROM transactions ORDER BY id`;
+    const was: Record<string, unknown>[] = await before.query(rows);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    const after: Record<string, unknown>[] = await ds.query(rows);
+    const exact: Record<string, { amount_uah: number; fx_rate: number }> = {
+      sell: { amount_uah: -412700, fx_rate: 41.27 },
+      owner: { amount_uah: -206350, fx_rate: 41.27 },
+    };
+    expect(after).toEqual(was.map((r) => ({ ...r, ...exact[r.external_id as string] })));
+
+    // The next start reclassifies with the raised version, and the exchange is found.
+    expect(CLASSIFIER_VERSION).toBeGreaterThan(1);
+    const runner = new JobRunner(ds, { now: () => Date.now() });
+    const svc = new ReclassifyService(ds, runner, own);
+    svc.onModuleInit();
+    await svc.onApplicationBootstrap();
+    expect(await runner.runOnce()).toBe(true);
+    expect(await ds.query(types)).toEqual([
+      { external_id: "sell", type: "own_transfer" },
+      { external_id: "leg", type: "own_transfer" },
+    ]);
+    expect((await ds.query(`SELECT type, type_source FROM transactions WHERE external_id='owner'`))[0]).toEqual({ type: "spend", type_source: "owner" });
+
+    // Down cannot bring the guessed amounts back and leaves the exact ones.
+    for (let i = migrations.indexOf(HryvniaLegAmounts1796256000000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect((await ds.query(`SELECT amount_uah::float8 AS v FROM transactions WHERE external_id='sell'`))[0].v).toBe(-412700);
     await ds.destroy();
   });
 });
