@@ -31,6 +31,7 @@ import {
   receivedByLastMonthsMoney,
   waitsForLateIncome,
 } from "../domain/fop-income";
+import { previousMonth } from "../domain/insights";
 import { kyivDate } from "../domain/money";
 import { estimateDueOn, precedingQuarter, quarterBounds, quarterOf } from "../domain/quarter";
 import { taxReserve } from "../domain/tax";
@@ -672,8 +673,9 @@ export class PlanService implements OnApplicationBootstrap {
    */
   async unsettle(m: EntityManager, ids: readonly number[], type: string): Promise<LimitReason | null> {
     if (ids.length === 0) return null;
+    const reopenedIncome = type === "income" ? false : await this.releaseFopIncome(m, ids);
     const dropped = type === "loan_in" ? false : await this.dropLoans(m, ids);
-    if (SETTLING_TYPES.has(type)) return dropped ? "loan" : null;
+    if (SETTLING_TYPES.has(type)) return dropped ? "loan" : reopenedIncome ? "income" : null;
     const unlinked: { payment_id: number }[] = await m.query(
       `WITH d AS (DELETE FROM payment_links WHERE transaction_id = ANY($1::int[]) RETURNING payment_id) SELECT DISTINCT payment_id FROM d`,
       [ids],
@@ -684,7 +686,50 @@ export class PlanService implements OnApplicationBootstrap {
     )) as [unknown[], number];
     const reopened = await this.reopenUncovered(m, unlinked.map((u) => u.payment_id));
     if (freed[1] > 0 || reopened) return "payment_paid";
-    return dropped ? "loan" : null;
+    return dropped ? "loan" : reopenedIncome ? "income" : null;
+  }
+
+  /**
+   * Rows that stopped being income (already retyped in this transaction) give back the fop income they brought
+   * (task Б49; a transfer to oneself typed income before Б38). An event the bank received with one of them is
+   * opened and then given its month's income afresh by domain/fop-income's rule, as the hourly job does: income
+   * that is still there receives it again with its own first row, time and sum, and with none left it waits again,
+   * its date (`expected_on`, `date_set_by_hand`) untouched. A received event whose sum counted one of them keeps
+   * its first row and gets the smaller sum. Events confirmed by hand (no row) and USDC events are not touched.
+   * True when an event the rows had received waits again: the next income date moved, and the day is fixed afresh.
+   */
+  private async releaseFopIncome(m: EntityManager, ids: readonly number[]): Promise<boolean> {
+    const taken: { id: number }[] = await m.query(
+      `SELECT e.id FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id AND x.source='fop'
+        WHERE e.status='received' AND e.matched_transaction_id = ANY($1::int[]) FOR UPDATE OF e`,
+      [ids],
+    );
+    // The months a fop credit among the rows could have counted in: its own, or the one before (Б46).
+    const months: { month: string }[] = await m.query(
+      `SELECT DISTINCT to_char(t.local_date, 'YYYY-MM') AS month FROM transactions t JOIN accounts a ON a.id = t.account_id
+        WHERE t.id = ANY($1::int[]) AND a.kind='fop' AND t.amount > 0`,
+      [ids],
+    );
+    if (taken.length === 0 && months.length === 0) return false;
+    const takenIds = taken.map((e) => e.id);
+    if (takenIds.length > 0) {
+      await m.query(
+        `UPDATE income_events SET status='expected', received_at=NULL, amount_uah=NULL, matched_transaction_id=NULL WHERE id = ANY($1::int[])`,
+        [takenIds],
+      );
+      await this.receiveFopEvents(m);
+    }
+    const periods = new Set(months.flatMap((r) => [r.month, previousMonth(r.month)]));
+    for (const e of await this.fopEventIncome(m)) {
+      if (!periods.has(e.period) || !e.received || !e.byBank || !e.income || e.amountUah === e.income.sum) continue;
+      await m.query(`UPDATE income_events SET amount_uah=$2 WHERE id=$1 AND status='received' AND matched_transaction_id IS NOT NULL`, [
+        e.id,
+        e.income.sum,
+      ]);
+    }
+    if (takenIds.length === 0) return false;
+    const waiting: unknown[] = await m.query(`SELECT 1 FROM income_events WHERE id = ANY($1::int[]) AND status <> 'received' LIMIT 1`, [takenIds]);
+    return waiting.length > 0;
   }
 
   /**
