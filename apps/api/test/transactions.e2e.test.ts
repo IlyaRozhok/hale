@@ -1015,3 +1015,107 @@ describe("an owner retype that makes a loan or closes a payment fixes the day af
     expect(await dayLimit()).toBe(1);
   });
 });
+
+describe("deleting a rule returns only what was changed through it (Б36)", () => {
+  const del = (p: string) => request(http()).delete(p).set("Authorization", auth);
+  const reclassifyIds = (ids: number[]) => app.get(ReclassifyService).reclassifyIds(ids);
+  const source = async (id: number) => row("SELECT type, type_source FROM transactions WHERE id=$1", [id]);
+  const ruleIds = async () => ((await api.get("/rules").expect(200)).body as { id: number }[]).map((r) => r.id);
+  const transfer = (a: number, o: TxOver = {}) =>
+    tx(a, { iban: IBAN, name: "Olena K", description: "Переказ", mcc: 4829, type: "person_transfer", amount: -80_000, ...o });
+
+  it("leaves a row the owner then changed alone, and returns the rows changed through the rule", async () => {
+    const a = await account();
+    const edited = await transfer(a);
+    const similar = await transfer(a);
+    const alone = await transfer(a);
+    await api.patch(`/transactions/${edited}`, { type: "obligation", applyToSimilar: true }).expect(200);
+    // The owner sets the same type on one of them by itself: from now on it is the owner's.
+    await api.patch(`/transactions/${alone}`, { type: "obligation" }).expect(200);
+    const [rule] = await ruleIds();
+
+    expect((await del(`/rules/${rule}`).expect(200)).body).toEqual({ updated: 2 });
+    expect((await source(edited)).type_source).not.toBe("owner");
+    expect((await source(similar)).type_source).not.toBe("owner");
+    expect(await source(alone)).toEqual({ type: "obligation", type_source: "owner" });
+  });
+
+  it("leaves a later row the owner typed alone, and returns a later row the rule typed", async () => {
+    const a = await account();
+    const first = await transfer(a);
+    await api.patch(`/transactions/${first}`, { type: "obligation", applyToSimilar: true }).expect(200);
+    const byRule = await transfer(a, { type: null, source: null });
+    await reclassifyIds([byRule]);
+    expect(await source(byRule)).toEqual({ type: "obligation", type_source: "rule" });
+    const byHand = await transfer(a);
+    await api.patch(`/transactions/${byHand}`, { type: "obligation" }).expect(200);
+    const [rule] = await ruleIds();
+
+    expect((await del(`/rules/${rule}`).expect(200)).body).toEqual({ updated: 2 });
+    expect((await source(byRule)).type_source).not.toBe("rule");
+    expect((await source(first)).type_source).not.toBe("owner");
+    expect(await source(byHand)).toEqual({ type: "obligation", type_source: "owner" });
+  });
+
+  it("a recipient answer gives back its rows, but not one the owner changed alone after it", async () => {
+    const a = await account();
+    const one = await transfer(a, { needsLabel: true });
+    const two = await transfer(a, { needsLabel: true });
+    const key = (await api.get("/transactions").expect(200)).body.items[0].counterKey as string;
+    await api.post("/recipients/label", { counterKey: key, label: "obligation" }).expect(201);
+    await api.patch(`/transactions/${two}`, { type: "obligation" }).expect(200);
+    const [rule] = await ruleIds();
+
+    expect((await del(`/rules/${rule}`).expect(200)).body).toEqual({ updated: 1 });
+    expect(await row("SELECT type, needs_label FROM transactions WHERE id=$1", [one])).toEqual({ type: "person_transfer", needs_label: true });
+    expect(await source(two)).toEqual({ type: "obligation", type_source: "owner" });
+  });
+
+  it("a rule saved again under a new id still gives back the rows changed through the first one", async () => {
+    const a = await account();
+    const one = await transfer(a);
+    const two = await transfer(a);
+    await api.patch(`/transactions/${one}`, { type: "obligation", applyToSimilar: true }).expect(200);
+    const [old] = await ruleIds();
+    // The same counterparty answered: the stored rule is replaced by a new row.
+    const key = ((await api.get("/transactions").expect(200)).body.items as { id: number; counterKey: string }[]).find((i) => i.id === two)!.counterKey;
+    await api.post("/recipients/label", { counterKey: key, label: "obligation" }).expect(201);
+    const [rule] = await ruleIds();
+    expect(rule).not.toBe(old);
+    expect((await row("SELECT count(*)::int AS n FROM transactions WHERE owner_rule_id=$1", [old])).n).toBe(0);
+
+    expect((await del(`/rules/${rule}`).expect(200)).body).toEqual({ updated: 2 });
+    expect((await source(one)).type_source).not.toBe("owner");
+    expect((await source(two)).type_source).not.toBe("owner");
+  });
+
+  it("a rule saved again moves the marks of rows the new save does not reach", async () => {
+    const a = await account();
+    const one = await transfer(a);
+    await api.patch(`/transactions/${one}`, { type: "obligation", applyToSimilar: true }).expect(200);
+    const [old] = await ruleIds();
+    expect((await row("SELECT owner_rule_id FROM transactions WHERE id=$1", [one])).owner_rule_id).toBe(old);
+    // The stored rule is found case-insensitively, the counterparty key is not: an account number written in
+    // other case replaces the rule from outside the first save's rows, and `one` keeps a mark of the new rule.
+    const other = await transfer(a, { iban: IBAN.toLowerCase() });
+    await api.patch(`/transactions/${other}`, { type: "obligation", applyToSimilar: true }).expect(200);
+    const [rule] = await ruleIds();
+    expect(rule).not.toBe(old);
+    expect((await row("SELECT owner_rule_id FROM transactions WHERE id=$1", [one])).owner_rule_id).toBe(rule);
+  });
+
+  it("a row the owner typed before rules were marked is given back as before; one typed alone since is kept", async () => {
+    const a = await account();
+    const old = await transfer(a, { type: "obligation", source: "owner" });
+    await ds.query(`UPDATE transactions SET owner_rule_id = -1 WHERE id=$1`, [old]);
+    const alone = await transfer(a, { type: "obligation", source: "owner" });
+    const rule = (
+      await ds.query(`INSERT INTO rules (match_kind, match_value, type, direction) VALUES ('iban',$1,'obligation','out') RETURNING id`, [IBAN])
+    )[0].id as number;
+
+    expect((await del(`/rules/${rule}`).expect(200)).body).toEqual({ updated: 1 });
+    expect((await source(old)).type_source).not.toBe("owner");
+    expect(await row("SELECT owner_rule_id FROM transactions WHERE id=$1", [old])).toEqual({ owner_rule_id: null });
+    expect(await source(alone)).toEqual({ type: "obligation", type_source: "owner" });
+  });
+});

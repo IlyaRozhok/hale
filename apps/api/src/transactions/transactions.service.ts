@@ -233,7 +233,8 @@ export class TransactionsService {
   /**
    * Owner edit. With applyToSimilar the same change goes to every row of the same counterparty
    * (counterKey; a row without IBAN or name is keyed by its normalised description) and a rule
-   * is stored for rows that arrive later. Every changed row becomes type_source 'owner'.
+   * is stored for rows that arrive later. Every changed row becomes type_source 'owner', marked with the
+   * rule when one is stored (deleting it gives them back); a row changed alone loses any mark (task Б36).
    */
   async edit(id: number, p: TransactionPatch): Promise<TransactionEditDto> {
     const base = (
@@ -253,17 +254,18 @@ export class TransactionsService {
     if (p.applyToSimilar && !ruleType) throw new UnprocessableEntityException("the row has no type to make a rule from");
 
     const changed = await this.ds.transaction(async (m) => {
+      let ruleId: number | null = null;
       if (p.applyToSimilar && ruleType) {
         // A name that is short or a generic bank text would catch strangers: rows are still
         // changed, but no rule is stored for it.
         const rule = ruleFor(base);
         if (rule.kind === "iban" || !isWeakRuleValue(rule.value)) {
-          await this.saveRule(m, rule.kind, rule.value, ruleType, p.category ?? null, null, base.amount < 0 ? "out" : "in");
+          ruleId = await this.saveRule(m, rule.kind, rule.value, ruleType, p.category ?? null, null, base.amount < 0 ? "out" : "in");
         }
       }
       const scope = p.applyToSimilar ? similarScope(id, base, ruleType!) : { id };
       const undone = p.type ? await this.undoCashAnswers(m, scope, p.type) : false;
-      const ids = await this.apply(m, scope, p.type ?? null, p.category ?? null);
+      const ids = await this.apply(m, scope, p.type ?? null, p.category ?? null, ruleId);
       const freed = p.type ? await this.unsettle(m, ids, p.type) : null;
       if (undone || freed) await this.limit.invalidate(freed ?? "cash", m);
       return ids;
@@ -308,8 +310,10 @@ export class TransactionsService {
   }
 
   /**
-   * Deletes a rule. Its rows, the one the owner edited included, go back to automatic recognition
-   * right away; the limit follows by itself, it is computed from types.
+   * Deletes a rule. The rows it stands for go back to automatic recognition right away: those the rule
+   * typed, and those the owner changed through it (the edited one included), but not one the owner changed
+   * alone (task Б36). An owner row typed before that was recorded (owner_rule_id -1) goes back as it did
+   * before. The limit follows by itself, it is computed from types.
    */
   async deleteRule(id: number): Promise<{ updated: number }> {
     const ids = await this.ds.transaction(async (m) => {
@@ -318,12 +322,15 @@ export class TransactionsService {
       await m.query(`DELETE FROM rules WHERE id=$1`, [id]);
       const rows: RuleRow[] = await m.query(
         `SELECT t.id, t.type, t.amount::float8 AS amount, t.description, t.counter_iban, t.counter_name ${FROM}
-          WHERE t.type_source IN ('owner','rule') AND t.type = $1 AND a.kind <> 'cash'
+          WHERE (t.type_source = 'rule' OR (t.type_source = 'owner' AND t.owner_rule_id IN ($2, ${OWNER_RULE_UNKNOWN})))
+            AND t.type = $1 AND a.kind <> 'cash'
             AND NOT EXISTS (SELECT 1 FROM payment_links l WHERE l.transaction_id = t.id)`,
-        [rule.type],
+        [rule.type, id],
       );
       const under = rowsUnder(rule, rows).map((r) => r.id);
-      if (under.length > 0) await m.query(`UPDATE transactions SET type_source = NULL WHERE id = ANY($1::int[])`, [under]);
+      if (under.length > 0) {
+        await m.query(`UPDATE transactions SET type_source = NULL, owner_rule_id = NULL WHERE id = ANY($1::int[])`, [under]);
+      }
       return under;
     });
     await this.reclassify.reclassifyIds(ids);
@@ -347,11 +354,12 @@ export class TransactionsService {
     const rule = ruleFor(sample);
     const type = LABEL_TYPE[label];
     const changed = await this.ds.transaction(async (m) => {
+      let ruleId: number | null = null;
       if (rule.kind === "iban" || !isWeakRuleValue(rule.value)) {
         await this.dropNameAnswer(m, sample);
-        await this.saveRule(m, rule.kind === "merchant" ? "recipient" : rule.kind, rule.value, type, null, label, "out");
+        ruleId = await this.saveRule(m, rule.kind === "merchant" ? "recipient" : rule.kind, rule.value, type, null, label, "out");
       }
-      const ids = await this.apply(m, { key: counterKey, relabel: true }, type, null);
+      const ids = await this.apply(m, { key: counterKey, relabel: true }, type, null, ruleId);
       const freed = await this.unsettle(m, ids, type);
       if (freed) await this.limit.invalidate(freed, m);
       return ids;
@@ -394,9 +402,13 @@ export class TransactionsService {
     );
   }
 
-  private async apply(m: EntityManager, scope: Scope, type: TxType | null, category: string | null): Promise<number[]> {
-    const { where, args: scopeArgs } = scopeWhere(scope, 4);
-    const args: unknown[] = [type, category, type ? typeCategory(type) : null, ...scopeArgs];
+  /**
+   * The owner's change to the rows of `scope`. `ruleId`: the rule it is made through, marked on every row so
+   * that deleting the rule gives them back; null for a change by hand alone, which deleting no rule undoes (Б36).
+   */
+  private async apply(m: EntityManager, scope: Scope, type: TxType | null, category: string | null, ruleId: number | null): Promise<number[]> {
+    const { where, args: scopeArgs } = scopeWhere(scope, 5);
+    const args: unknown[] = [type, category, type ? typeCategory(type) : null, ruleId, ...scopeArgs];
     const rows: { id: number }[] = await m.query(
       `WITH u AS (UPDATE transactions SET
          category = CASE
@@ -404,7 +416,7 @@ export class TransactionsService {
            WHEN $1::text IS NULL THEN transactions.category
            WHEN $1 = 'spend' AND transactions.type = 'spend' THEN COALESCE(transactions.category, 'uncategorized')
            ELSE $3 END,
-         type = COALESCE($1::text, transactions.type), type_source = 'owner', needs_label = false
+         type = COALESCE($1::text, transactions.type), type_source = 'owner', owner_rule_id = $4::int, needs_label = false
        FROM transactions t WHERE transactions.id = t.id AND ${where} RETURNING transactions.id AS id)
        SELECT id FROM u`,
       args,
@@ -464,15 +476,21 @@ export class TransactionsService {
     category: string | null,
     label: string | null,
     direction: "in" | "out",
-  ): Promise<void> {
-    await m.query(
-      `DELETE FROM rules WHERE match_kind=$1 AND lower(match_value)=lower($2) AND direction IS NOT DISTINCT FROM $3`,
+  ): Promise<number> {
+    const replaced = (await m.query(
+      `DELETE FROM rules WHERE match_kind=$1 AND lower(match_value)=lower($2) AND direction IS NOT DISTINCT FROM $3 RETURNING id`,
       [kind, value, direction],
-    );
-    await m.query(
-      `INSERT INTO rules (match_kind, match_value, type, category, label, direction) VALUES ($1,$2,$3,$4,$5,$6)`,
-      [kind, value, type, category, label, direction],
-    );
+    )) as [{ id: number }[], number];
+    const id = (
+      await m.query(
+        `INSERT INTO rules (match_kind, match_value, type, category, label, direction) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [kind, value, type, category, label, direction],
+      )
+    )[0].id as number;
+    // The rule replaced is the same rule under a new id: rows changed through it stay changed through it.
+    const old = replaced[0].map((r) => r.id);
+    if (old.length > 0) await m.query(`UPDATE transactions SET owner_rule_id = $1 WHERE owner_rule_id = ANY($2::int[])`, [id, old]);
+    return id;
   }
 
   async one(id: number): Promise<TransactionDto> {
@@ -531,6 +549,9 @@ function scopeWhere(scope: Scope, first: number): { where: string; args: unknown
   }
   return { where: parts.join(" AND "), args };
 }
+
+/** owner_rule_id of an owner row typed before rules were marked (migration 0030): how it was typed is unknown. */
+const OWNER_RULE_UNKNOWN = -1;
 
 const RULE_COLUMNS = `id, match_kind AS "matchKind", match_value AS "matchValue", direction, type, category, label`;
 interface StoredRule {

@@ -38,6 +38,8 @@ export class Transaction {
   @Column({ type: "text", nullable: true }) type!: string | null;
   @Column({ type: "text", nullable: true }) category!: string | null;
   @Column({ type: "text", nullable: true }) type_source!: "rule" | "owner" | "auto" | null;
+  /** For an owner-typed row: the rule it was changed through; NULL by the owner's hand alone; -1 typed before Б36. */
+  @Column({ type: "integer", nullable: true }) owner_rule_id!: number | null;
   @Column({ type: "boolean", default: false }) needs_label!: boolean;
   @Column({ type: "boolean", default: false }) usdc_checked!: boolean;
   @Column({ type: "boolean", default: false }) from_wallet!: boolean;

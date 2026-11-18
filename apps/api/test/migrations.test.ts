@@ -8,6 +8,7 @@ import { IncomeEventDateByHand1795737600000 } from "../src/db/migrations/0026-in
 import { RecurringStart1795824000000 } from "../src/db/migrations/0027-recurring-start";
 import { CashStartedAt1795910400000 } from "../src/db/migrations/0028-cash-started-at";
 import { CashCountAbsorbed1795996800000 } from "../src/db/migrations/0029-cash-count-absorbed";
+import { OwnerRuleMark1796083200000 } from "../src/db/migrations/0030-owner-rule-mark";
 import { kyivDate } from "../src/domain/money";
 import { createTestDatabase } from "./db";
 
@@ -243,7 +244,7 @@ describe("migrations", () => {
       await ds.runMigrations();
       const s = (await ds.query(`SELECT cash_counted_at AS at FROM settings WHERE id=1`))[0] as { at: Date | null };
       const a = (await ds.query(`SELECT answer, count_transaction_id, count_absorbed::int AS absorbed, count_row FROM cash_answers`))[0];
-      await ds.undoLastMigration();
+      for (let i = migrations.indexOf(CashCountAbsorbed1795996800000); i < migrations.length; i++) await ds.undoLastMigration();
       expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE column_name IN ('cash_counted_at','count_absorbed','count_row')`)).toEqual([]);
       expect(await ds.query(`SELECT answer FROM cash_answers`)).toEqual([{ answer: "wallet" }]);
       await ds.destroy();
@@ -252,5 +253,38 @@ describe("migrations", () => {
     const answer = { answer: "wallet", count_transaction_id: null, absorbed: 0, count_row: null };
     expect(await at("2026-11-10")).toEqual({ counted: true, answer });
     expect(await at(null)).toEqual({ counted: null, answer });
+  });
+
+  it("0030 marks every row the owner typed before it as changed by an unknown hand, and nothing else (Б36)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(OwnerRuleMark1796083200000)) });
+    await before.initialize();
+    await before.runMigrations();
+    const account = (await before.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ('a','black','UAH',0) RETURNING id`))[0].id;
+    for (const [ext, source] of [["owner", "owner"], ["rule", "rule"], ["auto", "auto"], ["none", null]] as const) {
+      await before.query(
+        `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, amount, amount_uah, type, type_source, raw)
+         VALUES ($1,$2,'2026-11-10T10:00:00Z','2026-11-10',-50000,-50000,'obligation',$3,'{}')`,
+        [ext, account, source],
+      );
+    }
+    const rows = `SELECT external_id, type, type_source FROM transactions ORDER BY id`;
+    const was = await before.query(rows);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    expect(await ds.query(`SELECT external_id, owner_rule_id FROM transactions ORDER BY id`)).toEqual([
+      { external_id: "owner", owner_rule_id: -1 },
+      { external_id: "rule", owner_rule_id: null },
+      { external_id: "auto", owner_rule_id: null },
+      { external_id: "none", owner_rule_id: null },
+    ]);
+    expect(await ds.query(rows)).toEqual(was);
+    for (let i = migrations.indexOf(OwnerRuleMark1796083200000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE column_name='owner_rule_id'`)).toEqual([]);
+    expect(await ds.query(rows)).toEqual(was);
+    await ds.destroy();
   });
 });
