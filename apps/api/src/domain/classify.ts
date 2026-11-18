@@ -15,8 +15,10 @@ export type { Category } from "./merchants";
  * or in the own-pair logic (own-pair.ts) should reach rows already stored: at the next start the server sees
  * that settings.classifier_version is older and queues one reclassify of every row not typed by the owner.
  * 1: the rules as of Б38 (money in from the owner, his name only in the bank's counterparty field).
+ * 2: no rule changed; migration 0032 (Б50) gave old exchanges from a currency account the bank's exact hryvnias,
+ *    and the own-pair rule reads amount_uah, so those exchanges can now pair with their hryvnia leg.
  */
-export const CLASSIFIER_VERSION = 1;
+export const CLASSIFIER_VERSION = 2;
 
 export type TxType =
   | "income"
