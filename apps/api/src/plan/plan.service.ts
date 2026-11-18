@@ -692,9 +692,33 @@ export class PlanService implements OnApplicationBootstrap {
    * owner's hand (unsettle), and a payment that opens or a loan that goes fixes the day afresh in the same
    * transaction. Unlike money that arrives on its own, this takes back what the day already counted as paid.
    */
-  async onRetyped(m: EntityManager, txId: number, type: string): Promise<void> {
-    const changed = await this.unsettle(m, [txId], type);
+  async onRetyped(m: EntityManager, txId: number, from: string, to: string): Promise<void> {
+    if (await this.keepsOwnRetype(m, txId, from, to)) return;
+    const changed = await this.unsettle(m, [txId], to);
     if (changed) await this.limit.invalidate(changed, m);
+  }
+
+  /**
+   * The plan itself retypes some rows after classification, and onClassified does it again on every pass while
+   * the row holds its payment: a store installment classified as spend is stored as debt_payment (retypeAsDebt),
+   * and a transfer to a planned recipient as obligation (settleFromPlannedRecipient). classify() gives such a row
+   * its raw type back each time; that is no change of type, and what it settled stays settled (task Б52).
+   * The conditions are onClassified's own for putting the type back.
+   */
+  private async keepsOwnRetype(m: EntityManager, txId: number, from: string, to: string): Promise<boolean> {
+    if (from === "debt_payment" && to === "spend") {
+      const held = await m.query(
+        `SELECT 1 FROM transactions t JOIN scheduled_payments p ON p.kind='installment' AND p.transaction_id = t.id
+          WHERE t.id=$1 AND t.amount < 0 LIMIT 1`,
+        [txId],
+      );
+      return held.length > 0;
+    }
+    if (from === "obligation" && to === "person_transfer") {
+      const held = await m.query(`SELECT 1 FROM scheduled_payments WHERE transaction_id=$1 LIMIT 1`, [txId]);
+      return held.length > 0 && (await this.isPlannedRecipient(txId));
+    }
+    return false;
   }
 
   /**

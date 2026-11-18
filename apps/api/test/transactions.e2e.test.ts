@@ -1244,6 +1244,66 @@ describe("a reclassify that changes a row's type frees what the row settled, as 
     expect(await dayLimit()).toBe(1);
   });
 
+  it("a store installment the plan stored as debt_payment keeps its payment and the day's limit on every pass", async () => {
+    const a = await account();
+    await ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, match_hint) VALUES ('installment','Skay',529500,'UAH','2026-11-17','skay')`,
+    );
+    const t = await tx(a, { amount: -529_500, description: "Skay", mcc: 5411, at: "2026-11-17T10:00:00.000Z", type: null, source: null });
+    await reclassify();
+    expect(await typeOf(t)).toBe("debt_payment");
+    expect(await payment()).toEqual({ transaction_id: t, paid: true });
+    await sentinel();
+
+    await reclassify();
+    await reclassify();
+    expect(await typeOf(t)).toBe("debt_payment");
+    expect(await payment()).toEqual({ transaction_id: t, paid: true });
+    expect(await dayLimit()).toBe(1);
+  });
+
+  it("a transfer to a planned recipient the plan stored as obligation keeps its payment when the rate moves", async () => {
+    const a = await account();
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-01T09:00:00Z', 40)`);
+    await ds.query(
+      `INSERT INTO rules (match_kind, match_value, type, label, direction) VALUES ('recipient','olena k','person_transfer','close_regular','out')`,
+    );
+    await ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Support',80000,'USD','2026-11-05')`,
+    );
+    const t = await tx(a, { name: "Olena K", description: "Переказ", amount: -3_200_000, at: "2026-11-06T10:00:00.000Z", type: null, source: null });
+    await reclassify();
+    expect(await typeOf(t)).toBe("obligation");
+    expect(await payment()).toEqual({ transaction_id: t, paid: true });
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-13T09:00:00Z', 44)`);
+    await sentinel();
+
+    await reclassify();
+    expect(await typeOf(t)).toBe("obligation");
+    expect(await payment()).toEqual({ transaction_id: t, paid: true });
+    expect(await dayLimit()).toBe(1);
+  });
+
+  it("a transfer whose recipient is no longer planned frees the payment it closed", async () => {
+    const a = await account();
+    await ds.query(
+      `INSERT INTO rules (match_kind, match_value, type, label, direction) VALUES ('recipient','olena k','person_transfer','close_regular','out')`,
+    );
+    await ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Support',80000,'UAH','2026-11-05')`,
+    );
+    const t = await tx(a, { name: "Olena K", description: "Переказ", amount: -80_000, at: "2026-11-05T10:00:00.000Z", type: null, source: null });
+    await reclassify();
+    expect(await payment()).toEqual({ transaction_id: t, paid: true });
+    await ds.query(`UPDATE rules SET label='one_off'`);
+    await sentinel();
+
+    await reclassify();
+    expect(await typeOf(t)).toBe("person_transfer");
+    expect(await payment()).toEqual({ transaction_id: null, paid: false });
+    expect(await dayLimit()).not.toBe(1);
+  });
+
   it("an owner row is never freed by a reclassify", async () => {
     const t = await rentClosedByRule();
     await ds.query(`UPDATE transactions SET type_source='owner' WHERE id=$1`, [t]);

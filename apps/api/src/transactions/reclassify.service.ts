@@ -143,10 +143,12 @@ export class ReclassifyService implements OnModuleInit {
             args,
           ) as Promise<[unknown[], number]>;
         const plan = this.plan;
-        if (plan && r.type !== out.type) {
+        if (plan && r.type !== null && r.type !== out.type) {
           // A row given another type frees what it settled under the old one, as an edit by hand does (Б52).
+          // An untyped row is new and has settled nothing yet.
+          const from = r.type;
           await this.ds.transaction(async (m) => {
-            if ((await update(m))[1] > 0) await plan.onRetyped(m, r.id, out.type);
+            if ((await update(m))[1] > 0) await plan.onRetyped(m, r.id, from, out.type);
           });
         } else {
           await update(this.ds);
