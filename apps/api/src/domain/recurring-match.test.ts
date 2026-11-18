@@ -466,6 +466,62 @@ describe("matchTaxShare", () => {
       });
     });
 
+    describe("a row its own operation paid exactly (transaction_id) takes a top-up like a hand-closed one (Б43)", () => {
+      // ₴5,000 paid exactly through the row's own operation; `matched` is that operation's hryvnia.
+      const exact = (over: Partial<Payment> = {}) =>
+        row({ id: 1, amount: 500_000, paid_at: "2026-11-14", transaction_id: 7, matched: 500_000, ...over });
+
+      it("₴300 on top is linked, without closing anything; ₴600 would pass 10% and is not", () => {
+        const r = exact();
+        expect(matchTaxShare(paying(30_000), [r], [])).toEqual({ payment: r, ids: [10], closes: false, release: false });
+        expect(matchTaxShare(paying(50_000), [r], [])).toMatchObject({ payment: r });
+        expect(matchTaxShare(paying(60_000), [r], [])).toBeNull();
+      });
+
+      it("counts the top-ups already linked to it", () => {
+        const r = exact({ linked: 20_000 });
+        expect(matchTaxShare(paying(30_000), [r], [])).toEqual({ payment: r, ids: [10], closes: false, release: false });
+        expect(matchTaxShare(paying(30_000), [exact({ linked: 30_000 })], [])).toBeNull();
+      });
+
+      it("counts the operation's own hryvnia, or the row's amount when the caller did not load it", () => {
+        expect(matchTaxShare(paying(30_000), [exact({ matched: 530_000 })], [])).toBeNull();
+        expect(matchTaxShare(paying(50_000), [exact({ matched: undefined })], [])).toMatchObject({ payment: { id: 1 } });
+        expect(matchTaxShare(paying(50_100), [exact({ matched: undefined })], [])).toBeNull();
+      });
+
+      it("an open row takes the payment first, as a part or whole", () => {
+        const open = row({ id: 2, name: "ЄП", amount: 224_000, due_on: "2026-11-25" });
+        expect(matchTaxShare(paying(30_000), [exact(), open], [])).toEqual({ payment: open, ids: [10], closes: false, release: false });
+        expect(matchTaxShare(paying(224_000), [exact(), open], [])).toMatchObject({ payment: { id: 2 }, closes: true });
+      });
+
+      it("is never paid, completed or parted by steps 1-4: a payment beyond its 10% goes nowhere", () => {
+        // A hand-closed row would take ₴3,000 as a part; a row its operation paid is covered already.
+        expect(matchTaxShare(paying(300_000), [exact()], [])).toBeNull();
+        expect(matchTaxShare(paying(500_000), [exact()], [])).toBeNull();
+      });
+
+      it("takes nothing from outside its window", () => {
+        expect(matchTaxShare(paying(30_000, { localDate: "2026-09-30" }), [exact()], [])).toBeNull();
+        expect(matchTaxShare(paying(30_000, { localDate: "2026-12-21" }), [exact()], [])).toBeNull();
+      });
+
+      it("its top-ups are never taken back by an open row (Б42 leaves these rows alone)", () => {
+        const held: HeldTaxLink[] = [{ paymentId: 1, tx: paying(30_000, { id: 9, localDate: "2026-11-13" }) }];
+        // ЄП ₴1,000 holds ₴500; ₴200 more with the exact row's ₴300 would close it, but that link stays.
+        const open = row({ id: 2, name: "ЄП", amount: 100_000, due_on: "2026-11-25", linked: 50_000 });
+        expect(matchTaxShare(paying(20_000, { id: 11 }), [exact({ linked: 30_000 }), open], [], held)).toEqual({
+          payment: open,
+          ids: [11],
+          closes: false,
+          release: false,
+        });
+        const withPart = row({ id: 2, name: "ЄП", amount: 100_000, due_on: "2026-11-25", linked: 70_000 });
+        expect(repairTaxLinks([exact({ linked: 30_000 }), withPart], held)).toBeNull();
+      });
+    });
+
     it("takes nothing from outside its window", () => {
       expect(matchTaxShare(paying(300_000, { localDate: "2026-09-30" }), [hand()], [])).toBeNull();
       expect(matchTaxShare(paying(300_000, { localDate: "2026-12-21" }), [hand()], [])).toBeNull();

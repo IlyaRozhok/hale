@@ -24,6 +24,11 @@ export interface Payment {
   linked?: number;
   /** Paid because its linked operations covered it (Б26), not by the owner's «Оплачено». */
   closed_by_links?: boolean;
+  /**
+   * Hryvnia minor units paid by the operation in `transaction_id`, positive (task Б43); absent when there is
+   * none or the caller did not load it, and then a tax row's own amount is assumed (it matched exactly).
+   */
+  matched?: number;
 }
 
 export interface PayableTx {
@@ -262,6 +267,11 @@ export interface TaxMove {
   txId: number;
 }
 
+/** Oldest due date first, then the lower id. */
+function byDue(a: Payment, b: Payment): number {
+  return a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : a.id - b.id;
+}
+
 /** Hryvnia paid by an outgoing row, positive; null when unknown. */
 function paidUah(tx: PayableTx): number | null {
   const uah = tx.amountUah ?? (tx.currency === "UAH" ? tx.amount : null);
@@ -286,7 +296,9 @@ function inTaxWindow(tx: PayableTx, p: Payment): boolean {
  * 2. this payment alone settles a row (parts guessed before are let go);
  * 3. this payment and one unlinked tax payment from `others` together settle a row with nothing linked;
  * 4. a row it does not settle yet takes it as a part; an open row stays open and reserved;
- * 5. a hand-closed row its links already settle takes it while their total stays within `taxCap`.
+ * 5. a hand-closed row its links already settle takes it while their total stays within `taxCap`; so does
+ *    a row its own operation paid exactly (`transaction_id`, task Б43), counting that operation (`matched`)
+ *    with its links. Such a row takes part in this step only: it is paid, never completed or parted.
  * They run as: 1-3 over open rows, 1-3 over hand-closed rows, 4 over open rows, 4 over hand-closed rows,
  * then 5. An open row is still reserved and a closed one is not, so a payment that can pay an open row
  * goes there; but a payment that pays a row by itself is not taken as a part of another one.
@@ -313,7 +325,7 @@ export function matchTaxShare(
   const cap = (p: Payment) => (byHand(p) ? taxCap(p) : p.amount + tol(p));
   const inWindow = payments
     .filter((p) => p.kind === "tax" && p.currency === "UAH" && p.transaction_id === null && inTaxWindow(tx, p))
-    .sort((a, b) => (a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : a.id - b.id));
+    .sort(byDue);
   const uncovered = inWindow.filter((p) => !taxCovered(p, linked(p)));
   const fits = (p: Payment, sum: number) => sum >= p.amount - tol(p) && sum <= cap(p);
   const share = (p: Payment, ids: number[], release = false): TaxShare => ({ payment: p, ids, closes: p.paid_at === null, release });
@@ -352,20 +364,26 @@ export function matchTaxShare(
   };
   const found = settle(open) ?? back() ?? settle(closed) ?? part(open) ?? part(closed);
   if (found) return found;
-  for (const p of inWindow) {
-    if (byHand(p) && taxCovered(p, linked(p)) && linked(p) + x <= taxCap(p)) return share(p, [tx.id]);
+  const exact = payments.filter((p) => p.kind === "tax" && p.currency === "UAH" && p.transaction_id !== null && inTaxWindow(tx, p));
+  const paid = (p: Payment) => (p.transaction_id !== null ? (p.matched ?? p.amount) + linked(p) : linked(p));
+  for (const p of [...inWindow, ...exact].sort(byDue)) {
+    if (!byHand(p) && p.transaction_id === null) continue;
+    if (taxCovered(p, paid(p)) && paid(p) + x <= taxCap(p)) return { payment: p, ids: [tx.id], closes: false, release: false };
   }
   return null;
 }
 
 /**
- * Task Б42: the tax payment held by a row the owner closed by hand («Оплачено», not closed by its links)
- * that brings `base` to the open row `p` within its own `taxTolerance`, the band it closes by anyway. Only
- * tax-typed payments in `p`'s window count: the matcher links only those, and an operation the owner chose
- * in the «Оплачено» sheet becomes an obligation. The closest total wins, then the lower id.
+ * Task Б42: the tax payment held by a row the owner closed by hand («Оплачено», not closed by its links,
+ * not paid through its own operation: a top-up of such a row stays with it, task Б43) that brings `base` to
+ * the open row `p` within its own `taxTolerance`, the band it closes by anyway. Only tax-typed payments in
+ * `p`'s window count: the matcher links only those, and an operation the owner chose in the «Оплачено»
+ * sheet becomes an obligation. The closest total wins, then the lower id.
  */
 function takeBack(p: Payment, base: number, payments: readonly Payment[], held: readonly HeldTaxLink[]): PayableTx | null {
-  const holders = new Set(payments.filter((h) => h.kind === "tax" && h.paid_at !== null && h.closed_by_links !== true).map((h) => h.id));
+  const holders = new Set(
+    payments.filter((h) => h.kind === "tax" && h.paid_at !== null && h.closed_by_links !== true && h.transaction_id === null).map((h) => h.id),
+  );
   let best: { tx: PayableTx; gap: number } | null = null;
   for (const h of held) {
     if (h.paymentId === p.id || !holders.has(h.paymentId) || !inTaxWindow(h.tx, p)) continue;

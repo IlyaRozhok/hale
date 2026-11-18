@@ -788,6 +788,73 @@ describe("tax reserve and own money", () => {
         expect((await today()).state.free).toBe(2_000_000 - 560_000 - 40_000);
       });
 
+      describe("a row paid exactly through its own operation takes a top-up up to 10% (Б43)", () => {
+        it("₴5,000 exactly, then ₴300: the ₴300 goes to Q3, not against Q4, and the day is fixed afresh", async () => {
+          await big();
+          const id = await taxRow(500_000);
+          const a = await pay(500_000);
+          expect(await state(id)).toMatchObject({ paid: true, transaction_id: a });
+          await staleLimit();
+          const b = await pay(30_000);
+          expect(await links(id)).toEqual([b]);
+          expect(await state(id)).toMatchObject({ paid: true, transaction_id: a });
+          expect(await closedByLinks(id)).toBe(false);
+          expect(await limit()).not.toBe(1);
+          expect((await today()).state.free).toBe(q4Whole(530_000));
+          // Seen again, nothing changes.
+          await plan().hourlyJob();
+          expect(await ds.query(`SELECT 1 FROM payment_links`)).toHaveLength(1);
+          expect((await today()).state.free).toBe(q4Whole(530_000));
+        });
+
+        it("a top-up loaded before this rule is reached by the hourly job, even with no other tax row", async () => {
+          await big();
+          const id = await taxRow(500_000);
+          const a = await tx(card, -500_000, "tax", { date: "2026-11-13" });
+          const b = await tx(card, -30_000, "tax", { date: "2026-11-14" });
+          await ds.query(`UPDATE scheduled_payments SET paid_at='2026-11-13T12:00:00Z', transaction_id=$2 WHERE id=$1`, [id, a]);
+          await setBalance(card, 2_000_000 - 530_000);
+          expect((await today()).state.free).toBe(2_000_000 - 530_000 - (600_000 - 30_000));
+          await staleLimit();
+          await plan().hourlyJob();
+          expect(await links(id)).toEqual([b]);
+          expect(await limit()).not.toBe(1);
+          expect((await today()).state.free).toBe(q4Whole(530_000));
+        });
+
+        it("₴600 on top would pass ₴5,500: it counts against Q4, as before", async () => {
+          await big();
+          const id = await taxRow(500_000);
+          await pay(500_000);
+          await pay(60_000);
+          expect(await links(id)).toEqual([]);
+          expect((await today()).state.free).toBe(2_000_000 - 560_000 - (600_000 - 60_000));
+        });
+
+        it("an open row of the quarter takes the payment first", async () => {
+          await big();
+          const esv = await taxRow(500_000, { name: "ЄСВ" });
+          const ep = await taxRow(224_000, { name: "ЄП", due: "2026-11-19" });
+          await pay(500_000);
+          const b = await pay(30_000);
+          expect(await links(ep)).toEqual([b]);
+          expect(await links(esv)).toEqual([]);
+          expect(await state(ep)).toMatchObject({ paid: false });
+        });
+
+        it("the exact payment retyped: the row opens again, keeping the ₴300 as its part", async () => {
+          await big();
+          const id = await taxRow(500_000);
+          const a = await pay(500_000);
+          const b = await pay(30_000);
+          await api.patch(`/transactions/${a}`, { type: "spend" }).expect(200);
+          expect(await state(id)).toMatchObject({ paid: false, transaction_id: null });
+          expect(await links(id)).toEqual([b]);
+          // An open row stays reserved whole while partly paid (Б24); the ₴300 is still not taken off Q4.
+          expect((await today()).state.free).toBe(q4Whole(530_000) - 500_000);
+        });
+      });
+
       it("closed by hand, then ₴3,000 + ₴2,500: both go to Q3, the day is fixed afresh each time, the mark stays", async () => {
         await big();
         const id = await taxRow(500_000);
