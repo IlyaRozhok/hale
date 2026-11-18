@@ -42,6 +42,14 @@ describe("runway", () => {
     expect(runway({ ...base, endOn: "2026-11-12", free: 124_000 }).zeroOn).toBeNull();
   });
 
+  it("spends a later limit after today when one is given: the day the shortage came on", () => {
+    const r = runway({ ...base, laterLimit: 45_000 });
+    expect(r.points.map((p) => p.balance)).toEqual([1_000_000, 876_000, 831_000, 786_000, 741_000]);
+    expect(r.reserve).toBe(1_000_000 - 124_000 - 3 * 45_000);
+    // Without it, or with the same limit, every later day spends the day's limit as before.
+    expect(runway({ ...base, laterLimit: base.dailyLimit })).toEqual(runway(base));
+  });
+
   it("is a single point when the income is today", () => {
     const r = runway({ ...base, endOn: "2026-11-11" });
     expect(r.points).toEqual([{ date: "2026-11-11", balance: 1_000_000 }]);
