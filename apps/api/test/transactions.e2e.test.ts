@@ -1018,6 +1018,74 @@ describe("an owner retype that makes a loan or closes a payment fixes the day af
   });
 });
 
+describe("a loan with repayments whose row is no longer loan_in can be deleted (Б48)", () => {
+  const AT = "2026-11-14T10:00:00.000Z";
+  const del = (p: string) => request(http()).delete(p).set("Authorization", auth);
+  const dayLimit = async () => (await row(`SELECT daily_limit::int AS l FROM daily_snapshots WHERE local_date='2026-11-14'`)).l as number;
+  const sentinel = () =>
+    ds.query(
+      `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ('2026-11-14', 1, 'normal') ON CONFLICT (local_date) DO UPDATE SET daily_limit=1`,
+    );
+  const loans = () => ds.query(`SELECT id, source_transaction_id FROM loans ORDER BY id`);
+  const listed = async (id: number) => {
+    const h = (await api.get("/plan/loans/history").expect(200)).body as Record<"open" | "old" | "repaid", { id: number }[]>;
+    return [...h.open, ...h.old, ...h.repaid].find((l) => l.id === id);
+  };
+  /** A bank row recorded as a loan by hand, with part of it repaid. */
+  const repaidBankLoan = async () => {
+    const a = await account();
+    const t = await tx(a, { amount: 300_000, type: "person_in", description: "Від: Петро", at: AT });
+    await api.patch(`/transactions/${t}`, { type: "loan_in" }).expect(200);
+    const id = (await row(`SELECT id FROM loans WHERE source_transaction_id=$1`, [t])).id as number;
+    await api.post(`/plan/loans/${id}/repay`, { amount: 100_000, date: "2026-11-14" }).expect(201);
+    return { t, id };
+  };
+  beforeEach(async () => {
+    app.get(Clock).fixed = new Date("2026-11-14T10:00:00Z");
+    await ds.query(`TRUNCATE daily_snapshots`);
+  });
+  afterEach(() => {
+    app.get(Clock).fixed = null;
+  });
+
+  it("a loan whose row was retyped stays, can be deleted, fixes the day afresh and does not come back", async () => {
+    const { t, id } = await repaidBankLoan();
+    await api.patch(`/transactions/${t}`, { type: "person_in" }).expect(200);
+    expect(await loans()).toEqual([{ id, source_transaction_id: t }]);
+    expect(await listed(id)).toMatchObject({ manual: false, removable: true });
+    await sentinel();
+
+    await del(`/plan/loans/${id}`).expect(200);
+    expect(await loans()).toEqual([]);
+    expect(await dayLimit()).not.toBe(1);
+
+    await app.get(ReclassifyService).reclassifyIds([t]);
+    await app.get(ReclassifyService).reclassifyPending();
+    await app.get(PlanService).onClassified(t, "person_in");
+    expect(await loans()).toEqual([]);
+  });
+
+  it("a loan whose row is still loan_in cannot be deleted: it would come back", async () => {
+    const { id } = await repaidBankLoan();
+    expect(await listed(id)).toMatchObject({ manual: false, removable: false });
+    await del(`/plan/loans/${id}`).expect(409);
+    expect(await loans()).toHaveLength(1);
+  });
+
+  it("a loan whose row has no type yet cannot be deleted: classification may make it loan_in again", async () => {
+    const { t, id } = await repaidBankLoan();
+    await ds.query(`UPDATE transactions SET type=NULL, type_source=NULL WHERE id=$1`, [t]);
+    expect(await listed(id)).toMatchObject({ removable: false });
+    await del(`/plan/loans/${id}`).expect(409);
+  });
+
+  it("a manual loan is removable as before", async () => {
+    const id = (await api.post("/plan/loans", { amount: 50_000, received_on: "2026-11-14", note: "друг" }).expect(201)).body.id as number;
+    expect(await listed(id)).toMatchObject({ manual: true, removable: true });
+    await del(`/plan/loans/${id}`).expect(200);
+  });
+});
+
 describe("deleting a rule returns only what was changed through it (Б36)", () => {
   const del = (p: string) => request(http()).delete(p).set("Authorization", auth);
   const reclassifyIds = (ids: number[]) => app.get(ReclassifyService).reclassifyIds(ids);

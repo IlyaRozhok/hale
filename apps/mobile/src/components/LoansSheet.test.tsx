@@ -85,6 +85,31 @@ describe("the loans list in Plan", () => {
     expect(screen.getByText("Друг")).toBeTruthy();
   });
 
+  describe("which loans can be deleted (Б48)", () => {
+    const list = (open: Parameters<typeof loanFixture>[0][]) =>
+      fakeApi({ loanHistory: jest.fn(async () => loanHistoryFixture({ open: open.map((o) => loanFixture(o)) })) });
+
+    it("offers deleting a bank loan whose row is no longer a loan, with the same question", async () => {
+      const api = list([{ id: 8, title: "Від: Петро", manual: false, removable: true }, {}]);
+      await show(api);
+      await fireEvent.press(screen.getByRole("button", { name: "Удалить: Від: Петро" }));
+      expect(alert.mock.calls.at(-1)![0]).toBe("Удалить ошибочную запись?");
+      await act(async () => pressAlert(alert, "Удалить"));
+      await waitFor(() => expect(api.deleteLoan).toHaveBeenCalledWith(8));
+    });
+
+    it("does not offer it for a bank loan the server says stays, nor for a manual one it says stays", async () => {
+      await show(list([{ id: 8, title: "Кредит", manual: false, removable: false }, { removable: false }]));
+      expect(screen.queryByRole("button", { name: /^Удалить/ })).toBeNull();
+    });
+
+    it("an older server without the field: only a manual loan can be deleted, as before", async () => {
+      await show(list([{ id: 8, title: "Кредит", manual: false }, {}]));
+      expect(screen.getByRole("button", { name: "Удалить: Друг" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Удалить: Кредит" })).toBeNull();
+    });
+  });
+
   it("repays a loan from the list: the form opens with what is owed, and Today is counted again", async () => {
     const api = oneLoan();
     await show(api);
