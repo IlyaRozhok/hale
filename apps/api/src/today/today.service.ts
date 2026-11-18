@@ -747,7 +747,8 @@ export class TodayService {
    * Asked about a card with no answer yet, and (Б47.5) about a card answered yes, for a transfer on or after
    * the same Kyiv day a calendar month after the answer (10.11 → from 10.12; 31.01 → from 28.02). Until answered
    * such a transfer still counts as cash (cardCashSql), so the wallet does not jump. One question per card at a
-   * time, about its first such transfer: the answer covers the rest. A card answered no is not asked again.
+   * time, about its first such transfer: the answer covers the rest. A card answered no is not asked again. The
+   * card's answer here is its latest one (Б47.6: a card keeps an answer per stretch of transfers, see cardCashSql).
    */
   private async cashCardQuestions(m: EntityManager, f: Facts): Promise<TodayDto["questions"]> {
     if (f.cashStart === null) return [];
@@ -756,7 +757,8 @@ export class TodayService {
          SELECT DISTINCT ON (${counterKeySql("t")}) t.id, t.occurred_at, t.amount_uah::float8 AS amount_uah, t.local_date::text AS local_date,
                 COALESCE(NULLIF(btrim(t.counter_name), ''), t.description) AS target
            FROM transactions t JOIN accounts a ON a.id = t.account_id
-           LEFT JOIN cash_cards c ON c.counter_key = ${counterKeySql("t")}
+           LEFT JOIN LATERAL (SELECT cc.counter_key, cc.withdraws, cc.answered_at FROM cash_cards cc
+                               WHERE cc.counter_key = ${counterKeySql("t")} ORDER BY cc.from_at DESC LIMIT 1) c ON true
           WHERE ${cardTransferSql()} AND t.cash_amount IS NULL AND t.amount_uah IS NOT NULL
             AND (c.counter_key IS NULL
                  OR (c.withdraws AND t.local_date >= (${kyivDaySql("c.answered_at")} + interval '1 month')::date))

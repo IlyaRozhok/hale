@@ -34,6 +34,7 @@ import { OwnerRuleMark1796083200000 } from "./migrations/0030-owner-rule-mark";
 import { SettingsClassifierVersion1796169600000 } from "./migrations/0031-settings-classifier-version";
 import { HryvniaLegAmounts1796256000000 } from "./migrations/0032-hryvnia-leg-amounts";
 import { CashCardAnsweredAt1796342400000 } from "./migrations/0033-cash-card-answered-at";
+import { CashCardAnswerFrom1796428800000 } from "./migrations/0034-cash-card-answer-from";
 
 export const migrations = [
   Init1793577600000,
@@ -69,6 +70,7 @@ export const migrations = [
   SettingsClassifierVersion1796169600000,
   HryvniaLegAmounts1796256000000,
   CashCardAnsweredAt1796342400000,
+  CashCardAnswerFrom1796428800000,
 ];
 
 export function createDataSource(url: string): DataSource {

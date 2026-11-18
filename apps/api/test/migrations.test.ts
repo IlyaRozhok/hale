@@ -12,6 +12,7 @@ import { OwnerRuleMark1796083200000 } from "../src/db/migrations/0030-owner-rule
 import { SettingsClassifierVersion1796169600000 } from "../src/db/migrations/0031-settings-classifier-version";
 import { HryvniaLegAmounts1796256000000 } from "../src/db/migrations/0032-hryvnia-leg-amounts";
 import { CashCardAnsweredAt1796342400000 } from "../src/db/migrations/0033-cash-card-answered-at";
+import { CashCardAnswerFrom1796428800000 } from "../src/db/migrations/0034-cash-card-answer-from";
 import { CLASSIFIER_VERSION } from "../src/domain/classify";
 import { JobRunner } from "../src/mono/jobs/job-runner";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
@@ -421,6 +422,35 @@ describe("migrations", () => {
     for (let i = migrations.indexOf(CashCardAnsweredAt1796342400000); i < migrations.length; i++) await ds.undoLastMigration();
     expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE table_name='cash_cards' AND column_name='answered_at'`)).toEqual([]);
     expect(await ds.query(`SELECT * FROM cash_cards ORDER BY counter_key`)).toEqual(was);
+    await ds.destroy();
+  });
+
+  it("0034 makes every card's answer cover all its transfers so far, and down keeps the latest answer of a card (Б47.6)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(CashCardAnswerFrom1796428800000)) });
+    await before.initialize();
+    await before.runMigrations();
+    await before.query(
+      `INSERT INTO cash_cards (counter_key, withdraws, answered_at) VALUES ('yes', true, '2026-11-10T10:00:00Z'), ('no', false, '2026-11-11T10:00:00Z')`,
+    );
+    const was = await before.query(`SELECT * FROM cash_cards ORDER BY counter_key`);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    const after: { counter_key: string; withdraws: boolean; answered_at: Date; from_at: unknown }[] = await ds.query(
+      `SELECT counter_key, withdraws, answered_at, from_at::text AS from_at FROM cash_cards ORDER BY counter_key`,
+    );
+    expect(after).toEqual(was.map((r: object) => ({ ...r, from_at: "-infinity" })));
+    // A card can now hold answers from different transfers on; down keeps the one that covers its latest transfers.
+    await ds.query(`INSERT INTO cash_cards (counter_key, withdraws, answered_at, from_at) VALUES ('yes', false, '2026-12-15T12:00:00Z', '2026-12-15T10:00:00Z')`);
+    for (let i = migrations.indexOf(CashCardAnswerFrom1796428800000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE table_name='cash_cards' AND column_name='from_at'`)).toEqual([]);
+    expect(await ds.query(`SELECT counter_key, withdraws FROM cash_cards ORDER BY counter_key`)).toEqual([
+      { counter_key: "no", withdraws: false },
+      { counter_key: "yes", withdraws: false },
+    ]);
     await ds.destroy();
   });
 });
