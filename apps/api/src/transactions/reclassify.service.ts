@@ -1,6 +1,7 @@
-import { Inject, Injectable, Optional, type OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, Optional, type OnApplicationBootstrap, type OnModuleInit } from "@nestjs/common";
 import { DataSource, type EntityManager } from "typeorm";
 import {
+  CLASSIFIER_VERSION,
   classify,
   hasThirdParty,
   type ClassifyContext,
@@ -68,7 +69,7 @@ const prefixed = (r: Record<string, unknown>, p: string): LegFacts =>
  * An owner *rule* is stored as 'rule', so deleting the rule lets the row be classified again.
  */
 @Injectable()
-export class ReclassifyService implements OnModuleInit {
+export class ReclassifyService implements OnModuleInit, OnApplicationBootstrap {
   constructor(
     @Inject(DataSource) private readonly ds: DataSource,
     @Inject(JobRunner) private readonly runner: JobRunner,
@@ -82,9 +83,30 @@ export class ReclassifyService implements OnModuleInit {
     });
   }
 
-  /** Queues one reclassify job unless one is already waiting (call after the rules change). */
-  async enqueue(runAfter: Date = new Date()): Promise<void> {
-    await this.ds.query(
+  /**
+   * A server with a newer classifier than the one the stored rows were classified with queues one reclassify
+   * of the whole history (Б49). The version is written in the same transaction as the job, so a crash leaves
+   * either both or neither, and the next start with the same version queues nothing.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    await this.ds.transaction(async (m) => {
+      const [, raised] = (await m.query(
+        `UPDATE settings SET classifier_version=$1 WHERE id=1 AND classifier_version < $1`,
+        [CLASSIFIER_VERSION],
+      )) as [unknown, number];
+      if (raised === 0) return;
+      // A fresh database has nothing to rewrite; an empty job would only sit in the queue.
+      const rows: unknown[] = await m.query(`SELECT 1 FROM transactions WHERE type_source IS DISTINCT FROM 'owner' LIMIT 1`);
+      if (rows.length > 0) await this.enqueue(new Date(), m);
+    });
+  }
+
+  /**
+   * Queues one reclassify job unless one is already waiting. Called after a history import ends
+   * (ImportService) and at start when the classifier version is newer (onApplicationBootstrap).
+   */
+  async enqueue(runAfter: Date = new Date(), q: DataSource | EntityManager = this.ds): Promise<void> {
+    await q.query(
       `INSERT INTO jobs (kind, run_after)
        SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE kind=$1 AND status='pending')`,
       [RECLASSIFY_JOB_KIND, runAfter],

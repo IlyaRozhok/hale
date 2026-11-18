@@ -13,6 +13,7 @@ let app: INestApplication;
 let ds: DataSource;
 let auth: string;
 let seq = 0;
+let dbUrl = "";
 
 const http = () => app.getHttpServer();
 const api = {
@@ -24,6 +25,7 @@ const api = {
 
 beforeAll(async () => {
   const url = await createMigratedDatabase();
+  dbUrl = url;
   ds = new DS({ type: "postgres", url });
   await ds.initialize();
   app = await createTestApp(url);
@@ -1087,6 +1089,103 @@ describe("income events", () => {
       await app.get(PlanService).hourlyJob();
       expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 500_000, tx: null });
       expect((await event("2026-10")).status).toBe("received");
+    });
+  });
+
+  describe("a transfer to oneself that received the fop income gives it back when it stops being income (Б49)", () => {
+    /** The server after Б38: it knows the owner's name, so the same row is a transfer between own accounts. */
+    let after: INestApplication;
+    beforeAll(async () => {
+      after = await createTestApp(dbUrl, { config: { OWNER_NAMES: ["Test Owner"] } });
+    });
+    afterAll(async () => {
+      await after.close();
+    });
+    const event = async (period: string) =>
+      (await row(
+        `SELECT e.status, e.expected_on::text AS on, e.date_set_by_hand AS hand, e.amount_uah::int AS amount_uah, e.received_at,
+                e.matched_transaction_id AS tx
+           FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id WHERE x.source='fop' AND e.period=$1`,
+        [period],
+      )) as { status: string; on: string; hand: boolean; amount_uah: number | null; received_at: Date | null; tx: number | null };
+    const expectedNovember = { status: "expected", on: "2026-11-25", hand: false, amount_uah: null, received_at: null, tx: null };
+    /** November's fop event received, before Б38, by ₴5,000 the owner sent himself on 10 November. */
+    const setup = async () => {
+      await api.post("/plan/expected-incomes", { source: "fop", amount: 500_000, currency: "UAH", window_start_day: 15, window_end_day: 25 }).expect(201);
+      await app.get(PlanService).generateEvents("2026-11-02");
+      const fop = await account("fop");
+      const self = await tx(fop, { amount: 500_000, description: "Переказ коштів", mcc: 4829, date: "2026-11-10" });
+      await ds.query(`UPDATE transactions SET counter_name='Test Owner' WHERE id=$1`, [self]);
+      await reclassify([self]); // the server before Б38 does not know the name: income
+      expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 500_000, tx: self });
+      return { fop, self };
+    };
+    const type = async (id: number) => (await row(`SELECT type FROM transactions WHERE id=$1`, [id])).type as string;
+
+    it("the reclassify after the deploy makes it own_transfer, November waits again and the day is fixed afresh", async () => {
+      const { self } = await setup();
+      const date = kyivDate(new Date());
+      await plantSnapshot(date);
+      await after.get(ReclassifyService).reclassifyPending();
+      expect(await type(self)).toBe("own_transfer");
+      expect(await event("2026-11")).toEqual(expectedNovember);
+      await fixedAfresh(date);
+      // Nothing moves on the next pass or the hourly job.
+      await after.get(ReclassifyService).reclassifyPending();
+      await after.get(PlanService).hourlyJob();
+      expect(await event("2026-11")).toEqual(expectedNovember);
+    });
+
+    it("with real income in November too, November stays received by the real row with its own sum", async () => {
+      const { fop, self } = await setup();
+      const real = await tx(fop, { amount: 300_000, description: "From client", date: "2026-11-20" });
+      await reclassify([real]);
+      expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 800_000, tx: self });
+      await after.get(ReclassifyService).reclassifyPending();
+      expect(await event("2026-11")).toEqual({
+        status: "received", on: "2026-11-25", hand: false, amount_uah: 300_000, received_at: new Date("2026-11-20T10:00:00Z"), tx: real,
+      });
+    });
+
+    it("a later transfer to oneself counted in the sum leaves the first row and takes only its own money back", async () => {
+      await api.post("/plan/expected-incomes", { source: "fop", amount: 500_000, currency: "UAH", window_start_day: 15, window_end_day: 25 }).expect(201);
+      await app.get(PlanService).generateEvents("2026-11-02");
+      const fop = await account("fop");
+      const real = await tx(fop, { amount: 300_000, description: "From client", date: "2026-11-05" });
+      const self = await tx(fop, { amount: 500_000, description: "Переказ коштів", mcc: 4829, date: "2026-11-10" });
+      await ds.query(`UPDATE transactions SET counter_name='Test Owner' WHERE id=$1`, [self]);
+      await reclassify([real, self]);
+      expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 800_000, tx: real });
+      await after.get(ReclassifyService).reclassifyPending();
+      expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 300_000, received_at: new Date("2026-11-05T10:00:00Z"), tx: real });
+    });
+
+    it("the same when the owner retypes it by hand", async () => {
+      const { self } = await setup();
+      const date = kyivDate(new Date());
+      await plantSnapshot(date);
+      await api.patch(`/transactions/${self}`, { type: "own_transfer" }).expect(200);
+      expect(await event("2026-11")).toEqual(expectedNovember);
+      await fixedAfresh(date);
+    });
+
+    it("by hand with real income in November, November is received by the real row", async () => {
+      const { fop, self } = await setup();
+      const real = await tx(fop, { amount: 300_000, description: "From client", date: "2026-11-20" });
+      await reclassify([real]);
+      await api.patch(`/transactions/${self}`, { type: "own_transfer" }).expect(200);
+      expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 300_000, tx: real });
+    });
+
+    it("leaves alone a November confirmed by hand and the USDC events", async () => {
+      await usdc();
+      const { self } = await setup();
+      await ds.query(`UPDATE income_events SET matched_transaction_id=NULL WHERE period='2026-11'`);
+      const usdcBefore = await ds.query(`SELECT e.* FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id WHERE x.source='usdc' ORDER BY e.id`);
+      await after.get(ReclassifyService).reclassifyPending();
+      expect(await type(self)).toBe("own_transfer");
+      expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 500_000, tx: null });
+      expect(await ds.query(`SELECT e.* FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id WHERE x.source='usdc' ORDER BY e.id`)).toEqual(usdcBefore);
     });
   });
 

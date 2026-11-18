@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { DataSource } from "typeorm";
 import { createDataSource } from "../db/data-source";
 import { createMigratedDatabase } from "../../test/app";
-import { hasThirdParty } from "../domain/classify";
+import { CLASSIFIER_VERSION, hasThirdParty } from "../domain/classify";
 import { exactPartnerSql, isOwnPair, ownPairSql, type PairLeg } from "../domain/own-pair";
 import { JobRunner } from "../mono/jobs/job-runner";
 import { RECLASSIFY_JOB_KIND, ReclassifyService } from "./reclassify.service";
@@ -331,5 +331,59 @@ describe("reclassify", () => {
     await ds.query(`INSERT INTO jobs (kind, run_after) VALUES ($1, $2)`, [RECLASSIFY_JOB_KIND, new Date(NOW)]);
     expect(await runner.runOnce()).toBe(true);
     expect((await get(id)).category).toBe("groceries");
+  });
+});
+
+describe("after the classification rules change (Б49)", () => {
+  const version = async () => (await ds.query(`SELECT classifier_version AS v FROM settings WHERE id=1`))[0].v as number;
+  const pending = async () =>
+    (await ds.query(`SELECT count(*)::int AS n FROM jobs WHERE kind=$1 AND status='pending'`, [RECLASSIFY_JOB_KIND]))[0].n as number;
+  beforeEach(async () => {
+    await ds.query(`UPDATE settings SET classifier_version=0 WHERE id=1`);
+  });
+
+  it("queues one reclassify at the first start with a newer classifier, and stores its version", async () => {
+    await insertTx(black, { mcc: 5812, type: "spend", category: "cafe" });
+    await service().onApplicationBootstrap();
+    expect(await pending()).toBe(1);
+    expect(await version()).toBe(CLASSIFIER_VERSION);
+  });
+
+  it("queues nothing on the next start with the same classifier", async () => {
+    await insertTx(black, { mcc: 5812, type: "spend", category: "cafe" });
+    await service().onApplicationBootstrap();
+    await ds.query(`UPDATE jobs SET status='done' WHERE kind=$1`, [RECLASSIFY_JOB_KIND]);
+    await service().onApplicationBootstrap();
+    expect(await pending()).toBe(0);
+    expect(await version()).toBe(CLASSIFIER_VERSION);
+  });
+
+  it("does not queue a second job when one is already waiting", async () => {
+    await insertTx(black, { mcc: 5812, type: "spend", category: "cafe" });
+    await service().enqueue();
+    await service().onApplicationBootstrap();
+    expect(await pending()).toBe(1);
+    expect(await version()).toBe(CLASSIFIER_VERSION);
+  });
+
+  it("queues nothing when no row may be rewritten, and still stores the version", async () => {
+    await insertTx(black, { mcc: 5812, type: "obligation", type_source: "owner" });
+    await service().onApplicationBootstrap();
+    expect(await pending()).toBe(0);
+    expect(await version()).toBe(CLASSIFIER_VERSION);
+  });
+
+  it("rewrites old rows by today's rules and leaves the rows the owner typed", async () => {
+    const runner = new JobRunner(ds, { now: () => Date.now() });
+    const svc = new ReclassifyService(ds, runner, { ownNames: ["Test Owner"], ownIbans: [], ownJars: [] });
+    svc.onModuleInit();
+    // Typed before Б38: money from the owner himself on the fop account, his name only in the bank's field.
+    const facts = { amount: 500_000, mcc: 4829, description: "Переказ коштів", counterName: "Test Owner", type: "income", category: "income" };
+    const old = await insertTx(fop, facts);
+    const mine = await insertTx(fop, { ...facts, type_source: "owner" });
+    await svc.onApplicationBootstrap();
+    expect(await runner.runOnce()).toBe(true);
+    expect(await get(old)).toMatchObject({ type: "own_transfer", category: "own" });
+    expect(await get(mine)).toEqual({ type: "income", category: "income", type_source: "owner" });
   });
 });
