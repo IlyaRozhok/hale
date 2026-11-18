@@ -42,6 +42,19 @@ describe("contracts", () => {
     expect(insightsMonthDto.safeParse({ ...ok, through: "2026-02-30" }).success).toBe(false);
     expect(insightsMonthDto.safeParse({ ...ok, categories: [{ category: "cafe", spent: 1, previousSpent: 0, count: -1 }] }).success).toBe(false);
   });
+
+  it("takes the month's places as optional, so an older server's answer still reads (В3)", () => {
+    const base = { month: "2026-11", through: "2026-11-16", previous: { from: "2026-10-01", to: "2026-10-16" }, spent: 0, previousSpent: 0, categories: [] };
+    const place = { key: "0123456789abcdef", name: "Aroma Kava", spent: 224_000, visits: 14, isNew: false };
+    expect(insightsMonthDto.safeParse(base).success).toBe(true);
+    expect(insightsMonthDto.safeParse({ ...base, places: [] }).success).toBe(true);
+    expect(insightsMonthDto.safeParse({ ...base, places: [place] }).success).toBe(true);
+    expect(insightsMonthDto.safeParse({ ...base, places: [{ ...place, spent: 1.5 }] }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...base, places: [{ ...place, spent: 0 }] }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...base, places: [{ ...place, visits: 0 }] }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...base, places: [{ ...place, key: "IBAN" }] }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...base, places: Array(6).fill(place) }).success).toBe(false);
+  });
 });
 
 describe("exchangeRate (Б22)", () => {

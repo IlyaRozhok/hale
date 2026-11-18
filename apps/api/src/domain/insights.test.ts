@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildInsights, insightsWindow, previousMonth } from "./insights";
+import { PLACES_TOP, type PlaceRow, buildInsights, buildPlaces, insightsWindow, placesLookbackFrom, previousMonth } from "./insights";
 
 describe("previousMonth", () => {
   it("steps back across the year", () => {
@@ -111,5 +111,55 @@ describe("buildInsights", () => {
       { category: "cafe", period: "previous", spent: 1, count: 1 },
     ]);
     expect(dto.categories.map((c) => c.category)).toEqual(["cafe", "health", "leisure"]);
+  });
+});
+
+describe("placesLookbackFrom (В3)", () => {
+  it("starts three whole months before the month, across the year", () => {
+    expect(placesLookbackFrom("2026-11")).toBe("2026-08-01");
+    expect(placesLookbackFrom("2027-02")).toBe("2026-11-01");
+  });
+});
+
+describe("buildPlaces (В3)", () => {
+  const row = (key: string, spent: number, visits: number, seenBefore = true, name = key): PlaceRow => ({ key, name, spent, visits, seenBefore });
+
+  it("takes the five largest places by the month's sum, with their visits", () => {
+    const rows = [row("a", 1_000, 1), row("b", 9_000, 3), row("c", 5_000, 14), row("d", 3_000, 2), row("e", 7_000, 1), row("f", 2_000, 5)];
+    expect(buildPlaces(rows, "2026-01-01", "2026-11").map((p) => [p.key, p.spent, p.visits])).toEqual([
+      ["b", 9_000, 3],
+      ["e", 7_000, 1],
+      ["c", 5_000, 14],
+      ["d", 3_000, 2],
+      ["f", 2_000, 5],
+    ]);
+    expect(PLACES_TOP).toBe(5);
+  });
+
+  it("breaks a tie by visits, then by name", () => {
+    const rows = [row("z", 1_000, 1, true, "Б"), row("y", 1_000, 1, true, "А"), row("x", 1_000, 4, true, "В")];
+    expect(buildPlaces(rows, "2026-01-01", "2026-11").map((p) => p.name)).toEqual(["В", "А", "Б"]);
+  });
+
+  it("leaves out a place a refund took back in full, a refund with no purchase at that place, and a nameless one", () => {
+    const rows = [row("a", 0, 1), row("b", -2_000, 0), row("c", 500, 1), row("d", 9_000, 1, true, " ")];
+    expect(buildPlaces(rows, "2026-01-01", "2026-11").map((p) => p.key)).toEqual(["c"]);
+  });
+
+  it("marks a place new when it was not visited in the three months before and the history reaches back that far", () => {
+    const rows = [row("old", 2_000, 1, true), row("new", 1_000, 1, false)];
+    const marks = (historyFrom: string | null) => buildPlaces(rows, historyFrom, "2026-11").map((p) => [p.key, p.isNew]);
+    expect(marks("2026-08-01")).toEqual([["old", false], ["new", true]]);
+    expect(marks("2025-01-01")).toEqual([["old", false], ["new", true]]);
+    // A shorter history cannot say what is new: nothing is.
+    expect(marks("2026-08-02")).toEqual([["old", false], ["new", false]]);
+    expect(marks(null)).toEqual([["old", false], ["new", false]]);
+  });
+
+  it("answers the place as it is named, its key and the sum in kopecks", () => {
+    expect(buildPlaces([row("k1", 224_000, 14, false, "Aroma Kava")], "2026-01-01", "2026-11")).toEqual([
+      { key: "k1", name: "Aroma Kava", spent: 224_000, visits: 14, isNew: true },
+    ]);
+    expect(buildPlaces([], "2026-01-01", "2026-11")).toEqual([]);
   });
 });

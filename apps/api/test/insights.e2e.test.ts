@@ -112,7 +112,67 @@ describe("GET /insights/month", () => {
         { category: "transport", spent: 0, previousSpent: 6_000, count: 0 },
         { category: "refund", spent: -12_000, previousSpent: 0, count: 1 },
       ],
+      // Every row here has the bank text 'x': one place. The purchases from the jar and without a hryvnia amount are
+      // not the limit's, the refunds lower it and are not visits. The history starts in September: nothing is new.
+      places: [{ key: expect.stringMatching(/^[0-9a-f]{16}$/), name: "x", spent: 40_000 + 12_000 + 9_000 + 30_000 - 12_000 - 2_000 + 1_500, visits: 5, isNew: false }],
     });
+  });
+
+  it("names the month's largest places, with visits and the sum after refunds, and marks the new ones (В3)", async () => {
+    const black = (await ds.query(`SELECT id FROM accounts WHERE kind='black'`))[0].id as number;
+    const jar = (await ds.query(`SELECT id FROM accounts WHERE kind='jar'`))[0].id as number;
+    const cash = await account("cash");
+    const at = async (accountId: number, when: string, amount: number, type: string, description: string, counterName: string | null = null, raw = "{}") => {
+      seq++;
+      await ds.query(
+        `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, counter_name, amount, amount_uah, type, category, raw)
+         VALUES ($1,$2,$3,${kyivDaySql("$3::timestamptz")},$4,$5,$6,$6,$7,'cafe',$8::jsonb)`,
+        [`tx-${seq}`, accountId, when, description, counterName, amount, type, raw],
+      );
+    };
+    // The history reaches back over the three months before November.
+    await at(black, "2026-07-20T10:00:00Z", -50_000, "spend", "Rozetka");
+    // A coffee shop seen in September: three visits in November and a refund there, named as the purchase.
+    await at(black, "2026-09-12T10:00:00Z", -6_000, "spend", "Aroma Kava");
+    await at(black, "2026-11-02T08:00:00Z", -6_000, "spend", "Aroma Kava");
+    await at(black, "2026-11-05T08:00:00Z", -6_000, "spend", "aroma  kava "); // the same place, as the key normalises it
+    await at(black, "2026-11-09T08:00:00Z", -6_000, "spend", "Aroma Kava");
+    await at(black, "2026-11-09T09:00:00Z", 2_000, "spend", "Aroma Kava");
+    // Last bought at before the lookback: new again.
+    await at(black, "2026-11-03T10:00:00Z", -50_000, "spend", "Rozetka");
+    // Named by the counterparty, as «Операции» names it; never seen before.
+    await at(black, "2026-11-04T10:00:00Z", -7_000, "spend", "Оплата", "ФОП Петренко");
+    await at(black, "2026-11-06T10:00:00Z", -3_000, "spend", "Uklon");
+    await at(black, "2026-11-07T10:00:00Z", -1_000, "spend", "Kiosk"); // the sixth: below the top five
+    // Not places: a person, the cash wallet, a withdrawal, the jar, a count's shortfall, a refund with no purchase.
+    await at(black, "2026-11-08T10:00:00Z", -900_000, "person_transfer", "Олена");
+    await at(cash, "2026-11-10T10:00:00Z", -900_000, "spend", "Ринок");
+    await at(black, "2026-11-08T11:00:00Z", -900_000, "cash_out", "Банкомат");
+    await at(jar, "2026-11-08T12:00:00Z", -900_000, "spend", "Jar Shop");
+    await at(cash, "2026-11-14T10:00:00Z", -900_000, "spend", "Не записано", null, `{"cash_count":"short"}`);
+    await at(black, "2026-11-14T11:00:00Z", -900_000, "spend", "Short Shop", null, `{"cash_count":"short"}`);
+    await at(black, "2026-11-12T10:00:00Z", 4_000, "spend", "Скасування. Zara");
+
+    const { body } = await get("/insights/month").expect(200);
+    expect(insightsMonthDto.safeParse(body).success).toBe(true);
+    expect(body.places.map((p: Record<string, unknown>) => [p.name, p.spent, p.visits, p.isNew])).toEqual([
+      ["x", 78_500, 5, false], // bought at in September and October
+      ["Rozetka", 50_000, 1, true],
+      ["Aroma Kava", 16_000, 3, false],
+      ["ФОП Петренко", 7_000, 1, true],
+      ["Uklon", 3_000, 1, true],
+    ]);
+    // The key is the counterparty's, as on the transaction in «Операции».
+    const list = (await get("/transactions?group=spend&limit=200&from=2026-11-01&to=2026-11-16").expect(200)).body.items as {
+      counterKey: string;
+      description: string;
+    }[];
+    expect(body.places[2].key).toBe(list.find((i) => i.description === "Aroma Kava")!.counterKey);
+  });
+
+  it("counts the places of a past month to its last day (В3)", async () => {
+    const { body } = await get("/insights/month?month=2026-10").expect(200);
+    expect(body.places).toEqual([{ key: expect.any(String), name: "x", spent: 20_000 + 6_000 + 4_000 + 70_000 + 11_000, visits: 5, isNew: false }]);
   });
 
   it("adds up to the limit's spending over the same days, for both stretches", async () => {
@@ -183,7 +243,7 @@ describe("GET /insights/month", () => {
 
   it("answers a month with nothing in it with zeros", async () => {
     const { body } = await get("/insights/month?month=2025-01").expect(200);
-    expect(body).toEqual({ month: "2025-01", through: "2025-01-31", previous: { from: "2024-12-01", to: "2024-12-31" }, spent: 0, previousSpent: 0, categories: [] });
+    expect(body).toEqual({ month: "2025-01", through: "2025-01-31", previous: { from: "2024-12-01", to: "2024-12-31" }, spent: 0, previousSpent: 0, categories: [], places: [] });
   });
 
   it("refuses a malformed month and a month in the future", async () => {
