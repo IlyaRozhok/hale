@@ -236,9 +236,12 @@ export class TodayService {
     // The row's mode follows the day. A plan that has ended takes the day's row with it, so its mark is not stored.
     const stored = await this.storedMarks(m, f.date);
     // The shortage marks the day only when it changes the day's limit (Б47 (3)): the same test as `nextLimit` below.
+    // A day with no row is compared by the limit it is about to be fixed with (Б47 (4)): one that began in
+    // shortage has the shortage's limit from its start, so it is not the start.
     const mark = dayMark({
       live: state.mode,
       ...(closePlan ? { ...stored, stored: null, storedLimit: null } : stored),
+      ...(stored.stored === null && !closePlan ? { storedLimit: morning.dailyLimit } : {}),
       limit: state.dailyLimit,
     });
     return { plan, state, morning, mark, closePlan, replan };
@@ -377,7 +380,10 @@ export class TodayService {
       }
       // The plan changes the day's limit, not what the day is: the day the shortage came on stays that day.
       // A day that crossed into shortage on the limit it had becomes that day once the plan changes the limit.
-      const mark = dayMark({ live: "bridge", ...(await this.storedMarks(m, f.date)), limit: dailyAmount });
+      // A day not fixed yet is compared by the limit it would have begun with, as if its row were there.
+      const stored = await this.storedMarks(m, f.date);
+      const begun = stored.stored === null ? { storedLimit: this.compute(f, f.plan, 0, f.spentToday).dailyLimit } : {};
+      const mark = dayMark({ live: "bridge", ...stored, ...begun, limit: dailyAmount });
       await m.query(
         `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3)
          ON CONFLICT (local_date) DO UPDATE SET daily_limit=EXCLUDED.daily_limit, mode=EXCLUDED.mode`,

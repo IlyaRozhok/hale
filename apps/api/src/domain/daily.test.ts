@@ -270,7 +270,7 @@ describe("dayMark", () => {
     expect(dayMark({ live: "bridge", stored: "bridge_start", previous: "normal" })).toBe("bridge_start");
     expect(dayMark({ live: "bridge", stored: "bridge", previous: "normal" })).toBe("bridge");
   });
-  it("a day fixed for the first time, or again, in shortage is the start only right after an ordinary day", () => {
+  it("without limits to compare, a day first fixed in shortage is the start only right after an ordinary day", () => {
     expect(dayMark({ live: "bridge", stored: null, previous: "normal" })).toBe("bridge_start");
     expect(dayMark({ live: "bridge", stored: null, previous: "bridge" })).toBe("bridge");
     expect(dayMark({ live: "bridge", stored: null, previous: "bridge_start" })).toBe("bridge");
@@ -295,8 +295,15 @@ describe("dayMark", () => {
     // A day already in shortage the day before is an ordinary shortage day, whatever its limit does.
     expect(dayMark({ live: "bridge", stored: "bridge", previous: "bridge", storedLimit: 45_000, limit: 30_000 })).toBe("bridge");
   });
-  it("a day with no row yet has no limit to compare: right after an ordinary day it is still the start", () => {
-    expect(dayMark({ live: "bridge", stored: null, previous: "normal", storedLimit: null, limit: 45_000 })).toBe("bridge_start");
+  // Б47 (4): for a day with no row, `storedLimit` is the limit it is being fixed with (its morning one).
+  it("a day that began in shortage right after an ordinary day is an ordinary shortage day, not the start", () => {
+    expect(dayMark({ live: "bridge", stored: null, previous: "normal", storedLimit: 45_000, limit: 45_000 })).toBe("bridge");
+    // Fixed so, it stays that through the day while its limit holds.
+    expect(dayMark({ live: "bridge", stored: "bridge", previous: "normal", storedLimit: 45_000, limit: 45_000 })).toBe("bridge");
+  });
+  it("a day fixed for the first time after it crossed into shortage onto another limit is still the start", () => {
+    // The morning was ordinary at ₴1,000; the spending before the first fix took it into shortage at ₴450.
+    expect(dayMark({ live: "bridge", stored: null, previous: "normal", storedLimit: 100_000, limit: 45_000 })).toBe("bridge_start");
   });
   it("reads a value it does not know as an ordinary shortage day, so nothing is marked by mistake", () => {
     expect(dayMark({ live: "bridge", stored: "other", previous: "normal" })).toBe("bridge");

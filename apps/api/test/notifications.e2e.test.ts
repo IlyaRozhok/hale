@@ -252,6 +252,31 @@ describe("fix round 1", () => {
     expect((await logged()).filter((k) => k.startsWith("over_limit:"))).toEqual(["over_limit:2026-11-03"]);
   });
 
+  // Б47 (4): a day that began in shortage keeps the limit it began with, so it is judged by it.
+  it("speaks up about an overspend on a day that began in shortage after an ordinary day", async () => {
+    await device("a", "ExponentPushToken[a]");
+    await ds.query(`TRUNCATE income_events, expected_incomes RESTART IDENTITY CASCADE`);
+    const fop = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop',500000,'UAH',15,25) RETURNING id`))[0].id;
+    await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-11','2026-11-12','expected')`, [fop]);
+    const card = (await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance, credit_limit) VALUES ('acc-s','black','UAH',4000000,3000000) RETURNING id`))[0].id;
+    at("2026-11-01T08:00:00Z");
+    await svc.tick();
+    expect((await app.get(TodayService).getToday()).state).toMatchObject({ mode: "normal", dailyLimit: 90_909 });
+    // Late on the 1st, with no pass after it: the 2nd is first fixed already in shortage.
+    await spendTx(card, -1_100_000, "spend", "2026-11-01");
+    await ds.query(`UPDATE accounts SET balance=2900000 WHERE id=$1`, [card]);
+    at("2026-11-02T08:00:00Z");
+    await svc.tick();
+    await spendTx(card, -100_000, "spend", "2026-11-02");
+    await ds.query(`UPDATE accounts SET balance=2800000 WHERE id=$1`, [card]);
+    at("2026-11-02T19:00:00Z"); // 21:00 Kyiv
+    for (let i = 0; i < 4; i++) await svc.tick();
+    const day = (await app.get(TodayService).getToday()).state;
+    expect(day).toMatchObject({ mode: "bridge", dailyLimit: 45_000, leftToday: -55_000 });
+    expect(day.shortageStart).toBeUndefined();
+    expect((await logged()).filter((k) => k.startsWith("over_limit:"))).toEqual(["over_limit:2026-11-02"]);
+  });
+
   // Б47 (3): near zero the ordinary limit is already ₴450, so crossing into shortage changes no limit.
   it("speaks up about an overspend that crosses into shortage on the same ₴450: the day is judged by its limit", async () => {
     await device("a", "ExponentPushToken[a]");
