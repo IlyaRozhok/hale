@@ -98,3 +98,58 @@ export function buildInsights(w: InsightsWindow, rows: readonly InsightsRow[]): 
     categories,
   };
 }
+
+// --- Places of the month (task В3) -------------------------------------------------------------------------------
+// A place is the counterparty of a bank purchase that counts against the limit (type 'spend'), named by the one
+// counterparty key the app already uses (transactions/counter-key.ts: «Применить к похожим», recipients, the
+// questions on «Сегодня»). Person transfers are people, not places; entries in the cash wallet carry only the owner's
+// note, not a bank's merchant; withdrawals are not purchases. A refund lowers its place's sum, as it lowers its
+// category's, when the bank names it as the purchase; it is not a visit.
+
+/** How many places «Итоги» names: a short list that fits one card, the largest first. */
+export const PLACES_TOP = 5;
+/** A place is new for a month when it had no purchase in this many whole months before it (as for spikes, audit §8). */
+export const NEW_PLACE_MONTHS = 3;
+
+/** One place over the month's stretch, summed in the database. */
+export interface PlaceRow {
+  /** counterKeySql of its rows. */
+  key: string;
+  /** As «Операции» names its latest row: the counterparty's name, else the bank text. */
+  name: string;
+  /** Kopecks, signed like limitSpend: refunds at the place lower it. */
+  spent: Minor;
+  /** Purchases (money out) at the place in the stretch; refunds are not visits. */
+  visits: number;
+  /** A purchase at the place in the NEW_PLACE_MONTHS before the month. */
+  seenBefore: boolean;
+}
+
+export interface InsightsPlace {
+  key: string;
+  name: string;
+  spent: Minor;
+  visits: number;
+  isNew: boolean;
+}
+
+/** The first day of the stretch a new place is looked for in: the 1st of the month NEW_PLACE_MONTHS before. */
+export function placesLookbackFrom(month: string): string {
+  let m = month;
+  for (let i = 0; i < NEW_PLACE_MONTHS; i++) m = previousMonth(m);
+  return `${m}-01`;
+}
+
+/**
+ * The month's largest places. Only a place with a name, a visit and a sum left after refunds is one. A place is new only
+ * when the history (the first day any operation is stored, `historyFrom`) reaches back over the whole lookback;
+ * with a shorter history every place would look new, so none is marked.
+ */
+export function buildPlaces(rows: readonly PlaceRow[], historyFrom: string | null, month: string): InsightsPlace[] {
+  const knowsHistory = historyFrom !== null && historyFrom <= placesLookbackFrom(month);
+  return rows
+    .filter((r) => r.visits > 0 && r.spent > 0 && r.name.trim() !== "")
+    .sort((a, b) => b.spent - a.spent || b.visits - a.visits || (a.name < b.name ? -1 : a.name > b.name ? 1 : a.key < b.key ? -1 : 1))
+    .slice(0, PLACES_TOP)
+    .map((r) => ({ key: r.key, name: r.name, spent: r.spent, visits: r.visits, isNew: knowsHistory && !r.seenBefore }));
+}

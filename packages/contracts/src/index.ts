@@ -775,6 +775,27 @@ export const insightsMonthDto = z
     categories: z.array(
       z.object({ category: z.string().min(1), spent: money, previousSpent: money, count: z.number().int().nonnegative() }).strict(),
     ),
+    /**
+     * Task В3, optional (an older server does not send it): the month's largest places, at most five, by the sum
+     * over the same stretch as `spent`. A place is the bank's counterparty of purchases from the limit; person
+     * transfers and cash wallet entries are not places. `key` is the counterparty's opaque id (as `counterKey` of a
+     * transaction), `name` is how «Операции» names it, `spent` is kopecks after refunds there (positive), `visits`
+     * the purchases, `isNew` — no purchase there in the three months before.
+     */
+    places: z
+      .array(
+        z
+          .object({
+            key: z.string().regex(/^[0-9a-f]{16}$/),
+            name: z.string().min(1),
+            spent: money.refine((n) => n > 0, "a place has a positive sum"),
+            visits: z.number().int().positive(),
+            isNew: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(5)
+      .optional(),
   })
   .strict();
 export type InsightsMonthDto = z.infer<typeof insightsMonthDto>;
