@@ -178,8 +178,8 @@ export class PlanService implements OnApplicationBootstrap {
   /**
    * Bank rows can arrive before the tax row that claims them (history is imported first, the owner's
    * rows are seeded later), so unclaimed tax payments are tried again, on start and hourly. This is also
-   * how payments read under an older rule reach their quarter (Б30). Newest first: a row goes to its
-   * latest fitting payment. Safe to repeat.
+   * how payments read under an older rule reach their quarter (Б30), a top-up of a row its own operation
+   * paid exactly among them (Б43). Newest first: a row goes to its latest fitting payment. Safe to repeat.
    */
   async linkTaxTransactions(): Promise<void> {
     const rows: { id: number }[] = await this.ds.query(
@@ -187,7 +187,7 @@ export class PlanService implements OnApplicationBootstrap {
         WHERE t.type='tax' AND t.amount < 0
           AND NOT EXISTS (SELECT 1 FROM scheduled_payments p WHERE p.transaction_id = t.id)
           AND NOT EXISTS (SELECT 1 FROM payment_links l WHERE l.transaction_id = t.id)
-          AND EXISTS (SELECT 1 FROM scheduled_payments p WHERE p.kind='tax' AND p.transaction_id IS NULL)
+          AND EXISTS (SELECT 1 FROM scheduled_payments p WHERE p.kind='tax')
         ORDER BY t.occurred_at DESC, t.id DESC`,
     );
     for (const r of rows) await this.onClassified(r.id, "tax");
@@ -542,13 +542,16 @@ export class PlanService implements OnApplicationBootstrap {
         if (t.type === "spend") await this.retypeAsDebt(m, t.id);
         return loanReason;
       }
-      // Tax rows stay candidates after the owner marked them paid: they can still claim their bank row.
+      // Tax rows stay candidates after the owner marked them paid: they can still claim their bank row. Tax
+      // rows paid through their own operation come too, with its hryvnia (`matched`): they take a top-up (Б43);
+      // the exact matchers skip them.
       const open: Payment[] = await m.query(
         `SELECT p.id, p.kind, p.name, p.amount::float8 AS amount, p.currency, p.due_on::text AS due_on, p.paid_at,
                 p.transaction_id, p.match_hint, p.tax_quarter, p.is_estimate, p.closed_by_links,
                 (SELECT COALESCE(SUM(-COALESCE(x.amount_uah, x.amount)), 0) FROM payment_links l
-                   JOIN transactions x ON x.id = l.transaction_id WHERE l.payment_id = p.id)::float8 AS linked
-           FROM scheduled_payments p WHERE p.transaction_id IS NULL AND (p.paid_at IS NULL OR p.kind='tax')
+                   JOIN transactions x ON x.id = l.transaction_id WHERE l.payment_id = p.id)::float8 AS linked,
+                (SELECT -COALESCE(x.amount_uah, x.amount) FROM transactions x WHERE x.id = p.transaction_id)::float8 AS matched
+           FROM scheduled_payments p WHERE p.kind='tax' OR (p.transaction_id IS NULL AND p.paid_at IS NULL)
           ORDER BY p.due_on, p.id FOR UPDATE OF p`,
       );
       if (t.type === "spend" && t.type_source === "owner") return loanReason;
