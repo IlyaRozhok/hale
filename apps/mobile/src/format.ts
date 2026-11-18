@@ -161,6 +161,16 @@ export function isIsoDate(text: string): boolean {
   return !Number.isNaN(d.getTime()) && d.toISOString().startsWith(text);
 }
 
+/** "2026-08-04" as "4 августа". */
+export function dayMonthLong(iso: string): string {
+  return `${dayOf(iso)} ${MONTHS_FULL[monthOf(iso)]}`;
+}
+
+const MONTHS_IN = ["январе", "феврале", "марте", "апреле", "мае", "июне", "июле", "августе", "сентябре", "октябре", "ноябре", "декабре"];
+
+/** A month in the prepositional case, for «в октябре». month is 1..12. */
+export const inMonth = (month: number): string => MONTHS_IN[month - 1]!;
+
 /** "2026-11-03" as "3 ноября 2026". */
 export function dateLabel(iso: string): string {
   return `${dayOf(iso)} ${MONTHS_FULL[monthOf(iso)]} ${iso.slice(0, 4)}`;

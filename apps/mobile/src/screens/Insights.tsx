@@ -5,13 +5,14 @@ import { tokens } from "@hale/tokens";
 import type { InsightsMonthDto } from "@hale/contracts";
 import { useInsights } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
-import { formatMoney, kyivDate, monthTitle, pluralIndex } from "../format";
+import { formatMoney, inMonth, kyivDate, monthTitle, pluralIndex } from "../format";
 import { categoryLabel } from "../labels";
 import { ErrorText } from "../components/ErrorText";
 import { Glass } from "../components/Glass";
 import { LAYOUT } from "../components/layout";
 import { PlacesCard } from "../components/PlacesCard";
 import { PrimaryButton } from "../components/PrimaryButton";
+import { SubscriptionsCard } from "../components/SubscriptionsCard";
 
 const { color, radius, space, touchMin, type } = tokens;
 
@@ -19,9 +20,6 @@ type Category = InsightsMonthDto["categories"][number];
 
 /** Rows shown before the rest folds into one «Ещё» row. */
 const TOP = 5;
-
-/** «в октябре»: the month in the prepositional case. month is 1..12. */
-const IN_MONTH = ["январе", "феврале", "марте", "апреле", "мае", "июне", "июле", "августе", "сентябре", "октябре", "ноябре", "декабре"];
 
 /** "2026-11" and a number of months later. */
 function shiftMonth(month: string, by: number): string {
@@ -46,7 +44,7 @@ function comparison(d: InsightsMonthDto): string {
   if (d.previousSpent === 0) return "потрачено";
   const before = d.previous.from.slice(0, 7);
   const whole = dayNumber(d.previous.to) === lastDayOf(before);
-  return `потрачено · в ${IN_MONTH[monthNumber(before) - 1]}${whole ? "" : " за те же дни"} ${formatMoney(d.previousSpent)}`;
+  return `потрачено · в ${inMonth(monthNumber(before))}${whole ? "" : " за те же дни"} ${formatMoney(d.previousSpent)}`;
 }
 
 const categoriesText = (n: number): string => `${n} ${["категория", "категории", "категорий"][pluralIndex(n)]}`;
@@ -161,6 +159,8 @@ function Month({ data, past, thisYear, unfolded, onUnfold, onOpenCategory }: Mon
       {(data.otherPayments ?? 0) > 0 && <Text style={styles.note}>{`Ещё платежи: ${formatMoney(data.otherPayments!)}`}</Text>}
       {/* Task В3: the month's largest places, under the categories; an older server does not send them. */}
       <PlacesCard places={data.places} />
+      {/* Task В4, variant Б: one row with the total a month, opening the list; an older server does not send it. */}
+      <SubscriptionsCard subscriptions={data.subscriptions} />
     </>
   );
 }
