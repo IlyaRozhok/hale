@@ -30,6 +30,7 @@ import { IncomeEventDateByHand1795737600000 } from "./migrations/0026-income-eve
 import { RecurringStart1795824000000 } from "./migrations/0027-recurring-start";
 import { CashStartedAt1795910400000 } from "./migrations/0028-cash-started-at";
 import { CashCountAbsorbed1795996800000 } from "./migrations/0029-cash-count-absorbed";
+import { OwnerRuleMark1796083200000 } from "./migrations/0030-owner-rule-mark";
 
 export const migrations = [
   Init1793577600000,
@@ -61,6 +62,7 @@ export const migrations = [
   RecurringStart1795824000000,
   CashStartedAt1795910400000,
   CashCountAbsorbed1795996800000,
+  OwnerRuleMark1796083200000,
 ];
 
 export function createDataSource(url: string): DataSource {
