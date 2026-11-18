@@ -2496,4 +2496,34 @@ describe("last month's fop income that arrives early next month closes last mont
     at("2026-11-27T08:00:00Z");
     expect((await today()).state).toMatchObject({ daysLeft: 31, needsIncomeDate: false });
   });
+
+  it("after the hourly repair of the old rule's state, the next date is November's window, not December's", async () => {
+    await account("black", 1_000_000);
+    const fop = await account("fop", 0);
+    at("2026-11-02T08:00:00Z");
+    await api.post("/plan/expected-incomes", { source: "fop", amount: 500_000, currency: "UAH", window_start_day: 25, window_end_day: 28 }).expect(201);
+    seq++;
+    const late = (
+      await ds.query(
+        `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, mcc, type, category, raw)
+         VALUES ($1,$2,'2026-11-02T09:00:00Z','2026-11-02','From client',300000,300000,4829,'income','income','{}') RETURNING id`,
+        [`tx-${seq}`, fop],
+      )
+    )[0].id as number;
+    // What the calendar-month rule left: October waiting with a past date, November received by October's money.
+    await ds.query(
+      `INSERT INTO income_events (expected_income_id, period, expected_on, status) SELECT id, '2026-10', '2026-10-28', 'expected' FROM expected_incomes`,
+    );
+    await ds.query(
+      `UPDATE income_events SET status='received', received_at='2026-11-02T09:00:00Z', amount_uah=300000, matched_transaction_id=$1 WHERE period='2026-11'`,
+      [late],
+    );
+
+    at("2026-11-18T08:00:00Z");
+    await app.get(PlanService).hourlyJob();
+    at("2026-11-19T08:00:00Z");
+    const next = await today();
+    expect(next.state).toMatchObject({ daysLeft: 9, needsIncomeDate: false });
+    expect(next.questions.map((q: { kind: string }) => q.kind)).not.toContain("income_date");
+  });
 });

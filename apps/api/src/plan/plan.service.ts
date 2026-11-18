@@ -24,7 +24,13 @@ import {
   paymentUah,
   repairTaxLinks,
 } from "../domain/recurring-match";
-import { type FopIncome, type FopMonthIncome, fopIncomeByPeriod, waitsForLateIncome } from "../domain/fop-income";
+import {
+  type FopIncome,
+  type FopMonthIncome,
+  fopIncomeByPeriod,
+  receivedByLastMonthsMoney,
+  waitsForLateIncome,
+} from "../domain/fop-income";
 import { kyivDate } from "../domain/money";
 import { estimateDueOn, precedingQuarter, quarterBounds, quarterOf } from "../domain/quarter";
 import { taxReserve } from "../domain/tax";
@@ -49,6 +55,7 @@ interface FopEventIncome {
   period: string;
   received: boolean;
   byBank: boolean;
+  matchedId: number | null;
   amountUah: number | null;
   /** The income given to the event's month; undefined when none. */
   income: FopMonthIncome | undefined;
@@ -770,10 +777,21 @@ export class PlanService implements OnApplicationBootstrap {
    * Fop events still expected whose month already has fop income are received, dated by its first income
    * (the hourly job: events the old half-the-amount rule, or the calendar-month rule before Б46, left waiting).
    * Safe to repeat; a received event is never re-dated. Like any bank credit it leaves the day's fixed limit alone.
+   *
+   * It also repairs what the calendar-month rule did before Б46: an event received by last month's late money,
+   * with no income of its own month, is opened again (receivedByLastMonthsMoney) while last month takes that money,
+   * so the next income date is its own window's again. Its date (`expected_on`, `date_set_by_hand`) is untouched.
+   * Both follow from the same attribution, so a second run finds nothing to do.
    */
   private async receiveFopEvents(m: EntityManager): Promise<void> {
     for (const e of await this.fopEventIncome(m)) {
-      if (!e.received && e.income) await this.receiveFopEvent(m, e.id, e.income);
+      if (receivedByLastMonthsMoney({ period: e.period, received: e.received, matchedId: e.matchedId, hasIncome: e.income !== undefined }, e.periodOf)) {
+        await m.query(
+          `UPDATE income_events SET status='expected', received_at=NULL, amount_uah=NULL, matched_transaction_id=NULL
+            WHERE id=$1 AND status='received' AND matched_transaction_id=$2`,
+          [e.id, e.matchedId],
+        );
+      } else if (!e.received && e.income) await this.receiveFopEvent(m, e.id, e.income);
     }
   }
 
@@ -819,6 +837,7 @@ export class PlanService implements OnApplicationBootstrap {
           period: e.period,
           received: e.status === "received",
           byBank: e.matched_transaction_id !== null,
+          matchedId: e.matched_transaction_id,
           amountUah: e.amount_uah,
           income: months.get(e.period),
           periodOf,

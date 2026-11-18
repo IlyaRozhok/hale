@@ -62,3 +62,15 @@ export function fopIncomeByPeriod(
   }
   return { periodOf, months };
 }
+
+/**
+ * A received fop event the calendar-month rule gave last month's late money (before Б46): it was received by the
+ * bank with a row that now goes to the month before, and its own month has no income of its own. Such an event is
+ * opened again, so that it waits for its own money and its own date. One confirmed by hand has no row and is kept.
+ */
+export function receivedByLastMonthsMoney(
+  e: { period: string; received: boolean; matchedId: number | null; hasIncome: boolean },
+  periodOf: ReadonlyMap<number, string>,
+): boolean {
+  return e.received && e.matchedId !== null && !e.hasIncome && periodOf.get(e.matchedId) === previousMonth(e.period);
+}

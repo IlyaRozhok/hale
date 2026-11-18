@@ -1035,6 +1035,59 @@ describe("income events", () => {
       expect(await event("2026-10")).toMatchObject({ status: "received", amount_uah: 500_000, received_at: new Date("2026-11-02T10:00:00Z"), tx: first });
       expect(await event("2026-11")).toEqual(expected("2026-11-28"));
     });
+
+    it("the hourly job repairs November received by October's late money under the old rule: October takes it, November waits again", async () => {
+      const fop = await setup(25, 28);
+      const late = await tx(fop, { amount: 300_000, description: "From client", date: "2026-11-02" });
+      await ds.query(`UPDATE transactions SET type='income', category='income'`);
+      // What the calendar-month rule left: November received by the 2 November row, October waiting with a past date.
+      await ds.query(
+        `UPDATE income_events SET status='received', received_at='2026-11-02T10:00:00Z', amount_uah=300000, matched_transaction_id=$1 WHERE period='2026-11'`,
+        [late],
+      );
+
+      await app.get(PlanService).hourlyJob();
+      expect(await event("2026-10")).toEqual({
+        status: "received", on: "2026-10-28", amount_uah: 300_000, received_at: new Date("2026-11-02T10:00:00Z"), tx: late,
+      });
+      expect(await event("2026-11")).toEqual(expected("2026-11-28"));
+      expect((await row(`SELECT date_set_by_hand FROM income_events WHERE period='2026-11'`)).date_set_by_hand).toBe(false);
+
+      // Again: nothing moves.
+      await app.get(PlanService).hourlyJob();
+      expect(await event("2026-10")).toMatchObject({ status: "received", amount_uah: 300_000, tx: late });
+      expect(await event("2026-11")).toEqual(expected("2026-11-28"));
+
+      // November's own money still receives November.
+      const own = await tx(fop, { amount: 450_000, description: "From client", date: "2026-11-26" });
+      await reclassify([own]);
+      expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 450_000, tx: own });
+    });
+
+    it("the repair leaves alone a November that has income of its own, or one confirmed by hand", async () => {
+      const fop = await setup(25, 28);
+      const late = await tx(fop, { amount: 300_000, description: "From client", date: "2026-11-02" });
+      const own = await tx(fop, { amount: 450_000, description: "From client", date: "2026-11-26" });
+      await ds.query(`UPDATE transactions SET type='income', category='income'`);
+      await ds.query(
+        `UPDATE income_events SET status='received', received_at='2026-11-02T10:00:00Z', amount_uah=750000, matched_transaction_id=$1 WHERE period='2026-11'`,
+        [late],
+      );
+      await app.get(PlanService).hourlyJob();
+      expect(await event("2026-11")).toMatchObject({ status: "received", tx: late });
+      expect(await event("2026-10")).toMatchObject({ status: "received", amount_uah: 300_000, tx: late });
+      expect((await event("2026-11")).tx).not.toBe(own);
+    });
+
+    it("the repair never touches a November confirmed by hand", async () => {
+      const fop = await setup(25, 28);
+      await tx(fop, { amount: 300_000, description: "From client", date: "2026-11-02" });
+      await ds.query(`UPDATE transactions SET type='income', category='income'`);
+      await ds.query(`UPDATE income_events SET status='received', received_at='2026-11-02T10:00:00Z', amount_uah=500000 WHERE period='2026-11'`);
+      await app.get(PlanService).hourlyJob();
+      expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 500_000, tx: null });
+      expect((await event("2026-10")).status).toBe("received");
+    });
   });
 
   it("matching a cash_in to a USDC event lowers Binance, retypes the row and is idempotent", async () => {

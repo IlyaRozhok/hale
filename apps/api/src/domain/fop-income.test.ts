@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type FopIncome, fopIncomeByPeriod, fopIncomePeriod, waitsForLateIncome } from "./fop-income";
+import { type FopIncome, fopIncomeByPeriod, fopIncomePeriod, receivedByLastMonthsMoney, waitsForLateIncome } from "./fop-income";
 
 const inc = (id: number, localDate: string, amountUah: number): FopIncome => ({
   id,
@@ -81,5 +81,22 @@ describe("fopIncomeByPeriod (Б46)", () => {
   it("an early income in a month whose previous month does not wait stays in its month even when an older month waits", () => {
     const r = fopIncomeByPeriod([inc(1, "2026-11-02", 100_000)], 25, new Set(["2026-09"]));
     expect(r.periodOf.get(1)).toBe("2026-11");
+  });
+});
+
+describe("receivedByLastMonthsMoney (Б46 repair)", () => {
+  const periodOf = new Map([[1, "2026-10"], [2, "2026-11"]]);
+  const nov = { period: "2026-11", received: true, matchedId: 1, hasIncome: false };
+
+  it("November received by a row that is now October's, with no income of its own, is opened again", () => {
+    expect(receivedByLastMonthsMoney(nov, periodOf)).toBe(true);
+  });
+
+  it("is kept when it has income of its own, was confirmed by hand, its row is its own or unknown, or it is not received", () => {
+    expect(receivedByLastMonthsMoney({ ...nov, hasIncome: true }, periodOf)).toBe(false);
+    expect(receivedByLastMonthsMoney({ ...nov, matchedId: null }, periodOf)).toBe(false);
+    expect(receivedByLastMonthsMoney({ ...nov, matchedId: 2 }, periodOf)).toBe(false);
+    expect(receivedByLastMonthsMoney({ ...nov, matchedId: 3 }, periodOf)).toBe(false);
+    expect(receivedByLastMonthsMoney({ ...nov, received: false }, periodOf)).toBe(false);
   });
 });
