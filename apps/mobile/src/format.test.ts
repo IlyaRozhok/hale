@@ -8,6 +8,8 @@ import {
   formatSignedOriginal,
   goalPercent,
   longDate,
+  dayMonthLong,
+  inMonth,
   dueLabel, formatMoney, formatOriginal, kyivDate, formatStamp, formatUsd, isIsoDate, parseBalance, parseHryvnias, shiftDate, shortDate, taxQuarterOfDue,
 } from "./format";
 
@@ -198,5 +200,17 @@ describe("periodLabel", () => {
     expect(periodLabel("2026-11-09", "2026-11-09")).toBe("9 ноя");
     expect(periodLabel("2026-11-03", "2026-11-09")).toBe("3–9 ноя");
     expect(periodLabel("2026-10-28", "2026-11-03")).toBe("28 окт – 3 ноя");
+  });
+});
+
+describe("dates in words (В4)", () => {
+  it("a day and its month in the genitive, no year", () => {
+    expect(dayMonthLong("2026-08-04")).toBe("4 августа");
+    expect(dayMonthLong("2026-03-31")).toBe("31 марта");
+  });
+
+  it("a month in the prepositional case", () => {
+    expect(inMonth(10)).toBe("октябре");
+    expect(inMonth(5)).toBe("мае");
   });
 });

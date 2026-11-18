@@ -27,6 +27,30 @@ const places = [
   place("Uklon", 196_000, 11),
   place("Сушия", 138_000, 21, true),
 ];
+type Subscriptions = NonNullable<InsightsMonthDto["subscriptions"]>;
+type Sub = Subscriptions["items"][number];
+const sub = (name: string, amount: number, over: Partial<Sub> = {}): Sub => ({
+  key: "00000000000000b2",
+  name,
+  amount,
+  lastDate: "2026-11-05",
+  raisedBy: 0,
+  missed: 0,
+  ...over,
+});
+const subscriptions: Subscriptions = {
+  monthly: 188_600,
+  items: [
+    sub("ChatGPT", 83_000),
+    sub("Netflix", 34_900, { raisedBy: 5_000 }),
+    sub("Київстар", 25_000),
+    sub("Spotify", 19_900),
+    sub("YouTube Premium", 15_900),
+    sub("iCloud+", 9_900),
+    sub("Megogo", 19_900, { missed: 2, lastDate: "2026-08-04" }),
+  ],
+};
+const withSubs = (s: Subscriptions | undefined) => fakeApi({ insights: jest.fn(async () => insightsFixture({ subscriptions: s })) });
 const placeRows = () => screen.getAllByTestId("place-row").map((r) => r.props.accessibilityLabel as string);
 
 /** A whole past month against the whole month before it. */
@@ -358,6 +382,98 @@ describe("Insights", () => {
       expect(await screen.findByText("Novus")).toBeTruthy();
       expect(placeRows()).toEqual(["Novus, 22 раза: ₴3,100"]);
       expect(screen.queryByText("Сільпо")).toBeNull();
+    });
+  });
+
+  describe("subscriptions of the month (В4)", () => {
+    it("one row: the total a month, with the first raised one as a quiet note", async () => {
+      await renderWith(<Insights now={now} />, withSubs(subscriptions));
+      const row = await screen.findByTestId("subscriptions-row");
+      expect(row.props.accessibilityLabel).toBe("Подписки: ₴1,886 в месяц. Netflix подорожала на ₴50");
+      expect(screen.getByText("₴1,886 в месяц")).toBeTruthy();
+      expect(screen.getByText("Netflix подорожала на ₴50")).toBeTruthy();
+      // The row lists nothing: the subscriptions are in the sheet.
+      expect(screen.queryByText("ChatGPT")).toBeNull();
+    });
+
+    it("with none raised, the first one not charged for a while is the note", async () => {
+      const items = subscriptions.items.map((i) => ({ ...i, raisedBy: 0 }));
+      await renderWith(<Insights now={now} />, withSubs({ ...subscriptions, items }));
+      await screen.findByTestId("subscriptions-row");
+      expect(screen.getByText("Megogo не списывалась 2 месяца")).toBeTruthy();
+      expect(screen.queryByText(/подорожала/)).toBeNull();
+    });
+
+    it("one missed charge reads as a month, five as months", async () => {
+      const one = [sub("ChatGPT", 83_000), sub("Megogo", 19_900, { missed: 1 })];
+      await renderWith(<Insights now={now} />, withSubs({ monthly: 83_000, items: one }));
+      expect(await screen.findByText("Megogo не списывалась месяц")).toBeTruthy();
+    });
+
+    it("five missed charges read as «5 месяцев»", async () => {
+      const five = [sub("ChatGPT", 83_000), sub("Megogo", 19_900, { missed: 5 })];
+      await renderWith(<Insights now={now} />, withSubs({ monthly: 83_000, items: five }));
+      expect(await screen.findByText("Megogo не списывалась 5 месяцев")).toBeTruthy();
+    });
+
+    it("no note when nothing changed", async () => {
+      const calm = [sub("ChatGPT", 83_000), sub("Spotify", 19_900)];
+      await renderWith(<Insights now={now} />, withSubs({ monthly: 102_900, items: calm }));
+      const row = await screen.findByTestId("subscriptions-row");
+      expect(row.props.accessibilityLabel).toBe("Подписки: ₴1,029 в месяц");
+      expect(screen.queryByText(/подорожала|не списывалась/)).toBeNull();
+    });
+
+    it("a tap opens the sheet with the list, and «Закрыть» closes it", async () => {
+      await renderWith(<Insights now={now} />, withSubs(subscriptions));
+      await fireEvent.press(await screen.findByRole("button", { name: "Подписки: ₴1,886 в месяц. Netflix подорожала на ₴50" }));
+      expect(await screen.findByText("₴1,886 в месяц · 6 подписок")).toBeTruthy();
+      expect(screen.getByText("ChatGPT")).toBeTruthy();
+      expect(screen.getByText("Давно не списывались")).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
+      await waitFor(() => expect(screen.queryByText("Давно не списывались")).toBeNull());
+      expect(screen.getByTestId("subscriptions-row")).toBeTruthy();
+    });
+
+    it("a solid card, not glass, with no red", async () => {
+      await renderWith(<Insights now={now} />, withSubs(subscriptions));
+      await screen.findByTestId("subscriptions-row");
+      const card = StyleSheet.flatten(screen.getByTestId("subscriptions-card").props.style) as { backgroundColor?: string };
+      expect(card.backgroundColor).toBe(tokens.color.card.fill);
+      const note = StyleSheet.flatten(screen.getByText("Netflix подорожала на ₴50").props.style) as { color?: string };
+      expect(note.color).toBe(tokens.color.fg.muted);
+    });
+
+    it("comes after the categories, «Ещё платежи» and «Места»", async () => {
+      await renderWith(
+        <Insights now={now} />,
+        fakeApi({ insights: jest.fn(async () => insightsFixture({ places, otherPayments: 1_870_500, subscriptions })) }),
+      );
+      await screen.findByTestId("subscriptions-row");
+      const texts = screen.getAllByText(/./).map((t) => t.props.children as unknown);
+      const at = texts.indexOf("₴1,886 в месяц");
+      expect(at).toBeGreaterThan(texts.indexOf("Ещё 4 категории"));
+      expect(at).toBeGreaterThan(texts.indexOf("Ещё платежи: ₴18,705"));
+      expect(at).toBeGreaterThan(texts.indexOf("Сушия"));
+    });
+
+    it("no row from an older server's answer without the field", async () => {
+      await renderWith(<Insights now={now} />, withSubs(undefined));
+      await screen.findByText("₴18,220");
+      expect(screen.queryByTestId("subscriptions-row")).toBeNull();
+    });
+
+    it("no row when none were found", async () => {
+      await renderWith(<Insights now={now} />, withSubs({ monthly: 0, items: [] }));
+      await screen.findByText("₴18,220");
+      expect(screen.queryByTestId("subscriptions-row")).toBeNull();
+    });
+
+    it("no row when every one found has stopped being charged", async () => {
+      await renderWith(<Insights now={now} />, withSubs({ monthly: 0, items: [sub("Megogo", 19_900, { missed: 2 })] }));
+      await screen.findByText("₴18,220");
+      expect(screen.queryByTestId("subscriptions-row")).toBeNull();
+      expect(screen.queryByText(/Megogo/)).toBeNull();
     });
   });
 });
