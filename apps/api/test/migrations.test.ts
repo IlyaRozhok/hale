@@ -11,6 +11,7 @@ import { CashCountAbsorbed1795996800000 } from "../src/db/migrations/0029-cash-c
 import { OwnerRuleMark1796083200000 } from "../src/db/migrations/0030-owner-rule-mark";
 import { SettingsClassifierVersion1796169600000 } from "../src/db/migrations/0031-settings-classifier-version";
 import { HryvniaLegAmounts1796256000000 } from "../src/db/migrations/0032-hryvnia-leg-amounts";
+import { CashCardAnsweredAt1796342400000 } from "../src/db/migrations/0033-cash-card-answered-at";
 import { CLASSIFIER_VERSION } from "../src/domain/classify";
 import { JobRunner } from "../src/mono/jobs/job-runner";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
@@ -394,6 +395,32 @@ describe("migrations", () => {
     // Down cannot bring the guessed amounts back and leaves the exact ones.
     for (let i = migrations.indexOf(HryvniaLegAmounts1796256000000); i < migrations.length; i++) await ds.undoLastMigration();
     expect((await ds.query(`SELECT amount_uah::float8 AS v FROM transactions WHERE external_id='sell'`))[0].v).toBe(-412700);
+    await ds.destroy();
+  });
+
+  it("0033 gives every card answered before it the migration's time as its answer time, and changes nothing else (Б47.5)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(CashCardAnsweredAt1796342400000)) });
+    await before.initialize();
+    await before.runMigrations();
+    await before.query(`INSERT INTO cash_cards (counter_key, withdraws) VALUES ('yes', true), ('no', false)`);
+    const was = await before.query(`SELECT * FROM cash_cards ORDER BY counter_key`);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    const from = new Date();
+    await ds.runMigrations();
+    const to = new Date();
+    const after: { counter_key: string; withdraws: boolean; answered_at: Date }[] = await ds.query(`SELECT * FROM cash_cards ORDER BY counter_key`);
+    expect(after.map((r) => ({ counter_key: r.counter_key, withdraws: r.withdraws }))).toEqual(was);
+    for (const r of after) {
+      expect(r.answered_at.getTime()).toBeGreaterThanOrEqual(from.getTime() - 1000);
+      expect(r.answered_at.getTime()).toBeLessThanOrEqual(to.getTime() + 1000);
+    }
+    for (let i = migrations.indexOf(CashCardAnsweredAt1796342400000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT 1 FROM information_schema.columns WHERE table_name='cash_cards' AND column_name='answered_at'`)).toEqual([]);
+    expect(await ds.query(`SELECT * FROM cash_cards ORDER BY counter_key`)).toEqual(was);
     await ds.destroy();
   });
 });
