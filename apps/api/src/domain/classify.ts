@@ -122,18 +122,17 @@ export function isWeakRuleValue(value: string): boolean {
 export function ruleMatches(rule: Pick<ClassifyRule, "matchKind" | "matchValue" | "direction">, tx: Pick<ClassifyInput, "amount" | "description" | "counterIban" | "counterName">): boolean {
   if (rule.direction === "out" && tx.amount >= 0) return false;
   if (rule.direction === "in" && tx.amount <= 0) return false;
-  const v = lc(rule.matchValue);
-  if (!v) return false;
+  const n = normaliseText(rule.matchValue);
+  if (!n) return false;
   switch (rule.matchKind) {
     case "iban":
       return tx.counterIban === rule.matchValue;
     case "merchant":
-      return lc(tx.description).includes(v);
-    case "recipient": {
+      // The whole bank text, never a fragment: a rule for «Uber» is not «Uber Eats» (Б37).
+      return normaliseText(tx.description) === n;
+    case "recipient":
       // The whole name or the whole description, never a fragment of either.
-      const n = normaliseText(rule.matchValue);
       return normaliseText(tx.counterName ?? "") === n || normaliseText(tx.description) === n;
-    }
   }
 }
 
