@@ -1395,6 +1395,26 @@ describe("bridge mode", () => {
       expect((await month()).at(-1)).toEqual({ date: "2026-11-02", limit: 100_000, spent: 1_100_000, status: "today", shortageStart: true });
     });
 
+    it("counts the runway's later days by the limit it names for tomorrow, not by the morning one", async () => {
+      const card = await ordinaryMorning();
+      await tx(card, -1_100_000, "spend");
+      await setBalance(card, 2_900_000);
+      const crossed = await today();
+      expect(crossed.state).toMatchObject({ dailyLimit: 100_000, shortageStart: { nextLimit: 45_000 } });
+      const free = crossed.state.free;
+      // Today is overspent and spends nothing more; each of the nine days to the 12th spends ₴450.
+      expect(crossed.runway.points.map((p: { balance: number }) => p.balance)).toEqual([
+        free,
+        free,
+        ...Array.from({ length: 9 }, (_, i) => free - (i + 1) * 45_000),
+      ]);
+      expect(crossed.runway.reserve).toBe(free - 9 * 45_000);
+      // Once the plan fixes the day, nothing is named for tomorrow and the day's own limit runs on.
+      const chosen = (await api.post("/bridge", { dailyAmount: 60_000 }).expect(201)).body;
+      expect(chosen.state.shortageStart).toEqual({});
+      expect(chosen.runway.reserve).toBe(chosen.state.free - 9 * 60_000);
+    });
+
     it("once a plan is confirmed the day's limit already is the new one: marked, with no limit for tomorrow to announce", async () => {
       const card = await ordinaryMorning();
       await tx(card, -1_100_000, "spend");

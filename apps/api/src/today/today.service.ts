@@ -874,6 +874,8 @@ export class TodayService {
       endOn: f.end,
       free: state.free,
       dailyLimit: state.dailyLimit,
+      // On the day the shortage came on, the days after today run on the limit the screen names for tomorrow.
+      ...(shortageStart?.nextLimit !== undefined ? { laterLimit: shortageStart.nextLimit } : {}),
       leftToday: state.leftToday,
       payments: events,
     });

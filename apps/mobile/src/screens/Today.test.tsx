@@ -1014,11 +1014,19 @@ describe("Today, bridge", () => {
       expect(screen.queryByText(/понадобится/)).toBeNull();
     });
 
-    it("names no date on the day the shortage came on: the runway is drawn for the morning limit", async () => {
-      const today = shortToday({}, "2026-11-17", { dailyLimit: 200000, leftToday: 60000, level: 0.3, shortageStart: { nextLimit: 45300 } });
-      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today }));
+    it("names the date on the day the shortage came on: the runway is drawn for tomorrow's limit, not the morning one (А23)", async () => {
+      const today = shortToday({}, "2026-11-17", { dailyLimit: 200000, leftToday: 60000, level: 0.3, shortageStart: { nextLimit: 45000 } });
+      const api = fakeApi({
+        today,
+        previewBridge: jest.fn(async (d: number) => ({ dailyAmount: d, creditNeeded: 2997000, shortfall: 2997000 })),
+      });
+      await renderWith(<Today onOpenActivity={noop} />, api);
       await openBridge();
-      expect(await screen.findByText(NO_DATE)).toBeTruthy();
+      expect(await screen.findByText(LINE)).toBeTruthy();
+      // At the morning limit the date would be the one for ₴450 a day: it is left out.
+      await fireEvent(await screen.findByLabelText("Сумма в день"), "valueChange", 200000);
+      await tick(310);
+      expect(await screen.findByText(NO_DATE.replace("₴20,070", "₴29,970"))).toBeTruthy();
       expect(screen.queryByText(/понадобится к/)).toBeNull();
     });
 

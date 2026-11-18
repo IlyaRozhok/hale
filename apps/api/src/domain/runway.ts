@@ -7,6 +7,11 @@ export interface RunwayInput {
   /** Own money with reserves and the payments below already taken out. */
   free: Minor;
   dailyLimit: Minor;
+  /**
+   * What each day after today spends, when it is not `dailyLimit`: on the day the shortage came on, today keeps
+   * its morning limit while the days after it already run on the shortage one. Defaults to `dailyLimit`.
+   */
+  laterLimit?: Minor;
   /** What is left of today's limit; negative when overspent. */
   leftToday: Minor;
   /** Unpaid payments before `endOn`, in hryvnias. Overdue ones count today. */
@@ -24,13 +29,13 @@ export interface Runway {
 
 /**
  * The money day by day until the next income: today spends what is left of its limit, each later
- * day its whole limit, and a payment leaves on its day. Pure; the same input gives the same answer.
+ * day its whole limit (or `laterLimit`), and a payment leaves on its day. Pure; the same input gives the same answer.
  */
 export function runway(i: RunwayInput): Runway {
   let balance = i.free + i.payments.reduce((s, p) => s + p.amount, 0);
   const points = [{ date: i.today, balance }];
   for (let d = i.today; d < i.endOn; d = addDays(d, 1)) {
-    const spend = d === i.today ? Math.max(0, i.leftToday) : i.dailyLimit;
+    const spend = d === i.today ? Math.max(0, i.leftToday) : (i.laterLimit ?? i.dailyLimit);
     const paid = i.payments.reduce((s, p) => s + ((p.date <= i.today ? i.today : p.date) === d ? p.amount : 0), 0);
     balance -= spend + paid;
     points.push({ date: addDays(d, 1), balance });
