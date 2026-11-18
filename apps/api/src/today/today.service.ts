@@ -235,7 +235,12 @@ export class TodayService {
     const morning = this.compute(f, plan, 0, f.spentToday);
     // The row's mode follows the day. A plan that has ended takes the day's row with it, so its mark is not stored.
     const stored = await this.storedMarks(m, f.date);
-    const mark = dayMark({ live: state.mode, ...(closePlan ? { ...stored, stored: null } : stored) });
+    // The shortage marks the day only when it changes the day's limit (Б47 (3)): the same test as `nextLimit` below.
+    const mark = dayMark({
+      live: state.mode,
+      ...(closePlan ? { ...stored, stored: null, storedLimit: null } : stored),
+      limit: state.dailyLimit,
+    });
     return { plan, state, morning, mark, closePlan, replan };
   }
 
@@ -371,7 +376,8 @@ export class TodayService {
         ]);
       }
       // The plan changes the day's limit, not what the day is: the day the shortage came on stays that day.
-      const mark = dayMark({ live: "bridge", ...(await this.storedMarks(m, f.date)) });
+      // A day that crossed into shortage on the limit it had becomes that day once the plan changes the limit.
+      const mark = dayMark({ live: "bridge", ...(await this.storedMarks(m, f.date)), limit: dailyAmount });
       await m.query(
         `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3)
          ON CONFLICT (local_date) DO UPDATE SET daily_limit=EXCLUDED.daily_limit, mode=EXCLUDED.mode`,
@@ -416,12 +422,17 @@ export class TodayService {
   }
 
   /** What today's row and the last fixed day before it say, for `dayMark`. */
-  private async storedMarks(m: EntityManager, date: string): Promise<{ stored: string | null; previous: string | null }> {
-    const rows: { date: string; mode: string }[] = await m.query(
-      `SELECT local_date::text AS date, mode FROM daily_snapshots WHERE local_date <= $1 ORDER BY local_date DESC LIMIT 2`,
+  private async storedMarks(
+    m: EntityManager,
+    date: string,
+  ): Promise<{ stored: string | null; previous: string | null; storedLimit: number | null }> {
+    const rows: { date: string; mode: string; daily_limit: number }[] = await m.query(
+      `SELECT local_date::text AS date, mode, daily_limit::float8 AS daily_limit FROM daily_snapshots
+        WHERE local_date <= $1 ORDER BY local_date DESC LIMIT 2`,
       [date],
     );
-    return { stored: rows.find((r) => r.date === date)?.mode ?? null, previous: rows.find((r) => r.date < date)?.mode ?? null };
+    const own = rows.find((r) => r.date === date);
+    return { stored: own?.mode ?? null, previous: rows.find((r) => r.date < date)?.mode ?? null, storedLimit: own?.daily_limit ?? null };
   }
 
   /** The limit fixed for the day, if its row is there. */

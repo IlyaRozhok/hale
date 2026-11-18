@@ -252,6 +252,28 @@ describe("fix round 1", () => {
     expect((await logged()).filter((k) => k.startsWith("over_limit:"))).toEqual(["over_limit:2026-11-03"]);
   });
 
+  // Б47 (3): near zero the ordinary limit is already ₴450, so crossing into shortage changes no limit.
+  it("speaks up about an overspend that crosses into shortage on the same ₴450: the day is judged by its limit", async () => {
+    await device("a", "ExponentPushToken[a]");
+    await ds.query(`TRUNCATE income_events, expected_incomes RESTART IDENTITY CASCADE`);
+    const fop = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop',500000,'UAH',15,25) RETURNING id`))[0].id;
+    await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-11','2026-11-12','expected')`, [fop]);
+    const card = (await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ('acc-s','black','UAH',10000) RETURNING id`))[0].id;
+    at("2026-11-01T08:00:00Z");
+    await svc.tick();
+    at("2026-11-02T08:00:00Z");
+    await svc.tick();
+    expect((await app.get(TodayService).getToday()).state).toMatchObject({ mode: "normal", dailyLimit: 45_000 });
+    await spendTx(card, -200_000, "spend", "2026-11-02");
+    await ds.query(`UPDATE accounts SET balance=-190000 WHERE id=$1`, [card]);
+    at("2026-11-02T19:00:00Z"); // 21:00 Kyiv
+    for (let i = 0; i < 4; i++) await svc.tick();
+    const crossed = (await app.get(TodayService).getToday()).state;
+    expect(crossed).toMatchObject({ mode: "bridge", dailyLimit: 45_000, leftToday: -155_000 });
+    expect(crossed.shortageStart).toBeUndefined();
+    expect((await logged()).filter((k) => k.startsWith("over_limit:"))).toEqual(["over_limit:2026-11-02"]);
+  });
+
   it("a tax payment closed by a matched transaction gets no further reminders", async () => {
     await device("a", "ExponentPushToken[a]");
     const fop = (await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ('acc-fop','fop','UAH',5000000) RETURNING id`))[0].id;

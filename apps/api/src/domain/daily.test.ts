@@ -134,35 +134,79 @@ describe("computeDaily normal mode", () => {
     expect(s.daysLeft).toBe(30);
     expect(s.dailyLimit).toBe(333_333);
   });
+  // These four look at the share of free money over the days, so the plan's recommended sum is set below it.
+  const lowFloor = { foodFloor: 1_000 };
   it("divides free over the days when below the cap", () => {
-    const s = computeDaily(input({ ...rich, cardsMoney: 900_000 }));
+    const s = computeDaily(input({ ...rich, ...lowFloor, cardsMoney: 900_000 }));
     expect(s.dailyLimit).toBe(30_000);
   });
   it("rounds the daily limit down", () => {
-    const s = computeDaily(input({ ...rich, cardsMoney: 100_000 }));
+    const s = computeDaily(input({ ...rich, ...lowFloor, cardsMoney: 100_000 }));
     expect(s.dailyLimit).toBe(3_333);
   });
   it("allows negative leftToday and clamps level to 0", () => {
-    const s = computeDaily(input({ ...rich, cardsMoney: 900_000, spentToday: 40_000 }));
+    const s = computeDaily(input({ ...rich, ...lowFloor, cardsMoney: 900_000, spentToday: 40_000 }));
     expect(s.leftToday).toBe(-10_000);
     expect(s.level).toBe(0);
   });
   it("clamps level to 1 when spentToday is negative (refund)", () => {
-    const s = computeDaily(input({ ...rich, cardsMoney: 900_000, spentToday: -5_000 }));
+    const s = computeDaily(input({ ...rich, ...lowFloor, cardsMoney: 900_000, spentToday: -5_000 }));
     expect(s.level).toBe(1);
   });
-  it("free exactly 0 is normal with level 0", () => {
+  it("free exactly 0 is normal, on the plan's recommended sum (Б47 (3))", () => {
     const s = computeDaily(input({ ...rich, cardsMoney: 0 }));
     expect(s.mode).toBe("normal");
     expect(s.free).toBe(0);
-    expect(s.dailyLimit).toBe(0);
-    expect(s.level).toBe(0);
+    expect(s.bridge).toBeNull();
+    expect(s.dailyLimit).toBe(45_000);
+    expect(s.level).toBe(1);
   });
   it("sums fop and binance and subtracts goals and borrowed", () => {
     const s = computeDaily(
       input({ ...rich, cardsMoney: 100_000, fopMoney: 200_000, binanceMoney: 300_000, goalDue: 50_000, borrowed: 50_000 }),
     );
     expect(s.free).toBe(500_000);
+  });
+});
+
+describe("computeDaily near zero free money (Б47 (3), option А)", () => {
+  // Ten days to the income; obligations taken out so own money alone is the free money.
+  const near = { obligationsDue: 0, nextIncomeOn: "2026-11-12" };
+  it("free +₴100 over 10 days gives the recommended sum, not ₴10", () => {
+    const s = computeDaily(input({ ...near, cardsMoney: 10_000 }));
+    expect(s.mode).toBe("normal");
+    expect(s.daysLeft).toBe(10);
+    expect(s.dailyLimit).toBe(45_000);
+    expect(s.bridge).toBeNull();
+  });
+  it("free −₴100 is still the shortage mode on the same recommended sum: no jump across zero", () => {
+    const above = computeDaily(input({ ...near, cardsMoney: 10_000 }));
+    const below = computeDaily(input({ ...near, cardsMoney: -10_000 }));
+    expect(below.mode).toBe("bridge");
+    expect(below.dailyLimit).toBe(45_000);
+    expect(below.dailyLimit).toBe(above.dailyLimit);
+  });
+  it("the shortage mode keeps the plan's chosen sum; the normal mode does not use it", () => {
+    expect(computeDaily(input({ ...near, cardsMoney: -10_000, bridgeDaily: 30_000 })).dailyLimit).toBe(30_000);
+    expect(computeDaily(input({ ...near, cardsMoney: 10_000, bridgeDaily: 30_000 })).dailyLimit).toBe(45_000);
+  });
+  it("above the recommended sum the share of free money over the days stays the limit", () => {
+    expect(computeDaily(input({ ...near, cardsMoney: 600_000 })).dailyLimit).toBe(60_000);
+    expect(computeDaily(input({ ...near, cardsMoney: 450_000 })).dailyLimit).toBe(45_000);
+    expect(computeDaily(input({ ...near, cardsMoney: 449_999 })).dailyLimit).toBe(45_000);
+  });
+  it("the owner's lifestyle cap still caps, even below the recommended sum", () => {
+    // ₴9,000 a month is ₴300 a day: the cap is the ceiling the owner set.
+    expect(computeDaily(input({ ...near, cardsMoney: 10_000, lifestyleCapMonthly: 900_000 })).dailyLimit).toBe(30_000);
+    expect(computeDaily(input({ ...near, cardsMoney: 3_000_000, lifestyleCapMonthly: 900_000 })).dailyLimit).toBe(30_000);
+  });
+  it("never goes down as free money grows from below zero to well above it", () => {
+    let prev = -Infinity;
+    for (let cards = -50_000; cards <= 800_000; cards += 5_000) {
+      const s = computeDaily(input({ ...near, cardsMoney: cards }));
+      expect(s.dailyLimit).toBeGreaterThanOrEqual(prev);
+      prev = s.dailyLimit;
+    }
   });
 });
 
@@ -233,6 +277,26 @@ describe("dayMark", () => {
   });
   it("is not the start on the very first fixed day: there was no limit before it to replace", () => {
     expect(dayMark({ live: "bridge", stored: null, previous: null })).toBe("bridge");
+  });
+  // Б47 (3): near zero the ordinary limit is already the recommended sum, so crossing zero may change nothing.
+  it("a day crossing into shortage on the limit it already has is not the start: nothing to spare it from", () => {
+    expect(dayMark({ live: "bridge", stored: "normal", previous: "normal", storedLimit: 45_000, limit: 45_000 })).toBe("bridge");
+    expect(dayMark({ live: "bridge", stored: "normal", previous: null, storedLimit: 45_000, limit: 45_000 })).toBe("bridge");
+  });
+  it("a day crossing into shortage onto another limit is the start, in either direction", () => {
+    // Below the floor the owner's cap made the ordinary limit ₴300; the shortage one is ₴450.
+    expect(dayMark({ live: "bridge", stored: "normal", previous: "normal", storedLimit: 30_000, limit: 45_000 })).toBe("bridge_start");
+    expect(dayMark({ live: "bridge", stored: "normal", previous: "normal", storedLimit: 100_000, limit: 45_000 })).toBe("bridge_start");
+  });
+  it("a day that crossed on the same limit becomes the start once its limit changes the same day (a plan chosen)", () => {
+    const crossed = dayMark({ live: "bridge", stored: "normal", previous: "normal", storedLimit: 45_000, limit: 45_000 });
+    expect(dayMark({ live: "bridge", stored: crossed, previous: "normal", storedLimit: 45_000, limit: 45_000 })).toBe("bridge");
+    expect(dayMark({ live: "bridge", stored: crossed, previous: "normal", storedLimit: 45_000, limit: 30_000 })).toBe("bridge_start");
+    // A day already in shortage the day before is an ordinary shortage day, whatever its limit does.
+    expect(dayMark({ live: "bridge", stored: "bridge", previous: "bridge", storedLimit: 45_000, limit: 30_000 })).toBe("bridge");
+  });
+  it("a day with no row yet has no limit to compare: right after an ordinary day it is still the start", () => {
+    expect(dayMark({ live: "bridge", stored: null, previous: "normal", storedLimit: null, limit: 45_000 })).toBe("bridge_start");
   });
   it("reads a value it does not know as an ordinary shortage day, so nothing is marked by mistake", () => {
     expect(dayMark({ live: "bridge", stored: "other", previous: "normal" })).toBe("bridge");

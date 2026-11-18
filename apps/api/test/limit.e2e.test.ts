@@ -182,6 +182,8 @@ describe("the plan", () => {
   });
 
   it("an expected income: added, changed, deleted", async () => {
+    // The 30-day share (₴333) is below the plan's recommended sum, which would hide it (Б47 (3)): ₴1 here.
+    await ds.query(`UPDATE settings SET food_floor=100`);
     await account("black", 4_000_000, { creditLimit: 3_000_000 });
     await fixed("2026-11-01", 100_000, "normal");
     await plant();
@@ -413,6 +415,8 @@ describe("the night jobs that used to delete the row", () => {
   });
 
   it("templates that got their first rows reach the limit the same hour", async () => {
+    // The 30-day share (₴333) is below the plan's recommended sum, which would hide it (Б47 (3)): ₴1 here.
+    await ds.query(`UPDATE settings SET food_floor=100`);
     await account("black", 4_000_000, { creditLimit: 3_000_000 });
     await ensure();
     expect((await today()).state.dailyLimit).toBe(Math.floor(1_000_000 / 30));
