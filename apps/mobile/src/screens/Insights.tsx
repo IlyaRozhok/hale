@@ -10,6 +10,7 @@ import { categoryLabel } from "../labels";
 import { ErrorText } from "../components/ErrorText";
 import { Glass } from "../components/Glass";
 import { LAYOUT } from "../components/layout";
+import { PlacesCard } from "../components/PlacesCard";
 import { PrimaryButton } from "../components/PrimaryButton";
 
 const { color, radius, space, touchMin, type } = tokens;
@@ -158,6 +159,8 @@ function Month({ data, past, thisYear, unfolded, onUnfold, onOpenCategory }: Mon
       )}
       {/* Task В2а: payments the limit leaves out (rent, taxes, debts), one quiet line with no breakdown. An older server does not send it. */}
       {(data.otherPayments ?? 0) > 0 && <Text style={styles.note}>{`Ещё платежи: ${formatMoney(data.otherPayments!)}`}</Text>}
+      {/* Task В3: the month's largest places, under the categories; an older server does not send them. */}
+      <PlacesCard places={data.places} />
     </>
   );
 }
