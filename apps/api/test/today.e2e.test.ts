@@ -238,6 +238,8 @@ describe("the first day", () => {
   const correct = Math.floor((1_000_000 - 100_000) / 23);
 
   it("before the seed the job freezes a 30-day limit; after seed and restart the same day has the right one", async () => {
+    // The 30-day share (₴333) is below the plan's recommended sum, which would hide it (Б47 (3)): ₴1 here.
+    await ds.query(`UPDATE settings SET food_floor=100`);
     await account("black", 1_000_000);
     const before = await today();
     expect(before.state).toMatchObject({ daysLeft: 30, dailyLimit: Math.floor(1_000_000 / 30), needsIncomeDate: true });
@@ -253,6 +255,8 @@ describe("the first day", () => {
   });
 
   it("a job that freezes the limit between the seed and the generation does not keep it wrong", async () => {
+    // The 30-day share (₴333) is below the plan's recommended sum, which would hide it (Б47 (3)): ₴1 here.
+    await ds.query(`UPDATE settings SET food_floor=100`);
     await account("black", 1_000_000);
     await today();
     await applySeed(ds, seed, NOW);
@@ -2426,6 +2430,8 @@ describe("an expected income's window dates its events (Б28)", () => {
 
 describe("a fop income smaller than expected still counts as the month's income (Б33)", () => {
   it("the next income date moves to next month's event: the morning limit holds that day, the next days divide by the days to it", async () => {
+    // The 36-day share (₴330) is below the plan's recommended sum, which would hide it (Б47 (3)): ₴1 here.
+    await ds.query(`UPDATE settings SET food_floor=100`);
     await account("black", 1_000_000);
     const fop = await account("fop", 0);
     at("2026-11-18T08:00:00Z");
@@ -2606,5 +2612,40 @@ describe("last month's fop income that arrives early next month closes last mont
     const next = await today();
     expect(next.state).toMatchObject({ daysLeft: 9, needsIncomeDate: false });
     expect(next.questions.map((q: { kind: string }) => q.kind)).not.toContain("income_date");
+  });
+});
+
+// Б47 (3), the owner's option А of 18 November: near zero the ordinary limit is not below the plan's recommended sum.
+describe("near zero free money the limit does not jump (Б47 (3))", () => {
+  it("₴100 free over 10 days gives ₴450, not ₴10; the runway shows the days running into the credit", async () => {
+    await account("black", 10_000);
+    await income("fop", "2026-11-12");
+    const r = await today();
+    expect(r.state).toMatchObject({ mode: "normal", daysLeft: 10, free: 10_000, dailyLimit: 45_000, leftToday: 45_000, bridge: null });
+    expect(r.state.shortageStart).toBeUndefined();
+    // Every day spends ₴450 from ₴100: the runway goes below zero at once, as it does in the shortage mode.
+    expect(r.runway.reserve).toBe(10_000 - 10 * 45_000);
+    expect(r.runway.zeroOn).toBe("2026-11-02");
+    expect(r.badCases).toEqual([]);
+  });
+
+  it("the next morning at −₴100 is the shortage mode on the same ₴450: the day it came on names no new limit", async () => {
+    const card = await account("black", 10_000);
+    await income("fop", "2026-11-12");
+    expect((await today()).state).toMatchObject({ mode: "normal", dailyLimit: 45_000 });
+    at("2026-11-03T10:00:00Z");
+    await setBalance(card, -10_000);
+    const next = await today();
+    expect(next.state).toMatchObject({ mode: "bridge", free: -10_000, dailyLimit: 45_000 });
+    expect(next.state.bridge.recommendedDaily).toBe(45_000);
+    // The shortage came on today, but the limit is the one the day already has.
+    expect(next.state.shortageStart).toEqual({});
+  });
+
+  it("the lifestyle cap still caps the limit below the recommended sum", async () => {
+    await ds.query(`UPDATE settings SET lifestyle_cap=900000`);
+    await account("black", 10_000);
+    await income("fop", "2026-11-12");
+    expect((await today()).state).toMatchObject({ mode: "normal", dailyLimit: 30_000 });
   });
 });

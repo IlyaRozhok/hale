@@ -110,7 +110,11 @@ export function computeDaily(i: DailyInput): DailyState {
       overPlan: i.creditPlan !== null && ownTotal < -i.creditPlan,
     };
   } else {
-    dailyLimit = Math.floor(Math.min(free / daysLeft, i.lifestyleCapMonthly / 30));
+    // Not below the plan's recommended sum (task Б47 (3), the owner's option А of 18 November): near zero
+    // the share of free money over the days would drop to ₴10 a day just above zero while ₴450 waits just
+    // below it. The lifestyle cap is the ceiling the owner set, so it still wins over the recommended sum.
+    // The days above the share then run into the credit; the runway shows that, as it does in the shortage.
+    dailyLimit = Math.floor(Math.min(Math.max(free / daysLeft, i.foodFloor), i.lifestyleCapMonthly / 30));
   }
 
   const leftToday = dailyLimit - i.spentToday;
