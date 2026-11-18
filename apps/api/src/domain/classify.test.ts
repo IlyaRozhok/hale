@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classify, findOwnPairs, hasThirdParty, isWeakRuleValue, type ClassifyContext, type ClassifyInput } from "./classify";
+import { classify, findOwnPairs, hasThirdParty, isWeakRuleValue, ruleMatches, type ClassifyContext, type ClassifyInput } from "./classify";
 
 const ctx = (over: Partial<ClassifyContext> = {}): ClassifyContext => ({
   ownIbans: new Set(["UA00OWN0001"]),
@@ -20,7 +20,7 @@ const tx = (over: Partial<ClassifyInput> = {}): ClassifyInput => ({
 describe("classify order", () => {
   it("owner rule beats every built-in rule", () => {
     const c = ctx({
-      rules: [{ matchKind: "merchant", matchValue: "Кредит до завтра", type: "spend", category: "other" }],
+      rules: [{ matchKind: "merchant", matchValue: "кредит до завтра на 7 днів", type: "spend", category: "other" }],
     });
     const r = classify(tx({ description: "Кредит До завтра на 7 днів", amount: 50000, mcc: 4829 }), c);
     expect(r).toMatchObject({ type: "spend", category: "other", source: "owner", needsLabel: false });
@@ -270,7 +270,7 @@ describe("cash", () => {
   });
 
   it("a cash_out rule still applies to a withdrawal", () => {
-    const rules = [{ matchKind: "merchant" as const, matchValue: "банкомат", type: "cash_out" as const, category: "cash" }];
+    const rules = [{ matchKind: "merchant" as const, matchValue: "банкомат 1", type: "cash_out" as const, category: "cash" }];
     expect(classify(tx({ description: "Банкомат 1", mcc: 6011 }), ctx({ rules }))).toMatchObject({ type: "cash_out", source: "owner" });
   });
 });
@@ -353,7 +353,7 @@ describe("a cafe by its name (Б14)", () => {
   });
 
   it("an owner rule still wins over the name", () => {
-    const c = ctx({ rules: [{ matchKind: "merchant", matchValue: "Mango", type: "spend", category: "groceries" }] });
+    const c = ctx({ rules: [{ matchKind: "merchant", matchValue: 'кафе "mango"', type: "spend", category: "groceries" }] });
     expect(classify(tx({ description: 'Кафе "Mango"', mcc: 5499 }), c)).toMatchObject({
       category: "groceries",
       source: "owner",
@@ -484,6 +484,25 @@ describe("default categories and fop income", () => {
   it("any incoming money on the fop account is income", () => {
     const r = classify(tx({ accountKind: "fop", amount: 1_000_000, mcc: 4829, description: "Payment from client" }), ctx());
     expect(r.type).toBe("income");
+  });
+});
+
+describe("a merchant rule matches the whole bank text (Б37)", () => {
+  const rule = (matchValue: string) => ({ matchKind: "merchant" as const, matchValue, direction: null });
+  const buy = (description: string) => ({ amount: -100, description, counterIban: null, counterName: null });
+
+  it("a rule for one shop does not catch a longer name that starts with it", () => {
+    expect(ruleMatches(rule("uber"), buy("Uber Eats"))).toBe(false);
+    expect(ruleMatches(rule("uber eats"), buy("Uber"))).toBe(false);
+    const c = ctx({ rules: [{ matchKind: "merchant", matchValue: "uber", type: "obligation" }] });
+    expect(classify(tx({ description: "Uber Eats", mcc: 5812 }), c).source).not.toBe("owner");
+    expect(classify(tx({ description: "Uber", mcc: 4121 }), c)).toMatchObject({ type: "obligation", source: "owner" });
+  });
+
+  it("ignores case and extra spaces on both sides", () => {
+    expect(ruleMatches(rule("UBER"), buy("uber"))).toBe(true);
+    expect(ruleMatches(rule("uber eats"), buy("  Uber   Eats "))).toBe(true);
+    expect(ruleMatches(rule(" Uber  Eats"), buy("uber eats"))).toBe(true);
   });
 });
 

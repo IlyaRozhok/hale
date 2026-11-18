@@ -348,13 +348,15 @@ describe("PATCH /transactions/:id", () => {
     expect((await row("SELECT type, type_source FROM transactions WHERE id=$1", [same])).type_source).toBe("owner");
     expect((await row("SELECT type FROM transactions WHERE id=$1", [t])).type).toBe("person_transfer");
 
-    // A new row of the same merchant picks up the rule through classify.
-    const later = await tx(a, { description: "UKLON ride", type: null, source: null, at: "2026-11-20T10:00:00.000Z" });
-    await app.get(ReclassifyService).reclassifyIds([later]);
+    // A new row of the same merchant picks up the rule through classify; a longer name is another shop (Б37).
+    const later = await tx(a, { description: " Uklon  ", type: null, source: null, at: "2026-11-20T10:00:00.000Z" });
+    const longer = await tx(a, { description: "UKLON ride", type: null, source: null, at: "2026-11-20T11:00:00.000Z" });
+    await app.get(ReclassifyService).reclassifyIds([later, longer]);
     expect(await row("SELECT type, type_source FROM transactions WHERE id=$1", [later])).toEqual({
       type: "person_transfer",
       type_source: "rule",
     });
+    expect((await row("SELECT type_source FROM transactions WHERE id=$1", [longer])).type_source).not.toBe("rule");
   });
 
   it("applyToSimilar matches rows by counterKey (same IBAN) and keeps an iban rule", async () => {
