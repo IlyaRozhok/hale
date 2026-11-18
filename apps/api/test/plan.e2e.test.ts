@@ -1177,6 +1177,65 @@ describe("income events", () => {
       expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 300_000, tx: real });
     });
 
+    describe("when the same pass opens another month (Б53)", () => {
+      /** October received by ₴5,000 the owner sent himself on 20 October, November by ₴3,000 of income on 5 November. */
+      const twoMonths = async () => {
+        await api.post("/plan/expected-incomes", { source: "fop", amount: 500_000, currency: "UAH", window_start_day: 15, window_end_day: 25 }).expect(201);
+        await app.get(PlanService).generateEvents("2026-10-16");
+        await app.get(PlanService).generateEvents("2026-11-02");
+        const fop = await account("fop");
+        const self = await tx(fop, { amount: 500_000, description: "Переказ коштів", mcc: 4829, date: "2026-10-20" });
+        await ds.query(`UPDATE transactions SET counter_name='Test Owner' WHERE id=$1`, [self]);
+        await reclassify([self]);
+        const real = await tx(fop, { amount: 300_000, description: "From client", date: "2026-11-05" });
+        await reclassify([real]);
+        expect(await event("2026-10")).toMatchObject({ status: "received", amount_uah: 500_000, tx: self });
+        expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 300_000, tx: real });
+        return { self, real };
+      };
+      const shifted = async (real: number) => {
+        expect(await event("2026-10")).toMatchObject({
+          status: "received", amount_uah: 300_000, received_at: new Date("2026-11-05T10:00:00Z"), tx: real,
+        });
+        expect(await event("2026-11")).toEqual(expectedNovember);
+      };
+
+      it("the reclassify gives October the November income, November waits again and the day is fixed afresh", async () => {
+        const { self, real } = await twoMonths();
+        const date = kyivDate(new Date());
+        await plantSnapshot(date);
+        await after.get(ReclassifyService).reclassifyPending();
+        expect(await type(self)).toBe("own_transfer");
+        await shifted(real);
+        await fixedAfresh(date);
+      });
+
+      it("the same when the owner retypes it by hand", async () => {
+        const { self, real } = await twoMonths();
+        const date = kyivDate(new Date());
+        await plantSnapshot(date);
+        await api.patch(`/transactions/${self}`, { type: "own_transfer" }).expect(200);
+        await shifted(real);
+        await fixedAfresh(date);
+      });
+
+      it("a retype that leaves every event as received as it was does not fix the day afresh", async () => {
+        await api.post("/plan/expected-incomes", { source: "fop", amount: 500_000, currency: "UAH", window_start_day: 15, window_end_day: 25 }).expect(201);
+        await app.get(PlanService).generateEvents("2026-11-02");
+        const fop = await account("fop");
+        const real = await tx(fop, { amount: 300_000, description: "From client", date: "2026-11-16" });
+        const self = await tx(fop, { amount: 500_000, description: "Переказ коштів", mcc: 4829, date: "2026-11-17" });
+        await ds.query(`UPDATE transactions SET counter_name='Test Owner' WHERE id=$1`, [self]);
+        await reclassify([real, self]);
+        expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 800_000, tx: real });
+        const date = kyivDate(new Date());
+        await plantSnapshot(date);
+        await api.patch(`/transactions/${self}`, { type: "own_transfer" }).expect(200);
+        expect(await event("2026-11")).toMatchObject({ status: "received", amount_uah: 300_000, tx: real });
+        expect(await ds.query(`SELECT daily_limit::int AS l FROM daily_snapshots WHERE local_date=$1`, [date])).toEqual([{ l: 1 }]);
+      });
+    });
+
     it("leaves alone a November confirmed by hand and the USDC events", async () => {
       await usdc();
       const { self } = await setup();

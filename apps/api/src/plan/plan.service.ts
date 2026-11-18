@@ -696,7 +696,8 @@ export class PlanService implements OnApplicationBootstrap {
    * that is still there receives it again with its own first row, time and sum, and with none left it waits again,
    * its date (`expected_on`, `date_set_by_hand`) untouched. A received event whose sum counted one of them keeps
    * its first row and gets the smaller sum. Events confirmed by hand (no row) and USDC events are not touched.
-   * True when an event the rows had received waits again: the next income date moved, and the day is fixed afresh.
+   * True when any fop event received before waits again, the rows' own or another month the same pass opened
+   * (task Б53): the next income date moved, and the day is fixed afresh.
    */
   private async releaseFopIncome(m: EntityManager, ids: readonly number[]): Promise<boolean> {
     const taken: { id: number }[] = await m.query(
@@ -711,6 +712,10 @@ export class PlanService implements OnApplicationBootstrap {
       [ids],
     );
     if (taken.length === 0 && months.length === 0) return false;
+    // What was received before, so that any event the pass leaves waiting is seen, not only the rows' own (Б53).
+    const received: { id: number }[] = await m.query(
+      `SELECT e.id FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id AND x.source='fop' WHERE e.status='received'`,
+    );
     const takenIds = taken.map((e) => e.id);
     if (takenIds.length > 0) {
       await m.query(
@@ -727,8 +732,10 @@ export class PlanService implements OnApplicationBootstrap {
         e.income.sum,
       ]);
     }
-    if (takenIds.length === 0) return false;
-    const waiting: unknown[] = await m.query(`SELECT 1 FROM income_events WHERE id = ANY($1::int[]) AND status <> 'received' LIMIT 1`, [takenIds]);
+    if (received.length === 0) return false;
+    const waiting: unknown[] = await m.query(`SELECT 1 FROM income_events WHERE id = ANY($1::int[]) AND status <> 'received' LIMIT 1`, [
+      received.map((e) => e.id),
+    ]);
     return waiting.length > 0;
   }
 
