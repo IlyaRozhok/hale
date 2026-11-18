@@ -128,10 +128,11 @@ function follow(start: ChargeRow, charges: readonly ChargeRow[], taken: Readonly
  * The subscriptions as of the Kyiv day `asOf` (today, or the last day of a past month), from the purchases of the
  * SUBSCRIPTION_MONTHS up to it. At each place chains are followed back from the latest charge on (`follow`). A chain
  * of MIN_CHARGES or more is a subscription, and two chains at one place are two (two plans at one store, at one price
- * or not), unless the place is a shop: within the chain's span more sums like it than SIMILAR_PER_MONTH a month, or
- * more other purchases than months. A one-off purchase at the store that also bills a subscription does not matter.
- * One not charged for a while is left out when the place has since charged a sum like it outside any chain: it may
- * be back, and «не списывалась» would be wrong. A yearly charge never chains. A place with no name is left out: the
+ * or not), unless the place is a shop: within the chain's span more sums like it than SIMILAR_PER_MONTH a month
+ * (judged first, for each chain on its own), or more purchases outside the chains still standing than months. A
+ * one-off purchase at the store that also bills a subscription does not matter. One not charged for a while is left
+ * out when the place has since charged a sum like it outside the chains still standing: it may be back, and
+ * «не списывалась» would be wrong. A yearly charge never chains. A place with no name is left out: the
  * screen would have nothing to call it.
  */
 export function findSubscriptions(rows: readonly ChargeRow[], asOf: string): Subscriptions {
@@ -154,21 +155,33 @@ export function findSubscriptions(rows: readonly ChargeRow[], asOf: string): Sub
       chains.push(chain);
       for (const c of chain.links) taken.add(c);
     }
-    for (const { links, steps } of chains) {
+    const judged = chains.map(({ links, steps }) => {
       const start = links[0]!;
       const first = links[links.length - 1]!;
       const months = steps.reduce((s, n) => s + n, 0);
       const inSpan = charges.filter((c) => c.date >= first.date && c.date <= start.date && !links.includes(c));
-      const similar = links.length + inSpan.filter((c) => links.some((l) => near(l.amount, c.amount))).length;
-      const others = inSpan.filter((c) => !taken.has(c)).length;
-      if (similar > SIMILAR_PER_MONTH * (months + 1) + 1 || others > months) continue;
       // A missed charge counts once half a step has passed after it was due, then one more each step:
       // floor((since − step / 2) / step) with step = span / months, kept in whole numbers.
       const span = daysBetween(first.date, start.date);
       const since = daysBetween(start.date, asOf);
       const missed = Math.max(0, Math.floor((2 * since * months - span) / (2 * span)));
-      const chargedSince = charges.some((c) => c.date > start.date && !taken.has(c) && (drifts(start.amount, c.amount) || rises(start.amount, c.amount)));
-      if (missed > 0 && chargedSince) continue;
+      const similar = links.length + inSpan.filter((c) => links.some((l) => near(l.amount, c.amount))).length;
+      return { links, start, months, inSpan, missed, dense: similar > SIMILAR_PER_MONTH * (months + 1) + 1 };
+    });
+    // The rest is judged against the chains still standing: a purchase in a chain dropped as a shop is a shop's
+    // purchase like any other. Dropping one chain can bring down another, so it runs until nothing changes.
+    let kept = judged.filter((j) => !j.dense);
+    for (;;) {
+      const linked = new Set(kept.flatMap((j) => j.links));
+      const next = kept.filter(
+        (j) =>
+          j.inSpan.filter((c) => !linked.has(c)).length <= j.months &&
+          !(j.missed > 0 && charges.some((c) => c.date > j.start.date && !linked.has(c) && (drifts(j.start.amount, c.amount) || rises(j.start.amount, c.amount)))),
+      );
+      if (next.length === kept.length) break;
+      kept = next;
+    }
+    for (const { links, start, missed } of kept) {
       const previous = links[1]!;
       found.push({
         key: start.key,

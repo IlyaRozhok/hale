@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { type ChargeRow, findSubscriptions, subscriptionsFrom } from "./subscriptions";
 
 const row = (key: string, date: string, amount: number, name = key): ChargeRow => ({ key, name, date, amount });
+/** The Kyiv day `n` days after 20 May 2026: six months before the 16 November most tests look from. */
+const day = (n: number): string => new Date(Date.UTC(2026, 4, 20) + n * 86_400_000).toISOString().slice(0, 10);
 
 describe("subscriptionsFrom", () => {
   it("looks back over the month asked and the five before it", () => {
@@ -207,5 +209,73 @@ describe("findSubscriptions", () => {
   it("does not see charges after the day asked, for a past month", () => {
     const rows = [row("s", "2026-08-01", 5_000), row("s", "2026-09-01", 5_000), row("s", "2026-10-01", 5_000), row("s", "2026-11-01", 7_000)];
     expect(findSubscriptions(rows, "2026-10-31").items).toEqual([{ key: "s", name: "s", amount: 5_000, lastDate: "2026-10-01", raisedBy: 0, missed: 0 }]);
+  });
+
+  it("does not take a shop bought at about weekly at sums within ±15% for a subscription «не списывалась»", () => {
+    // Interleaved, these purchases make about-monthly chains at close sums, and the chains take almost every purchase
+    // between them. Before the shop rule ran first, one came out as ₴255, last charged on 29 September, missed 1.
+    const days = [5, 13, 21, 26, 34, 42, 48, 55, 62, 68, 75, 82, 91, 97, 103, 111, 118, 125, 132, 139, 146, 152, 160, 167, 173];
+    const sums = [
+      33_300, 26_300, 34_500, 31_700, 34_000, 32_300, 28_700, 27_000, 30_200, 26_600, 27_500, 30_700, 26_000, 25_600, 31_700, 26_500, 33_500, 26_700,
+      25_500, 27_400, 29_100, 30_800, 26_300, 32_600, 28_900,
+    ];
+    const rows = days.map((d, i) => row("shop", day(d), sums[i]!));
+    expect(findSubscriptions(rows, "2026-11-16")).toEqual({ monthly: 0, items: [] });
+  });
+
+  it("does not take a shop bought at every ten days at sums within ±10% for a subscription", () => {
+    // Before the shop rule ran first: ₴324 a month, last on 15 October.
+    const days = [9, 18, 27, 39, 48, 58, 69, 77, 88, 97, 109, 119, 128, 138, 148, 157, 167, 177];
+    const sums = [32_500, 31_900, 27_600, 27_500, 31_900, 30_800, 32_100, 27_500, 28_300, 27_900, 31_100, 31_200, 29_300, 27_400, 32_400, 28_100, 28_900, 27_600];
+    const rows = days.map((d, i) => row("shop", day(d), sums[i]!));
+    expect(findSubscriptions(rows, "2026-11-16")).toEqual({ monthly: 0, items: [] });
+  });
+
+  describe("on generated places (a fixed seed)", () => {
+    function random(seed: number): () => number {
+      let s = seed >>> 0;
+      return () => {
+        s = (s * 1_664_525 + 1_013_904_223) >>> 0;
+        return s / 2 ** 32;
+      };
+    }
+    /** How many of 200 shops, bought at every `every` days (±1 day) at ₴300 ± `spread`, come out with a subscription. */
+    function falseShops(every: number, spread: number): number {
+      const r = random(every * 1_000 + spread * 100);
+      let shops = 0;
+      for (let k = 0; k < 200; k++) {
+        const rows: ChargeRow[] = [];
+        for (let d = Math.floor(r() * every); d < 180; d += every) {
+          rows.push(row("shop", day(d + Math.round(r() * 2) - 1), Math.round(30_000 * (1 + (r() * 2 - 1) * spread))));
+        }
+        if (findSubscriptions(rows, "2026-11-16").items.length > 0) shops++;
+      }
+      return shops;
+    }
+
+    it("rarely takes a shop for a subscription", () => {
+      expect(falseShops(7, 0.1)).toBe(0);
+      expect(falseShops(7, 0.2)).toBe(0);
+      expect(falseShops(5, 0.1)).toBe(0);
+      expect(falseShops(3, 0.3)).toBe(0);
+      expect(falseShops(10, 0.1)).toBeLessThanOrEqual(2);
+      // Every 14 days at one price is two monthly charges, as two subscriptions at one store are: not told apart.
+    });
+
+    it("finds the subscriptions themselves, with a rate drift, a late bank and one-off purchases at the store", () => {
+      const r = random(42);
+      let all = 0;
+      for (let k = 0; k < 200; k++) {
+        const rows: ChargeRow[] = [];
+        for (let s = 0; s < 2; s++) {
+          const base = 4_900 + s * 10_000;
+          const d0 = Math.floor(r() * 28);
+          for (let m = 0; m < 6; m++) rows.push(row("apple", day(d0 + m * 30 + Math.round(r() * 4) - 2), Math.round(base * (1 + (r() * 2 - 1) * 0.03))));
+        }
+        for (let e = 0; e < 3; e++) rows.push(row("apple", day(Math.floor(r() * 175)), 2_000 + Math.floor(r() * 20_000)));
+        if (findSubscriptions(rows, "2026-11-16").items.filter((i) => i.missed === 0).length === 2) all++;
+      }
+      expect(all).toBeGreaterThanOrEqual(190);
+    });
   });
 });
