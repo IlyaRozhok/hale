@@ -44,10 +44,19 @@ describe("findSubscriptions", () => {
   });
 
   it("does not take a jump of more than 60% for a price rise", () => {
-    const rows = [row("s", "2026-09-01", 10_000), row("s", "2026-10-01", 10_000), row("s", "2026-11-01", 16_001)];
-    expect(findSubscriptions(rows, "2026-11-16").items).toEqual([]);
-    const rise = [row("s", "2026-09-01", 10_000), row("s", "2026-10-01", 10_000), row("s", "2026-11-01", 16_000)];
-    expect(findSubscriptions(rise, "2026-11-16").items[0]).toMatchObject({ amount: 16_000, raisedBy: 6_000 });
+    const steady = [row("s", "2026-08-01", 10_000), row("s", "2026-09-01", 10_000), row("s", "2026-10-01", 10_000)];
+    const rise = findSubscriptions([...steady, row("s", "2026-11-01", 16_000)], "2026-11-16");
+    expect(rise.items).toEqual([{ key: "s", name: "s", amount: 16_000, lastDate: "2026-11-01", raisedBy: 6_000, missed: 0 }]);
+    // ₴160.01 is another purchase: the ₴100 one is not charged since October and the sum is not like it.
+    const jump = findSubscriptions([...steady, row("s", "2026-11-01", 16_001)], "2026-11-16");
+    expect(jump.items.map((i) => [i.amount, i.lastDate, i.raisedBy, i.missed])).toEqual([[10_000, "2026-10-01", 0, 1]]);
+  });
+
+  it("believes a price rise only after three charges at the old price: a café at ₴120, ₴125, ₴190 is not one", () => {
+    const cafe = [row("cafe", "2026-09-02", 12_000), row("cafe", "2026-10-01", 12_500), row("cafe", "2026-11-01", 19_000)];
+    expect(findSubscriptions(cafe, "2026-11-16").items).toEqual([]);
+    const four = [row("cafe", "2026-08-01", 12_000), ...cafe];
+    expect(findSubscriptions(four, "2026-11-16").items).toEqual([{ key: "cafe", name: "cafe", amount: 19_000, lastDate: "2026-11-01", raisedBy: 6_500, missed: 0 }]);
   });
 
   it("does not take a price drop beyond the drift for the same subscription", () => {
@@ -86,8 +95,73 @@ describe("findSubscriptions", () => {
     expect(findSubscriptions(rows, "2026-11-16")).toEqual({ monthly: 0, items: [] });
   });
 
-  it("does not take a place charged a similar sum twice a month for a subscription", () => {
-    const rows = ["06", "07", "08", "09", "10"].flatMap((m) => [row("barber", `2026-${m}-05`, 40_000), row("barber", `2026-${m}-19`, 40_000)]);
+  it("keeps an active subscription that skipped one month, on the total and not «давно не списывалась»", () => {
+    const skipped = ["06", "07", "08", "10", "11"].map((m) => row("s", `2026-${m}-05`, 10_000));
+    expect(findSubscriptions(skipped, "2026-11-16")).toEqual({
+      monthly: 10_000,
+      items: [{ key: "s", name: "s", amount: 10_000, lastDate: "2026-11-05", raisedBy: 0, missed: 0 }],
+    });
+    const declined = ["07", "08", "09", "11"].map((m) => row("s", `2026-${m}-05`, 10_000));
+    expect(findSubscriptions(declined, "2026-11-16")).toEqual({
+      monthly: 10_000,
+      items: [{ key: "s", name: "s", amount: 10_000, lastDate: "2026-11-05", raisedBy: 0, missed: 0 }],
+    });
+    // With the month skipped the step is still a month (about 31 days): due again on 5 December, missed from the 22nd.
+    expect(findSubscriptions(declined, "2026-12-21").items[0]!.missed).toBe(0);
+    expect(findSubscriptions(declined, "2026-12-22").items[0]!.missed).toBe(1);
+  });
+
+  it("does not call one charged again after a longer pause «давно не списывалась»", () => {
+    const rows = [...["06", "07", "08"].map((m) => row("s", `2026-${m}-05`, 10_000)), row("s", "2026-11-05", 10_000)];
+    expect(findSubscriptions(rows, "2026-11-16")).toEqual({ monthly: 0, items: [] });
+    // Not charged since August, and nothing like it since: it is.
+    expect(findSubscriptions(rows.slice(0, 3), "2026-11-16").items[0]).toMatchObject({ lastDate: "2026-08-05", missed: 2 });
+  });
+
+  it("does not take a place paid every two months for a monthly subscription: one skip in a history, not more", () => {
+    const rows = ["2026-06-05", "2026-08-05", "2026-10-05"].map((d) => row("s", d, 10_000));
+    expect(findSubscriptions(rows, "2026-11-16").items).toEqual([]);
+  });
+
+  it("takes two subscriptions at one place at the same price on different days for two", () => {
+    const rows = ["06", "07", "08", "09", "10", "11"].flatMap((m) => [row("apple", `2026-${m}-03`, 4_900, "Apple"), row("apple", `2026-${m}-15`, 4_900, "Apple")]);
+    const s = findSubscriptions(rows, "2026-11-16");
+    expect(s.items.map((i) => [i.amount, i.lastDate, i.missed])).toEqual([
+      [4_900, "2026-11-15", 0],
+      [4_900, "2026-11-03", 0],
+    ]);
+    expect(s.monthly).toBe(9_800);
+  });
+
+  it("takes two subscriptions at one place at close prices for two", () => {
+    const rows = ["06", "07", "08", "09", "10", "11"].flatMap((m) => [row("apple", `2026-${m}-03`, 4_900, "Apple"), row("apple", `2026-${m}-15`, 5_900, "Apple")]);
+    const s = findSubscriptions(rows, "2026-11-16");
+    expect(s.items.map((i) => [i.amount, i.lastDate])).toEqual([
+      [5_900, "2026-11-15"],
+      [4_900, "2026-11-03"],
+    ]);
+    expect(s.monthly).toBe(10_800);
+  });
+
+  it("keeps a subscription next to a one-off purchase near its price, or a second charge in one month", () => {
+    const icloud = ["06", "07", "08", "09", "10", "11"].map((m) => row("apple", `2026-${m}-03`, 4_900, "Apple"));
+    expect(findSubscriptions([...icloud, row("apple", "2026-09-20", 5_500, "Apple")], "2026-11-16").items).toEqual([
+      { key: "apple", name: "Apple", amount: 4_900, lastDate: "2026-11-03", raisedBy: 0, missed: 0 },
+    ]);
+    // Charged twice in September: one subscription still, at its monthly sum.
+    const twice = findSubscriptions([...icloud, row("apple", "2026-09-18", 4_900, "Apple")], "2026-11-16");
+    expect(twice.items.map((i) => [i.amount, i.lastDate])).toEqual([[4_900, "2026-11-03"]]);
+    expect(twice.monthly).toBe(4_900);
+  });
+
+  it("does not take a weekly purchase of one sum for monthly subscriptions", () => {
+    const rows = Array.from({ length: 24 }, (_, i) => row("delivery", new Date(Date.UTC(2026, 5, 2 + i * 7)).toISOString().slice(0, 10), 35_000));
+    expect(findSubscriptions(rows, "2026-11-16").items).toEqual([]);
+  });
+
+  it("does not take a café visited several times a week for a subscription", () => {
+    const sums = [6_500, 12_000, 4_000, 9_000, 6_500, 15_000, 7_000];
+    const rows = Array.from({ length: 60 }, (_, i) => row("cafe", new Date(Date.UTC(2026, 5, 1 + Math.floor(i * 2.7))).toISOString().slice(0, 10), sums[i % sums.length]!));
     expect(findSubscriptions(rows, "2026-11-16").items).toEqual([]);
   });
 

@@ -236,7 +236,8 @@ describe("GET /insights/month", () => {
     const monthly = async (days: string[], accountId: number, amount: number, type: string, description: string, counterName: string | null = null, amountUah: number | null = amount) => {
       for (const d of days) await at(accountId, d, amount, type, description, counterName, amountUah);
     };
-    // A subscription, its price risen in November; a refund there is not a charge.
+    // A subscription, its price risen in November. October's charge was refunded two days later: the refund is not a
+    // charge, and the charge it returned still keeps the chain (a refunded month is not a missed one).
     await monthly(["2026-08-05", "2026-09-05", "2026-10-05"], black, -24_900, "spend", "Netflix");
     await at(black, "2026-11-05", -29_900, "spend", "Netflix");
     await at(black, "2026-10-07", 24_900, "spend", "Netflix");
