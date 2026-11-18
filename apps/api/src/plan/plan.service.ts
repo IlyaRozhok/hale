@@ -45,6 +45,8 @@ import { BINANCE } from "./binance";
 export { BINANCE } from "./binance";
 const MATCH_DAYS = 3;
 const PLANNED_RECIPIENT_LABELS = ["close_regular", "shared_budget"];
+/** Types whose rows can settle a planned payment; a row retyped to anything else frees it. */
+const SETTLING_TYPES: ReadonlySet<string> = new Set(["obligation", "debt_payment", "tax"]);
 /** Fop income rows with a hryvnia amount, in order of arrival; which month each is, is domain/fop-income's rule. */
 const FOP_INCOMES = `SELECT t.id, t.local_date::text AS "localDate", t.occurred_at AS "occurredAt", t.amount_uah::float8 AS "amountUah"
   FROM transactions t JOIN accounts a ON a.id = t.account_id
@@ -658,6 +660,53 @@ export class PlanService implements OnApplicationBootstrap {
     if (reopen.length === 0) return false;
     await m.query(`UPDATE scheduled_payments SET paid_at = NULL, closed_by_links = false WHERE id = ANY($1::int[])`, [reopen]);
     return true;
+  }
+
+  /**
+   * Rows retyped to a type that settles nothing free their planned payments, in the retype's transaction: by the
+   * owner's hand or by a reclassify (task Б52). A payment closed through the row itself (transaction_id) opens
+   * again. A row linked through payment_links is unlinked, and its payment opens again only if those links closed
+   * it and the rest no longer cover it (task Б26); a payment marked paid by hand stays paid. Rows retyped away
+   * from loan_in take their loan with them, while nothing was repaid on it (task Б35). Returns what changed, for
+   * the caller to fix the day afresh with, or null.
+   */
+  async unsettle(m: EntityManager, ids: readonly number[], type: string): Promise<LimitReason | null> {
+    if (ids.length === 0) return null;
+    const dropped = type === "loan_in" ? false : await this.dropLoans(m, ids);
+    if (SETTLING_TYPES.has(type)) return dropped ? "loan" : null;
+    const unlinked: { payment_id: number }[] = await m.query(
+      `WITH d AS (DELETE FROM payment_links WHERE transaction_id = ANY($1::int[]) RETURNING payment_id) SELECT DISTINCT payment_id FROM d`,
+      [ids],
+    );
+    const freed = (await m.query(
+      `UPDATE scheduled_payments SET transaction_id = NULL, paid_at = NULL, closed_by_links = false WHERE transaction_id = ANY($1::int[])`,
+      [ids],
+    )) as [unknown[], number];
+    const reopened = await this.reopenUncovered(m, unlinked.map((u) => u.payment_id));
+    if (freed[1] > 0 || reopened) return "payment_paid";
+    return dropped ? "loan" : null;
+  }
+
+  /**
+   * A reclassify gave this row another type (task Б52): what it settled under the old one is freed as by the
+   * owner's hand (unsettle), and a payment that opens or a loan that goes fixes the day afresh in the same
+   * transaction. Unlike money that arrives on its own, this takes back what the day already counted as paid.
+   */
+  async onRetyped(m: EntityManager, txId: number, type: string): Promise<void> {
+    const changed = await this.unsettle(m, [txId], type);
+    if (changed) await this.limit.invalidate(changed, m);
+  }
+
+  /**
+   * The loans these rows recorded as loan_in. One with anything repaid stays: its repayments are the owner's
+   * record, and what to do with them is not decided (task Б35). True when one went.
+   */
+  private async dropLoans(m: EntityManager, ids: readonly number[]): Promise<boolean> {
+    const gone = (await m.query(
+      `DELETE FROM loans WHERE source_transaction_id = ANY($1::int[]) AND repaid_amount = 0 AND repaid_at IS NULL`,
+      [ids],
+    )) as [unknown[], number];
+    return gone[1] > 0;
   }
 
   /** The owner said this recipient is a close person, sent money regularly. */

@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional, type OnModuleInit } from "@nestjs/common";
-import { DataSource } from "typeorm";
+import { DataSource, type EntityManager } from "typeorm";
 import {
   classify,
   hasThirdParty,
@@ -27,6 +27,8 @@ export interface OwnIdentity {
 
 interface Row {
   id: number;
+  /** The type before this pass. */
+  type: string | null;
   account_kind: ClassifyInput["accountKind"];
   description: string;
   comment: string | null;
@@ -111,7 +113,7 @@ export class ReclassifyService implements OnModuleInit {
     for (let i = 0; i < all.length; i += CHUNK) {
       const chunk = all.slice(i, i + CHUNK);
       const rows: Row[] = await this.ds.query(
-        `SELECT t.id, a.kind AS account_kind, t.description, t.comment, t.mcc, t.amount::float8 AS amount,
+        `SELECT t.id, t.type, a.kind AS account_kind, t.description, t.comment, t.mcc, t.amount::float8 AS amount,
                 t.counter_iban, t.counter_name
            FROM transactions t JOIN accounts a ON a.id = t.account_id
           WHERE t.id = ANY($1) AND t.type_source IS DISTINCT FROM 'owner'
@@ -133,11 +135,22 @@ export class ReclassifyService implements OnModuleInit {
           },
           ctx,
         );
-        await this.ds.query(
-          `UPDATE transactions SET type=$2, category=$3, type_source=$4, needs_label=$5
-            WHERE id=$1 AND type_source IS DISTINCT FROM 'owner'`,
-          [r.id, out.type, out.category, out.source === "owner" ? "rule" : out.source, out.needsLabel],
-        );
+        const args = [r.id, out.type, out.category, out.source === "owner" ? "rule" : out.source, out.needsLabel];
+        const update = (q: DataSource | EntityManager) =>
+          q.query(
+            `UPDATE transactions SET type=$2, category=$3, type_source=$4, needs_label=$5
+              WHERE id=$1 AND type_source IS DISTINCT FROM 'owner'`,
+            args,
+          ) as Promise<[unknown[], number]>;
+        const plan = this.plan;
+        if (plan && r.type !== out.type) {
+          // A row given another type frees what it settled under the old one, as an edit by hand does (Б52).
+          await this.ds.transaction(async (m) => {
+            if ((await update(m))[1] > 0) await plan.onRetyped(m, r.id, out.type);
+          });
+        } else {
+          await update(this.ds);
+        }
         if (PLAN_TYPES.has(out.type)) await this.plan?.onClassified(r.id, out.type);
         n++;
       }

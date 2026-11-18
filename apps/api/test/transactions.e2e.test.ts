@@ -1189,3 +1189,122 @@ describe("deleting a rule returns only what was changed through it (Б36)", () =
     expect(await source(alone)).toEqual({ type: "obligation", type_source: "owner" });
   });
 });
+
+describe("a reclassify that changes a row's type frees what the row settled, as an edit by hand does (Б52)", () => {
+  const AT = "2026-11-14T10:00:00.000Z";
+  const reclassify = () => app.get(ReclassifyService).reclassifyPending();
+  const dayLimit = async () => (await row(`SELECT daily_limit::int AS l FROM daily_snapshots WHERE local_date='2026-11-14'`)).l as number;
+  const sentinel = () =>
+    ds.query(
+      `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ('2026-11-14', 1, 'normal') ON CONFLICT (local_date) DO UPDATE SET daily_limit=1`,
+    );
+  const rule = (value: string, type: string) =>
+    ds.query(`INSERT INTO rules (match_kind, match_value, type, direction) VALUES ('merchant', $1, $2, NULL)`, [value, type]);
+  const payment = async () => row(`SELECT transaction_id, paid_at IS NOT NULL AS paid FROM scheduled_payments`);
+  const loans = () => ds.query(`SELECT source_transaction_id FROM loans ORDER BY id`);
+  const typeOf = async (id: number) => (await row(`SELECT type FROM transactions WHERE id=$1`, [id])).type as string | null;
+  beforeEach(async () => {
+    app.get(Clock).fixed = new Date("2026-11-14T10:00:00Z");
+    await ds.query(`TRUNCATE daily_snapshots`);
+  });
+  afterEach(() => {
+    app.get(Clock).fixed = null;
+  });
+
+  /** A rent payment closed by a bank row its rule typed as obligation. */
+  const rentClosedByRule = async () => {
+    const a = await account();
+    await ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Rent',1700000,'UAH','2026-11-14')`,
+    );
+    const t = await tx(a, { amount: -1_700_000, description: "Landlord", at: AT, type: null, source: null });
+    await rule("Landlord", "obligation");
+    await reclassify();
+    expect(await payment()).toEqual({ transaction_id: t, paid: true });
+    return t;
+  };
+
+  it("a payment closed by a row its rule typed opens again when the rule is gone, and the day is fixed afresh", async () => {
+    const t = await rentClosedByRule();
+    await ds.query(`DELETE FROM rules`);
+    await sentinel();
+
+    await reclassify();
+    expect(await typeOf(t)).not.toBe("obligation");
+    expect(await payment()).toEqual({ transaction_id: null, paid: false });
+    expect(await dayLimit()).not.toBe(1);
+  });
+
+  it("a row whose type stays keeps its payment closed and the day's limit as it was", async () => {
+    const t = await rentClosedByRule();
+    await sentinel();
+
+    await reclassify();
+    expect(await payment()).toEqual({ transaction_id: t, paid: true });
+    expect(await dayLimit()).toBe(1);
+  });
+
+  it("an owner row is never freed by a reclassify", async () => {
+    const t = await rentClosedByRule();
+    await ds.query(`UPDATE transactions SET type_source='owner' WHERE id=$1`, [t]);
+    await ds.query(`DELETE FROM rules`);
+    await sentinel();
+
+    await reclassify();
+    expect(await typeOf(t)).toBe("obligation");
+    expect(await payment()).toEqual({ transaction_id: t, paid: true });
+    expect(await dayLimit()).toBe(1);
+  });
+
+  it("a tax row that is no longer tax frees its link, and a payment its links closed opens again", async () => {
+    const a = await account();
+    const t = await tx(a, { amount: -500_000, description: "Landlord", at: AT, type: "tax", source: "rule" });
+    const p = (
+      await row(
+        `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, paid_at, closed_by_links)
+         VALUES ('tax','ЄП',500000,'UAH','2026-11-14', $1, true) RETURNING id`,
+        [AT],
+      )
+    ).id as number;
+    await ds.query(`INSERT INTO payment_links (payment_id, transaction_id) VALUES ($1,$2)`, [p, t]);
+    await sentinel();
+
+    await reclassify();
+    expect(await typeOf(t)).not.toBe("tax");
+    expect(await ds.query(`SELECT * FROM payment_links`)).toEqual([]);
+    expect(await payment()).toEqual({ transaction_id: null, paid: false });
+    expect(await dayLimit()).not.toBe(1);
+  });
+
+  it("a loan its rule recorded with nothing repaid goes when the rule is gone, and the day is fixed afresh", async () => {
+    const a = await account();
+    const t = await tx(a, { amount: 300_000, description: "Від: Петро", at: AT, type: null, source: null });
+    await rule("Від: Петро", "loan_in");
+    await reclassify();
+    expect(await loans()).toEqual([{ source_transaction_id: t }]);
+    await ds.query(`DELETE FROM rules`);
+    await sentinel();
+
+    await reclassify();
+    expect(await typeOf(t)).not.toBe("loan_in");
+    expect(await loans()).toEqual([]);
+    expect(await dayLimit()).not.toBe(1);
+  });
+
+  it("a loan with a repayment stays when its row is retyped, and can then be deleted (Б48)", async () => {
+    const a = await account();
+    const t = await tx(a, { amount: 300_000, description: "Від: Петро", at: AT, type: null, source: null });
+    await rule("Від: Петро", "loan_in");
+    await reclassify();
+    await ds.query(`UPDATE loans SET repaid_amount = 100000`);
+    await ds.query(`DELETE FROM rules`);
+    await sentinel();
+
+    await reclassify();
+    expect(await typeOf(t)).not.toBe("loan_in");
+    expect(await loans()).toEqual([{ source_transaction_id: t }]);
+    expect(await dayLimit()).toBe(1);
+    const id = (await row(`SELECT id FROM loans`)).id as number;
+    await request(http()).delete(`/plan/loans/${id}`).set("Authorization", auth).expect(200);
+  });
+});
