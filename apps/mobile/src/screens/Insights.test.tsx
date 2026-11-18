@@ -6,10 +6,28 @@ import { Insights } from "./Insights";
 import { fakeApi, insightsFixture, renderWith } from "../testing";
 import { ApiError } from "../api/client";
 import { useEditTransaction } from "../api/queries";
+import { visitsText } from "../components/PlacesCard";
 
 const now = () => new Date("2026-11-16T10:00:00Z");
 const rows = () => screen.getAllByTestId("insights-row").map((r) => r.props.accessibilityLabel as string);
 const flat = (id: string) => StyleSheet.flatten(screen.getByTestId(id).props.style) as { width?: string; backgroundColor?: string };
+
+type Place = NonNullable<InsightsMonthDto["places"]>[number];
+const place = (name: string, spent: number, visits: number, isNew = false): Place => ({
+  key: `${name.length.toString(16).padStart(2, "0")}${"0".repeat(12)}${visits.toString(16).padStart(2, "0")}`,
+  name,
+  spent,
+  visits,
+  isNew,
+});
+const places = [
+  place("Сільпо", 748_000, 1),
+  place("АТБ", 421_500, 2),
+  place("Aroma Kava", 224_000, 5),
+  place("Uklon", 196_000, 11),
+  place("Сушия", 138_000, 21, true),
+];
+const placeRows = () => screen.getAllByTestId("place-row").map((r) => r.props.accessibilityLabel as string);
 
 /** A whole past month against the whole month before it. */
 const october = (): InsightsMonthDto =>
@@ -235,5 +253,111 @@ describe("Insights", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Предыдущий месяц" }));
     expect(await screen.findByText("Декабрь 2026")).toBeTruthy();
     expect(insights).toHaveBeenLastCalledWith("2026-12");
+  });
+
+  describe("places of the month (В3)", () => {
+    it("a card «Места» with up to five rows: name, visits declined in Russian, sum", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ places })) }));
+      expect(await screen.findByText("Места")).toBeTruthy();
+      expect(placeRows()).toEqual([
+        "Сільпо, 1 раз: ₴7,480",
+        "АТБ, 2 раза: ₴4,215",
+        "Aroma Kava, 5 раз: ₴2,240",
+        "Uklon, 11 раз: ₴1,960",
+        "Сушия, новое, 21 раз: ₴1,380",
+      ]);
+      expect(screen.getByText("Сільпо")).toBeTruthy();
+      expect(screen.getByText("· 1 раз")).toBeTruthy();
+      expect(screen.getByText("· 2 раза")).toBeTruthy();
+      expect(screen.getByText("· 21 раз")).toBeTruthy();
+      expect(screen.getByText("₴7,480")).toBeTruthy();
+      expect(screen.getByText("₴4,215")).toBeTruthy();
+    });
+
+    it("visits decline like the rest of the app's counts", () => {
+      expect([1, 2, 4, 5, 11, 12, 14, 21, 22, 25, 101, 111].map(visitsText)).toEqual([
+        "1 раз",
+        "2 раза",
+        "4 раза",
+        "5 раз",
+        "11 раз",
+        "12 раз",
+        "14 раз",
+        "21 раз",
+        "22 раза",
+        "25 раз",
+        "101 раз",
+        "111 раз",
+      ]);
+    });
+
+    it("the tag «новое» only on a new place, grey, no colour", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ places })) }));
+      await screen.findByText("Места");
+      const tags = screen.getAllByText("новое");
+      expect(tags).toHaveLength(1);
+      expect((StyleSheet.flatten(tags[0]!.props.style) as { color?: string }).color).toBe(tokens.color.fg.muted);
+      expect(placeRows().filter((r) => r.includes("новое"))).toEqual(["Сушия, новое, 21 раз: ₴1,380"]);
+      for (const t of screen.getAllByText(/./)) {
+        const c = (StyleSheet.flatten(t.props.style) as { color?: string }).color;
+        expect([tokens.color.status.danger, tokens.color.money.expense]).not.toContain(c);
+      }
+    });
+
+    it("rows are not buttons and lead nowhere: «Операции» has no place filter yet", async () => {
+      const onOpenCategory = jest.fn();
+      await renderWith(<Insights now={now} onOpenCategory={onOpenCategory} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ places })) }));
+      await screen.findByText("Места");
+      for (const r of screen.getAllByTestId("place-row")) {
+        expect(r.props.accessibilityRole).toBeUndefined();
+        expect(r.props.onPress).toBeUndefined();
+      }
+      expect(screen.queryByRole("button", { name: /Сільпо|АТБ|Aroma|Uklon|Сушия/ })).toBeNull();
+      // No «›» on place rows: only the month arrow and «Ещё 4 категории» carry it.
+      expect(screen.getAllByText("›")).toHaveLength(2);
+      await fireEvent.press(screen.getByText("Сільпо"));
+      expect(onOpenCategory).not.toHaveBeenCalled();
+    });
+
+    it("a solid card, not glass", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ places })) }));
+      await screen.findByText("Места");
+      const card = StyleSheet.flatten(screen.getByTestId("places-card").props.style) as { backgroundColor?: string };
+      expect(card.backgroundColor).toBe(tokens.color.card.fill);
+    });
+
+    it("comes after the categories card and the line «Ещё платежи»", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ places, otherPayments: 1_870_500 })) }));
+      await screen.findByText("Места");
+      const texts = screen.getAllByText(/./).map((t) => t.props.children as unknown);
+      expect(texts.indexOf("Места")).toBeGreaterThan(texts.indexOf("Ещё 4 категории"));
+      expect(texts.indexOf("Места")).toBeGreaterThan(texts.indexOf("Ещё платежи: ₴18,705"));
+    });
+
+    it("no card from an older server's answer without the field", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture()) }));
+      await screen.findByText("₴18,220");
+      expect(screen.queryByText("Места")).toBeNull();
+      expect(screen.queryByTestId("places-card")).toBeNull();
+    });
+
+    it("no card when there were no places", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ places: [] })) }));
+      await screen.findByText("₴18,220");
+      expect(screen.queryByText("Места")).toBeNull();
+      expect(screen.queryByTestId("places-card")).toBeNull();
+    });
+
+    it("the places change with the month", async () => {
+      const insights = jest.fn(async (month?: string) =>
+        month === "2026-10" ? { ...october(), places: [place("Novus", 310_000, 22)] } : insightsFixture({ places }),
+      );
+      await renderWith(<Insights now={now} />, fakeApi({ insights }));
+      await screen.findByText("Места");
+      await fireEvent.press(screen.getByRole("button", { name: "Предыдущий месяц" }));
+      expect(await screen.findByText("Novus")).toBeTruthy();
+      expect(placeRows()).toEqual(["Novus, 22 раза: ₴3,100"]);
+      expect(screen.queryByText("Сільпо")).toBeNull();
+    });
   });
 });
