@@ -55,6 +55,15 @@ describe("contracts", () => {
     expect(insightsMonthDto.safeParse({ ...base, places: [{ ...place, key: "IBAN" }] }).success).toBe(false);
     expect(insightsMonthDto.safeParse({ ...base, places: Array(6).fill(place) }).success).toBe(false);
   });
+
+  it("takes the payments outside the limit as optional whole kopecks, never below zero (В2а)", () => {
+    const base = { month: "2026-11", through: "2026-11-16", previous: { from: "2026-10-01", to: "2026-10-16" }, spent: 0, previousSpent: 0, categories: [] };
+    expect(insightsMonthDto.safeParse({ ...base, otherPayments: 1_870_500, previousOtherPayments: 0 }).success).toBe(true);
+    expect(insightsMonthDto.safeParse({ ...base, otherPayments: 0 }).success).toBe(true);
+    expect(insightsMonthDto.safeParse({ ...base, otherPayments: -1 }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...base, otherPayments: 1.5 }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...base, previousOtherPayments: -1 }).success).toBe(false);
+  });
 });
 
 describe("exchangeRate (Б22)", () => {

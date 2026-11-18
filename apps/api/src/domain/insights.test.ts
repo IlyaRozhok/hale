@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PLACES_TOP, type PlaceRow, buildInsights, buildPlaces, insightsWindow, placesLookbackFrom, previousMonth } from "./insights";
+import { PLACES_TOP, type PlaceRow, buildInsights, buildOtherPayments, buildPlaces, insightsWindow, placesLookbackFrom, previousMonth } from "./insights";
 
 describe("previousMonth", () => {
   it("steps back across the year", () => {
@@ -161,5 +161,25 @@ describe("buildPlaces (В3)", () => {
       { key: "k1", name: "Aroma Kava", spent: 224_000, visits: 14, isNew: true },
     ]);
     expect(buildPlaces([], "2026-01-01", "2026-11")).toEqual([]);
+  });
+});
+
+describe("buildOtherPayments (В2а)", () => {
+  it("adds up the payments outside the limit for each stretch", () => {
+    expect(
+      buildOtherPayments([
+        { period: "current", spent: 1_870_500 },
+        { period: "previous", spent: 795_000 },
+        { period: "current", spent: 730_100 },
+      ]),
+    ).toEqual({ otherPayments: 2_600_600, previousOtherPayments: 795_000 });
+  });
+
+  it("is zero for a stretch with none, and never below zero when money came back on such a row", () => {
+    expect(buildOtherPayments([])).toEqual({ otherPayments: 0, previousOtherPayments: 0 });
+    expect(buildOtherPayments([{ period: "current", spent: -5_000 }, { period: "previous", spent: 3_000 }])).toEqual({
+      otherPayments: 0,
+      previousOtherPayments: 3_000,
+    });
   });
 });

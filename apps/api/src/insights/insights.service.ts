@@ -1,7 +1,17 @@
 import { BadRequestException, Inject, Injectable } from "@nestjs/common";
 import type { InsightsMonthDto } from "@hale/contracts";
 import { DataSource } from "typeorm";
-import { type InsightsRow, type PlaceRow, buildInsights, buildPlaces, insightsWindow, placesLookbackFrom } from "../domain/insights";
+import {
+  type InsightsRow,
+  type OtherPaymentsRow,
+  type PlaceRow,
+  buildInsights,
+  buildOtherPayments,
+  buildPlaces,
+  insightsWindow,
+  placesLookbackFrom,
+} from "../domain/insights";
+import { outOfLimitPaymentSql } from "../domain/ledger";
 import { kyivDate } from "../domain/money";
 import { Clock } from "../time/clock";
 import { counterKeySql } from "../transactions/counter-key";
@@ -17,6 +27,7 @@ const AT_PLACE = `${IN_LIMIT} AND t.type = 'spend' AND a.kind <> 'cash'`;
  * Task В1: a month's spending by category against the same days of the month before. Spending is the limit's one
  * definition (IN_LIMIT, from domain/ledger.ts), signed as spentSql signs it: refunds lower their category's sum.
  * Task В3: the month's largest places over the same stretch, by the counterparty key the rest of the app uses.
+ * Task В2а: what the payments outside the limit (outOfLimitPaymentSql) took over the same two stretches.
  */
 @Injectable()
 export class InsightsService {
@@ -55,6 +66,14 @@ export class InsightsService {
       [w.from, w.to, placesLookbackFrom(w.month)],
     )) as PlaceRow[];
     const history = (await this.ds.query(`SELECT MIN(local_date)::text AS d FROM transactions`)) as { d: string | null }[];
-    return { ...buildInsights(w, rows), places: buildPlaces(places, history[0]?.d ?? null, w.month) };
+    // Task В2а: the payments the limit leaves out, over the same two stretches, signed as `spent` is.
+    const other = (await this.ds.query(
+      `SELECT CASE WHEN t.local_date >= $1::date THEN 'current' ELSE 'previous' END AS period, SUM(-t.amount_uah)::float8 AS spent
+         FROM transactions t JOIN accounts a ON a.id = t.account_id
+        WHERE ${outOfLimitPaymentSql("t", "a")} AND (t.local_date BETWEEN $1 AND $2 OR t.local_date BETWEEN $3 AND $4)
+        GROUP BY 1`,
+      [w.from, w.to, w.previousFrom, w.previousTo],
+    )) as OtherPaymentsRow[];
+    return { ...buildInsights(w, rows), places: buildPlaces(places, history[0]?.d ?? null, w.month), ...buildOtherPayments(other) };
   }
 }

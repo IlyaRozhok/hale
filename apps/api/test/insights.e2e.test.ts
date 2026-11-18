@@ -115,7 +115,50 @@ describe("GET /insights/month", () => {
       // Every row here has the bank text 'x': one place. The purchases from the jar and without a hryvnia amount are
       // not the limit's, the refunds lower it and are not visits. The history starts in September: nothing is new.
       places: [{ key: expect.stringMatching(/^[0-9a-f]{16}$/), name: "x", spent: 40_000 + 12_000 + 9_000 + 30_000 - 12_000 - 2_000 + 1_500, visits: 5, isNew: false }],
+      // The planned payment of the 10th, outside the limit and outside `spent` (В2а).
+      otherPayments: 80_000,
+      previousOtherPayments: 0,
     });
+  });
+
+  it("sums the payments outside the limit — planned payments, taxes, debts — over the same stretches, apart from `spent` (В2а)", async () => {
+    const [black, white, jar] = ((await ds.query(`SELECT id FROM accounts ORDER BY id`)) as { id: number }[]).map((r) => r.id) as [number, number, number];
+    const cash = await account("cash");
+    const before = (await get("/insights/month").expect(200)).body;
+
+    // In: each payment type, on a card and from the cash wallet.
+    await tx(black, "2026-11-03T10:00:00Z", -795_000, "tax", "tax");
+    await tx(white, "2026-11-05T10:00:00Z", -730_100, "debt_payment", "debt"); // an installment or a loan repaid
+    await tx(cash, "2026-11-12T10:00:00Z", -30_000, "obligation", "transfer"); // a planned payment paid in cash
+    // Out: what the limit leaves out for its own reasons, and moves of money that are not payments.
+    await tx(black, "2026-11-04T10:00:00Z", -11_000, "obligation", "transfer", null); // no hryvnia amount
+    await tx(jar, "2026-11-04T11:00:00Z", -12_000, "obligation", "transfer"); // on a jar
+    await tx(black, "2026-11-06T10:00:00Z", -200_000, "loan_out", "people"); // a loan given: comes back
+    await tx(black, "2026-11-06T11:00:00Z", -100_000, "goal_contribution", "own"); // into savings
+    await tx(black, "2026-11-12T11:00:00Z", -300_000, "own_transfer", "own"); // own money moved
+    await tx(black, "2026-11-12T12:00:00Z", -40_000, "cash_out", null); // into the wallet, after its start
+    seq++;
+    await ds.query(
+      `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, category, raw)
+       VALUES ($1,$2,'2026-11-14T10:00:00Z','2026-11-14','Не записано',-60000,-60000,'spend','uncategorized','{"cash_count":"short"}')`,
+      [`tx-${seq}`, cash],
+    );
+    // The month before: on its first sixteen days, and after them.
+    await tx(black, "2026-10-14T10:00:00Z", -120_000, "tax", "tax");
+    await tx(black, "2026-10-20T10:00:00Z", -1_870_500, "obligation", "transfer");
+
+    const now = (await get("/insights/month").expect(200)).body;
+    expect(insightsMonthDto.safeParse(now).success).toBe(true);
+    expect(now.otherPayments).toBe(80_000 + 795_000 + 730_100 + 30_000);
+    expect(now.previousOtherPayments).toBe(120_000);
+    // «Потрачено» and its categories stay the limit's alone.
+    expect(now.spent).toBe(before.spent);
+    expect(now.categories).toEqual(before.categories);
+    expect(now.spent).toBe(await limitSpent("2026-11-01", now.through));
+
+    const october = (await get("/insights/month?month=2026-10").expect(200)).body;
+    expect(october.otherPayments).toBe(120_000 + 1_870_500);
+    expect(october.previousOtherPayments).toBe(0);
   });
 
   it("names the month's largest places, with visits and the sum after refunds, and marks the new ones (В3)", async () => {
@@ -243,7 +286,7 @@ describe("GET /insights/month", () => {
 
   it("answers a month with nothing in it with zeros", async () => {
     const { body } = await get("/insights/month?month=2025-01").expect(200);
-    expect(body).toEqual({ month: "2025-01", through: "2025-01-31", previous: { from: "2024-12-01", to: "2024-12-31" }, spent: 0, previousSpent: 0, categories: [], places: [] });
+    expect(body).toEqual({ month: "2025-01", through: "2025-01-31", previous: { from: "2024-12-01", to: "2024-12-31" }, spent: 0, previousSpent: 0, categories: [], places: [], otherPayments: 0, previousOtherPayments: 0 });
   });
 
   it("refuses a malformed month and a month in the future", async () => {

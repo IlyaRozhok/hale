@@ -109,6 +109,39 @@ describe("Insights", () => {
     }
   });
 
+  it("payments outside the limit: one quiet line under the categories, no colour, no breakdown, not a button (В2а)", async () => {
+    await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ otherPayments: 1_870_500 })) }));
+    const line = await screen.findByText("Ещё платежи: ₴18,705");
+    // «Потрачено» stays the limit's.
+    expect(screen.getByText("₴18,220")).toBeTruthy();
+    expect((StyleSheet.flatten(line.props.style) as { color?: string }).color).toBe(tokens.color.fg.muted);
+    expect(screen.queryByRole("button", { name: /платежи/ })).toBeNull();
+    // Below the categories card: after its last row.
+    const texts = screen.getAllByText(/./).map((t) => t.props.children as unknown);
+    expect(texts.indexOf("Ещё платежи: ₴18,705")).toBeGreaterThan(texts.indexOf("Ещё 4 категории"));
+  });
+
+  it("no line when there were no such payments (В2а)", async () => {
+    await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ otherPayments: 0 })) }));
+    await screen.findByText("₴18,220");
+    expect(screen.queryByText(/Ещё платежи/)).toBeNull();
+  });
+
+  it("no line from an older server's answer without the field (В2а)", async () => {
+    await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture()) }));
+    await screen.findByText("₴18,220");
+    expect(screen.queryByText(/Ещё платежи/)).toBeNull();
+  });
+
+  it("the line shows in a month with no spending from the limit too (В2а)", async () => {
+    await renderWith(
+      <Insights now={now} />,
+      fakeApi({ insights: jest.fn(async () => insightsFixture({ spent: 0, previousSpent: 0, categories: [], otherPayments: 795_000 })) }),
+    );
+    expect(await screen.findByText("Трат пока нет.")).toBeTruthy();
+    expect(screen.getByText("Ещё платежи: ₴7,950")).toBeTruthy();
+  });
+
   it("a quiet line for a month with no spending yet", async () => {
     await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ spent: 0, previousSpent: 0, categories: [] })) }));
     expect(await screen.findByText("Трат пока нет.")).toBeTruthy();

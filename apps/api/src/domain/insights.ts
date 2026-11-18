@@ -99,6 +99,23 @@ export function buildInsights(w: InsightsWindow, rows: readonly InsightsRow[]): 
   };
 }
 
+// --- Payments outside the limit (task В2а) ------------------------------------------------------------------------
+// Planned payments, taxes and debt payments leave money but not the limit (OUT_OF_LIMIT_PAYMENT_TYPES in
+// domain/ledger.ts). «Итоги» names them in one quiet line under the categories, apart from `spent`.
+
+/** What the payments outside the limit took over one of the two stretches, summed in the database. */
+export interface OtherPaymentsRow {
+  period: "current" | "previous";
+  /** Kopecks, signed like outOfLimitPayment. */
+  spent: Minor;
+}
+
+/** Each stretch's sum; never below zero, so money back on such a row cannot make the line negative. */
+export function buildOtherPayments(rows: readonly OtherPaymentsRow[]): { otherPayments: Minor; previousOtherPayments: Minor } {
+  const sum = (period: OtherPaymentsRow["period"]) => Math.max(0, rows.filter((r) => r.period === period).reduce((s, r) => s + r.spent, 0));
+  return { otherPayments: sum("current"), previousOtherPayments: sum("previous") };
+}
+
 // --- Places of the month (task В3) -------------------------------------------------------------------------------
 // A place is the counterparty of a bank purchase that counts against the limit (type 'spend'), named by the one
 // counterparty key the app already uses (transactions/counter-key.ts: «Применить к похожим», recipients, the
