@@ -12,6 +12,7 @@ import {
   placesLookbackFrom,
 } from "../domain/insights";
 import { outOfLimitPaymentSql } from "../domain/ledger";
+import { type ChargeRow, findSubscriptions, subscriptionsFrom } from "../domain/subscriptions";
 import { kyivDate } from "../domain/money";
 import { Clock } from "../time/clock";
 import { counterKeySql } from "../transactions/counter-key";
@@ -28,6 +29,7 @@ const AT_PLACE = `${IN_LIMIT} AND t.type = 'spend' AND a.kind <> 'cash'`;
  * definition (IN_LIMIT, from domain/ledger.ts), signed as spentSql signs it: refunds lower their category's sum.
  * Task В3: the month's largest places over the same stretch, by the counterparty key the rest of the app uses.
  * Task В2а: what the payments outside the limit (outOfLimitPaymentSql) took over the same two stretches.
+ * Task В4: the subscriptions as of the month's last counted day, from the purchases at places (AT_PLACE) before it.
  */
 @Injectable()
 export class InsightsService {
@@ -74,6 +76,20 @@ export class InsightsService {
         GROUP BY 1`,
       [w.from, w.to, w.previousFrom, w.previousTo],
     )) as OtherPaymentsRow[];
-    return { ...buildInsights(w, rows), places: buildPlaces(places, history[0]?.d ?? null, w.month), ...buildOtherPayments(other) };
+    // Task В4: every purchase at a place over the months looked at, each named as «Операции» names its place's latest row.
+    const charges = (await this.ds.query(
+      `SELECT key, first_value(name) OVER (PARTITION BY key ORDER BY occurred_at DESC, id DESC) AS name, date, amount
+         FROM (SELECT ${counterKeySql("t")} AS key, COALESCE(NULLIF(t.counter_name,''), t.description) AS name,
+                      t.local_date::text AS date, (-t.amount_uah)::float8 AS amount, t.occurred_at, t.id
+                 FROM transactions t JOIN accounts a ON a.id = t.account_id
+                WHERE ${AT_PLACE} AND t.amount_uah < 0 AND t.local_date BETWEEN $1 AND $2) p`,
+      [subscriptionsFrom(w.to), w.to],
+    )) as ChargeRow[];
+    return {
+      ...buildInsights(w, rows),
+      places: buildPlaces(places, history[0]?.d ?? null, w.month),
+      ...buildOtherPayments(other),
+      subscriptions: findSubscriptions(charges, w.to),
+    };
   }
 }

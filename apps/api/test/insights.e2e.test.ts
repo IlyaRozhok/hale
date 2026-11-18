@@ -118,6 +118,8 @@ describe("GET /insights/month", () => {
       // The planned payment of the 10th, outside the limit and outside `spent` (В2а).
       otherPayments: 80_000,
       previousOtherPayments: 0,
+      // No place here charges about the same sum about monthly (В4).
+      subscriptions: { monthly: 0, items: [] },
     });
   });
 
@@ -218,6 +220,62 @@ describe("GET /insights/month", () => {
     expect(body.places).toEqual([{ key: expect.any(String), name: "x", spent: 20_000 + 6_000 + 4_000 + 70_000 + 11_000, visits: 5, isNew: false }]);
   });
 
+  it("finds the subscriptions among the card purchases of the limit: the price rise, the one not charged for a while (В4)", async () => {
+    const black = (await ds.query(`SELECT id FROM accounts WHERE kind='black'`))[0].id as number;
+    const white = (await ds.query(`SELECT id FROM accounts WHERE kind='white'`))[0].id as number;
+    const jar = (await ds.query(`SELECT id FROM accounts WHERE kind='jar'`))[0].id as number;
+    const cash = await account("cash");
+    const at = async (accountId: number, day: string, amount: number, type: string, description: string, counterName: string | null = null, amountUah: number | null = amount) => {
+      seq++;
+      await ds.query(
+        `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, counter_name, amount, amount_uah, type, category, raw)
+         VALUES ($1,$2,$3,${kyivDaySql("$3::timestamptz")},$4,$5,$6,$7,$8,'subscriptions','{}')`,
+        [`tx-${seq}`, accountId, `${day}T10:00:00Z`, description, counterName, amount, amountUah, type],
+      );
+    };
+    const monthly = async (days: string[], accountId: number, amount: number, type: string, description: string, counterName: string | null = null, amountUah: number | null = amount) => {
+      for (const d of days) await at(accountId, d, amount, type, description, counterName, amountUah);
+    };
+    // A subscription, its price risen in November. October's charge was refunded two days later: the refund is not a
+    // charge, and the charge it returned still keeps the chain (a refunded month is not a missed one).
+    await monthly(["2026-08-05", "2026-09-05", "2026-10-05"], black, -24_900, "spend", "Netflix");
+    await at(black, "2026-11-05", -29_900, "spend", "Netflix");
+    await at(black, "2026-10-07", 24_900, "spend", "Netflix");
+    // Charged to the white card under the counterparty's name, last in August.
+    await monthly(["2026-06-04", "2026-07-04", "2026-08-04"], white, -90_000, "spend", "Оплата", "Sport Life");
+    // Not subscriptions: not the limit's (a jar, a planned payment, no hryvnia amount), a person, the cash wallet.
+    await monthly(["2026-08-10", "2026-09-10", "2026-10-10", "2026-11-10"], jar, -10_000, "spend", "Jar Shop");
+    await monthly(["2026-08-11", "2026-09-11", "2026-10-11", "2026-11-11"], black, -20_000, "obligation", "Kyivstar");
+    await monthly(["2026-08-12", "2026-09-12", "2026-10-12", "2026-11-12"], black, -30_000, "spend", "Google", null, null);
+    await monthly(["2026-08-13", "2026-09-13", "2026-10-13", "2026-11-13"], black, -40_000, "person_transfer", "Олена");
+    await monthly(["2026-08-14", "2026-09-14", "2026-10-14", "2026-11-14"], cash, -50_000, "spend", "Оренда");
+
+    const { body } = await get("/insights/month").expect(200);
+    expect(insightsMonthDto.safeParse(body).success).toBe(true);
+    expect(body.subscriptions).toEqual({
+      monthly: 29_900,
+      items: [
+        { key: expect.stringMatching(/^[0-9a-f]{16}$/), name: "Netflix", amount: 29_900, lastDate: "2026-11-05", raisedBy: 5_000, missed: 0 },
+        // Due on 4 September and 4 October; not on the total.
+        { key: expect.stringMatching(/^[0-9a-f]{16}$/), name: "Sport Life", amount: 90_000, lastDate: "2026-08-04", raisedBy: 0, missed: 2 },
+      ],
+    });
+    // The key is the counterparty's, as on the transaction in «Операции».
+    const list = (await get("/transactions?group=spend&limit=200&from=2026-11-01&to=2026-11-16").expect(200)).body.items as {
+      counterKey: string;
+      description: string;
+    }[];
+    expect(body.subscriptions.items[0].key).toBe(list.find((i) => i.description === "Netflix")!.counterKey);
+
+    // A past month is seen as of its last day: November's charge and rise are not there yet.
+    const october = (await get("/insights/month?month=2026-10").expect(200)).body;
+    expect(october.subscriptions.monthly).toBe(24_900);
+    expect(october.subscriptions.items.map((i: Record<string, unknown>) => [i.name, i.amount, i.lastDate, i.raisedBy, i.missed])).toEqual([
+      ["Netflix", 24_900, "2026-10-05", 0, 0],
+      ["Sport Life", 90_000, "2026-08-04", 0, 2],
+    ]);
+  });
+
   it("adds up to the limit's spending over the same days, for both stretches", async () => {
     for (const q of ["", "?month=2026-10", "?month=2026-09"]) {
       const { body } = await get(`/insights/month${q}`).expect(200);
@@ -286,7 +344,7 @@ describe("GET /insights/month", () => {
 
   it("answers a month with nothing in it with zeros", async () => {
     const { body } = await get("/insights/month?month=2025-01").expect(200);
-    expect(body).toEqual({ month: "2025-01", through: "2025-01-31", previous: { from: "2024-12-01", to: "2024-12-31" }, spent: 0, previousSpent: 0, categories: [], places: [], otherPayments: 0, previousOtherPayments: 0 });
+    expect(body).toEqual({ month: "2025-01", through: "2025-01-31", previous: { from: "2024-12-01", to: "2024-12-31" }, spent: 0, previousSpent: 0, categories: [], places: [], otherPayments: 0, previousOtherPayments: 0, subscriptions: { monthly: 0, items: [] } });
   });
 
   it("refuses a malformed month and a month in the future", async () => {

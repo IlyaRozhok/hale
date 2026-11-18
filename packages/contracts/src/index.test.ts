@@ -64,6 +64,21 @@ describe("contracts", () => {
     expect(insightsMonthDto.safeParse({ ...base, otherPayments: 1.5 }).success).toBe(false);
     expect(insightsMonthDto.safeParse({ ...base, previousOtherPayments: -1 }).success).toBe(false);
   });
+
+  it("takes the month's subscriptions as optional, so an older server's answer still reads (В4)", () => {
+    const base = { month: "2026-11", through: "2026-11-16", previous: { from: "2026-10-01", to: "2026-10-16" }, spent: 0, previousSpent: 0, categories: [] };
+    const item = { key: "0123456789abcdef", name: "Netflix", amount: 29_900, lastDate: "2026-11-05", raisedBy: 5_000, missed: 0 };
+    expect(insightsMonthDto.safeParse(base).success).toBe(true);
+    expect(insightsMonthDto.safeParse({ ...base, subscriptions: { monthly: 0, items: [] } }).success).toBe(true);
+    expect(insightsMonthDto.safeParse({ ...base, subscriptions: { monthly: 29_900, items: [item, { ...item, raisedBy: 0, missed: 2 }] } }).success).toBe(true);
+    expect(insightsMonthDto.safeParse({ ...base, subscriptions: { monthly: -1, items: [] } }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...base, subscriptions: { monthly: 0, items: [{ ...item, amount: 0 }] } }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...base, subscriptions: { monthly: 0, items: [{ ...item, amount: 1.5 }] } }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...base, subscriptions: { monthly: 0, items: [{ ...item, raisedBy: -1 }] } }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...base, subscriptions: { monthly: 0, items: [{ ...item, missed: 0.5 }] } }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...base, subscriptions: { monthly: 0, items: [{ ...item, lastDate: "2026-02-30" }] } }).success).toBe(false);
+    expect(insightsMonthDto.safeParse({ ...base, subscriptions: { monthly: 0, items: [{ ...item, key: "IBAN" }] } }).success).toBe(false);
+  });
 });
 
 describe("exchangeRate (Б22)", () => {
