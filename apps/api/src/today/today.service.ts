@@ -5,7 +5,7 @@ import { DataSource, type EntityManager } from "typeorm";
 import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
 import { lastIncomeBoundary, loanReserve, type ReceivedIncome } from "../domain/loans";
-import { type DailyInput, type DailyState, type DayMark, computeDaily, dayMark, sumDue } from "../domain/daily";
+import { type DailyInput, type DailyState, type DayMark, computeDaily, dayMark, dueWindowEnd, sumDue } from "../domain/daily";
 import { spentByDaySql, spentSql } from "../domain/ledger";
 import { runway } from "../domain/runway";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
@@ -538,6 +538,8 @@ export class TodayService {
 
     // payments: unpaid ones feed the limit; the window's payments (paid or not, native amounts) define the bridge basis
     const end = next && next >= date ? next : addDays(date, HORIZON_DAYS);
+    // The payments of the stretch: due before `end`, or on the income day itself (reserved in advance, Б47 (1)).
+    const dueEnd = dueWindowEnd(date, next);
     const pays: {
       id: number; name: string; kind: string; amount: number; currency: string; due_on: string; paid: boolean;
       tax_quarter: string | null; is_estimate: boolean; linked: number;
@@ -548,7 +550,7 @@ export class TodayService {
                 (SELECT COALESCE(SUM(-COALESCE(x.amount_uah, x.amount)), 0) FROM payment_links l
                    JOIN transactions x ON x.id = l.transaction_id WHERE l.payment_id = scheduled_payments.id)::float8 AS linked
            FROM scheduled_payments WHERE due_on < $1 OR paid_at IS NULL ORDER BY due_on, id`,
-        [end],
+        [dueEnd],
       );
     const unpaid = pays.filter((p) => !p.paid);
     // A loan with a return date is reserved as a payment on that date (task Б7).
@@ -561,12 +563,12 @@ export class TodayService {
     const unpaidScheduled = unpaid.filter((p) => p.kind === "tax").reduce((s, p) => s + uah(p.amount, p.currency), 0);
     const basis =
       pays
-        .filter((p) => p.due_on < end)
+        .filter((p) => p.due_on < dueEnd)
         .map((p) => `${p.due_on}:${p.amount}:${p.currency}`)
         .sort()
         .join(",") + `|${next ?? ""}`;
     const upcoming = unpaid
-      .filter((p) => p.due_on < end)
+      .filter((p) => p.due_on < dueEnd)
       // `paid`: what operations linked to the open payment already paid (task Б9); its whole amount stays reserved.
       .map((p) => ({ id: String(p.id), name: p.name, amount: uah(p.amount, p.currency), dueOn: p.due_on, kind: p.kind, currency: p.currency, paid: p.linked }));
 

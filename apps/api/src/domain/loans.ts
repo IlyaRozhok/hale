@@ -32,8 +32,8 @@ export interface LoanReserve {
   /** Every loan that lowers free money now, in the order given. */
   counted: OpenLoan[];
   /**
-   * Reserved loans whose return date is today or already past, the oldest date first. A loan due on the day the
-   * income comes is outside the window, so it is not named: nothing would say it is in the limit.
+   * Reserved loans whose return date is today or already past, the oldest date first. Only reserved loans are named,
+   * so nothing says a loan is in the limit when it is not; a loan due on the day the income comes is reserved (Б47 (1)).
    */
   dueNow: OpenLoan[];
 }
@@ -42,7 +42,8 @@ export interface LoanReserve {
  * Which open loans lower free money, and by how much (task Б7, the owner's answer of 16 November, option А).
  *
  * - A loan with a return date, of any kind, behaves as an unpaid payment on that date: it is reserved when the
- *   date falls before the next income (or the 30-day horizon), and when it is overdue: the window of `sumDue`.
+ *   date falls before the next income or on its day (or within the 30-day horizon), and when it is overdue: the
+ *   window of `sumDue`.
  * - With no date, a loan from a person and a short bank loan («Кредит до завтра», МФО, a cash loan for N days)
  *   are owed in full until repaid, whatever the income cycle.
  * - With no date, a monthly bank loan counts only in the cycle it arrived, since the last received income; after

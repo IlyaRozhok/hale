@@ -14,7 +14,7 @@ export interface RunwayInput {
   laterLimit?: Minor;
   /** What is left of today's limit; negative when overspent. */
   leftToday: Minor;
-  /** Unpaid payments before `endOn`, in hryvnias. Overdue ones count today. */
+  /** Unpaid payments up to `endOn`, in hryvnias. Overdue ones count today; one on `endOn` leaves before it. */
   payments: readonly { date: string; amount: Minor }[];
 }
 
@@ -34,11 +34,18 @@ export interface Runway {
 export function runway(i: RunwayInput): Runway {
   let balance = i.free + i.payments.reduce((s, p) => s + p.amount, 0);
   const points = [{ date: i.today, balance }];
+  const day = (p: { date: string }) => (p.date <= i.today ? i.today : p.date);
   for (let d = i.today; d < i.endOn; d = addDays(d, 1)) {
     const spend = d === i.today ? Math.max(0, i.leftToday) : (i.laterLimit ?? i.dailyLimit);
-    const paid = i.payments.reduce((s, p) => s + ((p.date <= i.today ? i.today : p.date) === d ? p.amount : 0), 0);
+    const paid = i.payments.reduce((s, p) => s + (day(p) === d ? p.amount : 0), 0);
     balance -= spend + paid;
     points.push({ date: addDays(d, 1), balance });
+  }
+  // A payment due on `endOn` (the income day) is reserved in advance (Б47 (1)): it leaves before the last point.
+  const onEnd = i.payments.reduce((s, p) => s + (day(p) >= i.endOn ? p.amount : 0), 0);
+  if (onEnd !== 0) {
+    balance -= onEnd;
+    points[points.length - 1] = { date: points[points.length - 1]!.date, balance };
   }
   const below = points.findIndex((p) => p.balance < 0);
   return { points, reserve: balance, zeroOn: below < 0 ? null : points[Math.max(0, below - 1)]!.date };
