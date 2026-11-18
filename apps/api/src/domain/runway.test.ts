@@ -50,6 +50,12 @@ describe("runway", () => {
     expect(runway({ ...base, laterLimit: base.dailyLimit })).toEqual(runway(base));
   });
 
+  it("with a later limit, an overdue payment still leaves today and a later one on its day", () => {
+    const r = runway({ ...base, laterLimit: 45_000, payments: [{ date: "2026-11-06", amount: 50_000 }, { date: "2026-11-13", amount: 300_000 }] });
+    expect(r.points.map((p) => p.balance)).toEqual([1_350_000, 1_350_000 - 124_000 - 50_000, 1_176_000 - 45_000, 1_131_000 - 45_000 - 300_000, 786_000 - 45_000]);
+    expect(r.reserve).toBe(1_000_000 - 124_000 - 3 * 45_000);
+  });
+
   it("is a single point when the income is today", () => {
     const r = runway({ ...base, endOn: "2026-11-11" });
     expect(r.points).toEqual([{ date: "2026-11-11", balance: 1_000_000 }]);

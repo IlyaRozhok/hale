@@ -22,8 +22,10 @@ type Props = {
   onCancel: () => void;
   confirming: boolean;
   /**
-   * The day own money runs out (the runway's zero day), drawn for the day's current limit; null or
-   * absent when there is none, or from an older server.
+   * The day own money runs out (the runway's zero day), drawn for the limit the days ahead run on: the
+   * day's own, or on the day the shortage came on the one named for tomorrow (А23). Null or absent when
+   * there is none, or from an older server. An older server still draws a transition day for the morning
+   * limit, so there the date is named for the wrong amount: a narrow transitional case.
    */
   zeroOn?: string | null;
   /** Today's date: a zero day that is not after it is no date to name. */
@@ -62,9 +64,10 @@ export function BridgePlan({ state, usdRate, creditLimit = 0, onConfirm, onCance
   const needsAction = !base.confirmed || changed;
   const canConfirm = fresh && !confirming && !preview.failed;
   const short = !preview.failed && fresh && shown.shortfall > 0;
-  // The zero day is drawn for the day's limit: it holds only while the slider shows that amount,
-  // and it is named only while it is still ahead.
-  const neededOn = zeroOn && today && zeroOn > today && value === state.dailyLimit ? dayMonth(zeroOn) : null;
+  // The zero day is drawn for the limit the days ahead run on: tomorrow's on the day the shortage came on,
+  // the day's own otherwise. It holds only while the slider shows that amount, and is named only while ahead.
+  const drawnFor = nextLimit ?? state.dailyLimit;
+  const neededOn = zeroOn && today && zeroOn > today && value === drawnFor ? dayMonth(zeroOn) : null;
   // One amount missing on the screen: the same one as in «Не хватает до дохода», never the part beyond the credit limit.
   const shortLine = (): string | null => {
     if (!short) return null;
