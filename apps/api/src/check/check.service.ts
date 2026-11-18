@@ -191,15 +191,20 @@ export class LedgerCheckService {
 
   /**
    * Invariant 2: a transfer between own accounts with no other leg here (the pair rule of domain/own-pair.ts).
-   * Left out: the wallet's own rows, transfers to a card the owner said is his at another bank (cash_cards), and
-   * (in loneLegsCheck) money coming in from his account at another bank, by «Від: …» or his name in counter_name: their other leg is outside by nature.
+   * Left out: the wallet's own rows, transfers to a card the owner said is his at another bank (cash_cards), money
+   * the owner answered came from the wallet or from Binance (Б51: «Из кошелька» sets from_wallet; «Вывод с Binance»,
+   * from a deposit or a card credit, makes the row an own transfer with usdc_checked, while «Другое» only sets
+   * usdc_checked and keeps its answer «other»), and (in loneLegsCheck) money coming in from his account at another
+   * bank, by «Від: …» or his name in counter_name: their other leg is outside by nature.
    */
   private async ownTransfers(m: EntityManager): Promise<ResultRow> {
     const rows: { date: string; amount: number; description: string; counter_name: string | null }[] = await m.query(
       `SELECT t.local_date::text AS date, t.amount::float8 AS amount, t.description, t.counter_name FROM transactions t JOIN accounts ta ON ta.id = t.account_id
         WHERE t.type = 'own_transfer' AND ta.kind <> 'cash'
           AND NOT EXISTS (SELECT 1 FROM transactions o JOIN accounts oa ON oa.id = o.account_id WHERE ${ownPairSql("t", "ta", "o", "oa")})
-          AND NOT EXISTS (SELECT 1 FROM cash_cards c WHERE c.counter_key = ${counterKeySql("t")})`,
+          AND NOT EXISTS (SELECT 1 FROM cash_cards c WHERE c.counter_key = ${counterKeySql("t")})
+          AND NOT t.from_wallet
+          AND NOT (t.usdc_checked AND NOT EXISTS (SELECT 1 FROM cash_answers c WHERE c.transaction_id = t.id AND c.answer = 'other'))`,
     );
     const r = loneLegsCheck(
       rows.map((x) => ({ localDate: x.date, amount: x.amount, description: x.description, counterName: x.counter_name })),
