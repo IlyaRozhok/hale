@@ -796,6 +796,14 @@ export const insightsMonthDto = z
       )
       .max(5)
       .optional(),
+    /**
+     * Task В2а, optional (an older server does not send it): kopecks the payments outside the limit took over the
+     * same stretch as `spent` — planned payments, taxes, debt payments (installments among them); not own transfers,
+     * withdrawals, loans given, savings or a count's shortfall. Never below zero, and not part of `spent`.
+     */
+    otherPayments: money.refine((n) => n >= 0, "not below zero").optional(),
+    /** The same over the stretch of the month before (`previous`). */
+    previousOtherPayments: money.refine((n) => n >= 0, "not below zero").optional(),
   })
   .strict();
 export type InsightsMonthDto = z.infer<typeof insightsMonthDto>;

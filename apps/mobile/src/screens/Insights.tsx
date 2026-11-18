@@ -156,6 +156,8 @@ function Month({ data, past, thisYear, unfolded, onUnfold, onOpenCategory }: Mon
           </Glass>
         </View>
       )}
+      {/* Task В2а: payments the limit leaves out (rent, taxes, debts), one quiet line with no breakdown. An older server does not send it. */}
+      {(data.otherPayments ?? 0) > 0 && <Text style={styles.note}>{`Ещё платежи: ${formatMoney(data.otherPayments!)}`}</Text>}
     </>
   );
 }

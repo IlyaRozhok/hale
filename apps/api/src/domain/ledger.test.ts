@@ -8,6 +8,7 @@ import {
   CASH_START_SQL,
   LIMIT_EXCLUDED_ACCOUNT_KIND,
   LIMIT_TYPES,
+  OUT_OF_LIMIT_PAYMENT_TYPES,
   OWN_MONEY_ACCOUNT_KINDS,
   SPEND_GROUP_TYPES,
   cashCountShortSql,
@@ -18,6 +19,8 @@ import {
   limitSpent,
   limitSpentByDay,
   limitSql,
+  outOfLimitPayment,
+  outOfLimitPaymentSql,
   spendGroupSql,
   walletChange,
 } from "./ledger";
@@ -479,6 +482,54 @@ describe("properties (300 seeded cases each)", () => {
       const first = rows.map((t) => ledgerEffect(t, ctx));
       expect(rows.map((t) => ledgerEffect(t, ctx)), `seed ${seed}`).toEqual(first);
       expect(JSON.parse(JSON.stringify(rows)), `seed ${seed}`).toEqual(copy);
+    }
+  });
+});
+
+describe("payments outside the limit («Ещё платежи» in «Итоги», В2а)", () => {
+  it("are the planned payments, taxes and debt payments (installments among them), by their amount out", () => {
+    for (const type of ["obligation", "tax", "debt_payment"] as const) {
+      expect(outOfLimitPayment(row({ type, amountUah: -80_000 })), type).toBe(80_000);
+    }
+    // A planned payment paid from the cash wallet is still a payment.
+    expect(outOfLimitPayment(row({ type: "obligation", accountKind: "cash", amountUah: -30_000 }))).toBe(30_000);
+    // Signed as the limit signs it: money back on such a row lowers the sum.
+    expect(outOfLimitPayment(row({ type: "tax", amountUah: 5_000 }))).toBe(-5_000);
+    expect(OUT_OF_LIMIT_PAYMENT_TYPES).toEqual(["obligation", "tax", "debt_payment"]);
+  });
+
+  it("leave out own transfers, withdrawals, loans out, goals, income and the limit's own rows", () => {
+    for (const type of ALL_TYPES.filter((x) => !(OUT_OF_LIMIT_PAYMENT_TYPES as readonly (string | null)[]).includes(x))) {
+      expect(outOfLimitPayment(row({ type, amountUah: -80_000 })), String(type)).toBe(0);
+    }
+  });
+
+  it("leave out a count's shortfall: a spend row kept out of the limit, not a payment (Б47 (2))", () => {
+    expect(outOfLimitPayment(row({ type: "spend", accountKind: "cash", cashCountShort: true }))).toBe(0);
+  });
+
+  it("leave out jar rows and rows without a hryvnia amount, as the limit does", () => {
+    expect(outOfLimitPayment(row({ type: "tax", accountKind: LIMIT_EXCLUDED_ACCOUNT_KIND }))).toBe(0);
+    expect(outOfLimitPayment(row({ type: "tax", amountUah: null }))).toBe(0);
+  });
+
+  it("outOfLimitPaymentSql names the types and the limit's account and amount rules, under any alias", () => {
+    const sql = outOfLimitPaymentSql("x", "y");
+    expect(sql).toContain("x.type IN ('obligation','tax','debt_payment')");
+    expect(sql).toContain("y.kind <> 'jar'");
+    expect(sql).toContain("x.amount_uah IS NOT NULL");
+    expect(sql).not.toMatch(/\bt\.|\ba\./);
+    expect(outOfLimitPaymentSql()).toBe(outOfLimitPaymentSql("t", "a"));
+  });
+
+  it("never overlap the limit, and match the SQL predicate written out (300 seeded cases)", () => {
+    const oracle = (t: LedgerRow) => t.accountKind !== "jar" && t.amountUah !== null && ["obligation", "tax", "debt_payment"].includes(t.type ?? "");
+    for (const seed of SEEDS) {
+      const { rows, ctx } = randomCase(seed);
+      for (const t of rows) {
+        expect(outOfLimitPayment(t), `seed ${seed}`).toBe(oracle(t) ? 0 - t.amountUah! : 0);
+        if (oracle(t)) expect(countsAgainstLimit(t, ctx), `seed ${seed}`).toBe(false);
+      }
     }
   });
 });

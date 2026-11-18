@@ -37,6 +37,16 @@ export const SPEND_GROUP_TYPES = [
 ] as const satisfies readonly TxType[];
 
 /**
+ * Payments outside the limit, which «Итоги» names in one quiet line under its categories (В2а): planned payments
+ * (rent, utilities, and a person transfer that settled one is stored as 'obligation'), taxes, and debt payments
+ * (installments and loans repaid; installments have no type of their own). These are the types a planned payment
+ * settles (plan.service SETTLING_TYPES). The limit never counts them: none is in LIMIT_TYPES or CASH_OUT. Not
+ * payments: own transfers and withdrawals move own money; a loan given comes back; goal contributions are savings;
+ * a count's shortfall is a 'spend' row the limit leaves out (Б47 (2)). The account and amount rules are the limit's.
+ */
+export const OUT_OF_LIMIT_PAYMENT_TYPES = ["obligation", "tax", "debt_payment"] as const satisfies readonly TxType[];
+
+/**
  * A row a count of the pocket wrote for what it found missing («Не записано», cash.service `count`). The money is
  * gone, so the row lowers own money and the wallet on the day of the count, but it is not that day's spending
  * against its limit (Б47 (2), the owner's decision of 18 November 2026): it stays in the «Траты» list, marked as
@@ -129,6 +139,16 @@ export function countsAgainstLimit(row: LedgerRow, ctx: LedgerContext): boolean 
   return row.type === CASH_OUT && cashOutCounts(row.localDate, ctx.cashStart);
 }
 
+/**
+ * Kopecks a payment outside the limit took (OUT_OF_LIMIT_PAYMENT_TYPES), signed as limitSpend: money back lowers it;
+ * 0 for every other row. Mirrors outOfLimitPaymentSql.
+ */
+export function outOfLimitPayment(row: LedgerRow): Minor {
+  if (row.accountKind === LIMIT_EXCLUDED_ACCOUNT_KIND || row.amountUah === null) return 0;
+  // `0 - x` rather than `-x`: a zero amount gives 0, not -0.
+  return (OUT_OF_LIMIT_PAYMENT_TYPES as readonly string[]).includes(row.type ?? "") ? 0 - row.amountUah : 0;
+}
+
 export function inSpendGroup(row: LedgerRow, ctx: LedgerContext): boolean {
   if (!(SPEND_GROUP_TYPES as readonly string[]).includes(row.type ?? "")) return false;
   return row.type !== CASH_OUT || cashOutCounts(row.localDate, ctx.cashStart);
@@ -212,6 +232,11 @@ const cashOutFromStartSql = (t: string): string => `${t}.type = '${CASH_OUT}' AN
 export function limitSql(t = "t", a = "a"): string {
   return `${a}.kind <> '${LIMIT_EXCLUDED_ACCOUNT_KIND}' AND ${t}.amount_uah IS NOT NULL AND NOT ${cashCountShortSql(t)}
   AND (${t}.type IN (${sqlList(LIMIT_TYPES)}) OR (${t}.type = '${CASH_OUT}' AND NOT COALESCE(${t}.local_date >= ${CASH_START_SQL}, false)))`;
+}
+
+/** SQL condition over `t` (transactions) and `a` (its account): a payment outside the limit (outOfLimitPayment). */
+export function outOfLimitPaymentSql(t = "t", a = "a"): string {
+  return `(${a}.kind <> '${LIMIT_EXCLUDED_ACCOUNT_KIND}' AND ${t}.amount_uah IS NOT NULL AND ${t}.type IN (${sqlList(OUT_OF_LIMIT_PAYMENT_TYPES)}))`;
 }
 
 /** SQL condition over `t` (transactions): the row is in the «Траты» list group. */
