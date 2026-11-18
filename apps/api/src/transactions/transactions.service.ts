@@ -16,6 +16,7 @@ import { exchangeRate } from "@hale/contracts";
 import { DataSource, type EntityManager } from "typeorm";
 import { isCounterpartyName } from "../domain/counterparty";
 import { creditPart } from "../domain/credit";
+import { UNCATEGORIZED } from "../domain/insights";
 import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
 import { binanceOnChange, cashAnswerOf } from "../domain/cash-answer";
 import { PlanService } from "../plan/plan.service";
@@ -171,7 +172,8 @@ export class TransactionsService {
     // The «Траты» group is the ledger's: its types and the withdrawal rule live in domain/ledger.ts.
     if (q.group === "spend") where.push(SPEND_TAB.filter);
     if (q.group === "income") where.push(`t.type = ANY(${arg(INCOME_GROUP_TYPES)}::text[])`);
-    if (q.category) where.push(`t.category = ${arg(q.category)}`);
+    // An empty category is «Без категории», as «Итоги» file it (domain/insights.ts), so the two show the same rows (В8).
+    if (q.category) where.push(`COALESCE(t.category, '${UNCATEGORIZED}') = ${arg(q.category)}`);
     if (q.from) where.push(`t.local_date >= ${arg(q.from)}::date`);
     if (q.to) where.push(`t.local_date <= ${arg(q.to)}::date`);
     if (q.q) {

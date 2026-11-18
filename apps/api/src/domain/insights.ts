@@ -17,7 +17,7 @@ export interface InsightsWindow {
 
 /** What the limit took in one category over one of the two stretches. */
 export interface InsightsRow {
-  /** Null is filed under 'uncategorized', as the «Траты» filter files it. */
+  /** Null is filed under 'uncategorized'; the «Траты» filter by that category finds these rows too (В8). */
   category: string | null;
   period: "current" | "previous";
   /** Kopecks, signed like limitSpend: refunds are negative. */
@@ -42,7 +42,8 @@ export interface Insights {
   categories: InsightsCategory[];
 }
 
-const UNCATEGORIZED = "uncategorized";
+/** The category key «Без категории»: rows with an empty category go under it, here and in the list filter. */
+export const UNCATEGORIZED = "uncategorized";
 
 const pad = (n: number): string => String(n).padStart(2, "0");
 
