@@ -294,7 +294,8 @@ export class CashService {
 
   /**
    * "Снял наличными?" about a transfer to the owner's card at another bank. The answer is kept for
-   * the card: yes (also part) lets later transfers to it fill the wallet, no stops the question.
+   * the card with its time: yes (also part) lets later transfers to it fill the wallet, and a month
+   * later the question comes again (Б47.5); no stops the question.
    */
   async answerCard(id: number, a: CashCardAnswer): Promise<CashWalletDto> {
     return this.ds.transaction(async (m) => {
@@ -303,8 +304,9 @@ export class CashService {
         throw new UnprocessableEntityException("part needs the amount taken, no more than the transfer");
       }
       await m.query(
-        `INSERT INTO cash_cards (counter_key, withdraws) VALUES ($1, $2) ON CONFLICT (counter_key) DO UPDATE SET withdraws = EXCLUDED.withdraws`,
-        [t.key, a.answer !== "no"],
+        `INSERT INTO cash_cards (counter_key, withdraws, answered_at) VALUES ($1, $2, $3)
+         ON CONFLICT (counter_key) DO UPDATE SET withdraws = EXCLUDED.withdraws, answered_at = EXCLUDED.answered_at`,
+        [t.key, a.answer !== "no", this.clock.now()],
       );
       await m.query(`UPDATE transactions SET cash_amount=$2 WHERE id=$1`, [id, a.answer === "part" ? a.amount : null]);
       return this.wallet(m);

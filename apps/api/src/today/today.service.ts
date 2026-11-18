@@ -743,19 +743,26 @@ export class TodayService {
   }
 
   /**
-   * A transfer to the owner's card at another bank since the wallet start, about a card with no
-   * answer yet: was it taken out there as cash?
+   * A transfer to the owner's card at another bank since the wallet start: was it taken out there as cash?
+   * Asked about a card with no answer yet, and (Б47.5) about a card answered yes, for a transfer on or after
+   * the same Kyiv day a calendar month after the answer (10.11 → from 10.12; 31.01 → from 28.02). Until answered
+   * such a transfer still counts as cash (cardCashSql), so the wallet does not jump. One question per card at a
+   * time, about its first such transfer: the answer covers the rest. A card answered no is not asked again.
    */
   private async cashCardQuestions(m: EntityManager, f: Facts): Promise<TodayDto["questions"]> {
     if (f.cashStart === null) return [];
     const rows: { id: number; amount_uah: number; local_date: string; target: string }[] = await m.query(
-      `SELECT t.id, t.amount_uah::float8 AS amount_uah, t.local_date::text AS local_date,
-              COALESCE(NULLIF(btrim(t.counter_name), ''), t.description) AS target
-         FROM transactions t JOIN accounts a ON a.id = t.account_id
-        WHERE ${cardTransferSql()} AND t.cash_amount IS NULL AND t.amount_uah IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM cash_cards c WHERE c.counter_key = ${counterKeySql("t")})
-          AND t.local_date > $1::date - ${QUESTION_WINDOW_DAYS}
-        ORDER BY t.occurred_at, t.id`,
+      `SELECT id, amount_uah, local_date, target FROM (
+         SELECT DISTINCT ON (${counterKeySql("t")}) t.id, t.occurred_at, t.amount_uah::float8 AS amount_uah, t.local_date::text AS local_date,
+                COALESCE(NULLIF(btrim(t.counter_name), ''), t.description) AS target
+           FROM transactions t JOIN accounts a ON a.id = t.account_id
+           LEFT JOIN cash_cards c ON c.counter_key = ${counterKeySql("t")}
+          WHERE ${cardTransferSql()} AND t.cash_amount IS NULL AND t.amount_uah IS NOT NULL
+            AND (c.counter_key IS NULL
+                 OR (c.withdraws AND t.local_date >= (${kyivDaySql("c.answered_at")} + interval '1 month')::date))
+            AND t.local_date > $1::date - ${QUESTION_WINDOW_DAYS}
+          ORDER BY ${counterKeySql("t")}, t.occurred_at, t.id) q
+        ORDER BY occurred_at, id`,
       [f.date],
     );
     return rows.map((r) => ({
