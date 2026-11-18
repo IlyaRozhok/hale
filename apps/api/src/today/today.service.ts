@@ -105,6 +105,15 @@ const fmt = (kopecks: number) => `₴${Math.round(kopecks / 100).toString().repl
 
 const fmtDay = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
 
+/**
+ * The second line of «Это оплата?» (task Б45): the operation, its day and the payment's due date, so the
+ * owner sees which month is asked about. Each variant is one whole string, to be translated later.
+ */
+function paidDetail(description: string, day: string, due: string): string {
+  const who = description.trim();
+  return who ? `${who} · ${day} · срок платежа ${due}` : `${day} · срок платежа ${due}`;
+}
+
 /** Calm tail for a bad case: when the money runs out at the current pace, if that is known. */
 function runOutText(runOutOn: string | null, today: string): string {
   if (runOutOn === null) return "";
@@ -778,7 +787,7 @@ export class TodayService {
       kind: "payment_paid" as const,
       // A foreign payment is named by what left the card, in hryvnias.
       text: `Это оплата «${payment.name}» ${fmt(payment.currency === "UAH" ? payment.amount : Math.abs(tx.amountUah ?? tx.amount))}?`,
-      detail: `${texts.get(tx.id) ?? ""} · ${fmtDay(tx.localDate)}`,
+      detail: paidDetail(texts.get(tx.id) ?? "", fmtDay(tx.localDate), fmtDay(payment.due_on)),
     }));
   }
 

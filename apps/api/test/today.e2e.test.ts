@@ -1907,7 +1907,27 @@ describe("questions, upcoming and run-out", () => {
       const rent = await plan("Аренда", 1_700_000, "2026-11-02");
       const t = await tx(card, -1_700_000, "person_transfer", { date: "2026-11-01", description: "Іван П." });
       expect(paidQs(await today())).toEqual([
-        { id: `payment_paid:${rent}:${t}`, kind: "payment_paid", text: "Это оплата «Аренда» ₴17,000?", detail: "Іван П. · 01.11" },
+        { id: `payment_paid:${rent}:${t}`, kind: "payment_paid", text: "Это оплата «Аренда» ₴17,000?", detail: "Іван П. · 01.11 · срок платежа 02.11" },
+      ]);
+    });
+
+    // Б45: the caption names the payment's due date, so the owner sees which month is asked about.
+    it("with October's and November's rent both unpaid, names October's due date for a November transfer", async () => {
+      const card = await account("black", 5_000_000);
+      const october = await plan("Аренда", 1_000_000, "2026-10-15");
+      await plan("Аренда", 1_000_000, "2026-11-15");
+      const t = await tx(card, -1_000_000, "person_transfer", { date: "2026-11-12", description: "Іван П." });
+      expect(paidQs(await today())).toEqual([
+        { id: `payment_paid:${october}:${t}`, kind: "payment_paid", text: "Это оплата «Аренда» ₴10,000?", detail: "Іван П. · 12.11 · срок платежа 15.10" },
+      ]);
+    });
+
+    it("without the operation's description, the caption starts with its date", async () => {
+      const card = await account("black", 5_000_000);
+      const rent = await plan("Аренда", 1_700_000, "2026-11-02");
+      const t = await tx(card, -1_700_000, "person_transfer", { date: "2026-11-01", description: "" });
+      expect(paidQs(await today())).toEqual([
+        { id: `payment_paid:${rent}:${t}`, kind: "payment_paid", text: "Это оплата «Аренда» ₴17,000?", detail: "01.11 · срок платежа 02.11" },
       ]);
     });
 
@@ -1992,7 +2012,7 @@ describe("questions, upcoming and run-out", () => {
         const t = await tx(card, -1_000_000, "person_transfer", { date: "2026-11-22", description: "Іван П." });
         const r = await today();
         expect(paidQs(r)).toEqual([
-          { id: `payment_paid:${rent}:${t}`, kind: "payment_paid", text: "Это оплата «Аренда» ₴10,000?", detail: "Іван П. · 22.11" },
+          { id: `payment_paid:${rent}:${t}`, kind: "payment_paid", text: "Это оплата «Аренда» ₴10,000?", detail: "Іван П. · 22.11 · срок платежа 23.11" },
         ]);
         // Until the owner answers, the transfer is today's spending.
         expect(spent(r)).toBe(1_000_000);
@@ -2069,7 +2089,7 @@ describe("questions, upcoming and run-out", () => {
         const rent = await plan("Аренда", 1_000_000, "2026-11-23");
         const over = await tx(card, -1_001_500, "person_transfer", { date: "2026-11-22", description: "Іван П." });
         expect(paidQs(await today())).toEqual([
-          { id: `payment_paid:${rent}:${over}`, kind: "payment_paid", text: "Это оплата «Аренда» ₴10,000?", detail: "Іван П. · 22.11" },
+          { id: `payment_paid:${rent}:${over}`, kind: "payment_paid", text: "Это оплата «Аренда» ₴10,000?", detail: "Іван П. · 22.11 · срок платежа 23.11" },
         ]);
         await ds.query(`DELETE FROM transactions`);
         await tx(card, -1_002_100, "person_transfer", { date: "2026-11-22" });
@@ -2084,7 +2104,7 @@ describe("questions, upcoming and run-out", () => {
         )[0].id as number;
         const t = await tx(card, -85_000, "person_transfer", { date: "2026-11-22", description: "Netflix" });
         expect(paidQs(await today())).toEqual([
-          { id: `payment_paid:${sub}:${t}`, kind: "payment_paid", text: "Это оплата «Подписка» ₴850?", detail: "Netflix · 22.11" },
+          { id: `payment_paid:${sub}:${t}`, kind: "payment_paid", text: "Это оплата «Подписка» ₴850?", detail: "Netflix · 22.11 · срок платежа 23.11" },
         ]);
         await ds.query(`DELETE FROM transactions`);
         await tx(card, -88_000, "person_transfer", { date: "2026-11-22" });
