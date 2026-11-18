@@ -13,6 +13,7 @@ For agents, in English. Each item cost someone time once. When you hit a new one
 - **A builder subagent without `isolation: "worktree"` works in the lead's own working copy** (13 November 2026: the А21 builder checked out its branch in the lead's worktree). Harmless when the lead's copy is clean, but the lead then has to switch back to `origin/main` after the merge. Start builders with worktree isolation.
 - **The full type check** (`pnpm typecheck`) takes about 6 GB of memory. No more than two builders at once; reviewers do not run it.
 - **`/usr/bin/python3` (3.9) rejects a script file with long Cyrillic lines** with "SyntaxError: Non-UTF-8 code starting with ..." although the file is valid UTF-8 (16 November 2026, editing backlog.md). Run it as `python3 -c "exec(open(PATH, encoding='utf-8').read())"`, or keep the Russian text in a separate file the script reads.
+- **No prettier config in the repo.** The code is not prettier-formatted; `npx prettier --write` reflows whole files. Do not run it; keep the existing style by hand (18 November 2026, Б43).
 - **zsh and unquoted globs in `grep --include`.** The shell here is zsh: `grep -rn pattern dir --include=*.tsx` fails with "no matches found" before grep runs, and the rest of a compound command is lost with it. Quote the glob (`--include='*.tsx'`) or list the directories instead.
 
 ## Tests
