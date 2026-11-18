@@ -23,9 +23,17 @@ const input = (o: Partial<DailyInput> = {}): DailyInput => ({
 
 describe("sumDue", () => {
   const pay = (dueOn: string, amount = 100, paid = false) => ({ dueOn, amount, paid });
-  it("includes the 18th and excludes the 20th when income is on the 20th", () => {
-    const r = sumDue([pay("2026-11-18", 529_500), pay("2026-11-20", 1_700_000)], "2026-11-02", "2026-11-20");
-    expect(r).toBe(529_500);
+  // Б47 (1), the owner's option А of 18 November: a payment due on the income day is reserved in advance, like one
+  // the day before; it used to count as paid from the income itself.
+  it("includes the 18th and the 20th and excludes the 21st when income is on the 20th", () => {
+    const r = sumDue([pay("2026-11-18", 529_500), pay("2026-11-20", 1_700_000), pay("2026-11-21", 1)], "2026-11-02", "2026-11-20");
+    expect(r).toBe(529_500 + 1_700_000);
+  });
+  it("on the income day itself, a payment due that day is still reserved", () => {
+    expect(sumDue([pay("2026-11-20", 1_700_000), pay("2026-11-21", 1)], "2026-11-20", "2026-11-20")).toBe(1_700_000);
+  });
+  it("the 30-day horizon without an income date stays 30 days: its last day is not an income", () => {
+    expect(sumDue([pay("2026-12-01", 10), pay("2026-12-02", 100)], "2026-11-02", null)).toBe(10);
   });
   it("includes today and counts unpaid overdue payments", () => {
     const r = sumDue(

@@ -363,6 +363,11 @@ describe("borrowed", () => {
     expect(r.loansDue).toEqual([]);
     await ds.query(`UPDATE loans SET due_on='2026-11-11' WHERE id=$1`, [person]);
     expect((await today()).state.free).toBe(1_000_000 - 300_000);
+    // On the income day itself it is reserved too, as a payment due that day (Б47 (1), option А); the day after is not.
+    await ds.query(`UPDATE loans SET due_on='2026-11-12' WHERE id=$1`, [person]);
+    expect((await today()).state.free).toBe(1_000_000 - 300_000);
+    await ds.query(`UPDATE loans SET due_on='2026-11-13' WHERE id=$1`, [person]);
+    expect((await today()).state.free).toBe(1_000_000 - 100_000);
   });
 
   it("lists the loans due today or overdue, with what is still owed, the oldest date first (Б7)", async () => {
@@ -1244,6 +1249,36 @@ describe("bridge mode", () => {
     expect(r.state.bridge).toMatchObject({ creditNeeded: 2_007_000, shortfall: 0, recommendedDaily: 45_000 });
     expect(r.state.bridge.confirmed).toBe(false);
     expect(await plans()).toHaveLength(0);
+  });
+
+  // Б47 (1), option А: what is due on the income day is cash needed before it, like what is due the day before.
+  const bridgeOn = async (due: string) => {
+    await ds.query(`UPDATE scheduled_payments SET due_on=$1 WHERE name='On income'`, [due]);
+    await ds.query(`DELETE FROM daily_snapshots`);
+    return (await today()).state.bridge;
+  };
+
+  it("a payment due on the income day raises the credit needed like one due the day before", async () => {
+    await setup();
+    await payment("On income", 500_000, "2026-11-20");
+    const onIncome = await bridgeOn("2026-11-20");
+    const dayBefore = await bridgeOn("2026-11-19");
+    expect(onIncome.creditNeeded).toBe(2_007_000 + 500_000);
+    expect(onIncome).toMatchObject({ creditNeeded: dayBefore.creditNeeded, maxDailyWithinCredit: dayBefore.maxDailyWithinCredit });
+    expect((await bridgeOn("2026-11-21")).creditNeeded).toBe(2_007_000);
+  });
+
+  it("a tax estimate due on the income day is cash needed before it, like one due the day before", async () => {
+    await setup();
+    await ds.query(
+      `INSERT INTO scheduled_payments (kind, name, amount, currency, due_on, tax_quarter, is_estimate)
+       VALUES ('tax','On income',500000,'UAH','2026-11-20','2026-Q3',true)`,
+    );
+    const onIncome = await bridgeOn("2026-11-20");
+    const dayBefore = await bridgeOn("2026-11-19");
+    expect(onIncome).toMatchObject({ creditNeeded: dayBefore.creditNeeded, maxDailyWithinCredit: dayBefore.maxDailyWithinCredit });
+    // The day after the income it is an accrual again, not cash needed before the income.
+    expect((await bridgeOn("2026-11-21")).creditNeeded).toBeLessThan(onIncome.creditNeeded);
   });
 
   it("reports the plan as confirmed once one is saved", async () => {
@@ -2182,6 +2217,52 @@ describe("runway to the next income", () => {
     expect(run.zeroOn).toBeNull();
     // Taxes are inside the reserve, payments after the income are not in this stretch.
     expect(run.events).toEqual([{ id: r.upcoming.find((u: { name: string }) => u.name === "Rent").id, date: "2026-11-06", name: "Rent", amount: 100_000 }]);
+  });
+
+  // Б47 (1), the owner's option А of 18 November: a payment due on the income day is reserved in advance.
+  it("a payment due on the income day lowers today's limit like one the day before, and is listed and drawn", async () => {
+    await account("black", 1_000_000);
+    await income("fop", "2026-11-12");
+    await payment("On income", 100_000, "2026-11-12");
+    const onIncome = await today();
+
+    await ds.query(`UPDATE scheduled_payments SET due_on='2026-11-11'`);
+    await ds.query(`DELETE FROM daily_snapshots`);
+    const dayBefore = await today();
+    expect(onIncome.state.free).toBe(1_000_000 - 100_000);
+    expect(onIncome.state.dailyLimit).toBe(dayBefore.state.dailyLimit);
+    expect(onIncome.state.free).toBe(dayBefore.state.free);
+
+    const id = onIncome.upcoming[0].id;
+    expect(onIncome.upcoming).toMatchObject([{ id, name: "On income", amount: 100_000, dueOn: "2026-11-12" }]);
+    const run = onIncome.runway;
+    expect(run.events).toEqual([{ id, date: "2026-11-12", name: "On income", amount: 100_000 }]);
+    expect(run.points[0]).toEqual({ date: "2026-11-02", balance: onIncome.state.free + 100_000 });
+    // It leaves before the income: the reserve on the income day is the same as with the payment a day earlier.
+    expect(run.points.at(-1)).toEqual({ date: "2026-11-12", balance: run.reserve });
+    expect(run.reserve).toBe(dayBefore.runway.reserve);
+    expect(run.reserve).toBe(onIncome.state.free - 10 * onIncome.state.dailyLimit);
+  });
+
+  it("a payment due the day after the income is still outside the stretch", async () => {
+    await account("black", 1_000_000);
+    await income("fop", "2026-11-12");
+    await payment("After income", 100_000, "2026-11-13");
+    const r = await today();
+    expect(r.state.free).toBe(1_000_000);
+    expect(r.upcoming).toEqual([]);
+    expect(r.runway.events).toEqual([]);
+  });
+
+  it("on the income day itself, a payment due that day is still reserved", async () => {
+    at("2026-11-12T10:00:00Z");
+    await account("black", 1_000_000);
+    await income("fop", "2026-11-12");
+    await payment("Today", 100_000, "2026-11-12");
+    const r = await today();
+    expect(r.state.free).toBe(900_000);
+    expect(r.upcoming).toMatchObject([{ name: "Today", dueOn: "2026-11-12" }]);
+    expect(r.runway.points).toEqual([{ date: "2026-11-12", balance: 900_000 }]);
   });
 
   it("counts what is already spent today and puts an overdue payment on today", async () => {

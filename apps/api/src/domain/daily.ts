@@ -8,14 +8,19 @@ export interface DuePayment {
 
 const NO_INCOME_HORIZON_DAYS = 30;
 
-/** The first day not covered before the next income: that income's day, or the 30-day horizon without one. */
+/**
+ * The first due date not reserved before the next income: the day after that income's day, or the 30-day
+ * horizon without one. A payment due on the income day itself is reserved in advance, like one the day before
+ * (task Б47 (1), the owner's option А of 18 November): the money may well leave before the income arrives.
+ * The horizon is not an income, so its window stays the 30 days the limit is spread over.
+ */
 export function dueWindowEnd(today: string, nextIncomeOn: string | null): string {
-  return nextIncomeOn && nextIncomeOn >= today ? nextIncomeOn : addDays(today, NO_INCOME_HORIZON_DAYS);
+  return nextIncomeOn && nextIncomeOn >= today ? addDays(nextIncomeOn, 1) : addDays(today, NO_INCOME_HORIZON_DAYS);
 }
 
 /**
  * Unpaid payments that must be covered before the next income: overdue ones
- * (still owed) plus those with today <= due < nextIncomeOn. Without an income
+ * (still owed) plus those with today <= due <= nextIncomeOn. Without an income
  * date (null or already past), the next 30 days.
  * Callers pass only non-tax payments: taxes are covered by taxReserve.
  */

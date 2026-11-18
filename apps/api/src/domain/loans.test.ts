@@ -54,8 +54,10 @@ describe("loanReserve: loans with a return date behave as a payment on that date
     expect(r).toMatchObject({ borrowed: 0, due: 0, counted: [] });
   });
 
-  it("the date the income comes is after the window, as for a payment", () => {
-    expect(reserve([manual({ dueOn: "2026-11-12" })]).due).toBe(0);
+  // Б47 (1), option А: the income day is inside the window, as for a payment; the day after it is not.
+  it("the date the income comes is inside the window, as for a payment", () => {
+    expect(reserve([manual({ dueOn: "2026-11-12" })]).due).toBe(100_000);
+    expect(reserve([manual({ dueOn: "2026-11-13" })]).due).toBe(0);
   });
 
   it("an overdue loan is reserved, and a repaid part is not", () => {
@@ -67,9 +69,11 @@ describe("loanReserve: loans with a return date behave as a payment on that date
     expect(reserve([manual({ dueOn: "2026-11-30" }), short({ dueOn: "2026-12-05" })], { nextIncomeOn: null }).due).toBe(100_000);
   });
 
-  it("on the day the income comes, a loan due that day is neither reserved nor named as due (finding on PR #93)", () => {
+  // The finding on PR #93 still holds (a loan is named only while it is reserved); since Б47 (1) such a loan is both.
+  it("on the day the income comes, a loan due that day is reserved and named as due", () => {
     const r = reserve([manual({ receivedOn: "2026-11-01", dueOn: "2026-11-12" })], { today: "2026-11-12", lastIncomeOn: "2026-10-12", nextIncomeOn: "2026-11-12" });
-    expect(r).toMatchObject({ borrowed: 0, due: 0, counted: [], dueNow: [] });
+    expect(r).toMatchObject({ borrowed: 0, due: 100_000, dueNow: [expect.objectContaining({ id: 1 })] });
+    expect(r.counted.map((l) => l.id)).toEqual([1]);
     // An overdue one is reserved on that day too, so it is still named.
     const late = reserve([manual({ receivedOn: "2026-11-01", dueOn: "2026-11-10" })], { today: "2026-11-12", lastIncomeOn: "2026-10-12", nextIncomeOn: "2026-11-12" });
     expect(late).toMatchObject({ due: 100_000, dueNow: [expect.objectContaining({ id: 1 })] });

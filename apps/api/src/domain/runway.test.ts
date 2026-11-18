@@ -56,6 +56,20 @@ describe("runway", () => {
     expect(r.reserve).toBe(1_000_000 - 124_000 - 3 * 45_000);
   });
 
+  // Б47 (1), option А: a payment due on the income day is reserved in advance, so it leaves before the income.
+  it("a payment on the income day leaves before the last point: the reserve does not change", () => {
+    const r = runway({ ...base, payments: [{ date: "2026-11-15", amount: 300_000 }] });
+    expect(r.points[0]).toEqual({ date: "2026-11-11", balance: 1_300_000 });
+    expect(r.points.at(-1)).toEqual({ date: "2026-11-15", balance: 276_000 });
+    expect(r.reserve).toBe(276_000);
+  });
+
+  it("when the income is today, a payment due today leaves at that one point", () => {
+    const r = runway({ ...base, endOn: "2026-11-11", payments: [{ date: "2026-11-11", amount: 300_000 }] });
+    expect(r.points).toEqual([{ date: "2026-11-11", balance: 1_000_000 }]);
+    expect(r.reserve).toBe(1_000_000);
+  });
+
   it("is a single point when the income is today", () => {
     const r = runway({ ...base, endOn: "2026-11-11" });
     expect(r.points).toEqual([{ date: "2026-11-11", balance: 1_000_000 }]);
