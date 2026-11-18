@@ -219,6 +219,66 @@ describe("POST /check/run and GET /check/latest", () => {
     expect(r.body.issues).toEqual([]);
   });
 
+  describe("a cash deposit answered «Откуда наличные?» (Б51)", () => {
+    const api = (path: string, body: object) => request(http(on)).post(path).set("Authorization", auth).send(body);
+    /** ₴200 paid in on the white card at a terminal on 4 November, before its known bank balance. */
+    const deposit = async () => {
+      const id = await tx(white, "2026-11-04T08:00:00Z", 20_000, "cash_in", "cash", null, "Термінал City24");
+      await ds.query(`UPDATE transactions SET mcc=4829 WHERE id=$1`, [id]);
+      return id;
+    };
+    /** Binance holds $5,000 at ₴40, and the USDC income of November is received. */
+    const binance = async () => {
+      await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-03T09:00:00Z', 40)`);
+      await ds.query(`INSERT INTO manual_balances (name, amount, currency, counts_as_own) VALUES ('Binance', 500000, 'USD', true)`);
+      const exp = (
+        await ds.query(
+          `INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('usdc', 500000, 'USD', 1, 5) RETURNING id`,
+        )
+      )[0].id;
+      return (
+        await ds.query(
+          `INSERT INTO income_events (expected_income_id, period, expected_on, status, received_at) VALUES ($1,'2026-11','2026-11-03','received','2026-11-03T10:00:00Z') RETURNING id`,
+          [exp],
+        )
+      )[0].id as number;
+    };
+
+    it("«Из кошелька»: an own transfer whose other leg is the wallet is not a lone leg", async () => {
+      const id = await deposit();
+      await api(`/cash/deposits/${id}/answer`, { answer: "wallet" }).expect(201);
+      expect((await ds.query(`SELECT type FROM transactions WHERE id=$1`, [id]))[0].type).toBe("own_transfer");
+      expect((await run()).body.issues).toEqual([]);
+    });
+
+    it("«Вывод с Binance»: an own transfer whose other leg is Binance is not a lone leg", async () => {
+      await binance();
+      const id = await deposit();
+      await api(`/cash/deposits/${id}/answer`, { answer: "binance" }).expect(201);
+      expect((await ds.query(`SELECT type FROM transactions WHERE id=$1`, [id]))[0].type).toBe("own_transfer");
+      expect((await run()).body.issues).toEqual([]);
+    });
+
+    it("a second part of the same Binance withdrawal, and a card credit matched to it, are not lone legs either", async () => {
+      const ev = await binance();
+      const first = await deposit();
+      await api(`/cash/deposits/${first}/answer`, { answer: "binance" }).expect(201);
+      const second = await deposit();
+      await api(`/cash/deposits/${second}/answer`, { answer: "binance" }).expect(201);
+      const credit = await tx(white, "2026-11-04T09:00:00Z", 30_000, "person_in", "transfer", null, "Переказ коштів");
+      await api(`/plan/incomes/${ev}/match-transaction`, { transactionId: credit }).expect(201);
+      expect((await ds.query(`SELECT type FROM transactions WHERE id=$1`, [credit]))[0].type).toBe("own_transfer");
+      expect((await run()).body.issues).toEqual([]);
+    });
+
+    it("a lone own transfer the owner said is not from Binance is still a lone leg", async () => {
+      await ds.query(`DELETE FROM transactions WHERE id=$1`, [fromBlack]);
+      await api(`/plan/transactions/${toWhite}/not-usdc`, {}).expect(201);
+      expect((await ds.query(`SELECT usdc_checked FROM transactions WHERE id=$1`, [toWhite]))[0].usdc_checked).toBe(true);
+      expect((await run()).body.issues).toEqual([{ kind: "own_transfers", amount: 0, currency: "UAH", since: "2026-11-08", count: 1 }]);
+    });
+  });
+
   it("spending with no category shows as categories not adding up", async () => {
     await tx(black, "2026-11-10T08:00:00Z", -1_000, "spend", null, 44_000);
     await ds.query(`UPDATE accounts SET balance=44000 WHERE id=$1`, [black]);
