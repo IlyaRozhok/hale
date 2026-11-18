@@ -295,7 +295,9 @@ export class CashService {
   /**
    * "Снял наличными?" about a transfer to the owner's card at another bank. The answer is kept for
    * the card with its time: yes (also part) lets later transfers to it fill the wallet, and a month
-   * later the question comes again (Б47.5); no stops the question.
+   * later the question comes again (Б47.5); no stops the question. It covers this transfer and later
+   * ones, not earlier ones (Б47.6): those keep the answer that covered them, and an answer about this
+   * transfer or later is replaced. The card's first answer covers its earlier transfers too, as before.
    */
   async answerCard(id: number, a: CashCardAnswer): Promise<CashWalletDto> {
     return this.ds.transaction(async (m) => {
@@ -303,11 +305,24 @@ export class CashService {
       if (a.answer === "part" && (a.amount === undefined || a.amount > t.full)) {
         throw new UnprocessableEntityException("part needs the amount taken, no more than the transfer");
       }
-      await m.query(
-        `INSERT INTO cash_cards (counter_key, withdraws, answered_at) VALUES ($1, $2, $3)
-         ON CONFLICT (counter_key) DO UPDATE SET withdraws = EXCLUDED.withdraws, answered_at = EXCLUDED.answered_at`,
-        [t.key, a.answer !== "no", this.clock.now()],
-      );
+      const withdraws = a.answer !== "no";
+      await m.query(`SELECT 1 FROM cash_cards WHERE counter_key=$1 FOR UPDATE`, [t.key]);
+      await m.query(`DELETE FROM cash_cards WHERE counter_key=$1 AND from_at >= $2::timestamptz`, [t.key, t.at]);
+      const prev = (
+        await m.query(`SELECT from_at::text AS from_at, withdraws FROM cash_cards WHERE counter_key=$1 ORDER BY cash_cards.from_at DESC LIMIT 1`, [t.key])
+      )[0] as { from_at: string; withdraws: boolean } | undefined;
+      if (prev?.withdraws === withdraws) {
+        // The same answer as the one before goes on from there: only its time moves.
+        await m.query(`UPDATE cash_cards SET answered_at=$3 WHERE counter_key=$1 AND from_at=$2::timestamptz`, [t.key, prev.from_at, this.clock.now()]);
+      } else {
+        await m.query(`INSERT INTO cash_cards (counter_key, withdraws, answered_at, from_at) VALUES ($1, $2, $3, $4::timestamptz)
+           ON CONFLICT (counter_key, from_at) DO UPDATE SET withdraws = EXCLUDED.withdraws, answered_at = EXCLUDED.answered_at`, [
+          t.key,
+          withdraws,
+          this.clock.now(),
+          prev ? t.at : "-infinity",
+        ]);
+      }
       await m.query(`UPDATE transactions SET cash_amount=$2 WHERE id=$1`, [id, a.answer === "part" ? a.amount : null]);
       return this.wallet(m);
     });
@@ -323,17 +338,17 @@ export class CashService {
     });
   }
 
-  private async cardTransfer(m: EntityManager, id: number): Promise<{ key: string; full: number }> {
+  private async cardTransfer(m: EntityManager, id: number): Promise<{ key: string; full: number; at: string }> {
     const r = (
       await m.query(
-        `SELECT ${counterKeySql("t")} AS key, -t.amount_uah::float8 AS full, ${cardTransferSql()} AS ok
+        `SELECT ${counterKeySql("t")} AS key, -t.amount_uah::float8 AS full, t.occurred_at::text AS at, ${cardTransferSql()} AS ok
            FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.id=$1`,
         [id],
       )
-    )[0] as { key: string; full: number | null; ok: boolean | null } | undefined;
+    )[0] as { key: string; full: number | null; at: string; ok: boolean | null } | undefined;
     if (!r) throw new NotFoundException("transaction not found");
     if (!r.ok || r.full === null) throw new UnprocessableEntityException("only a transfer to the owner's card at another bank");
-    return { key: r.key, full: r.full };
+    return { key: r.key, full: r.full, at: r.at };
   }
 
   /** Operations that could have paid this payment, newest first: see candidateIds. */

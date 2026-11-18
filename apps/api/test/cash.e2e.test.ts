@@ -960,6 +960,60 @@ describe("the owner's card at another bank", () => {
     expect((await wallet()).balance).toBe(0);
   });
 
+  it("no on the question asked again: earlier transfers covered by yes stay cash, only this and later ones are not (Б47.6)", async () => {
+    const c = await card();
+    await start(0, "2026-11-09").expect(201);
+    const first = await send(c, 1_000_000, "2026-11-09");
+    await answer(first, { answer: "yes" }).expect(201);
+    const between = await send(c, 300_000, "2026-11-20");
+    const due = await send(c, 500_000, "2026-12-15");
+    at("2026-12-15T12:00:00Z");
+    expect((await questions()).map((q) => q.id)).toEqual([`cash_card:${due}`]);
+    expect((await wallet()).balance).toBe(1_800_000);
+    await answer(due, { answer: "no" }).expect(201);
+    expect((await wallet()).balance).toBe(1_300_000);
+    // A month after the yes, a card answered no since is not asked about again.
+    const later = await send(c, 200_000, "2027-01-16");
+    at("2027-01-20T12:00:00Z");
+    expect(await questions()).toEqual([]);
+    expect((await wallet()).balance).toBe(1_300_000);
+    const cashOut = async (id: number) =>
+      ((await api.get(`/transactions?q=545708`).expect(200)).body.items as { id: number; cashOut: number }[]).find((i) => i.id === id)!.cashOut;
+    expect([await cashOut(first), await cashOut(between), await cashOut(due), await cashOut(later)]).toEqual([1_000_000, 300_000, 0, 0]);
+  });
+
+  it("yes after an earlier no: only this and later transfers are cash, and the month of questions starts (Б47.6)", async () => {
+    const c = await card();
+    await start(0, "2026-11-09").expect(201);
+    await answer(await send(c, 1_000_000, "2026-11-09"), { answer: "no" }).expect(201);
+    const t = await send(c, 400_000, "2026-11-20");
+    at("2026-11-20T12:00:00Z");
+    expect(await questions()).toEqual([]);
+    await answer(t, { answer: "yes" }).expect(201);
+    expect((await wallet()).balance).toBe(400_000);
+    await send(c, 100_000, "2026-11-25");
+    expect((await wallet()).balance).toBe(500_000);
+    at("2026-12-21T12:00:00Z");
+    const due = await send(c, 100_000, "2026-12-21");
+    expect((await questions()).map((q) => q.id)).toEqual([`cash_card:${due}`]);
+  });
+
+  it("a new answer about a transfer replaces later answers from that transfer on, not earlier ones (Б47.6)", async () => {
+    const c = await card();
+    await start(0, "2026-11-09").expect(201);
+    const a = await send(c, 100_000, "2026-11-09");
+    const b = await send(c, 200_000, "2026-11-12");
+    const d = await send(c, 400_000, "2026-11-15");
+    await answer(a, { answer: "yes" }).expect(201);
+    await answer(d, { answer: "no" }).expect(201);
+    expect((await wallet()).balance).toBe(300_000);
+    // From «Операции», about the middle transfer: no from it on, the first stays cash.
+    await answer(b, { answer: "no" }).expect(201);
+    expect((await wallet()).balance).toBe(100_000);
+    await answer(b, { answer: "yes" }).expect(201);
+    expect((await wallet()).balance).toBe(700_000);
+  });
+
   it("a card with no answer yet is asked about once, by its first transfer (Б47.5)", async () => {
     const c = await card();
     await start(0, "2026-11-09").expect(201);

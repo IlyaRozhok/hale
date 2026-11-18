@@ -38,9 +38,15 @@ export const cardTransferSql = (t = "t", a = "a"): string =>
     AND ${sinceWalletStartSql(t)}
     AND NOT ${internalTransferSql(t)})`;
 
-/** SQL for the cash such a transfer gave: the amount set for it, else all of it if the card's answer is yes, else 0. */
+/**
+ * SQL for the cash such a transfer gave: the amount set for it, else all of it if the card's answer that covers
+ * it is yes, else 0. A card's answer covers its transfers from the one it was given about on (from_at), until the
+ * next answer (Б47.6); the card's first answer covers the earlier ones too (from_at '-infinity').
+ */
 export const cardCashSql = (t = "t"): string =>
-  `COALESCE(${t}.cash_amount, CASE WHEN (SELECT c.withdraws FROM cash_cards c WHERE c.counter_key = ${counterKeySql(t)})
+  `COALESCE(${t}.cash_amount, CASE WHEN (SELECT c.withdraws FROM cash_cards c
+                                          WHERE c.counter_key = ${counterKeySql(t)} AND c.from_at <= ${t}.occurred_at
+                                          ORDER BY c.from_at DESC LIMIT 1)
                                    THEN -${t}.amount_uah END, 0)`;
 
 /**
