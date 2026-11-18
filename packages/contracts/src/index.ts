@@ -381,7 +381,7 @@ export interface TodayDto {
     text: string;
     /** Who a recipient question is about. */
     subject?: string;
-    /** A second line under the text: for `payment_paid`, the operation ("Іван П. · 12.10"). */
+    /** A second line under the text: for `payment_paid`, the operation and the payment's due date ("Іван П. · 12.11 · срок платежа 15.10"). */
     detail?: string;
     /** For `usdc_arrived`: the expected amount in the income's minor units (cents). Absent on an older server. */
     expectedAmount?: number;

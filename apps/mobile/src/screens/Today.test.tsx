@@ -767,7 +767,7 @@ describe("Today, questions", () => {
     id: "payment_paid:7:91",
     kind: "payment_paid" as const,
     text: "Это оплата «Аренда» ₴17,000?",
-    detail: "Іван П. · 01.11",
+    detail: "Іван П. · 01.11 · срок платежа 02.11",
   };
 
   it("asks whether an operation paid a planned payment, with the operation under it and two answers", async () => {
@@ -775,7 +775,7 @@ describe("Today, questions", () => {
     await renderWith(<Today onOpenActivity={noop} />, api);
     await openQuestions();
     expect(await screen.findByText("Это оплата «Аренда» ₴17,000?")).toBeTruthy();
-    expect(screen.getByText("Іван П. · 01.11")).toBeTruthy();
+    expect(screen.getByText("Іван П. · 01.11 · срок платежа 02.11")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Да" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Нет" })).toBeTruthy();
   });
