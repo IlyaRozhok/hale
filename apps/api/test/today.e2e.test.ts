@@ -2648,4 +2648,57 @@ describe("near zero free money the limit does not jump (Б47 (3))", () => {
     await income("fop", "2026-11-12");
     expect((await today()).state).toMatchObject({ mode: "normal", dailyLimit: 30_000 });
   });
+
+  const calendarDay = async (date: string) =>
+    ((await api.get("/today/calendar?month=2026-11").expect(200)).body.days as { date: string }[]).find((d) => d.date === date);
+
+  it("an overspend that crosses into shortage on the same ₴450 is not the day the shortage came on: it is judged", async () => {
+    const card = await account("black", 10_000);
+    await income("fop", "2026-11-12");
+    at("2026-11-01T10:00:00Z");
+    await today();
+    at("2026-11-02T10:00:00Z");
+    expect((await today()).state).toMatchObject({ mode: "normal", dailyLimit: 45_000 });
+    await tx(card, -200_000, "spend");
+    await setBalance(card, -190_000);
+    const crossed = await today();
+    expect(crossed.state).toMatchObject({ mode: "bridge", dailyLimit: 45_000, leftToday: -155_000 });
+    expect(crossed.state.shortageStart).toBeUndefined();
+    expect(await ds.query(`SELECT mode FROM daily_snapshots WHERE local_date='2026-11-02'`)).toEqual([{ mode: "bridge" }]);
+    at("2026-11-03T10:00:00Z");
+    await today();
+    expect(await calendarDay("2026-11-02")).toEqual({ date: "2026-11-02", limit: 45_000, spent: 200_000, status: "far_over" });
+  });
+
+  it("choosing a plan with another sum that day makes it the day the shortage came on", async () => {
+    // ₴100 of own money on top of a ₴30,000 credit limit, so a plan can be confirmed.
+    const card = await account("black", 3_010_000, { creditLimit: 3_000_000 });
+    await income("fop", "2026-11-12");
+    at("2026-11-01T10:00:00Z");
+    await today();
+    at("2026-11-02T10:00:00Z");
+    expect((await today()).state).toMatchObject({ mode: "normal", dailyLimit: 45_000 });
+    await tx(card, -200_000, "spend");
+    await setBalance(card, 2_810_000);
+    expect((await today()).state.shortageStart).toBeUndefined();
+    const chosen = (await api.post("/bridge", { dailyAmount: 30_000 }).expect(201)).body;
+    expect(chosen.state).toMatchObject({ mode: "bridge", dailyLimit: 30_000, shortageStart: {} });
+  });
+
+  it("when the owner's cap holds the ordinary limit below ₴450, crossing into shortage is still the day it came on", async () => {
+    await ds.query(`UPDATE settings SET lifestyle_cap=900000`);
+    const card = await account("black", 10_000);
+    await income("fop", "2026-11-12");
+    at("2026-11-01T10:00:00Z");
+    await today();
+    at("2026-11-02T10:00:00Z");
+    expect((await today()).state).toMatchObject({ mode: "normal", dailyLimit: 30_000 });
+    await tx(card, -200_000, "spend");
+    await setBalance(card, -190_000);
+    const crossed = await today();
+    expect(crossed.state).toMatchObject({ mode: "bridge", dailyLimit: 30_000, shortageStart: { nextLimit: 45_000 } });
+    at("2026-11-03T10:00:00Z");
+    await today();
+    expect(await calendarDay("2026-11-02")).toMatchObject({ date: "2026-11-02", shortageStart: true });
+  });
 });

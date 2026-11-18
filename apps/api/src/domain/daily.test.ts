@@ -278,6 +278,26 @@ describe("dayMark", () => {
   it("is not the start on the very first fixed day: there was no limit before it to replace", () => {
     expect(dayMark({ live: "bridge", stored: null, previous: null })).toBe("bridge");
   });
+  // Б47 (3): near zero the ordinary limit is already the recommended sum, so crossing zero may change nothing.
+  it("a day crossing into shortage on the limit it already has is not the start: nothing to spare it from", () => {
+    expect(dayMark({ live: "bridge", stored: "normal", previous: "normal", storedLimit: 45_000, limit: 45_000 })).toBe("bridge");
+    expect(dayMark({ live: "bridge", stored: "normal", previous: null, storedLimit: 45_000, limit: 45_000 })).toBe("bridge");
+  });
+  it("a day crossing into shortage onto another limit is the start, in either direction", () => {
+    // Below the floor the owner's cap made the ordinary limit ₴300; the shortage one is ₴450.
+    expect(dayMark({ live: "bridge", stored: "normal", previous: "normal", storedLimit: 30_000, limit: 45_000 })).toBe("bridge_start");
+    expect(dayMark({ live: "bridge", stored: "normal", previous: "normal", storedLimit: 100_000, limit: 45_000 })).toBe("bridge_start");
+  });
+  it("a day that crossed on the same limit becomes the start once its limit changes the same day (a plan chosen)", () => {
+    const crossed = dayMark({ live: "bridge", stored: "normal", previous: "normal", storedLimit: 45_000, limit: 45_000 });
+    expect(dayMark({ live: "bridge", stored: crossed, previous: "normal", storedLimit: 45_000, limit: 45_000 })).toBe("bridge");
+    expect(dayMark({ live: "bridge", stored: crossed, previous: "normal", storedLimit: 45_000, limit: 30_000 })).toBe("bridge_start");
+    // A day already in shortage the day before is an ordinary shortage day, whatever its limit does.
+    expect(dayMark({ live: "bridge", stored: "bridge", previous: "bridge", storedLimit: 45_000, limit: 30_000 })).toBe("bridge");
+  });
+  it("a day with no row yet has no limit to compare: right after an ordinary day it is still the start", () => {
+    expect(dayMark({ live: "bridge", stored: null, previous: "normal", storedLimit: null, limit: 45_000 })).toBe("bridge_start");
+  });
   it("reads a value it does not know as an ordinary shortage day, so nothing is marked by mistake", () => {
     expect(dayMark({ live: "bridge", stored: "other", previous: "normal" })).toBe("bridge");
     expect(dayMark({ live: "bridge", stored: null, previous: "other" })).toBe("bridge");

@@ -137,6 +137,10 @@ export interface DayMarkInput {
   stored: string | null;
   /** What the last fixed day before today holds; null when there is none. */
   previous: string | null;
+  /** The limit today's row holds; null when the day has no row. Left out together with `limit`: not compared. */
+  storedLimit?: Minor | null;
+  /** The limit the shortage puts in force today: the engine's, or the plan's being chosen. */
+  limit?: Minor;
 }
 
 /**
@@ -146,10 +150,20 @@ export interface DayMarkInput {
  *
  * A day that began in shortage keeps `bridge` even while the money is briefly above zero: were it
  * rewritten to `normal`, falling back the same day would mark a day whose limit never changed.
+ *
+ * The mark spares the day's spending from a new limit, so a day fixed as ordinary that crosses into shortage on
+ * the limit it already has is not the start (task Б47 (3): near zero the ordinary limit is already the
+ * recommended sum). It stays an ordinary shortage day, judged by its limit, until that limit changes the same
+ * day — a plan chosen with another sum — and then it is the start. With the limits left out the mark is
+ * placed as before.
  */
 export function dayMark(i: DayMarkInput): DayMark {
   if (i.live === "normal") return i.stored === "bridge" ? "bridge" : "normal";
-  if (i.stored === "bridge_start" || i.stored === "normal") return "bridge_start";
+  const changed = i.limit === undefined ? null : i.storedLimit !== i.limit;
+  if (i.stored === "bridge_start") return "bridge_start";
+  if (i.stored === "normal") return changed === false ? "bridge" : "bridge_start";
+  // A row of `bridge` right after an ordinary day is a day that crossed on the same limit (above).
+  if (i.stored === "bridge" && i.previous === "normal" && changed === true) return "bridge_start";
   if (i.stored === null && i.previous === "normal") return "bridge_start";
   return "bridge";
 }
