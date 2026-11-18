@@ -804,6 +804,32 @@ export const insightsMonthDto = z
     otherPayments: money.refine((n) => n >= 0, "not below zero").optional(),
     /** The same over the stretch of the month before (`previous`). */
     previousOtherPayments: money.refine((n) => n >= 0, "not below zero").optional(),
+    /**
+     * Task В4, optional (an older server does not send it): subscriptions as of `through`, found in the card
+     * purchases from the limit over the six months up to it — one place charging about the same sum about monthly,
+     * three charges at least. `key` is the place's counterparty key (two subscriptions at one place share it), `name`
+     * as «Операции» names it, `amount` the latest charge (positive kopecks), `raisedBy` how much it is above the one
+     * before (0 when not raised), `missed` the charges due that did not come (0: still charged). `monthly` is the sum
+     * of `amount` over the ones with `missed` 0. Items: the ones still charged, largest first, then the rest.
+     */
+    subscriptions: z
+      .object({
+        monthly: money.refine((n) => n >= 0, "not below zero"),
+        items: z.array(
+          z
+            .object({
+              key: z.string().regex(/^[0-9a-f]{16}$/),
+              name: z.string().min(1),
+              amount: money.refine((n) => n > 0, "a charge is positive"),
+              lastDate: isoDate,
+              raisedBy: money.refine((n) => n >= 0, "not below zero"),
+              missed: z.number().int().nonnegative(),
+            })
+            .strict(),
+        ),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type InsightsMonthDto = z.infer<typeof insightsMonthDto>;
