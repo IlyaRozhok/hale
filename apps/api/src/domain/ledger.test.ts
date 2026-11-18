@@ -10,6 +10,7 @@ import {
   LIMIT_TYPES,
   OWN_MONEY_ACCOUNT_KINDS,
   SPEND_GROUP_TYPES,
+  cashCountShortSql,
   cashOutCounts,
   countsAgainstLimit,
   inSpendGroup,
@@ -87,6 +88,18 @@ describe("ledgerEffect: what one operation does to the limit", () => {
 
   it("an account outside own money (kind 'other') still counts today: only jars are excluded", () => {
     expect(ledgerEffect(row({ accountKind: "other" }), WITH_WALLET).limitSpend).toBe(42_000);
+  });
+
+  it("a shortfall a count of the pocket found is not the day's spending (Б47 (2)), but it still lowers own money", () => {
+    const short = row({ accountKind: "cash", amountUah: -60_000, category: "uncategorized", cashCountShort: true });
+    expect(ledgerEffect(short, WITH_WALLET).limitSpend).toBe(0);
+    expect(countsAgainstLimit(short, WITH_WALLET)).toBe(false);
+    expect(ledgerEffect(short, WITH_WALLET).ownMoney).toBe(-60_000);
+    expect(limitSpentByDay([short], WITH_WALLET).size).toBe(0);
+    // Listed under «Траты», marked as outside the limit.
+    expect(ledgerEffect(short, WITH_WALLET).inSpendGroup).toBe(true);
+    // The same row without the marker (written before it, or by hand) is spending as before.
+    expect(ledgerEffect({ ...short, cashCountShort: false }, WITH_WALLET).limitSpend).toBe(60_000);
   });
 });
 
@@ -270,6 +283,12 @@ describe("SQL built from the same data", () => {
     expect(limitSql()).toContain("t.amount_uah IS NOT NULL");
   });
 
+  it("limitSql leaves out a count's shortfall by the marker in raw, under any alias (Б47 (2))", () => {
+    expect(cashCountShortSql("x")).toBe("(x.raw->>'cash_count' IS NOT DISTINCT FROM 'short')");
+    expect(limitSql()).toContain(`NOT ${cashCountShortSql("t")}`);
+    expect(limitSql("x", "y")).toContain(`NOT ${cashCountShortSql("x")}`);
+  });
+
   it("spendGroupSql names every group type and the withdrawal rule, and takes another alias", () => {
     expect(spendGroupSql()).toContain(`NOT (t.type = 'cash_out' AND COALESCE(t.local_date >= ${CASH_START_SQL}, false))`);
     for (const t of SPEND_GROUP_TYPES) expect(spendGroupSql()).toContain(`'${t}'`);
@@ -312,6 +331,7 @@ function randomRow(r: () => number): LedgerRow {
     category: pick(r, ["food", "cafe", "own", "transfer", null]),
     fromWallet: r() < 0.05,
     walletCash: r() < 0.05 ? Math.round(r() * 100_000) : undefined,
+    cashCountShort: r() < 0.05,
   };
 }
 
@@ -333,7 +353,7 @@ function shuffle<T>(xs: readonly T[], seed: number): T[] {
 
 /** The SQL predicate of today.service.ts written out literally, independent of ledger.ts. */
 function sqlOracle(t: LedgerRow, cashStart: string | null): boolean {
-  if (t.accountKind === "jar" || t.amountUah === null) return false;
+  if (t.accountKind === "jar" || t.amountUah === null || t.cashCountShort) return false;
   if (t.type === "spend" || t.type === "person_transfer") return true;
   // NOT COALESCE(local_date >= cash_start, false): NULL cash_start gives NOT false.
   return t.type === "cash_out" && !(cashStart === null ? false : t.localDate >= cashStart);

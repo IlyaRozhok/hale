@@ -127,6 +127,20 @@ describe("GET /insights/month", () => {
     }
   });
 
+  it("leaves out a count's shortfall «Не записано», as the limit does (Б47 (2))", async () => {
+    const before = (await get("/insights/month").expect(200)).body;
+    const cash = await account("cash");
+    seq++;
+    await ds.query(
+      `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, category, raw)
+       VALUES ($1,$2,'2026-11-14T10:00:00Z','2026-11-14','Не записано',-60000,-60000,'spend','uncategorized','{"cash_count":"short"}')`,
+      [`tx-${seq}`, cash],
+    );
+    const after = (await get("/insights/month").expect(200)).body;
+    expect(after).toEqual(before);
+    expect(after.spent).toBe(await limitSpent("2026-11-01", after.through));
+  });
+
   it("counts a past month to its last day", async () => {
     const { body } = await get("/insights/month?month=2026-10").expect(200);
     expect(body).toMatchObject({ month: "2026-10", through: "2026-10-31", previous: { from: "2026-09-01", to: "2026-09-30" } });

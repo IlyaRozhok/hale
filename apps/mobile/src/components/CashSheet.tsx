@@ -24,7 +24,8 @@ export function CashSheet({ onClose }: { onClose: () => void }) {
     !w || counted === null || counted === w.balance
       ? null
       : counted < w.balance
-        ? `${formatMoney(w.balance - counted)} запишется тратой «Не записано» за сегодня.`
+        ? // The server writes it on today but outside the day's limit (Б47 (2)).
+          `${formatMoney(w.balance - counted)} запишется как «Не записано» за сегодня. Лимит дня не изменится.`
         : `Остаток станет больше на ${formatMoney(counted - w.balance)}, лимит не изменится.`;
 
   const save = () => {

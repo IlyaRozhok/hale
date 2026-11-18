@@ -6,7 +6,7 @@ import { APP_CONFIG } from "../config.module";
 import type { AppConfig } from "../config";
 import { walletBalance, walletChangesSql } from "../cash/wallet";
 import type { TxType } from "../domain/classify";
-import { type AccountKind, type LedgerContext, type LedgerRow, limitSpentByDay } from "../domain/ledger";
+import { type AccountKind, type LedgerContext, type LedgerRow, cashCountShortSql, limitSpentByDay } from "../domain/ledger";
 import {
   CHECK_INVARIANTS,
   type ChainRow,
@@ -225,8 +225,10 @@ export class LedgerCheckService {
       local_date: string;
       occurred_at: Date;
       category: string | null;
+      short: boolean;
     }[] = await m.query(
-      `SELECT t.type, a.kind, t.amount_uah::float8 AS amount_uah, t.local_date::text AS local_date, t.occurred_at, t.category
+      `SELECT t.type, a.kind, t.amount_uah::float8 AS amount_uah, t.local_date::text AS local_date, t.occurred_at, t.category,
+              ${cashCountShortSql("t")} AS short
          FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.local_date BETWEEN $1 AND $2`,
       [from, to],
     );
@@ -237,6 +239,7 @@ export class LedgerCheckService {
       localDate: r.local_date,
       occurredAt: r.occurred_at.getTime(),
       category: r.category,
+      cashCountShort: r.short,
     }));
     const categories = categoriesCheck(ledger, ctx);
     const days = daySpentCheck(limitSpentByDay(ledger, ctx), await this.screens.byDay(m, from, to));

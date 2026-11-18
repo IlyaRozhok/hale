@@ -3,10 +3,10 @@
 // Pure: no Nest, no I/O, no clock. The SQL helpers below are built from the same constants so the
 // services can filter in the database without a second copy of the rule.
 //
-// This encodes the rule the server uses as of 13 November 2026. «Сегодня» and the calendar count the limit
-// with limitSql (Б1 PR 2); the «Траты» group of the list is filtered by spendGroupSql (Б1 PR 3), while its
-// day totals, its summary and the inLimit mark of every row go by limitSql (Б2); test/ledger.e2e.test.ts
-// checks all of it against ledgerEffect in Postgres.
+// This encodes the rule the server uses as of 13 November 2026, with a count's shortfall taken out of the limit
+// on 18 November (Б47 (2)). «Сегодня» and the calendar count the limit with limitSql (Б1 PR 2); the «Траты»
+// group of the list is filtered by spendGroupSql (Б1 PR 3), while its day totals, its summary and the inLimit
+// mark of every row go by limitSql (Б2); test/ledger.e2e.test.ts checks all of it against ledgerEffect in Postgres.
 import type { TxType } from "./classify";
 import type { Minor } from "./money";
 
@@ -35,6 +35,17 @@ export const LIMIT_EXCLUDED_ACCOUNT_KIND: AccountKind = "jar";
 export const SPEND_GROUP_TYPES = [
   "spend", "obligation", "tax", "debt_payment", "person_transfer", "cash_out", "loan_out",
 ] as const satisfies readonly TxType[];
+
+/**
+ * A row a count of the pocket wrote for what it found missing («Не записано», cash.service `count`). The money is
+ * gone, so the row lowers own money and the wallet on the day of the count, but it is not that day's spending
+ * against its limit (Б47 (2), the owner's decision of 18 November 2026): it stays in the «Траты» list, marked as
+ * outside the limit. It is known by the marker the count writes into `raw` (the one Б40 reads too), not by its note,
+ * which the owner can change. Counts made before that marker (17 November 2026) wrote rows without it; those count.
+ */
+export function cashCountShortSql(t = "t"): string {
+  return `(${t}.raw->>'cash_count' IS NOT DISTINCT FROM 'short')`;
+}
 
 /** Where the services read the wallet start. */
 export const CASH_START_SQL = "(SELECT cash_start FROM settings WHERE id=1)";
@@ -77,6 +88,8 @@ export interface LedgerRow {
   fromWallet?: boolean;
   /** Cash a transfer to the owner's card at another bank put into the wallet (cardCashSql in cash/wallet.ts). */
   walletCash?: Minor;
+  /** A count of the pocket wrote it for what it found missing (cashCountShortSql): never the day's spending. */
+  cashCountShort?: boolean;
   links?: LedgerLinksInput;
 }
 
@@ -111,7 +124,7 @@ export function cashOutCounts(localDate: string, cashStart: string | null): bool
 const isLimitType = (type: TxType | null): boolean => (LIMIT_TYPES as readonly string[]).includes(type ?? "");
 
 export function countsAgainstLimit(row: LedgerRow, ctx: LedgerContext): boolean {
-  if (row.accountKind === LIMIT_EXCLUDED_ACCOUNT_KIND || row.amountUah === null) return false;
+  if (row.accountKind === LIMIT_EXCLUDED_ACCOUNT_KIND || row.amountUah === null || row.cashCountShort) return false;
   if (isLimitType(row.type)) return true;
   return row.type === CASH_OUT && cashOutCounts(row.localDate, ctx.cashStart);
 }
@@ -197,8 +210,8 @@ const cashOutFromStartSql = (t: string): string => `${t}.type = '${CASH_OUT}' AN
 
 /** SQL condition over `t` (transactions) and `a` (its account): the row counts against the limit. */
 export function limitSql(t = "t", a = "a"): string {
-  return `${a}.kind <> '${LIMIT_EXCLUDED_ACCOUNT_KIND}' AND ${t}.amount_uah IS NOT NULL AND (${t}.type IN (${sqlList(LIMIT_TYPES)})
-  OR (${t}.type = '${CASH_OUT}' AND NOT COALESCE(${t}.local_date >= ${CASH_START_SQL}, false)))`;
+  return `${a}.kind <> '${LIMIT_EXCLUDED_ACCOUNT_KIND}' AND ${t}.amount_uah IS NOT NULL AND NOT ${cashCountShortSql(t)}
+  AND (${t}.type IN (${sqlList(LIMIT_TYPES)}) OR (${t}.type = '${CASH_OUT}' AND NOT COALESCE(${t}.local_date >= ${CASH_START_SQL}, false)))`;
 }
 
 /** SQL condition over `t` (transactions): the row is in the «Траты» list group. */
@@ -223,4 +236,15 @@ export function spentByDaySql(from: string, to: string): string {
 export function spentSql(from: string, to: string): string {
   return `SELECT COALESCE(SUM(-t.amount_uah),0)::float8 AS s FROM transactions t JOIN accounts a ON a.id=t.account_id
         WHERE ${limitSql("t", "a")} AND t.local_date BETWEEN ${from} AND ${to}`;
+}
+
+/**
+ * SQL for what counts of the pocket found missing on one Kyiv day (a date parameter, e.g. "$1"), one row (s float8):
+ * the wallet spending rows with the marker (cashCountShortSql), which the limit leaves out. «Сегодня» adds them back,
+ * as it adds back «потрачено», when it fixes the day's limit from the money of now: a count does not change the
+ * limit of its own day (Б47 (2)), only of the days after it.
+ */
+export function cashCountShortfallSql(day: string): string {
+  return `SELECT COALESCE(SUM(-t.amount_uah),0)::float8 AS s FROM transactions t JOIN accounts a ON a.id=t.account_id
+        WHERE a.kind = 'cash' AND t.type = 'spend' AND t.amount_uah IS NOT NULL AND ${cashCountShortSql("t")} AND t.local_date = ${day}`;
 }

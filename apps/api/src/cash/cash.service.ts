@@ -252,7 +252,7 @@ export class CashService {
 
   /**
    * A cash deposit at a terminal paid from the wallet: an own transfer that lowers the wallet. Asked again, nothing changes.
-   * When the answer takes the deposit off a count's «Не записано» (Б40), spending changed, and the day is fixed afresh
+   * When the answer takes the deposit off a count's «Не записано» (Б40), the shortfall changed, and the day is fixed afresh
    * as an answer from the operation's card does.
    */
   async fromWallet(id: number): Promise<CashWalletDto> {

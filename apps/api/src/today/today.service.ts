@@ -6,7 +6,7 @@ import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
 import { lastIncomeBoundary, loanReserve, type ReceivedIncome } from "../domain/loans";
 import { type DailyInput, type DailyState, type DayMark, computeDaily, dayMark, dueWindowEnd, sumDue } from "../domain/daily";
-import { spentByDaySql, spentSql } from "../domain/ledger";
+import { cashCountShortfallSql, spentByDaySql, spentSql } from "../domain/ledger";
 import { runway } from "../domain/runway";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
 import { quarterLabel, quarterOf } from "../domain/quarter";
@@ -63,6 +63,8 @@ interface Facts {
   date: string;
   input: Omit<DailyInput, "spentToday" | "bridgeDaily" | "creditPlan" | "cardsMoney"> & { cardsMoney: number };
   spentToday: number;
+  /** What counts of the pocket found missing today: out of the limit, and given back to the morning's money (Б47 (2)). */
+  shortfallToday: number;
   avgDailySpend: number;
   credit: number;
   usdRate: number;
@@ -232,7 +234,7 @@ export class TodayService {
       state = this.compute(f, plan);
     }
 
-    const morning = this.compute(f, plan, 0, f.spentToday);
+    const morning = this.compute(f, plan, 0, true);
     // The row's mode follows the day. A plan that has ended takes the day's row with it, so its mark is not stored.
     const stored = await this.storedMarks(m, f.date);
     // The shortage marks the day only when it changes the day's limit (Б47 (3)): the same test as `nextLimit` below.
@@ -259,7 +261,7 @@ export class TodayService {
     const now = this.clock.now();
     const f = await this.load(kyivDate(now), now);
     const input = { ...f.input, lifestyleCapMonthly: lifestyleCap > 0 ? lifestyleCap : DEFAULT_LIFESTYLE_CAP };
-    const dailyLimit = this.compute({ ...f, input }, f.plan, 0, f.spentToday).dailyLimit;
+    const dailyLimit = this.compute({ ...f, input }, f.plan, 0, true).dailyLimit;
 
     const m = this.ds.manager;
     const rates = await this.rates(m);
@@ -382,7 +384,7 @@ export class TodayService {
       // A day that crossed into shortage on the limit it had becomes that day once the plan changes the limit.
       // A day not fixed yet is compared by the limit it would have begun with, as if its row were there.
       const stored = await this.storedMarks(m, f.date);
-      const begun = stored.stored === null ? { storedLimit: this.compute(f, f.plan, 0, f.spentToday).dailyLimit } : {};
+      const begun = stored.stored === null ? { storedLimit: this.compute(f, f.plan, 0, true).dailyLimit } : {};
       const mark = dayMark({ live: "bridge", ...stored, ...begun, limit: dailyAmount });
       await m.query(
         `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3)
@@ -411,16 +413,22 @@ export class TodayService {
   }
 
   // --- engine call ------------------------------------------------------------
+  /**
+   * `morning`: the day's limit as it began, from the money of now with today's «потрачено» added back, and what counts
+   * of the pocket found missing today too: that shortfall is not the day's spending, and the day's limit stays as it
+   * was (Б47 (2)). Other money that left today outside the limit (a loan out, a jar) is not added back.
+   */
   private compute(
     f: Facts,
     plan: Plan | null,
     creditPlan: number | null | undefined = plan?.creditPlan ?? null,
-    addBack = 0,
+    morning = false,
     bridgeDaily: number | null = plan?.dailyAmount ?? null,
   ): DailyState {
+    const addBack = morning ? f.spentToday : 0;
     return computeDaily({
       ...f.input,
-      cardsMoney: f.input.cardsMoney + addBack,
+      cardsMoney: f.input.cardsMoney + addBack + (morning ? f.shortfallToday : 0),
       spentToday: addBack > 0 ? 0 : f.spentToday,
       bridgeDaily,
       creditPlan: creditPlan ?? null,
@@ -615,6 +623,7 @@ export class TodayService {
       .reduce((s, p) => s + uah(p.amount, p.currency), 0);
 
     const spentToday = await this.spent(m, date, date);
+    const shortfallToday = ((await m.query(cashCountShortfallSql("$1"), [date])) as { s: number }[])[0]!.s;
     const avgDailySpend = Math.max(0, Math.round((await this.spent(m, addDays(date, -AVG_DAYS), addDays(date, -1))) / AVG_DAYS));
 
     const planRow = (
@@ -646,6 +655,7 @@ export class TodayService {
         foodFloor: settings.food_floor > 0 ? settings.food_floor : DEFAULT_FOOD_FLOOR,
       },
       spentToday,
+      shortfallToday,
       avgDailySpend,
       credit,
       usdRate: usd?.rate ?? 0,

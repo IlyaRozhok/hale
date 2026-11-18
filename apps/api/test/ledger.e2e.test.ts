@@ -60,6 +60,8 @@ interface Seed {
   date: string;
   /** UTC time of day; 10:00:00 (12:00 Kyiv) when left out. */
   time?: string;
+  /** Written by a count of the pocket that found less than recorded: raw.cash_count = 'short' (Б47 (2)). */
+  short?: boolean;
 }
 
 /** One account of every kind; returns the id by kind. */
@@ -80,8 +82,8 @@ async function seed(rows: readonly Seed[], cashStart: string | null): Promise<vo
     seq++;
     await ds.query(
       `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, raw)
-       VALUES ($1,$2,$3,$4,'x',$5,$6,$7,'{}')`,
-      [`tx-${seq}`, ids.get(r.kind), `${r.date}T${r.time ?? "10:00:00"}Z`, r.date, r.amountUah ?? -1, r.amountUah, r.type],
+       VALUES ($1,$2,$3,$4,'x',$5,$6,$7,$8)`,
+      [`tx-${seq}`, ids.get(r.kind), `${r.date}T${r.time ?? "10:00:00"}Z`, r.date, r.amountUah ?? -1, r.amountUah, r.type, r.short ? '{"cash_count":"short"}' : "{}"],
     );
   }
 }
@@ -93,9 +95,12 @@ interface StoredRow extends LedgerRow {
 /** The rows as they are in the database now, in the ledger's terms. */
 async function storedRows(): Promise<StoredRow[]> {
   const rows = (await ds.query(
-    `SELECT t.id, t.type, a.kind, t.amount_uah::float8 AS amount_uah, t.local_date::text AS date, t.category, t.occurred_at
+    `SELECT t.id, t.type, a.kind, t.amount_uah::float8 AS amount_uah, t.local_date::text AS date, t.category, t.occurred_at, t.raw
        FROM transactions t JOIN accounts a ON a.id=t.account_id`,
-  )) as { id: number; type: TxType | null; kind: AccountKind; amount_uah: number | null; date: string; category: string | null; occurred_at: Date }[];
+  )) as {
+    id: number; type: TxType | null; kind: AccountKind; amount_uah: number | null; date: string; category: string | null; occurred_at: Date;
+    raw: { cash_count?: string } | null;
+  }[];
   return rows.map((r) => ({
     id: r.id,
     type: r.type,
@@ -104,6 +109,7 @@ async function storedRows(): Promise<StoredRow[]> {
     localDate: r.date,
     occurredAt: r.occurred_at.getTime(),
     category: r.category,
+    cashCountShort: r.raw?.cash_count === "short",
   }));
 }
 
@@ -200,6 +206,25 @@ describe("the limit in the database is the ledger's", () => {
     for (const d of ["2026-11-10", "2026-11-11"]) expect(withoutWallet.get(d), d).not.toBe(withWallet.get(d));
   });
 
+  it("a count's shortfall is not the day's spending, in the database and in the ledger (Б47 (2))", async () => {
+    await seed(
+      [
+        { type: "spend", kind: "cash", amountUah: -60_000, date: TODAY, short: true },
+        { type: "spend", kind: "cash", amountUah: -5_000, date: TODAY },
+        { type: "spend", kind: "cash", amountUah: -60_000, date: "2026-11-11", short: true },
+        // The same row without the marker (a count before Б40 wrote none) counts as before.
+        { type: "spend", kind: "cash", amountUah: -7_000, date: "2026-11-10" },
+      ],
+      "2026-11-01",
+    );
+    const want = await check();
+    expect(want.get(TODAY)).toBe(5_000);
+    expect(want.get("2026-11-11")).toBe(0);
+    expect(want.get("2026-11-10")).toBe(7_000);
+    const listed = await checkSpendGroup();
+    expect(listed.filter((r) => r.cashCountShort)).toHaveLength(2);
+  });
+
   it("random row sets (20 seeds) give the same days in the database and in the ledger", async () => {
     for (let s = 1; s <= 20; s++) {
       await ds.query(`TRUNCATE transactions, accounts, daily_snapshots RESTART IDENTITY CASCADE`);
@@ -210,6 +235,7 @@ describe("the limit in the database is the ledger's", () => {
         kind: pick(r, ACCOUNT_KINDS),
         amountUah: r() < 0.1 ? null : Math.round((r() - 0.8) * 1_000_000),
         date: pick(r, dates),
+        short: r() < 0.1,
       }));
       await seed(rows, r() < 0.3 ? null : pick(r, dates));
       const got = await served();
@@ -421,6 +447,7 @@ describe("the «Траты» group in the database is the ledger's", () => {
         kind: pick(r, ACCOUNT_KINDS),
         amountUah: r() < 0.1 ? null : Math.round((r() - 0.8) * 1_000_000),
         date: pick(r, dates),
+        short: r() < 0.1,
       }));
       await seed(rows, r() < 0.3 ? null : pick(r, dates));
       expect(await servedSpendGroup(), `seed ${s}`).toEqual(await expectedSpendGroup());
