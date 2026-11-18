@@ -794,6 +794,34 @@ describe("operations larger than the payment, and foreign payments (Б44)", () =
     expect((await api.post(`/cash/payments/${parts}/links`, { transactionIds: [second] }).expect(201)).body).toEqual({ linked: 1, closed: true, remaining: 0 });
     expect(await paid(parts)).toBe(true);
   });
+
+  it("a foreign payment closed by two operations opens again when one is retyped, by hryvnias at the rate; the day takes it back", async () => {
+    const c = await card();
+    await usdRate();
+    const id = await plan(2_000, "USD");
+    const first = await bankTx(c, -40_000, "person_transfer", "2026-11-07");
+    const second = await bankTx(c, -43_000, "person_transfer", "2026-11-08");
+    await api.post(`/cash/payments/${id}/links`, { transactionIds: [first, second] }).expect(201);
+    expect(await paid(id)).toBe(true);
+    const closed = (await today()).state.dailyLimit as number;
+
+    // ₴400 left of ₴830: not covered, the payment is open again and its money held from the day.
+    await api.patch(`/transactions/${second}`, { type: "spend" }).expect(200);
+    expect(await paid(id)).toBe(false);
+    expect((await today()).state.dailyLimit).toBeLessThan(closed);
+  });
+
+  it("with no rate a foreign payment closed by links stays closed: nothing reopens on an unknown amount", async () => {
+    const c = await card();
+    await usdRate();
+    const id = await plan(2_000, "USD");
+    const first = await bankTx(c, -40_000, "person_transfer", "2026-11-07");
+    const second = await bankTx(c, -43_000, "person_transfer", "2026-11-08");
+    await api.post(`/cash/payments/${id}/links`, { transactionIds: [first, second] }).expect(201);
+    await ds.query(`DELETE FROM fx_rates`);
+    await api.patch(`/transactions/${second}`, { type: "spend" }).expect(200);
+    expect(await paid(id)).toBe(true);
+  });
 });
 
 describe("the owner's card at another bank", () => {

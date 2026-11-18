@@ -21,6 +21,7 @@ import {
   matchTaxShare,
   monthlyDueDates,
   monthlyEvents,
+  paymentUah,
   repairTaxLinks,
 } from "../domain/recurring-match";
 import { kyivDate } from "../domain/money";
@@ -615,16 +616,25 @@ export class PlanService implements OnApplicationBootstrap {
    */
   async reopenUncovered(m: EntityManager, paymentIds: readonly number[]): Promise<boolean> {
     if (paymentIds.length === 0) return false;
-    const rows: { id: number; kind: PaymentKind; amount: number; is_estimate: boolean; paid: boolean; closed_by_links: boolean; linked: number }[] =
+    const rows: {
+      id: number; kind: PaymentKind; amount: number; currency: string; is_estimate: boolean; paid: boolean; closed_by_links: boolean; linked: number;
+    }[] =
       await m.query(
-        `SELECT p.id, p.kind, p.amount::float8 AS amount, p.is_estimate, p.paid_at IS NOT NULL AS paid, p.closed_by_links,
+        `SELECT p.id, p.kind, p.amount::float8 AS amount, p.currency, p.is_estimate, p.paid_at IS NOT NULL AS paid, p.closed_by_links,
                 (SELECT COALESCE(SUM(-COALESCE(x.amount_uah, x.amount)), 0) FROM payment_links l
                    JOIN transactions x ON x.id = l.transaction_id WHERE l.payment_id = p.id)::float8 AS linked
            FROM scheduled_payments p WHERE p.id = ANY($1::int[]) ORDER BY p.id FOR UPDATE OF p`,
         [[...new Set(paymentIds)]],
       );
+    // What is linked is in hryvnias: a foreign payment is compared at the latest rate, as payWith closed it (task Б44).
+    // With no rate its amount is unknown, and it stays closed: it is not opened on a guess.
+    const rates = rows.some((r) => r.currency !== "UAH") ? await this.rates(m) : {};
     const reopen = rows
-      .filter((r) => reopensOnUnlink({ kind: r.kind, amount: r.amount, isEstimate: r.is_estimate, paid: r.paid, closedByLinks: r.closed_by_links }, r.linked))
+      .filter((r) => {
+        const amount = paymentUah(r, rates);
+        if (amount === null) return false;
+        return reopensOnUnlink({ kind: r.kind, amount, isEstimate: r.is_estimate, paid: r.paid, closedByLinks: r.closed_by_links }, r.linked);
+      })
       .map((r) => r.id);
     if (reopen.length === 0) return false;
     await m.query(`UPDATE scheduled_payments SET paid_at = NULL, closed_by_links = false WHERE id = ANY($1::int[])`, [reopen]);
