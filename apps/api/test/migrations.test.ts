@@ -346,10 +346,12 @@ describe("migrations", () => {
     await insert("leg", card, "2026-10-10T10:00:30Z", 412700, 412700, null, item(412700, 412700, 980), { description: "З доларового рахунку" });
     // Typed by the owner: the hryvnias become exact, the type stays his.
     await insert("owner", usd, "2026-10-12T10:00:00Z", -5000, -190000, 38, item(-5000, -206350, 980), { type: "spend", typeSource: "owner" });
-    // Not to be touched: an operation in dollars, signs that disagree, a zero amount, no bank item, a hryvnia account.
+    // Not to be touched: an operation in dollars, signs that disagree, zero amounts, no bank item, a hryvnia account.
     await insert("dollars", usd, "2026-10-14T10:00:00Z", -2000, -76000, 38, item(-2000, -2000, 840));
     await insert("signs", usd, "2026-10-15T10:00:00Z", -2000, -76000, 38, item(-2000, 82000, 980));
     await insert("zero", usd, "2026-10-16T10:00:00Z", 0, 0, 38, item(0, 41000, 980));
+    // Both sides zero agree in sign; only the guard on a zero amount keeps it from a division by zero.
+    await insert("zeros", usd, "2026-10-16T11:00:00Z", 0, 0, 38, item(0, 0, 980));
     await insert("bare", usd, "2026-10-17T10:00:00Z", -2000, -76000, 38, {});
     await insert("uah", card, "2026-10-18T10:00:00Z", -5000, -5000, null, item(-5000, -6000, 980));
 
