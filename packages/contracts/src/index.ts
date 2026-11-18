@@ -166,8 +166,13 @@ export interface LoanRowDto {
   serviceCost: number;
   /** The owner's note, or the bank's text for a loan from a bank row. */
   title: string | null;
-  /** Entered by hand, so it can be deleted. */
+  /** Entered by hand. */
   manual: boolean;
+  /**
+   * Can be deleted: entered by hand, or from a bank row that is no longer a loan (Б48). Absent on an older server,
+   * where only a manual loan can be.
+   */
+  removable?: boolean;
   /** «Вернуть до» (Б7): null when not set. Absent on an older server. */
   dueOn?: string | null;
 }

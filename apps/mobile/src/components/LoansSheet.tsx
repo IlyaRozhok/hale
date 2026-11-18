@@ -15,7 +15,7 @@ const { color, radius, space, touchMin, type } = tokens;
 
 const nameOf = (l: LoanRowDto) => l.title ?? "Займ";
 
-/** Removing a loan is only for a mistaken entry, so it asks first. */
+/** Removing a loan is only for a mistaken entry (or a bank row no longer a loan, Б48), so it asks first. */
 function askDeleteLoan(text: string, onDelete: () => void): void {
   Alert.alert("Удалить ошибочную запись?", `${text}. Если займ настоящий, отметьте его погашенным.`, [
     { text: "Оставить", style: "cancel" },
@@ -48,7 +48,7 @@ export function LoansSheet({ onClose }: { onClose: () => void }) {
           <Text style={styles.name}>{nameOf(l)}</Text>
           <Text style={styles.detail}>{detail(l)}</Text>
         </View>
-        {l.manual && (
+        {(l.removable ?? l.manual) && (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Удалить: ${nameOf(l)}`}

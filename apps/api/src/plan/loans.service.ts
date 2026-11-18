@@ -58,14 +58,22 @@ export class LoansService {
     return { closed: rows[1] as number };
   }
 
-  /** A mistaken manual entry goes away; a loan from a bank row would come back with the next sync. */
+  /**
+   * A mistaken manual entry goes away. A loan from a bank row goes only once that row is no longer a loan (task Б48:
+   * retyped with repayments on it, Б35 kept it): while the row is loan_in, or not classified yet, the loan would come back.
+   */
   async remove(id: number): Promise<{ deleted: true }> {
     return this.ds.transaction(async (m) => {
       const loan = (await m.query(`SELECT source_transaction_id FROM loans WHERE id=$1 FOR UPDATE`, [id]))[0] as
         | { source_transaction_id: number | null }
         | undefined;
       if (!loan) throw new NotFoundException();
-      if (loan.source_transaction_id !== null) throw new ConflictException("loan comes from a bank operation");
+      if (loan.source_transaction_id !== null) {
+        const row = (await m.query(`SELECT type FROM transactions WHERE id=$1 FOR UPDATE`, [loan.source_transaction_id]))[0] as
+          | { type: string | null }
+          | undefined;
+        if (row && (row.type === null || row.type === "loan_in")) throw new ConflictException("loan comes from a bank operation");
+      }
       await m.query(`DELETE FROM loans WHERE id=$1`, [id]);
       await this.limit.invalidate("loan", m);
       return { deleted: true as const };
@@ -112,6 +120,7 @@ export class LoansService {
       `SELECT l.id, l.amount::float8 AS amount, (l.amount - l.repaid_amount)::float8 AS remaining, l.received_on::text AS "receivedOn",
               (${kyivDaySql("l.repaid_at")})::text AS "repaidOn", NOT l.repaid_date_unknown AS "repaidDateKnown", l.repaid_amount::float8 AS "repaidAmount",
               l.service_cost::float8 AS "serviceCost", l.source_transaction_id IS NULL AS manual, l.due_on::text AS "dueOn",
+              (l.source_transaction_id IS NULL OR t.id IS NULL OR COALESCE(t.type <> 'loan_in', false)) AS removable,
               CASE WHEN l.source_transaction_id IS NULL THEN l.note ELSE t.description END AS title
          FROM loans l LEFT JOIN transactions t ON t.id = l.source_transaction_id
         WHERE ${where} ORDER BY l.received_on DESC, l.id DESC`,
