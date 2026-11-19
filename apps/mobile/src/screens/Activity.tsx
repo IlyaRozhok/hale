@@ -4,10 +4,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RouteProp } from "@react-navigation/native";
 import { tokens } from "@hale/tokens";
 import type { TransactionDto } from "@hale/contracts";
-import { useCategoryList, useTransactions } from "../api/queries";
+import { useCategoryList, useDismissObservation, useObservation, useTransactions } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
 import { dayHeader, formatSignedMoney, kyivDate, operationsText, periodLabel } from "../format";
 import { categoryLabel, categoryName } from "../labels";
+import { observationText } from "../dayPhrase";
 import { FiltersSheet, type Filters, type Period } from "../components/FiltersSheet";
 import { ErrorText } from "../components/ErrorText";
 import { Field } from "../components/Field";
@@ -37,10 +38,11 @@ const isTransferToSomeone = (t: TransactionDto) => t.amount < 0 && (t.recipientL
 
 /**
  * What a move to the operations may carry: `day` asks for that one day's spending (the limit calendar);
- * `category` with `from`..`to` for that category's spending over those days («Итоги», task В2). `at` differs on
+ * `category` with `from`..`to` for that category's spending over those days («Итоги», task В2); with `observation`
+ * they came from the phrase of the day's observation (task В7), which is said again above the list. `at` differs on
  * every arrival, so the same one twice in a row is applied twice.
  */
-export type ActivityParams = { day?: string; category?: string; from?: string; to?: string; at?: number } | undefined;
+export type ActivityParams = { day?: string; category?: string; from?: string; to?: string; at?: number; observation?: boolean } | undefined;
 
 type Props = {
   /** Test seam for the current moment. */
@@ -60,6 +62,10 @@ export function Activity({ now = () => new Date(), route }: Props) {
   const [category, setCategory] = useState<string | null>(null);
   const [period, setPeriod] = useState<Period | null>(null);
   const [filtering, setFiltering] = useState(false);
+  // Arrived from the phrase of the day's observation (В7): the card above the list stays until the filters change.
+  const [fromObservation, setFromObservation] = useState(false);
+  // Once asked for here, today's observation keeps being watched, so a dismissal is followed by the new answer.
+  const [watchObservation, setWatchObservation] = useState(false);
   // A row waiting for an answer opens the label sheet; "Изменить тип" there switches to the full editor,
   // and the editor of an answered transfer leads back to the label sheet, to change the answer.
   const [sheet, setSheet] = useState<"edit" | "answer" | null>(null);
@@ -95,6 +101,8 @@ export function Activity({ now = () => new Date(), route }: Props) {
     setFiltering(false);
     setOpen(null);
     setSheet(null);
+    setFromObservation(params?.observation === true && target.category !== null);
+    if (params?.observation === true) setWatchObservation(true);
   }
 
   const toggleSearch = () => {
@@ -117,6 +125,8 @@ export function Activity({ now = () => new Date(), route }: Props) {
   });
   const pull = usePullRefresh(list.refetch);
   const categories = useCategoryList();
+  const observation = useObservation(watchObservation);
+  const dismissObservation = useDismissObservation();
   // An own category chosen and deleted since (В5): its operations are in «Без категории» now, so the filter is taken
   // off rather than left showing an empty list under the category's key. Keys this app names itself stay: the
   // type-level ones «Итоги» files rows under (transfer, cash, tax, …) are never in the server's list.
@@ -138,6 +148,13 @@ export function Activity({ now = () => new Date(), route }: Props) {
   const activeFilters = (chosenCategory !== null ? 1 : 0) + (period !== null ? 1 : 0);
   const emptyText = search || filtered ? "Ничего не нашлось." : TABS.find((t) => t.tab === tab)!.empty;
   const summary = pages[0]?.summary ?? null;
+  // Said only while the list is still the observation's: its category over its days.
+  const seen = observation.data;
+  const noticed =
+    fromObservation && seen?.kind === "spike" && seen.category === chosenCategory && period?.from === seen.from && period?.to === seen.to
+      ? observationText(seen, categories, today)
+      : null;
+  const noticedCategory = noticed !== null ? (seen?.category ?? null) : null;
   const summaryTitle = [chosenCategory ? categoryName(chosenCategory, categories) : null, period ? periodLabel(period.from, period.to) : null].filter(Boolean).join(" · ");
 
   return (
@@ -225,6 +242,25 @@ export function Activity({ now = () => new Date(), route }: Props) {
           }}
           refreshing={pull.refreshing}
           onRefresh={pull.onRefresh}
+          ListHeaderComponent={
+            noticed && noticedCategory ? (
+              <View style={styles.notice}>
+                <Text style={styles.noticeText}>{noticed}</Text>
+                <Text style={styles.noticeCaption}>Обычно — середина трёх прошлых месяцев за те же дни</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => {
+                    setFromObservation(false);
+                    // A refusal or no connection: the card comes back, so it can be pressed again.
+                    dismissObservation.mutate({ kind: "spike", category: noticedCategory }, { onError: () => setFromObservation(true) });
+                  }}
+                  style={styles.noticeButton}
+                >
+                  <Text style={styles.noticeButtonText}>Не показывать такое</Text>
+                </Pressable>
+              </View>
+            ) : undefined
+          }
           ListEmptyComponent={list.isPending ? <ActivityIndicator color={color.fg.muted} /> : <Text style={styles.muted}>{emptyText}</Text>}
           ListFooterComponent={list.isFetchingNextPage ? <ActivityIndicator color={color.fg.muted} style={styles.footer} /> : undefined}
         />
@@ -247,6 +283,7 @@ export function Activity({ now = () => new Date(), route }: Props) {
           onApply={(f) => {
             setPeriod(f.period);
             setCategory(f.category);
+            setFromObservation(false);
           }}
           onClose={() => setFiltering(false)}
         />
@@ -260,6 +297,21 @@ export function Activity({ now = () => new Date(), route }: Props) {
 
 const styles = StyleSheet.create({
   summary: { ...type.caption, color: color.fg.muted, fontVariant: ["tabular-nums"] },
+  // A solid card, not glass: the observation is text to read, not a floating control.
+  notice: {
+    marginTop: space.md,
+    paddingHorizontal: space.lg,
+    paddingTop: space.lg,
+    gap: space.xs,
+    borderRadius: radius.xl,
+    backgroundColor: color.card.fill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.card.edge,
+  },
+  noticeText: { ...type.body, color: color.fg.default },
+  noticeCaption: { ...type.caption, color: color.fg.muted },
+  noticeButton: { minHeight: touchMin, justifyContent: "center", alignSelf: "flex-start" },
+  noticeButtonText: { ...type.label, color: color.fg.muted },
   headButtons: { flexDirection: "row", gap: space.xs },
   badge: {
     position: "absolute",

@@ -232,6 +232,9 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     deleteRule: jest.fn(async () => undefined),
     ledgerCheck: jest.fn(async () => null),
     insights: jest.fn(async () => insightsFixture()),
+    observation: jest.fn(async () => null),
+    observationShown: jest.fn(async () => null),
+    dismissObservation: jest.fn(async () => undefined),
     ...over,
   } as never;
 }

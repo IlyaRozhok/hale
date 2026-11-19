@@ -1,22 +1,27 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
-import type { TodayDto } from "@hale/contracts";
+import type { ObservationRef, TodayDto } from "@hale/contracts";
 import { LimitBar } from "../metal";
 import { limitState } from "../limitState";
 import { formatMoney, formatStamp, kyivDate, longDate, shiftDate, streakLabel } from "../format";
-import { dayPhrase, type PhraseAction } from "../dayPhrase";
+import { dayPhrase, observationRef, type PhraseAction } from "../dayPhrase";
 import {
   useAnswerCashCard,
   useCalendar,
   useCancelBridge,
+  useCategoryList,
   useChooseBridge,
   useConfirmIncome,
   useDepositFromWallet,
+  useDismissObservation,
   useDismissPaymentMatch,
   useDismissUsdcMatch,
+  useInsights,
+  useMarkObservationShown,
   useMatchUsdc,
+  useObservation,
   usePayWith,
   useSetIncomeDate,
   useToday,
@@ -35,6 +40,7 @@ import { RecipientLabelSheet } from "../components/RecipientLabelSheet";
 import { Runway } from "../components/Runway";
 import { Sheet } from "../components/Sheet";
 import { StaleBanner } from "../components/StaleBanner";
+import { SubscriptionsSheet } from "../components/SubscriptionsSheet";
 import { TodaySkeleton } from "../components/TodaySkeleton";
 import { UsdcArrivedSheet } from "../components/UsdcArrivedSheet";
 import { usePullRefresh } from "../usePullRefresh";
@@ -42,7 +48,14 @@ import { ApiError } from "../api/client";
 
 const { color, radius, space, touchMin, type } = tokens;
 
-type Props = { /** Opens the operations; with a date, those of that one day. */ onOpenActivity: (day?: string) => void; /** Test seam for the current moment. */ now?: () => Date };
+type Props = {
+  /** Opens the operations; with a date, those of that one day. */
+  onOpenActivity: (day?: string) => void;
+  /** Opens the operations on the category and days of the phrase's observation (task В7). */
+  onOpenObservation?: (category: string, from: string, to: string) => void;
+  /** Test seam for the current moment. */
+  now?: () => Date;
+};
 
 function freshnessLines(data: TodayDto, offlineSince: number | null, now: Date): string[] {
   const lines: string[] = [];
@@ -62,7 +75,7 @@ function freshnessLines(data: TodayDto, offlineSince: number | null, now: Date):
   return lines;
 }
 
-export function Today({ onOpenActivity, now = () => new Date() }: Props) {
+export function Today({ onOpenActivity, onOpenObservation, now = () => new Date() }: Props) {
   const insets = useSafeAreaInsets();
   const today = useToday();
   const confirmIncome = useConfirmIncome();
@@ -77,7 +90,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   const cancelBridge = useCancelBridge();
   const pull = usePullRefresh(today.refetch);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
-  const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | "loans" | null>(null);
+  const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | "loans" | "subscriptions" | null>(null);
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
   const [arriving, setArriving] = useState<{ id: string; eventId: number; expectedAmount: number } | null>(null);
   const [paying, setPaying] = useState<TodayDto["upcoming"][number] | null>(null);
@@ -94,6 +107,14 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
   // How yesterday went, for the phrase of the day. It waits for today's date and may never come: then the phrase is about something else.
   const dayBefore = data ? shiftDate(data.date, -1) : null;
   const calendar = useCalendar(dayBefore?.slice(0, 7) ?? "", dayBefore !== null);
+  // Today's observation (В7): said in the phrase only on a day with nothing more pressing. An older server has none.
+  const observation = useObservation();
+  const categories = useCategoryList();
+  const markShown = useMarkObservationShown();
+  const dismissObservation = useDismissObservation();
+  // The subscriptions' list opens from the phrase with the figures «Итоги» show it with.
+  const insights = useInsights(undefined, observation.data?.kind === "subscriptions");
+  const subscriptions = insights.data?.subscriptions ?? null;
   const top = insets.top + space.sm;
   const closeSheet = () => setSheet(null);
   /** Closes the sheet only if it is still the one open: a late answer must not close another. */
@@ -158,10 +179,18 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
     loansDue: data.loansDue,
     yesterday: calendar.data?.days.find((d) => d.date === dayBefore) ?? null,
     streak: data.streak ?? 0,
+    observation: observation.data,
+    categories,
   });
+  const noticed = phrase?.action.kind === "observation" ? observationRef(phrase.action.observation) : null;
   const act = (action: PhraseAction) => {
     if (action.kind === "pay") setPaying(action.payment);
-    else setSheet(action.kind);
+    else if (action.kind === "observation") {
+      const o = action.observation;
+      // A spike shows where it came from; the subscriptions are still to come, so their list, not past operations.
+      if (o.kind === "subscriptions") setSheet("subscriptions");
+      else if (o.category !== null) onOpenObservation?.(o.category, o.from, o.to);
+    } else setSheet(action.kind);
   };
   const limitLabel = hasLimit && nextLimitNote
     ? `${heading} ${formatMoney(over ? 0 : shownLeft)}. ${nextLimitNote}`
@@ -221,6 +250,7 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
             <Text style={styles.phrase}>{phrase.text}</Text>
           </Pressable>
         )}
+        {noticed && <MarkShown date={data.date} which={noticed} mark={markShown} />}
 
         {data.runway && (
           <View style={styles.runway}>
@@ -333,9 +363,26 @@ export function Today({ onOpenActivity, now = () => new Date() }: Props) {
           )}
         </Sheet>
       )}
+      {sheet === "subscriptions" && subscriptions && (
+        <SubscriptionsSheet
+          subscriptions={subscriptions}
+          onClose={closeSheet}
+          onDismiss={() => {
+            closeSheet();
+            dismissObservation.mutate({ kind: "subscriptions", category: null });
+          }}
+        />
+      )}
       {paying && <PaymentPaidSheet payment={paying} today={data.date} onClose={() => setPaying(null)} />}
     </View>
   );
+}
+
+/** Tells the server, once a day, that the phrase showed this observation: from then on it is today's. */
+function MarkShown({ date, which, mark }: { date: string; which: ObservationRef; mark: ReturnType<typeof useMarkObservationShown> }) {
+  // `mark` is new on each render and keeps its own once-a-day memory: the observation is what the effect follows.
+  useEffect(() => mark(date, which), [date, which.kind, which.category]);
+  return null;
 }
 
 const styles = StyleSheet.create({

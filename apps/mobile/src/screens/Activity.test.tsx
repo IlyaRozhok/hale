@@ -507,6 +507,75 @@ describe("Activity filters", () => {
     });
   });
 
+  describe("arriving from the phrase of the day's observation (В7)", () => {
+    const spike = { kind: "spike" as const, period: "month" as const, category: "cafe", spent: 482_000, usual: 310_000, amount: null, from: "2026-11-01", to: "2026-11-09" };
+    const TEXT = "Кафе и рестораны с начала ноября ₴4,820. Обычно к этому дню около ₴3,100.";
+    const CAPTION = "Обычно — середина трёх прошлых месяцев за те же дни";
+    const fromObservation = { params: { category: "cafe", from: "2026-11-01", to: "2026-11-09", at: 1, observation: true } };
+
+    it("says the same sentence above the list, with what «обычно» means, on that category and those days", async () => {
+      const transactions = summaryPage({ total: -482000, count: 9 });
+      await renderWith(<Activity now={now} route={fromObservation} />, fakeApi({ transactions, observation: jest.fn(async () => spike) }));
+      expect(await screen.findByText(TEXT)).toBeTruthy();
+      expect(screen.getByText(CAPTION)).toBeTruthy();
+      await waitFor(() =>
+        expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", category: "cafe", from: "2026-11-01", to: "2026-11-09" }),
+      );
+      expect(screen.getByRole("button", { name: "Не показывать такое" })).toBeTruthy();
+    });
+
+    it("the same filters from «Итоги» carry no observation", async () => {
+      const observation = jest.fn(async () => spike);
+      const { category, from, to, at } = fromObservation.params;
+      await renderWith(<Activity now={now} route={{ params: { category, from, to, at } }} />, fakeApi({ transactions: summaryPage({ total: -482000, count: 9 }), observation }));
+      await screen.findByText("Кафе и рестораны · 1–9 ноя: −₴4,820 · 9 операций");
+      expect(screen.queryByText(TEXT)).toBeNull();
+      expect(observation).not.toHaveBeenCalled();
+    });
+
+    it("«Не показывать такое» tells the server, hides the card and asks for today's observation again", async () => {
+      const observation = jest.fn().mockResolvedValueOnce(spike).mockResolvedValue(null);
+      const dismissObservation = jest.fn(async () => undefined);
+      await renderWith(<Activity now={now} route={fromObservation} />, fakeApi({ transactions: summaryPage({ total: -482000, count: 9 }), observation, dismissObservation }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Не показывать такое" }));
+      expect(dismissObservation).toHaveBeenCalledWith({ kind: "spike", category: "cafe" });
+      await waitFor(() => expect(screen.queryByText(TEXT)).toBeNull());
+      await waitFor(() => expect(observation).toHaveBeenCalledTimes(2));
+      expect(screen.queryByText(CAPTION)).toBeNull();
+    });
+
+    it("comes back when «Не показывать такое» did not reach the server", async () => {
+      const dismissObservation = jest.fn(async () => {
+        throw new NetworkError();
+      });
+      await renderWith(
+        <Activity now={now} route={fromObservation} />,
+        fakeApi({ transactions: summaryPage({ total: -482000, count: 9 }), observation: jest.fn(async () => spike), dismissObservation }),
+      );
+      await fireEvent.press(await screen.findByRole("button", { name: "Не показывать такое" }));
+      await waitFor(() => expect(dismissObservation).toHaveBeenCalled());
+      expect(await screen.findByText(TEXT)).toBeTruthy();
+    });
+
+    it("goes away once the filters are changed", async () => {
+      await renderWith(<Activity now={now} route={fromObservation} />, fakeApi({ transactions: summaryPage({ total: -482000, count: 9 }), observation: jest.fn(async () => spike) }));
+      await screen.findByText(TEXT);
+      await fireEvent.press(screen.getByRole("button", { name: "Фильтры: 2" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Сбросить" }));
+      await windowGone();
+      expect(screen.queryByText(TEXT)).toBeNull();
+    });
+
+    it("says nothing when today's observation is another one by now", async () => {
+      await renderWith(
+        <Activity now={now} route={fromObservation} />,
+        fakeApi({ transactions: summaryPage({ total: -482000, count: 9 }), observation: jest.fn(async () => ({ ...spike, category: "groceries" })) }),
+      );
+      await screen.findByText("Кафе и рестораны · 1–9 ноя: −₴4,820 · 9 операций");
+      expect(screen.queryByText(CAPTION)).toBeNull();
+    });
+  });
+
   it("income has no categories: one chosen for spending does not narrow it and is not counted there", async () => {
     const transactions = summaryPage({ total: -342000, count: 11 });
     await renderWith(<Activity now={now} />, fakeApi({ transactions }));

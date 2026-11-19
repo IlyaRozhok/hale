@@ -37,7 +37,13 @@ const Tabs = createBottomTabNavigator();
 
 function TodayTab({ navigation }: { navigation: NavigationProp<ParamListBase> }) {
   // `at` changes with every arrival, so the same day opened twice in a row is applied twice.
-  return <Today onOpenActivity={(day) => navigation.navigate("Activity", day ? { day, at: Date.now() } : undefined)} />;
+  return (
+    <Today
+      onOpenActivity={(day) => navigation.navigate("Activity", day ? { day, at: Date.now() } : undefined)}
+      // The observation's category over its days, and that it came from the observation (В7).
+      onOpenObservation={(category, from, to) => navigation.navigate("Activity", { category, from, to, observation: true, at: Date.now() })}
+    />
+  );
 }
 
 function InsightsTab({ navigation }: { navigation: NavigationProp<ParamListBase> }) {

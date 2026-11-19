@@ -1,9 +1,16 @@
-import type { CalendarDayDto, TodayDto } from "@hale/contracts";
-import { dayMonth, formatMoney, pluralIndex, shiftDate } from "./format";
+import type { CalendarDayDto, ObservationDto, ObservationRef, TodayDto } from "@hale/contracts";
+import { dayMonth, dayMonthLong, formatMoney, pluralIndex, shiftDate } from "./format";
+import { categoryName, type CategoryList } from "./labels";
 
 type Payment = TodayDto["upcoming"][number];
 
-export type PhraseAction = { kind: "bridge" } | { kind: "questions" } | { kind: "calendar" } | { kind: "loans" } | { kind: "pay"; payment: Payment };
+export type PhraseAction =
+  | { kind: "bridge" }
+  | { kind: "questions" }
+  | { kind: "calendar" }
+  | { kind: "loans" }
+  | { kind: "pay"; payment: Payment }
+  | { kind: "observation"; observation: ObservationDto };
 export interface Phrase {
   text: string;
   action: PhraseAction;
@@ -20,6 +27,10 @@ export interface PhraseInput {
   loansDue?: NonNullable<TodayDto["loansDue"]>;
   yesterday: CalendarDayDto | null;
   streak: number;
+  /** Today's observation from the server (task В7); absent from an older server. */
+  observation?: ObservationDto | null;
+  /** For the observation's category name. */
+  categories?: CategoryList;
 }
 
 const date = (iso: string) => {
@@ -27,9 +38,34 @@ const date = (iso: string) => {
   return `${day} ${month}`;
 };
 
+/** Which observation it is, as the server is told it was shown or dismissed; null for an incomplete spike. */
+export function observationRef(o: ObservationDto): ObservationRef | null {
+  if (o.kind === "subscriptions") return { kind: "subscriptions", category: null };
+  return o.category === null ? null : { kind: "spike", category: o.category };
+}
+
+/** A month's spike right after the 1st («с начала декабря» on the 2nd) reads oddly: it waits until the 4th. */
+const EARLY_MONTH_DAYS = 3;
+
+/**
+ * The observation as a whole phrase (task В7): what was spent and what is usual, never «больше» or «слишком».
+ * Null when there is nothing to say well: a month's spike in the first days of the month, or missing figures.
+ */
+export function observationText(o: ObservationDto, categories: CategoryList, today: string): string | null {
+  if (o.kind === "subscriptions") return o.amount === null ? null : `На этой неделе спишутся подписки: около ${formatMoney(o.amount)}.`;
+  if (o.category === null || o.spent === null || o.usual === null) return null;
+  const name = categoryName(o.category, categories);
+  if (o.period === "week") return `${name} за неделю ${formatMoney(o.spent)}. Обычно около ${formatMoney(o.usual)}.`;
+  if (Number(today.slice(8, 10)) <= EARLY_MONTH_DAYS) return null;
+  // The month in the genitive, «ноября», from the span's first day.
+  const month = dayMonthLong(o.from).split(" ")[1];
+  return `${name} с начала ${month} ${formatMoney(o.spent)}. Обычно к этому дню около ${formatMoney(o.usual)}.`;
+}
+
 /**
  * The one thing worth saying today, the most important first: a decision that is waiting, an overdue
- * payment, a loan to return, then a payment at the door, then how yesterday went. Null on a day with nothing to say.
+ * payment, a loan to return, then a payment at the door, then an observation (В7) in its place, else how
+ * yesterday went. Null on a day with nothing to say.
  */
 export function dayPhrase(i: PhraseInput): Phrase | null {
   if (i.needsPlan) return { text: "Нужен план до дохода. Это пара минут: выберите сумму на день.", action: { kind: "bridge" } };
@@ -58,6 +94,10 @@ export function dayPhrase(i: PhraseInput): Phrase | null {
     const when = soon.dueOn === i.today ? "Сегодня" : "Завтра";
     return { text: `${when} платёж: ${soon.name}, ${formatMoney(soon.amount)}. Он уже учтён в лимите.`, action: { kind: "pay", payment: soon } };
   }
+
+  const o = i.observation;
+  const noticed = o ? observationText(o, i.categories, i.today) : null;
+  if (o && noticed) return { text: noticed, action: { kind: "observation", observation: o } };
 
   const y = i.yesterday;
   if (!y || y.limit === null || y.date !== shiftDate(i.today, -1)) return null;
