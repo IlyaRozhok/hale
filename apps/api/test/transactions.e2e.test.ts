@@ -314,7 +314,7 @@ describe("PATCH /transactions/:id", () => {
   it("retypes one row as owner and clears needs_label", async () => {
     const a = await account();
     const t = await tx(a, { type: "person_transfer", needsLabel: true, name: "Ivan", category: "transfer" });
-    const res = await api.patch(`/transactions/${t}`, { type: "cash_out", category: "cash" }).expect(200);
+    const res = await api.patch(`/transactions/${t}`, { type: "cash_out" }).expect(200);
     expect(res.body.updated).toBe(1);
     expect(res.body.transaction).toMatchObject({ id: t, type: "cash_out", category: "cash", needsLabel: false });
     expect(await row("SELECT type_source, needs_label FROM transactions WHERE id=$1", [t])).toEqual({
@@ -379,9 +379,9 @@ describe("PATCH /transactions/:id", () => {
     const a = await account();
     const t = await tx(a, { description: "Uklon" });
     await api.patch(`/transactions/${t}`, { type: "cash_out", applyToSimilar: true }).expect(200);
-    await api.patch(`/transactions/${t}`, { type: "spend", category: "taxi", applyToSimilar: true }).expect(200);
+    await api.patch(`/transactions/${t}`, { type: "spend", category: "transport", applyToSimilar: true }).expect(200);
     expect(await ds.query(`SELECT match_value, type, category FROM rules`)).toEqual([
-      { match_value: "uklon", type: "spend", category: "taxi" },
+      { match_value: "uklon", type: "spend", category: "transport" },
     ]);
   });
 
@@ -1015,7 +1015,7 @@ describe("an owner retype that makes a loan or closes a payment fixes the day af
     const t = await tx(a, { amount: -10_000, at: AT });
     await sentinel();
 
-    await api.patch(`/transactions/${t}`, { type: "cash_out", category: "cash" }).expect(200);
+    await api.patch(`/transactions/${t}`, { type: "cash_out" }).expect(200);
     expect(await dayLimit()).toBe(1);
   });
 

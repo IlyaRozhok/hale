@@ -221,8 +221,20 @@ export class Goal {
   @Column({ type: "timestamptz", default: () => "now()" }) created_at!: Date;
 }
 
+/** A spending category (В5). `key` is what rows store; a deleted one keeps its row so its key is not reused. */
+@Entity("categories")
+export class Category {
+  @id() id!: number;
+  @Column({ type: "text", unique: true }) key!: string;
+  @Column({ type: "text" }) name!: string;
+  @Column({ type: "text" }) icon!: string;
+  @Column({ type: "integer" }) position!: number;
+  @Column({ type: "boolean", default: false }) system!: boolean;
+  @Column({ type: "timestamptz", nullable: true }) deleted_at!: Date | null;
+}
+
 export const entities = [
   Account, Transaction, Rule, ExpectedIncome, IncomeEvent, ScheduledPayment, RecurringPayment,
   ManualBalance, Loan, Settings, BridgePlan, DailySnapshot, FxRate, Job,
-  Device, NotificationLog, Goal,
+  Device, NotificationLog, Goal, Category,
 ];

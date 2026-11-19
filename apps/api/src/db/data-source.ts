@@ -35,6 +35,7 @@ import { SettingsClassifierVersion1796169600000 } from "./migrations/0031-settin
 import { HryvniaLegAmounts1796256000000 } from "./migrations/0032-hryvnia-leg-amounts";
 import { CashCardAnsweredAt1796342400000 } from "./migrations/0033-cash-card-answered-at";
 import { CashCardAnswerFrom1796428800000 } from "./migrations/0034-cash-card-answer-from";
+import { Categories1796515200000 } from "./migrations/0035-categories";
 
 export const migrations = [
   Init1793577600000,
@@ -71,6 +72,7 @@ export const migrations = [
   HryvniaLegAmounts1796256000000,
   CashCardAnsweredAt1796342400000,
   CashCardAnswerFrom1796428800000,
+  Categories1796515200000,
 ];
 
 export function createDataSource(url: string): DataSource {

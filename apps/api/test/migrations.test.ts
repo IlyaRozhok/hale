@@ -13,6 +13,7 @@ import { SettingsClassifierVersion1796169600000 } from "../src/db/migrations/003
 import { HryvniaLegAmounts1796256000000 } from "../src/db/migrations/0032-hryvnia-leg-amounts";
 import { CashCardAnsweredAt1796342400000 } from "../src/db/migrations/0033-cash-card-answered-at";
 import { CashCardAnswerFrom1796428800000 } from "../src/db/migrations/0034-cash-card-answer-from";
+import { Categories1796515200000 } from "../src/db/migrations/0035-categories";
 import { CLASSIFIER_VERSION } from "../src/domain/classify";
 import { JobRunner } from "../src/mono/jobs/job-runner";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
@@ -24,7 +25,7 @@ const TABLES = [
   "scheduled_payments", "recurring_payments", "manual_balances", "loans", "settings", "bridge_plans",
   "daily_snapshots", "fx_rates",
       "goals", "jobs", "devices", "notifications_log", "loan_repayments", "payment_links", "cash_cards", "payment_dismissals", "cash_answers",
-  "ledger_checks", "cash_exchanges", "recurring_skips",
+  "ledger_checks", "cash_exchanges", "recurring_skips", "categories",
 ];
 
 async function listTables(url: string): Promise<string[]> {
@@ -451,6 +452,52 @@ describe("migrations", () => {
       { counter_key: "no", withdraws: false },
       { counter_key: "yes", withdraws: false },
     ]);
+    await ds.destroy();
+  });
+
+  it("0035 adds the categories as today's set and changes no row that stores one (В5)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(Categories1796515200000)) });
+    await before.initialize();
+    await before.runMigrations();
+    const account = (await before.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ('a','black','UAH',0) RETURNING id`))[0].id;
+    for (const [n, category] of [[1, "cafe"], [2, "taxi"], [3, null], [4, "tax"]] as const) {
+      await before.query(
+        `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, amount, amount_uah, type, category, raw)
+         VALUES ($1,$2,'2026-11-08T10:00:00Z','2026-11-08',-100,-100,'spend',$3,'{}')`,
+        [`t${n}`, account, category],
+      );
+    }
+    await before.query(`INSERT INTO rules (match_kind, match_value, type, category) VALUES ('merchant','uklon','spend','taxi')`);
+    const rows = `SELECT external_id, category FROM transactions ORDER BY id`;
+    const was = await before.query(rows);
+    const rules = await before.query(`SELECT * FROM rules`);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    expect(await ds.query(`SELECT key, name, icon, position, system, deleted_at FROM categories ORDER BY position`)).toEqual(
+      [
+        ["groceries", "Продукты", "cart"],
+        ["cafe", "Кафе и рестораны", "coffee"],
+        ["transport", "Транспорт", "car"],
+        ["subscriptions", "Подписки", "repeat"],
+        ["leisure", "Досуг", "ticket"],
+        ["health", "Здоровье", "heart"],
+        ["utilities", "Коммунальные", "bolt"],
+        ["telecom", "Связь", "phone"],
+        ["shopping", "Покупки", "bag"],
+        ["refund", "Возвраты", "arrowIn"],
+        ["uncategorized", "Без категории", "circle"],
+      ].map(([key, name, icon], position) => ({ key, name, icon, position, system: key === "refund" || key === "uncategorized", deleted_at: null })),
+    );
+    expect(await ds.query(rows)).toEqual(was);
+    expect(await ds.query(`SELECT * FROM rules`)).toEqual(rules);
+
+    for (let i = migrations.indexOf(Categories1796515200000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT to_regclass('categories') AS t`)).toEqual([{ t: null }]);
+    expect(await ds.query(rows)).toEqual(was);
     await ds.destroy();
   });
 });
