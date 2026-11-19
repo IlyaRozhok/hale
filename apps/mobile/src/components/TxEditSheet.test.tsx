@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { TxEditSheet } from "./TxEditSheet";
-import type { TransactionDto } from "@hale/contracts";
+import type { CategoryDto, TransactionDto } from "@hale/contracts";
 import { fakeApi, renderWith, txFixture } from "../testing";
 
 const noop = () => undefined;
@@ -33,13 +33,13 @@ describe("TxEditSheet header: the operation itself", () => {
 
   it("does not repeat the bank's text when it is the name already", async () => {
     await renderWith(<TxEditSheet tx={txFixture({ description: "Кофейня", counterName: null })} onClose={noop} />, fakeApi());
-    await screen.findByText(/^Изменится/);
+    await screen.findByText("Тип");
     expect(screen.getAllByText("Кофейня")).toHaveLength(1);
   });
 
   it("an empty bank text under a name leaves no blank line", async () => {
     await renderWith(<TxEditSheet tx={txFixture({ description: "", counterName: "Сільпо" })} onClose={noop} />, fakeApi());
-    await screen.findByText(/^Изменится/);
+    await screen.findByText("Тип");
     expect(screen.queryAllByText("")).toHaveLength(0);
   });
 
@@ -143,8 +143,10 @@ describe("TxEditSheet types: the frequent ones and «Ещё»", () => {
     await renderWith(<TxEditSheet tx={txFixture({ id: 9, type: "spend" })} onClose={onClose} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: "Ещё" }));
     await fireEvent.press(screen.getByRole("button", { name: "Налог" }));
-    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(9, { type: "tax", applyToSimilar: true }));
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(9, { type: "tax", applyToSimilar: false }));
+    // Saved for this operation; the sheet stays to ask about the similar ones.
+    expect(await screen.findByText("Всегда так для «Кофейня»?")).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("a rare type the row already has is in sight and selected without «Ещё»", async () => {
@@ -177,34 +179,147 @@ describe("TxEditSheet types: the frequent ones and «Ещё»", () => {
   });
 });
 
-describe("TxEditSheet: the order and «Применить к похожим»", () => {
-  it("the category comes first, then the type, then the switch with its count", async () => {
-    const tx = txFixture({ description: "SILPO KYIV UA", counterName: "Сільпо" });
-    await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi({ similarCount: jest.fn(async () => 14) }));
-    await screen.findByText("Изменится 14 операций");
-    const texts = screen.getAllByText(/^(SILPO KYIV UA|Категория|Тип|Применить к похожим|Изменится 14 операций)$/).map((t) => String(t.props.children));
-    expect(texts).toEqual(["SILPO KYIV UA", "Категория", "Тип", "Применить к похожим", "Изменится 14 операций"]);
+describe("TxEditSheet: categories from the server and «Всегда так» (В5)", () => {
+  const LIST: CategoryDto[] = [
+    { key: "cafe", name: "Кафе", icon: "coffee", system: false },
+    { key: "groceries", name: "Продукты", icon: "cart", system: false },
+    { key: "c_cat", name: "Кот", icon: "paw", system: false },
+    { key: "refund", name: "Возвраты", icon: "arrowIn", system: true },
+    { key: "uncategorized", name: "Без категории", icon: "circle", system: true },
+  ];
+  /** The server applies the patch to the row it was given. */
+  const editing = (base: TransactionDto) =>
+    jest.fn(async (_id: number, patch: Partial<TransactionDto>) => ({ transaction: { ...base, ...patch }, updated: 1 }));
+  const silpo = txFixture({ id: 7, description: "SILPO KYIV UA", counterName: "Сільпо", type: "spend", category: "cafe" });
+  const labels = () => screen.getAllByRole("button").map((b) => String(b.props.accessibilityLabel));
+
+  it("offers the server's categories in its order, then «Новая»; no switch any more", async () => {
+    await renderWith(<TxEditSheet tx={silpo} onClose={noop} />, fakeApi({ categories: jest.fn(async () => LIST) }));
+    await screen.findByRole("button", { name: "Кот" });
+    const shown = labels().filter((l) => [...LIST.map((c) => c.name), "Новая"].includes(l));
+    expect(shown).toEqual(["Кафе", "Продукты", "Кот", "Возвраты", "Без категории", "Новая"]);
+    expect(selected("Кафе")).toBe(true);
+    expect(screen.queryByLabelText("Применить к похожим")).toBeNull();
+    expect(screen.queryByText(/Всегда так/)).toBeNull();
   });
 
-  it("the switch decides whether the change goes to similar rows, and hides the count when off", async () => {
-    const api = fakeApi({ similarCount: jest.fn(async () => 3) });
-    await renderWith(<TxEditSheet tx={txFixture({ id: 7 })} onClose={noop} />, api);
-    expect(await screen.findByText("Изменится 3 операции")).toBeTruthy();
-    const similar = screen.getByLabelText("Применить к похожим");
-    expect(similar.props.value).toBe(true);
-    await fireEvent(similar, "valueChange", false);
-    expect(screen.queryByText(/^Изменится/)).toBeNull();
-    await fireEvent.press(screen.getByRole("button", { name: "Продукты" }));
+  it("an older server: today's built-in list, and no «Новая»", async () => {
+    await renderWith(<TxEditSheet tx={silpo} onClose={noop} />, fakeApi({ categories: jest.fn(async () => null) }));
+    await screen.findByText("Тип");
+    await waitFor(() => expect(chip("Кафе и рестораны")).toBeTruthy());
+    expect(chip("Продукты")).toBeTruthy();
+    expect(chip("Новая")).toBeNull();
+  });
+
+  it("a new category is saved for this operation only, then asks about the similar ones", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction: editing(silpo), similarCount: jest.fn(async () => 24) });
+    const onClose = jest.fn();
+    await renderWith(<TxEditSheet tx={silpo} onClose={onClose} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Продукты" }));
     await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { category: "groceries", applyToSimilar: false }));
+    expect(await screen.findByText("Всегда так для «Сільпо»?")).toBeTruthy();
+    expect(await screen.findByText("Ещё 23 операции станут «Продукты»")).toBeTruthy();
+    expect(api.similarCount).toHaveBeenCalledWith(7, undefined);
+    expect(selected("Продукты")).toBe(true);
+    expect(selected("Кафе")).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+    // The question sits between the categories and the type.
+    const texts = screen.getAllByText(/^(Категория|Всегда так для «Сільпо»\?|Тип)$/).map((t) => String(t.props.children));
+    expect(texts).toEqual(["Категория", "Всегда так для «Сільпо»?", "Тип"]);
   });
 
-  it("left on, a type chip saves for similar rows too", async () => {
-    const api = fakeApi();
-    await renderWith(<TxEditSheet tx={txFixture({ id: 7 })} onClose={noop} />, api);
+  it("«Да, всегда» sends the same change for the similar ones, as the switch did, and closes", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction: editing(silpo), similarCount: jest.fn(async () => 24) });
+    const onClose = jest.fn();
+    await renderWith(<TxEditSheet tx={silpo} onClose={onClose} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Продукты" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Да, всегда" }));
+    await waitFor(() => expect(api.editTransaction).toHaveBeenLastCalledWith(7, { category: "groceries", applyToSimilar: true }));
+    expect(api.editTransaction).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("«Только эта» puts the question away and sends nothing more", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction: editing(silpo) });
+    const onClose = jest.fn();
+    await renderWith(<TxEditSheet tx={silpo} onClose={onClose} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Продукты" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Только эта" }));
+    expect(screen.queryByText(/Всегда так/)).toBeNull();
+    expect(api.editTransaction).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("with no other similar operations the question has no count line", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction: editing(silpo), similarCount: jest.fn(async () => 1) });
+    await renderWith(<TxEditSheet tx={silpo} onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Продукты" }));
+    expect(await screen.findByText("Всегда так для «Сільпо»?")).toBeTruthy();
+    await waitFor(() => expect(api.similarCount).toHaveBeenCalled());
+    expect(screen.queryByText(/^Ещё \d/)).toBeNull();
+  });
+
+  it("a new type asks the same, naming the type, and «Да, всегда» sends it for the similar ones", async () => {
+    const api = fakeApi({ editTransaction: editing(silpo), similarCount: jest.fn(async () => 4) });
+    await renderWith(<TxEditSheet tx={silpo} onClose={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: "Между своими" }));
-    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { type: "own_transfer", applyToSimilar: true }));
+    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { type: "own_transfer", applyToSimilar: false }));
+    expect(await screen.findByText("Ещё 3 операции станут «Между своими»")).toBeTruthy();
+    expect(api.similarCount).toHaveBeenCalledWith(7, "own_transfer");
+    await fireEvent.press(screen.getByRole("button", { name: "Да, всегда" }));
+    await waitFor(() => expect(api.editTransaction).toHaveBeenLastCalledWith(7, { type: "own_transfer", applyToSimilar: true }));
+  });
+
+  it("tapping the category the operation already has saves nothing and asks", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST), similarCount: jest.fn(async () => 5) });
+    await renderWith(<TxEditSheet tx={silpo} onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Кафе" }));
+    expect(await screen.findByText("Ещё 4 операции станут «Кафе»")).toBeTruthy();
+    expect(api.editTransaction).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByRole("button", { name: "Да, всегда" }));
+    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { category: "cafe", applyToSimilar: true }));
+  });
+
+  it("an operation with no type is changed alone: there is no rule to make, so no question", async () => {
+    const untyped = { ...silpo, type: null };
+    const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction: editing(untyped) });
+    await renderWith(<TxEditSheet tx={untyped} onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Продукты" }));
+    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { category: "groceries", applyToSimilar: false }));
+    await waitFor(() => expect(selected("Продукты")).toBe(true));
+    expect(screen.queryByText(/Всегда так/)).toBeNull();
+  });
+
+  it("a failed save says so and asks nothing", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction: jest.fn(async () => Promise.reject(new Error("500"))) });
+    await renderWith(<TxEditSheet tx={silpo} onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Продукты" }));
+    expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
+    expect(screen.queryByText(/Всегда так/)).toBeNull();
+    expect(selected("Кафе")).toBe(true);
+  });
+
+  it("«Новая» makes a category and puts this operation in it at once", async () => {
+    const created: CategoryDto = { key: "c_new", name: "Спорт", icon: "dumbbell", system: false };
+    const api = fakeApi({
+      categories: jest.fn(async () => LIST),
+      createCategory: jest.fn(async () => created),
+      editTransaction: editing(silpo),
+      similarCount: jest.fn(async () => 1),
+    });
+    await renderWith(<TxEditSheet tx={silpo} onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Новая" }));
+    expect(await screen.findByText("Новая категория")).toBeTruthy();
+    await fireEvent.changeText(screen.getByLabelText("Название"), "  Спорт ");
+    await fireEvent.press(screen.getByRole("radio", { name: "Значок: гантель" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Добавить" }));
+    await waitFor(() => expect(api.createCategory).toHaveBeenCalledWith({ name: "Спорт", icon: "dumbbell" }));
+    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { category: "c_new", applyToSimilar: false }));
+    await waitFor(() => expect(screen.queryByText("Новая категория")).toBeNull());
+    expect(await screen.findByText("Всегда так для «Сільпо»?")).toBeTruthy();
   });
 });
+
 
 describe("TxEditSheet: the answer to «Откуда наличные?» can be changed (Б21)", () => {
   const deposit = (cashAnswer: TransactionDto["cashAnswer"]) =>

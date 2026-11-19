@@ -3,10 +3,11 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, T
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 import type { InsightsMonthDto } from "@hale/contracts";
-import { useInsights } from "../api/queries";
+import { useCategoryList, useInsights } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
 import { formatMoney, inMonth, kyivDate, monthTitle, pluralIndex } from "../format";
-import { categoryLabel } from "../labels";
+import { categoryName, type CategoryList } from "../labels";
+import { CategoriesSheet } from "../components/CategoriesSheet";
 import { ErrorText } from "../components/ErrorText";
 import { Glass } from "../components/Glass";
 import { LAYOUT } from "../components/layout";
@@ -125,6 +126,8 @@ type MonthProps = {
 };
 
 function Month({ data, past, thisYear, unfolded, onUnfold, onOpenCategory }: MonthProps) {
+  const list = useCategoryList();
+  const [editing, setEditing] = useState(false);
   // A category spent on only in the month before has nothing to show for this one.
   const rows = data.categories.filter((c) => c.count > 0 || c.spent !== 0);
   // One leftover row is shown as it is: «Ещё 1 категория» would take the same room.
@@ -149,12 +152,19 @@ function Month({ data, past, thisYear, unfolded, onUnfold, onOpenCategory }: Mon
           <Text style={styles.eyebrow}>Категории</Text>
           <Glass style={styles.card}>
             {shown.map((c, i) => (
-              <Row key={c.category} c={c} largest={largest} first={i === 0} onPress={() => open(c)} />
+              <Row key={c.category} c={c} list={list} largest={largest} first={i === 0} onPress={() => open(c)} />
             ))}
             {folded && <More rest={rest} onPress={onUnfold} />}
           </Glass>
+          {/* Task В5, variant А: a quiet link to the list itself; an older server keeps the built-in one, with nothing to change. */}
+          {list && (
+            <Pressable accessibilityRole="button" accessibilityLabel="Изменить категории" onPress={() => setEditing(true)} style={styles.link}>
+              <Text style={styles.linkText}>Изменить категории</Text>
+            </Pressable>
+          )}
         </View>
       )}
+      {editing && <CategoriesSheet onClose={() => setEditing(false)} />}
       {/* Task В2а: payments the limit leaves out (rent, taxes, debts), one quiet line with no breakdown. An older server does not send it. */}
       {(data.otherPayments ?? 0) > 0 && <Text style={styles.note}>{`Ещё платежи: ${formatMoney(data.otherPayments!)}`}</Text>}
       {/* Task В3: the month's largest places, under the categories; an older server does not send them. */}
@@ -165,8 +175,8 @@ function Month({ data, past, thisYear, unfolded, onUnfold, onOpenCategory }: Mon
   );
 }
 
-function Row({ c, largest, first, onPress }: { c: Category; largest: number; first: boolean; onPress: () => void }) {
-  const label = categoryLabel(c.category);
+function Row({ c, list, largest, first, onPress }: { c: Category; list: CategoryList; largest: number; first: boolean; onPress: () => void }) {
+  const label = categoryName(c.category, list);
   const amount = formatMoney(c.spent);
   const width = (v: number) => `${(v / largest) * 100}%` as const;
   return (
@@ -244,4 +254,6 @@ const styles = StyleSheet.create({
   moreRight: { flexDirection: "row", gap: space.xs },
   moreSum: { ...type.body, color: color.fg.muted, fontVariant: ["tabular-nums"] },
   stack: { gap: space.md },
+  link: { minHeight: touchMin, justifyContent: "center", paddingHorizontal: space.lg },
+  linkText: { ...type.label, color: color.fg.muted },
 });

@@ -1,17 +1,17 @@
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { RuleDto } from "@hale/contracts";
-import { useDeleteRule, useRules } from "../api/queries";
+import { useCategoryList, useDeleteRule, useRules } from "../api/queries";
 import { operationsText, pluralIndex } from "../format";
-import { answerText, categoryLabel, typeLabel } from "../labels";
+import { answerText, categoryName, type CategoryList, typeLabel } from "../labels";
 import { ErrorText } from "./ErrorText";
 import { Sheet } from "./Sheet";
 
 const { color, space, touchMin, type } = tokens;
 
-/** What a rule does, then how many operations follow it. */
-export const ruleSummary = (r: RuleDto): string => {
-  const does = r.label ? answerText(r.label) : r.category ? `${typeLabel(r.type)} · ${categoryLabel(r.category)}` : typeLabel(r.type);
+/** What a rule does, then how many operations follow it; a category as the server names it (В5). */
+export const ruleSummary = (r: RuleDto, list?: CategoryList): string => {
+  const does = r.label ? answerText(r.label) : r.category ? `${typeLabel(r.type)} · ${categoryName(r.category, list)}` : typeLabel(r.type);
   return `${does} · ${operationsText(r.count)}`;
 };
 
@@ -19,6 +19,7 @@ export const ruleSummary = (r: RuleDto): string => {
 export function RulesSheet({ onClose }: { onClose: () => void }) {
   const rules = useRules();
   const remove = useDeleteRule();
+  const list = useCategoryList();
 
   const confirm = (r: RuleDto) =>
     Alert.alert(
@@ -36,13 +37,13 @@ export function RulesSheet({ onClose }: { onClose: () => void }) {
       {rules.isError && <ErrorText>Не получилось загрузить правила.</ErrorText>}
       {remove.isError && <ErrorText>Не удалось удалить. Попробуйте ещё раз.</ErrorText>}
       {rules.data?.length === 0 && (
-        <Text style={styles.muted}>Правил пока нет. Они появляются, когда вы меняете операцию с «Применить к похожим» или отвечаете, что это за перевод.</Text>
+        <Text style={styles.muted}>Правил пока нет. Они появляются, когда после смены категории или типа вы выбираете «Да, всегда» или отвечаете, что это за перевод.</Text>
       )}
       {rules.data?.map((r) => (
         <View key={r.id} style={styles.row}>
           <View style={styles.what}>
             <Text style={styles.text}>{r.title}</Text>
-            <Text style={styles.muted}>{ruleSummary(r)}</Text>
+            <Text style={styles.muted}>{ruleSummary(r, list)}</Text>
           </View>
           <Pressable
             accessibilityRole="button"

@@ -88,6 +88,35 @@ describe("api client", () => {
     expect(urls.slice(0, 2)).toEqual(["/insights/month", "/insights/month?month=2026-10"]);
   });
 
+  it("reads, adds, changes, orders and deletes categories (В5); an older server has none", async () => {
+    const list = [{ key: "groceries", name: "Продукты", icon: "cart", system: false }];
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(json(list))
+      .mockResolvedValueOnce(json({ key: "c_1", name: "Кот", icon: "paw", system: false }))
+      .mockResolvedValueOnce(json({ key: "c_1", name: "Кошка", icon: "paw", system: false }))
+      .mockResolvedValueOnce(json(list))
+      .mockResolvedValueOnce(json({ deleted: true, moved: 3 }))
+      .mockResolvedValueOnce(json({ message: "Cannot GET /categories" }, 404))
+      .mockResolvedValueOnce(json({ message: "taken" }, 409));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await expect(api.categories()).resolves.toEqual(list);
+    await expect(api.createCategory({ name: "Кот", icon: "paw" })).resolves.toMatchObject({ key: "c_1" });
+    await api.patchCategory("c_1", { name: "Кошка" });
+    await api.reorderCategories(["c_1", "groceries"]);
+    await expect(api.deleteCategory("c_1")).resolves.toEqual({ deleted: true, moved: 3 });
+    await expect(api.categories()).resolves.toBeNull();
+    await expect(api.createCategory({ name: "Кот", icon: "paw" })).rejects.toMatchObject({ status: 409 });
+    const calls = (fetchImpl.mock.calls as unknown as [string, RequestInit][]).map(([url, init]) => [init.method, url.replace("https://api.example.test", ""), init.body]);
+    expect(calls.slice(0, 5)).toEqual([
+      ["GET", "/categories", undefined],
+      ["POST", "/categories", JSON.stringify({ name: "Кот", icon: "paw" })],
+      ["PATCH", "/categories/c_1", JSON.stringify({ name: "Кошка" })],
+      ["PUT", "/categories/order", JSON.stringify({ keys: ["c_1", "groceries"] })],
+      ["DELETE", "/categories/c_1", undefined],
+    ]);
+  });
+
   it("login sends no token and returns the token string", async () => {
     const fetchImpl = vi.fn(async () => json({ token: "abc" }));
     const { api } = setup(fetchImpl as unknown as typeof fetch, null);

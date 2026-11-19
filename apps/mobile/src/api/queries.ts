@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { CategoryDto, CategoryInput, CategoryPatch } from "@hale/contracts";
+import type { CategoryList } from "../labels";
 import type { CashOperationInput, CashOperationPatch, CashStartInput, ExpectedIncomeInput, ExpectedIncomePatch, InstallmentInput, InstallmentPatch, LoanInput, LoanPatch, LoanRepayInput, RecipientLabelName, RecurringInput, RecurringPatch, ScheduledPaymentInput, ScheduledPaymentPatch, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
 import type { CashCardAnswer, CashDepositAnswerName, GoalInput, GoalPatch, TxTypeDto } from "@hale/contracts";
 import type { TransactionsFilter } from "./client";
@@ -596,4 +598,95 @@ export function useDeleteRule() {
         [RULES_KEY, TODAY_KEY, TRANSACTIONS_KEY, CALENDAR_KEY, INSIGHTS_KEY, CASH_KEY, PAYMENTS_KEY].map((queryKey) => client.invalidateQueries({ queryKey })),
       ),
   });
+}
+
+// --- categories (В5) ------------------------------------------------------------------
+export const CATEGORIES_KEY = ["categories"] as const;
+
+/** The owner's categories in order; null from an older server, which keeps the built-in list. */
+export function useCategories() {
+  const api = useApi();
+  return useQuery({ queryKey: CATEGORIES_KEY, queryFn: () => api.categories() });
+}
+
+/** For names and icons: undefined while loading or after an error, null from an older server — all fall back. */
+export function useCategoryList(): CategoryList {
+  return useCategories().data;
+}
+
+/**
+ * A change to the list shows wherever a category is named: the operations, «Итоги», the rules. A deleted one also
+ * moves its operations and rules to «Без категории».
+ */
+function useCategoryMutation<V, R>(mutationFn: (vars: V) => Promise<R>, onSaved?: (result: R, client: QueryClient) => void) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: (result: R) => {
+      onSaved?.(result, client);
+      return Promise.all([CATEGORIES_KEY, TRANSACTIONS_KEY, INSIGHTS_KEY, RULES_KEY].map((queryKey) => client.invalidateQueries({ queryKey })));
+    },
+  });
+}
+
+export function useCreateCategory() {
+  const api = useApi();
+  // The new category is at the end of the list at once, so its chip is there before the list comes back.
+  return useCategoryMutation(
+    (input: CategoryInput) => api.createCategory(input),
+    (created, client) => client.setQueryData<CategoryDto[] | null>(CATEGORIES_KEY, (list) => (list ? [...list, created] : list)),
+  );
+}
+
+export function usePatchCategory() {
+  const api = useApi();
+  return useCategoryMutation(({ key, patch }: { key: string; patch: CategoryPatch }) => api.patchCategory(key, patch));
+}
+
+export function useDeleteCategory() {
+  const api = useApi();
+  return useCategoryMutation((key: string) => api.deleteCategory(key));
+}
+
+/** A new order shows at once and goes back if the server refuses it. */
+export function useReorderCategories() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (keys: string[]) => api.reorderCategories(keys),
+    onMutate: async (keys: string[]) => {
+      await client.cancelQueries({ queryKey: CATEGORIES_KEY });
+      const before = client.getQueryData<CategoryDto[] | null>(CATEGORIES_KEY);
+      if (before) {
+        const byKey = new Map(before.map((c) => [c.key, c]));
+        client.setQueryData(CATEGORIES_KEY, keys.map((k) => byKey.get(k)).filter((c): c is CategoryDto => c !== undefined));
+      }
+      return { before };
+    },
+    onError: (_e, _keys, ctx) => {
+      if (ctx?.before) client.setQueryData(CATEGORIES_KEY, ctx.before);
+    },
+    onSuccess: (saved) => client.setQueryData(CATEGORIES_KEY, saved),
+    onSettled: () => Promise.all([CATEGORIES_KEY, INSIGHTS_KEY].map((queryKey) => client.invalidateQueries({ queryKey }))),
+  });
+}
+
+/**
+ * How many operations a category has, asked at the moment the deletion is confirmed, so the question never shows
+ * before the number has come; null when the server does not say or the request fails.
+ */
+export function useCategoryCount(): (key: string) => Promise<number | null> {
+  const api = useApi();
+  const client = useQueryClient();
+  return async (key) => {
+    try {
+      return await client.fetchQuery({
+        queryKey: [...TRANSACTIONS_KEY, "category-count", key],
+        queryFn: async () => (await api.transactions({ group: "all", category: key })).summary?.count ?? null,
+        staleTime: 0,
+      });
+    } catch {
+      return null;
+    }
+  };
 }

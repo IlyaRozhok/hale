@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Pressable, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
-import type { InsightsMonthDto } from "@hale/contracts";
+import type { CategoryDto, InsightsMonthDto } from "@hale/contracts";
 import { Insights } from "./Insights";
 import { fakeApi, insightsFixture, renderWith } from "../testing";
 import { ApiError } from "../api/client";
@@ -474,6 +474,52 @@ describe("Insights", () => {
       await screen.findByText("₴18,220");
       expect(screen.queryByTestId("subscriptions-row")).toBeNull();
       expect(screen.queryByText(/Megogo/)).toBeNull();
+    });
+  });
+
+  describe("own categories (В5)", () => {
+    const LIST: CategoryDto[] = [
+      { key: "groceries", name: "Еда", icon: "cart", system: false },
+      { key: "uncategorized", name: "Без категории", icon: "circle", system: true },
+    ];
+    const month = () => insightsFixture({ categories: [{ category: "groceries", spent: 880_000, previousSpent: 900_000, count: 12 }] });
+
+    it("names the categories as the server does", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => month()), categories: jest.fn(async () => LIST) }));
+      expect(await screen.findByRole("button", { name: "Еда: ₴8,800" })).toBeTruthy();
+    });
+
+    it("an older server keeps today's names and has no link to change them", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => month()), categories: jest.fn(async () => null) }));
+      expect(await screen.findByRole("button", { name: "Продукты: ₴8,800" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Изменить категории" })).toBeNull();
+    });
+
+    it("a quiet link under the categories card opens «Категории»", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => month()), categories: jest.fn(async () => LIST) }));
+      const link = await screen.findByRole("button", { name: "Изменить категории" });
+      const texts = screen.getAllByText(/./).map((t) => t.props.children as unknown);
+      expect(texts.indexOf("Изменить категории")).toBeGreaterThan(texts.indexOf("Еда"));
+      await fireEvent.press(link);
+      expect(await screen.findByText("Порядок — как в карточке операции")).toBeTruthy();
+    });
+
+    it("a renamed category is named anew in «Итоги»", async () => {
+      let list = LIST;
+      const insights = jest.fn(async () => month());
+      const api = fakeApi({
+        insights,
+        categories: jest.fn(async () => list),
+        patchCategory: jest.fn(async () => ((list = [{ ...LIST[0]!, name: "Супермаркет" }, LIST[1]!]), list[0]!)),
+      });
+      await renderWith(<Insights now={now} />, api);
+      await fireEvent.press(await screen.findByRole("button", { name: "Изменить категории" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Еда" }));
+      await fireEvent.changeText(await screen.findByLabelText("Название"), "Супермаркет");
+      await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+      await waitFor(() => expect(api.patchCategory).toHaveBeenCalledWith("groceries", { name: "Супермаркет" }));
+      expect(await screen.findByRole("button", { name: "Супермаркет: ₴8,800" })).toBeTruthy();
+      expect(insights.mock.calls.length).toBeGreaterThan(1);
     });
   });
 });

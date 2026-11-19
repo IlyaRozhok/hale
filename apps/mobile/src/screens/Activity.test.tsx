@@ -580,24 +580,27 @@ describe("Activity filters", () => {
 });
 
 describe("Activity edit sheet", () => {
-  it("changes the category in one tap, applying to similar by default", async () => {
+  it("changes the category in one tap for this operation, then «Да, всегда» takes it to the similar ones (В5)", async () => {
     const api = fakeApi();
     await renderWith(<Activity />, api);
     await fireEvent.press(await screen.findByText("Кофейня"));
-    const similar = await screen.findByLabelText("Применить к похожим");
-    expect(similar.props.value).toBe(true);
-    await fireEvent.press(screen.getByRole("button", { name: "Продукты" }));
-    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(1, { category: "groceries", applyToSimilar: true }));
-    await waitFor(() => expect(screen.queryByLabelText("Применить к похожим")).toBeNull());
+    await fireEvent.press(await screen.findByRole("button", { name: "Продукты" }));
+    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(1, { category: "groceries", applyToSimilar: false }));
+    expect(await screen.findByText("Всегда так для «Кофейня»?")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Да, всегда" }));
+    await waitFor(() => expect(api.editTransaction).toHaveBeenLastCalledWith(1, { category: "groceries", applyToSimilar: true }));
+    await waitFor(() => expect(screen.queryByText("Тип")).toBeNull());
   });
 
-  it("changes the type in one tap, and the similar switch can be turned off", async () => {
+  it("changes the type in one tap; «Только эта» leaves the similar ones as they are (В5)", async () => {
     const api = fakeApi();
     await renderWith(<Activity />, api);
     await fireEvent.press(await screen.findByText("Кофейня"));
-    await fireEvent(await screen.findByLabelText("Применить к похожим"), "valueChange", false);
-    await fireEvent.press(screen.getByRole("button", { name: "Обязательный платёж" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Обязательный платёж" }));
     await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(1, { type: "obligation", applyToSimilar: false }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Только эта" }));
+    expect(screen.queryByText(/Всегда так/)).toBeNull();
+    expect(api.editTransaction).toHaveBeenCalledTimes(1);
   });
 
   it("refreshes the list after an edit", async () => {
@@ -616,7 +619,7 @@ describe("Activity edit sheet", () => {
     await fireEvent.press(await screen.findByText("Кофейня"));
     await fireEvent.press(await screen.findByRole("button", { name: "Транспорт" }));
     expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
-    expect(screen.getByLabelText("Применить к похожим")).toBeTruthy();
+    expect(screen.getByText("Тип")).toBeTruthy();
   });
 });
 
@@ -685,7 +688,7 @@ describe("Activity recipient label", () => {
     // The window closes with an animation and covers the list until it is gone: a person cannot tap a row before that.
     await waitFor(() => expect(screen.queryByRole("button", { name: /Что это за перевод/ })).toBeNull());
     await fireEvent.press(await screen.findByText("Кофейня"));
-    await screen.findByLabelText("Применить к похожим");
+    await screen.findByText("Тип");
     expect(screen.queryByRole("button", { name: /Что это за перевод/ })).toBeNull();
   });
 
@@ -694,13 +697,69 @@ describe("Activity recipient label", () => {
     await renderWith(<Activity />, api);
     await fireEvent.press(await screen.findByText("Иван"));
     await fireEvent.press(await screen.findByRole("button", { name: "Изменить тип" }));
-    expect(await screen.findByLabelText("Применить к похожим")).toBeTruthy();
+    expect(await screen.findByText("Тип")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Обязательный платёж" }));
-    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(5, { type: "obligation", applyToSimilar: true }));
+    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(5, { type: "obligation", applyToSimilar: false }));
   });
 
   it("marks rows that need an answer", async () => {
     await renderWith(<Activity />, fakeApi({ transactions: page([person]) }));
     expect(await screen.findByText("Ждёт ответа")).toBeTruthy();
+  });
+});
+
+describe("Activity: own categories (В5)", () => {
+  const LIST = [
+    { key: "cafe", name: "Кофе", icon: "coffee" as const, system: false },
+    { key: "c_cat", name: "Кот", icon: "paw" as const, system: false },
+    { key: "uncategorized", name: "Без категории", icon: "circle" as const, system: true },
+  ];
+
+  it("rows carry the server's name and icon; type-level keys keep today's words", async () => {
+    const items = [
+      txFixture({ id: 1, description: "Зоомагазин", category: "c_cat" }),
+      txFixture({ id: 2, description: "ФОП", type: "tax", category: "tax", amount: -2000, amountUah: -2000 }),
+    ];
+    await renderWith(<Activity />, fakeApi({ transactions: page(items), categories: jest.fn(async () => LIST) }));
+    expect(await screen.findByText("Кот")).toBeTruthy();
+    expect(screen.getByTestId("tx-icon-paw")).toBeTruthy();
+    expect(screen.getByText("Налог")).toBeTruthy();
+  });
+
+  it("the filters offer the server's categories, and the summary names the chosen one as the server does", async () => {
+    const transactions = jest.fn(async () => ({ items: [txFixture()], nextCursor: null, dayTotals: {}, summary: { total: -2500, count: 2 } }));
+    await renderWith(<Activity />, fakeApi({ transactions, categories: jest.fn(async () => LIST) }));
+    await screen.findByText("Кофейня");
+    await fireEvent.press(screen.getByRole("button", { name: "Фильтры" }));
+    expect(await screen.findByRole("button", { name: "Кот" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Продукты" })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Кот" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Показать" }));
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", category: "c_cat" }));
+    expect(await screen.findByText("Кот: −₴25 · 2 операции")).toBeTruthy();
+  });
+
+  it("a chosen category that has since been deleted drops out of the filters instead of showing its key", async () => {
+    const transactions = jest.fn(async () => ({ items: [txFixture()], nextCursor: null, dayTotals: {}, summary: { total: -2500, count: 2 } }));
+    await renderWith(
+      <Activity route={{ params: { category: "c_gone", from: "2026-11-01", to: "2026-11-16", at: 1 } }} />,
+      fakeApi({ transactions, categories: jest.fn(async () => LIST) }),
+    );
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", from: "2026-11-01", to: "2026-11-16" }));
+    expect(await screen.findByRole("button", { name: "Фильтры: 1" })).toBeTruthy();
+    expect(screen.queryByText(/c_gone/)).toBeNull();
+  });
+
+  it("a type-level key from «Итоги» («Переводы») stays chosen though the list of purchase categories lacks it", async () => {
+    const transactions = jest.fn(async () => ({ items: [txFixture()], nextCursor: null, dayTotals: {}, summary: { total: -2500, count: 2 } }));
+    const categories = jest.fn(async () => LIST);
+    await renderWith(
+      <Activity route={{ params: { category: "transfer", from: "2026-11-01", to: "2026-11-16", at: 1 } }} />,
+      fakeApi({ transactions, categories }),
+    );
+    await waitFor(() => expect(categories).toHaveBeenCalled());
+    expect(await screen.findByText("Переводы · 1–16 ноя: −₴25 · 2 операции")).toBeTruthy();
+    expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", category: "transfer", from: "2026-11-01", to: "2026-11-16" });
+    expect(screen.getByRole("button", { name: "Фильтры: 2" })).toBeTruthy();
   });
 });

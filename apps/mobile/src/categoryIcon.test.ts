@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { categoryIcon } from "./categoryIcon";
+import { CATEGORY_ICONS } from "@hale/contracts";
+import { categoryIcon, categoryIconOf, isCategoryIcon } from "./categoryIcon";
 
 const spend = (category: string | null) => categoryIcon({ type: "spend", category });
 
@@ -35,5 +36,28 @@ describe("categoryIcon", () => {
     expect(categoryIcon({ type: "income", category: "income" })).toBe("arrowIn");
     expect(categoryIcon({ type: "person_in", category: "transfer" })).toBe("arrowIn");
     expect(categoryIcon({ type: "loan_in", category: "loan" })).toBe("arrowIn");
+  });
+
+  it("takes a category's icon from the server's list, falling back to the built-in ones (В5)", () => {
+    const list = [
+      { key: "groceries", name: "Продукты", icon: "bag" as const, system: false },
+      { key: "c_1", name: "Кот", icon: "paw" as const, system: false },
+    ];
+    expect(categoryIconOf("c_1", list)).toBe("paw");
+    expect(categoryIconOf("groceries", list)).toBe("bag");
+    expect(categoryIconOf("cafe", list)).toBe("coffee");
+    expect(categoryIconOf("c_2", list)).toBe("circle");
+    expect(categoryIconOf("groceries", undefined)).toBe("cart");
+    expect(categoryIconOf(null, null)).toBe("circle");
+    expect(categoryIcon({ type: "spend", category: "c_1" }, list)).toBe("paw");
+    // Other types keep their kind of money movement whatever the list says.
+    expect(categoryIcon({ type: "tax", category: "tax" }, list)).toBe("receipt");
+  });
+
+  it("an icon a newer server knows and this app does not draw falls back", () => {
+    const list = [{ key: "c_1", name: "Кот", icon: "rocket" as never, system: false }];
+    expect(categoryIconOf("c_1", list)).toBe("circle");
+    for (const icon of CATEGORY_ICONS) expect(isCategoryIcon(icon)).toBe(true);
+    expect(isCategoryIcon("rocket")).toBe(false);
   });
 });

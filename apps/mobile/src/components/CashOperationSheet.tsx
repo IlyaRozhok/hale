@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
-import type { CashCategory, CashOperationKind, TransactionDto } from "@hale/contracts";
+import type { CashOperationKind, TransactionDto } from "@hale/contracts";
 import { exchangeRate } from "@hale/contracts/exchange";
-import { useAddCashOperation, useCash, useDeleteCashOperation, usePatchCashOperation } from "../api/queries";
+import { useAddCashOperation, useCash, useCategoryList, useDeleteCashOperation, usePatchCashOperation } from "../api/queries";
 import { formatDollars, formatMoney, kyivDate, parseHryvnias } from "../format";
-import { SPEND_CATEGORIES, categoryLabel } from "../labels";
+import { categoryChoices } from "../labels";
 import { CashStartForm } from "./CashStartForm";
 import { Chip } from "./Chip";
 import { DateField } from "./DateField";
@@ -22,7 +22,6 @@ const KINDS: { kind: CashOperationKind; label: string; effect: string }[] = [
   { kind: "own_out", label: "Отдал в свои", effect: "Например, купил USDC за наличные. Наличных меньше, лимит не меняется." },
   { kind: "exchange", label: "Обменял USDC", effect: "Binance уменьшится на отданные USDC, наличных станет больше. Это перевод между своими, не доход." },
 ];
-const CATEGORIES = SPEND_CATEGORIES.filter((c): c is CashCategory => c !== "refund");
 const KIND_OF_TYPE: Record<string, CashOperationKind> = { spend: "spend", person_in: "received", own_transfer: "own_out" };
 /**
  * The opening balance or a count that found more: an own transfer into the wallet that is no exchange. It corrects
@@ -43,10 +42,13 @@ export function CashOperationSheet({ tx, onClose }: Props) {
   const add = useAddCashOperation();
   const patch = usePatchCashOperation();
   const remove = useDeleteCashOperation();
+  // The server's categories, own ones included (В5); a refund is no cash purchase.
+  const categories = categoryChoices(useCategoryList()).filter((c) => c.key !== "refund");
   const [kind, setKind] = useState<CashOperationKind>(tx ? (tx.exchange ? "exchange" : (KIND_OF_TYPE[tx.type ?? ""] ?? "own_out")) : "spend");
   const [amount, setAmount] = useState(tx ? String(Math.abs(tx.amount) / 100) : "");
   const [usdc, setUsdc] = useState(tx?.exchange ? String(tx.exchange.usdc / 100) : "");
-  const [category, setCategory] = useState<CashCategory | null>(tx && CATEGORIES.includes(tx.category as CashCategory) ? (tx.category as CashCategory) : null);
+  // The row's own category, whether or not the list has come yet: it is the one to keep unless another is chosen.
+  const [category, setCategory] = useState<string | null>(tx?.type === "spend" && tx.category && tx.category !== "refund" ? tx.category : null);
   const [date, setDate] = useState(tx?.localDate ?? kyivDate());
   const [note, setNote] = useState(tx?.description ?? "");
   const [message, setMessage] = useState<string | null>(null);
@@ -133,8 +135,8 @@ export function CashOperationSheet({ tx, onClose }: Props) {
       )}
       {kind === "spend" && (
         <View style={styles.chips}>
-          {CATEGORIES.map((c) => (
-            <Chip key={c} label={categoryLabel(c)} selected={category === c} onPress={() => setCategory(c)} />
+          {categories.map((c) => (
+            <Chip key={c.key} label={c.name} selected={category === c.key} onPress={() => setCategory(c.key)} />
           ))}
         </View>
       )}

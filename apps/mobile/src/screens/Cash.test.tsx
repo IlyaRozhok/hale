@@ -220,8 +220,7 @@ describe("an operation entered by hand, in Activity", () => {
   it("a bank row still opens the type editor", async () => {
     await renderWith(<Activity />, fakeApi());
     await fireEvent.press(await screen.findByText("Кофейня"));
-    expect(await screen.findByLabelText("Применить к похожим")).toBeTruthy();
-    expect(screen.getByText("Тип")).toBeTruthy();
+    expect(await screen.findByText("Тип")).toBeTruthy();
     expect(screen.getByText("Категория")).toBeTruthy();
   });
 
@@ -318,5 +317,33 @@ describe("a planned payment paid from the wallet, in Activity", () => {
     expect(await screen.findByText("Платёж из плана, оплачен наличными. Если удалить, платёж снова станет неоплаченным.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Сохранить" })).toBeNull();
     expect(screen.getByRole("button", { name: "Удалить" })).toBeTruthy();
+  });
+});
+
+describe("a cash purchase's categories (В5)", () => {
+  it("are the server's, own ones included, without «Возвраты»", async () => {
+    const categories = jest.fn(async () => [
+      { key: "groceries", name: "Еда", icon: "cart" as const, system: false },
+      { key: "c_cat", name: "Кот", icon: "paw" as const, system: false },
+      { key: "refund", name: "Возвраты", icon: "arrowIn" as const, system: true },
+      { key: "uncategorized", name: "Без категории", icon: "circle" as const, system: true },
+    ]);
+    const api = fakeApi({ ...started(), categories });
+    await renderWith(menu, api);
+    await press("Добавить операцию");
+    await fireEvent.changeText(await screen.findByLabelText("Сумма"), "120");
+    await press("Кот");
+    expect(screen.queryByRole("button", { name: "Возвраты" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Кафе и рестораны" })).toBeNull();
+    await press("Сохранить");
+    await waitFor(() => expect(api.addCashOperation).toHaveBeenCalledWith({ kind: "spend", amount: 12_000, category: "c_cat", date: kyivDate() }));
+  });
+
+  it("an operation of an own category opens with it chosen", async () => {
+    const categories = jest.fn(async () => [{ key: "c_cat", name: "Кот", icon: "paw" as const, system: false }]);
+    const own = { ...manual, category: "c_cat" };
+    await renderWith(<Activity />, fakeApi({ transactions: jest.fn(async () => ({ items: [own], nextCursor: null, dayTotals: {} })), ...started(), categories }));
+    await fireEvent.press(await screen.findByText("Рынок"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Кот" }).props.accessibilityState.selected).toBe(true));
   });
 });
