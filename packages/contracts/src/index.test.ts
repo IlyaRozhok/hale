@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { exchangeRate, expectedIncomeInput, insightsMonthDto, insightsMonthQuery, isoDate, scheduledPaymentInput, settingsPatch } from "./index";
+import {
+  exchangeRate,
+  expectedIncomeInput,
+  insightsMonthDto,
+  insightsMonthQuery,
+  isoDate,
+  observationRef,
+  observationTodayDto,
+  scheduledPaymentInput,
+  settingsPatch,
+} from "./index";
 
 describe("contracts", () => {
   it("accepts only real dates", () => {
@@ -87,5 +97,24 @@ describe("exchangeRate (Б22)", () => {
     expect(exchangeRate(6_543_000, 140_000)).toBe(46.74);
     expect(exchangeRate(4_100_000, 100_000)).toBe(41);
     expect(exchangeRate(1, 3)).toBe(0.33);
+  });
+});
+
+describe("observations (В7)", () => {
+  const spike = { kind: "spike", period: "month", category: "cafe", spent: 482_000, usual: 310_000, amount: null, from: "2026-11-01", to: "2026-11-19" };
+  it("describes today's observation in whole kopecks, or none", () => {
+    expect(observationTodayDto.safeParse({ observation: spike }).success).toBe(true);
+    expect(observationTodayDto.safeParse({ observation: null }).success).toBe(true);
+    expect(observationTodayDto.safeParse({ observation: { ...spike, spent: 1.5 } }).success).toBe(false);
+    expect(observationTodayDto.safeParse({ observation: { ...spike, period: "day" } }).success).toBe(false);
+    expect(observationTodayDto.safeParse({ observation: { ...spike, text: "x" } }).success).toBe(false);
+  });
+  it("names a spike by its category and the subscriptions without one", () => {
+    expect(observationRef.safeParse({ kind: "spike", category: "cafe" }).success).toBe(true);
+    expect(observationRef.safeParse({ kind: "subscriptions", category: null }).success).toBe(true);
+    expect(observationRef.safeParse({ kind: "spike", category: null }).success).toBe(false);
+    expect(observationRef.safeParse({ kind: "spike", category: " " }).success).toBe(false);
+    expect(observationRef.safeParse({ kind: "subscriptions", category: "cafe" }).success).toBe(false);
+    expect(observationRef.safeParse({ kind: "other", category: null }).success).toBe(false);
   });
 });

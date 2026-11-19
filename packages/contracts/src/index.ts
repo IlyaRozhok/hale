@@ -880,3 +880,41 @@ export const insightsMonthDto = z
   })
   .strict();
 export type InsightsMonthDto = z.infer<typeof insightsMonthDto>;
+
+// --- observations (task В7) --------------------------------------------------
+/**
+ * One observation for the phrase of the day; the app builds the text. `spike`: a category spent more than usual —
+ * `period` "month" (from the 1st to today) or "week" (the 7 days to today), `spent` over that span and `usual` the
+ * median of the same days of the three months before (whole hryvnias), both kopecks; `amount` null. `subscriptions`
+ * (the shortage mode only): `amount` what the subscriptions are expected to charge from `from` to `to`, before the
+ * income; `period`, `category`, `spent`, `usual` null. `from`/`to` are the days «Операции» open with (for a spike,
+ * filtered by `category`).
+ */
+export const observationDto = z
+  .object({
+    kind: z.enum(["spike", "subscriptions"]),
+    period: z.enum(["month", "week"]).nullable(),
+    category: z.string().min(1).nullable(),
+    spent: money.nullable(),
+    usual: money.nullable(),
+    amount: money.nullable(),
+    from: isoDate,
+    to: isoDate,
+  })
+  .strict();
+export type ObservationDto = z.infer<typeof observationDto>;
+
+/** `GET /observations/today` and the answer to `POST /observations/shown`: today's observation, or none. */
+export const observationTodayDto = z.object({ observation: observationDto.nullable() }).strict();
+export type ObservationTodayDto = z.infer<typeof observationTodayDto>;
+
+/**
+ * Which observation: a spike of one category, or the subscriptions kind (no category). The app sends it to
+ * `POST /observations/shown` when it displays the observation, and to `POST /observations/dismiss` for
+ * «Не показывать такое».
+ */
+export const observationRef = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("spike"), category: categoryKey }).strict(),
+  z.object({ kind: z.literal("subscriptions"), category: z.null() }).strict(),
+]);
+export type ObservationRef = z.infer<typeof observationRef>;
