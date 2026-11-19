@@ -4,11 +4,11 @@ import { randomBytes } from "node:crypto";
 import { DataSource, type EntityManager } from "typeorm";
 import { UNCATEGORIZED } from "../domain/insights";
 
-const COLUMNS = `key, name, icon, system`;
+const COLUMNS = `key, name, icon, system, want`;
 
 /**
- * Task В5: the owner's spending categories. Only names, icons and order change here; nothing about money does —
- * a category does not count in the limit, «потрачено» or the plan.
+ * Task В5: the owner's spending categories. Only names, icons, order and (В6) the side, «нужное» or «желаемое»,
+ * change here; nothing about money does — a category does not count in the limit, «потрачено» or the plan.
  */
 @Injectable()
 export class CategoriesService {
@@ -18,16 +18,19 @@ export class CategoriesService {
     return q.query(`SELECT ${COLUMNS} FROM categories WHERE deleted_at IS NULL ORDER BY position, id`);
   }
 
-  /** At the end of the list, with a key of its own: never made from the name, so a rename does not change it. */
+  /**
+   * At the end of the list, with a key of its own: never made from the name, so a rename does not change it.
+   * «Нужное» unless the owner chose «желаемое» (В6).
+   */
   async create(p: CategoryInput): Promise<CategoryDto> {
     return this.ds.transaction(async (m) => {
       await this.lock(m);
       await this.nameFree(m, p.name, null);
       const rows: CategoryDto[] = await m.query(
-        `INSERT INTO categories (key, name, icon, position)
-         SELECT $1, $2, $3, COALESCE(max(position) + 1, 0) FROM categories WHERE deleted_at IS NULL
+        `INSERT INTO categories (key, name, icon, position, want)
+         SELECT $1, $2, $3, COALESCE(max(position) + 1, 0), $4 FROM categories WHERE deleted_at IS NULL
          RETURNING ${COLUMNS}`,
-        [`c_${randomBytes(6).toString("hex")}`, p.name, p.icon],
+        [`c_${randomBytes(6).toString("hex")}`, p.name, p.icon, p.want ?? false],
       );
       return rows[0]!;
     });
@@ -41,9 +44,12 @@ export class CategoriesService {
         if (row.system) throw new UnprocessableEntityException("a system category keeps its name");
         await this.nameFree(m, p.name, key);
       }
+      // A system category is on neither side (В6). The operations' own choices stay as they are.
+      if (p.want !== undefined && row.system) throw new UnprocessableEntityException("a system category has no side");
       const [rows] = (await m.query(
-        `UPDATE categories SET name = COALESCE($2, name), icon = COALESCE($3, icon) WHERE key = $1 RETURNING ${COLUMNS}`,
-        [key, p.name ?? null, p.icon ?? null],
+        `UPDATE categories SET name = COALESCE($2, name), icon = COALESCE($3, icon), want = COALESCE($4, want)
+          WHERE key = $1 RETURNING ${COLUMNS}`,
+        [key, p.name ?? null, p.icon ?? null, p.want ?? null],
       )) as [CategoryDto[], number];
       return rows[0]!;
     });

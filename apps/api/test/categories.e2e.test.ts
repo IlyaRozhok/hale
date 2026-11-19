@@ -25,17 +25,17 @@ const api = {
 };
 
 const DEFAULTS = [
-  { key: "groceries", name: "Продукты", icon: "cart", system: false },
-  { key: "cafe", name: "Кафе и рестораны", icon: "coffee", system: false },
-  { key: "transport", name: "Транспорт", icon: "car", system: false },
-  { key: "subscriptions", name: "Подписки", icon: "repeat", system: false },
-  { key: "leisure", name: "Досуг", icon: "ticket", system: false },
-  { key: "health", name: "Здоровье", icon: "heart", system: false },
-  { key: "utilities", name: "Коммунальные", icon: "bolt", system: false },
-  { key: "telecom", name: "Связь", icon: "phone", system: false },
-  { key: "shopping", name: "Покупки", icon: "bag", system: false },
-  { key: "refund", name: "Возвраты", icon: "arrowIn", system: true },
-  { key: "uncategorized", name: "Без категории", icon: "circle", system: true },
+  { key: "groceries", name: "Продукты", icon: "cart", system: false, want: false },
+  { key: "cafe", name: "Кафе и рестораны", icon: "coffee", system: false, want: true },
+  { key: "transport", name: "Транспорт", icon: "car", system: false, want: false },
+  { key: "subscriptions", name: "Подписки", icon: "repeat", system: false, want: true },
+  { key: "leisure", name: "Досуг", icon: "ticket", system: false, want: true },
+  { key: "health", name: "Здоровье", icon: "heart", system: false, want: false },
+  { key: "utilities", name: "Коммунальные", icon: "bolt", system: false, want: false },
+  { key: "telecom", name: "Связь", icon: "phone", system: false, want: false },
+  { key: "shopping", name: "Покупки", icon: "bag", system: false, want: true },
+  { key: "refund", name: "Возвраты", icon: "arrowIn", system: true, want: null },
+  { key: "uncategorized", name: "Без категории", icon: "circle", system: true, want: null },
 ];
 const keys = async (): Promise<string[]> => ((await api.get("/categories").expect(200)).body as { key: string }[]).map((c) => c.key);
 
@@ -57,8 +57,8 @@ beforeEach(async () => {
   await ds.query(`TRUNCATE jobs, rules, transactions, accounts, cash_answers RESTART IDENTITY CASCADE`);
   await ds.query(`TRUNCATE categories`);
   for (const c of seeded) {
-    await ds.query(`INSERT INTO categories (id, key, name, icon, position, system, deleted_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [
-      c.id, c.key, c.name, c.icon, c.position, c.system, c.deleted_at,
+    await ds.query(`INSERT INTO categories (id, key, name, icon, position, system, deleted_at, want) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [
+      c.id, c.key, c.name, c.icon, c.position, c.system, c.deleted_at, c.want,
     ]);
   }
   await ds.query(`UPDATE settings SET cash_start=NULL, cash_started_at=NULL, cash_counted_at=NULL`);
@@ -125,8 +125,8 @@ describe("changing", () => {
   it("renames a category and changes its icon; its key and its rows stay", async () => {
     const t = await tx(await account(), "cafe");
     const res = await api.patch("/categories/cafe", { name: "Кофе" }).expect(200);
-    expect(res.body).toEqual({ key: "cafe", name: "Кофе", icon: "coffee", system: false });
-    expect((await api.patch("/categories/cafe", { icon: "star" }).expect(200)).body).toEqual({ key: "cafe", name: "Кофе", icon: "star", system: false });
+    expect(res.body).toEqual({ key: "cafe", name: "Кофе", icon: "coffee", system: false, want: true });
+    expect((await api.patch("/categories/cafe", { icon: "star" }).expect(200)).body).toEqual({ key: "cafe", name: "Кофе", icon: "star", system: false, want: true });
     expect(await categoryOf(t)).toBe("cafe");
     expect(await keys()).toEqual(DEFAULTS.map((c) => c.key));
   });
@@ -149,6 +149,32 @@ describe("changing", () => {
     await api.patch("/categories/groceries", {}).expect(400);
     await api.patch("/categories/groceries", { name: "" }).expect(400);
     await api.patch("/categories/groceries", { icon: "nope" }).expect(400);
+  });
+});
+
+describe("«нужное» и «желаемое» (В6)", () => {
+  it("a new category is «нужное» unless the owner says otherwise", async () => {
+    expect((await api.post("/categories", { name: "Кот", icon: "paw" }).expect(201)).body).toMatchObject({ name: "Кот", want: false });
+    expect((await api.post("/categories", { name: "Хобби", icon: "star", want: true }).expect(201)).body).toMatchObject({ name: "Хобби", want: true });
+    await api.post("/categories", { name: "Кот 2", icon: "paw", want: null }).expect(400);
+    await api.post("/categories", { name: "Кот 2", icon: "paw", want: "yes" }).expect(400);
+  });
+
+  it("moves a category to the other side alone or with a new name; its rows and their own choice stay", async () => {
+    const t = await tx(await account(), "cafe");
+    await ds.query(`UPDATE transactions SET want_override = true WHERE id = $1`, [t]);
+    expect((await api.patch("/categories/cafe", { want: false }).expect(200)).body).toEqual({ key: "cafe", name: "Кафе и рестораны", icon: "coffee", system: false, want: false });
+    expect((await api.patch("/categories/groceries", { name: "Еда", want: true }).expect(200)).body).toMatchObject({ name: "Еда", want: true });
+    expect((await api.patch("/categories/groceries", { icon: "star" }).expect(200)).body).toMatchObject({ icon: "star", want: true });
+    expect(await ds.query(`SELECT category, want_override FROM transactions WHERE id = $1`, [t])).toEqual([{ category: "cafe", want_override: true }]);
+  });
+
+  it("gives no side to «Возвраты» and «Без категории», and refuses a malformed one", async () => {
+    await api.patch("/categories/refund", { want: true }).expect(422);
+    await api.patch("/categories/uncategorized", { want: false }).expect(422);
+    await api.patch("/categories/cafe", { want: null }).expect(400);
+    await api.patch("/categories/cafe", { want: "true" }).expect(400);
+    expect((await api.get("/categories").expect(200)).body).toEqual(DEFAULTS);
   });
 });
 

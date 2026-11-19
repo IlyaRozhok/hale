@@ -241,7 +241,7 @@ describe("GET /transactions", () => {
       [
         "accountKind", "amount", "cashAnswer", "cashOut", "amountUah", "category", "counterKey", "counterName", "currency", "description",
         "creditPart", "fxRate", "hold", "id", "inLimit", "localDate", "manual", "needsLabel", "occurredAt", "paymentName", "recipientLabel",
-        "type", "exchange",
+        "type", "exchange", "want", "wantOverride",
       ].sort(),
     );
     expect(x).toMatchObject({ accountKind: "fop", currency: "UAH", counterName: "Ivan P", hold: false, manual: false });
@@ -411,6 +411,62 @@ describe("PATCH /transactions/:id", () => {
     const a = await account();
     const t = await tx(a, { type: null, source: null });
     await api.patch(`/transactions/${t}`, { category: "taxi", applyToSimilar: true }).expect(422);
+  });
+});
+
+describe("«нужное» и «желаемое» of one operation (В6)", () => {
+  it("each row says its side: the category's, or its own when the owner chose one", async () => {
+    const a = await account();
+    const cafe = await tx(a, { category: "cafe", description: "Cafe" });
+    const food = await tx(a, { category: "groceries", description: "Food" });
+    const refund = await tx(a, { category: "refund", amount: 5_000, description: "Back" });
+    const person = await tx(a, { type: "person_transfer", category: "people", description: "Ivan" });
+    await ds.query(`UPDATE transactions SET want_override = true WHERE id = $1`, [food]);
+    const items = (await api.get("/transactions").expect(200)).body.items as { id: number; want: boolean | null; wantOverride: boolean | null }[];
+    const side = (id: number) => items.find((i) => i.id === id)!;
+    expect(side(cafe)).toMatchObject({ want: true, wantOverride: null });
+    expect(side(food)).toMatchObject({ want: true, wantOverride: true });
+    expect(side(refund)).toMatchObject({ want: null, wantOverride: null });
+    expect(side(person)).toMatchObject({ want: null, wantOverride: null });
+  });
+
+  it("moves one purchase to the other side and back to its category's, changing nothing else", async () => {
+    const a = await account();
+    const t = await tx(a, { category: "shopping", needsLabel: true });
+    const other = await tx(a, { category: "shopping" });
+    const res = await api.patch(`/transactions/${t}`, { want: false }).expect(200);
+    expect(res.body).toMatchObject({ updated: 1, transaction: { id: t, category: "shopping", want: false, wantOverride: false } });
+    expect(await row(`SELECT type, category, type_source, needs_label, want_override FROM transactions WHERE id=$1`, [t])).toEqual({
+      type: "spend", category: "shopping", type_source: "auto", needs_label: true, want_override: false,
+    });
+    expect(await row(`SELECT want_override FROM transactions WHERE id=$1`, [other])).toEqual({ want_override: null });
+    expect((await api.patch(`/transactions/${t}`, { want: null }).expect(200)).body.transaction).toMatchObject({ want: true, wantOverride: null });
+  });
+
+  it("takes a side together with a new category, checked against the new one", async () => {
+    const a = await account();
+    const t = await tx(a, { category: "refund", amount: -3_000 });
+    await api.patch(`/transactions/${t}`, { want: true }).expect(422);
+    const res = await api.patch(`/transactions/${t}`, { category: "groceries", want: true }).expect(200);
+    expect(res.body.transaction).toMatchObject({ category: "groceries", want: true, wantOverride: true });
+    await api.patch(`/transactions/${t}`, { category: "uncategorized", want: false }).expect(422);
+    expect(await row(`SELECT category, want_override FROM transactions WHERE id=$1`, [t])).toEqual({ category: "groceries", want_override: true });
+  });
+
+  it("refuses a side for what is no purchase in a category with a side, and with applyToSimilar", async () => {
+    const a = await account();
+    const person = await tx(a, { type: "person_transfer", category: "people" });
+    const empty = await tx(a, { category: null });
+    const cafe = await tx(a, { category: "cafe" });
+    await api.patch(`/transactions/${person}`, { want: true }).expect(422);
+    await api.patch(`/transactions/${empty}`, { want: true }).expect(422);
+    await api.patch(`/transactions/${cafe}`, { type: "obligation", want: true }).expect(422);
+    await api.patch(`/transactions/${cafe}`, { want: false, applyToSimilar: true }).expect(400);
+    await api.patch(`/transactions/${cafe}`, { want: "no" }).expect(400);
+    const cash = await tx(await account("cash"), { category: "cafe" });
+    await api.patch(`/transactions/${cash}`, { want: false }).expect(422);
+    expect(await ds.query(`SELECT DISTINCT want_override FROM transactions`)).toEqual([{ want_override: null }]);
+    expect(await row(`SELECT type FROM transactions WHERE id=$1`, [cafe])).toEqual({ type: "spend" });
   });
 });
 
@@ -824,6 +880,17 @@ describe("filters by category and period", () => {
     expect((await api.get("/transactions").expect(200)).body.summary).toBeNull();
     await api.get("/transactions?from=2026-11-10&to=2026-11-01").expect(400);
     await api.get("/transactions?from=10.11.2026").expect(400);
+  });
+
+  it("filters to «желаемое» with a summary, and takes only want=true (В6)", async () => {
+    const a = await account();
+    await tx(a, { description: "Cafe", amount: -10_000, category: "cafe" });
+    await tx(a, { description: "Shop", amount: -5_000, category: "groceries" });
+    const res = await api.get("/transactions?want=true").expect(200);
+    expect(res.body.items.map((i: { description: string }) => i.description)).toEqual(["Cafe"]);
+    expect(res.body.summary).toEqual({ total: -10_000, count: 1 });
+    await api.get("/transactions?want=false").expect(400);
+    await api.get("/transactions?want=yes").expect(400);
   });
 });
 

@@ -120,7 +120,44 @@ describe("GET /insights/month", () => {
       previousOtherPayments: 0,
       // No place here charges about the same sum about monthly (В4).
       subscriptions: { monthly: 0, items: [] },
+      // «Желаемое» (В6): the cafe after its refund and the shopping; not the jar, not the subscription without a
+      // hryvnia amount, not «Возвраты», the transfer or «Без категории». October: the cafe.
+      wanted: 9_000 - 2_000 + 30_000,
+      previousWanted: 4_000,
     });
+  });
+
+  it("names the part of `spent` that went on «желаемое», by the category's side or the operation's own; «Операции» with want=true list exactly those rows (В6)", async () => {
+    const black = (await ds.query(`SELECT id FROM accounts WHERE kind='black'`))[0].id as number;
+    await ds.query(`INSERT INTO categories (key, name, icon, position, want) VALUES ('c_hobby', 'Хобби', 'star', 20, true) ON CONFLICT (key) DO NOTHING`);
+    await tx(black, "2026-11-14T10:00:00Z", -3_000, "spend", "c_hobby"); // an own category on «желаемое»
+    // The operation's own choice wins over its category's, both ways.
+    await ds.query(`UPDATE transactions SET want_override = true WHERE category = 'groceries' AND amount = -40000`);
+    await ds.query(`UPDATE transactions SET want_override = false WHERE category = 'shopping' AND local_date = '2026-11-05'`);
+    // A choice left on a row that is no purchase, or in a system category, puts it on neither side.
+    await ds.query(`UPDATE transactions SET want_override = true WHERE type = 'person_transfer' OR category IN ('refund') OR category IS NULL`);
+
+    const { body } = await get("/insights/month").expect(200);
+    expect(insightsMonthDto.safeParse(body).success).toBe(true);
+    expect(body.wanted).toBe(40_000 + 9_000 - 2_000 + 3_000);
+    expect(body.previousWanted).toBe(4_000);
+    expect(body.spent).toBe(await limitSpent("2026-11-01", body.through)); // a part of «потрачено», not added to it
+
+    const list = async (q: string) => (await get(`/transactions?want=true&limit=200&${q}`).expect(200)).body;
+    const current = await list("from=2026-11-01&to=2026-11-16");
+    expect(current.summary).toEqual({ total: -body.wanted, count: 4 });
+    expect(current.items.map((i: { amount: number }) => i.amount)).toEqual([-3_000, 2_000, -9_000, -40_000]);
+    expect(current.items.every((i: { inLimit: boolean; want: boolean }) => i.inLimit && i.want)).toBe(true);
+    expect((await list("group=spend&from=2026-11-01&to=2026-11-16")).summary).toEqual(current.summary);
+    expect((await list("from=2026-10-01&to=2026-10-16")).summary).toEqual({ total: -4_000, count: 1 });
+  });
+
+  it("never names a negative «желаемое»: a refund larger than the purchases makes it zero, while «Операции» show the sum as it is (В6)", async () => {
+    const black = (await ds.query(`SELECT id FROM accounts WHERE kind='black'`))[0].id as number;
+    await tx(black, "2026-09-10T10:00:00Z", 20_000, "spend", "leisure"); // a refund bigger than September's leisure
+    const { body } = await get("/insights/month?month=2026-09").expect(200);
+    expect(body.wanted).toBe(0);
+    expect((await get(`/transactions?want=true&from=2026-09-01&to=2026-09-30`).expect(200)).body.summary).toEqual({ total: 12_000, count: 2 });
   });
 
   it("sums the payments outside the limit — planned payments, taxes, debts — over the same stretches, apart from `spent` (В2а)", async () => {
@@ -344,7 +381,7 @@ describe("GET /insights/month", () => {
 
   it("answers a month with nothing in it with zeros", async () => {
     const { body } = await get("/insights/month?month=2025-01").expect(200);
-    expect(body).toEqual({ month: "2025-01", through: "2025-01-31", previous: { from: "2024-12-01", to: "2024-12-31" }, spent: 0, previousSpent: 0, categories: [], places: [], otherPayments: 0, previousOtherPayments: 0, subscriptions: { monthly: 0, items: [] } });
+    expect(body).toEqual({ month: "2025-01", through: "2025-01-31", previous: { from: "2024-12-01", to: "2024-12-31" }, spent: 0, previousSpent: 0, categories: [], places: [], otherPayments: 0, previousOtherPayments: 0, subscriptions: { monthly: 0, items: [] }, wanted: 0, previousWanted: 0 });
   });
 
   it("refuses a malformed month and a month in the future", async () => {

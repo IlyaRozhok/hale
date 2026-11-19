@@ -14,6 +14,7 @@ import {
 import { outOfLimitPaymentSql } from "../domain/ledger";
 import { type ChargeRow, findSubscriptions, subscriptionsFrom } from "../domain/subscriptions";
 import { kyivDate } from "../domain/money";
+import { type WantedRow, buildWanted, wantedSql } from "../domain/want";
 import { Clock } from "../time/clock";
 import { counterKeySql } from "../transactions/counter-key";
 import { IN_LIMIT } from "../transactions/day-totals";
@@ -40,6 +41,7 @@ export const SUBSCRIPTION_CHARGES_SQL = `SELECT key, first_value(name) OVER (PAR
  * Task В3: the month's largest places over the same stretch, by the counterparty key the rest of the app uses.
  * Task В2а: what the payments outside the limit (outOfLimitPaymentSql) took over the same two stretches.
  * Task В4: the subscriptions as of the month's last counted day, from the purchases at places (AT_PLACE) before it.
+ * Task В6: the part of `spent` on «желаемое» (wantedSql, domain/want.ts) over the same two stretches.
  */
 @Injectable()
 export class InsightsService {
@@ -88,11 +90,20 @@ export class InsightsService {
     )) as OtherPaymentsRow[];
     // Task В4: every purchase at a place over the months looked at, each named as «Операции» names its place's latest row.
     const charges = (await this.ds.query(SUBSCRIPTION_CHARGES_SQL, [subscriptionsFrom(w.to), w.to])) as ChargeRow[];
+    // Task В6: the part of `spent` on «желаемое» over the same two stretches, signed as `spent` is.
+    const wanted = (await this.ds.query(
+      `SELECT CASE WHEN t.local_date >= $1::date THEN 'current' ELSE 'previous' END AS period, SUM(-t.amount_uah)::float8 AS spent
+         FROM transactions t JOIN accounts a ON a.id = t.account_id
+        WHERE ${wantedSql("t", "a")} AND (t.local_date BETWEEN $1 AND $2 OR t.local_date BETWEEN $3 AND $4)
+        GROUP BY 1`,
+      [w.from, w.to, w.previousFrom, w.previousTo],
+    )) as WantedRow[];
     return {
       ...buildInsights(w, rows),
       places: buildPlaces(places, history[0]?.d ?? null, w.month),
       ...buildOtherPayments(other),
       subscriptions: findSubscriptions(charges, w.to),
+      ...buildWanted(wanted),
     };
   }
 }

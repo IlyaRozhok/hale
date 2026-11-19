@@ -37,6 +37,7 @@ import { CashCardAnsweredAt1796342400000 } from "./migrations/0033-cash-card-ans
 import { CashCardAnswerFrom1796428800000 } from "./migrations/0034-cash-card-answer-from";
 import { Categories1796515200000 } from "./migrations/0035-categories";
 import { Observations1796601600000 } from "./migrations/0036-observations";
+import { Want1796688000000 } from "./migrations/0037-want";
 
 export const migrations = [
   Init1793577600000,
@@ -75,6 +76,7 @@ export const migrations = [
   CashCardAnswerFrom1796428800000,
   Categories1796515200000,
   Observations1796601600000,
+  Want1796688000000,
 ];
 
 export function createDataSource(url: string): DataSource {

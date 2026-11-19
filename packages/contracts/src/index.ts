@@ -488,6 +488,11 @@ export const transactionsQuery = z
     /** Kyiv calendar days, both inclusive. */
     from: isoDate.optional(),
     to: isoDate.optional(),
+    /**
+     * Task В6: only "true" — the rows that make up «желаемое» in «Итоги»: purchases in the limit on the «желаемое»
+     * side. With a period, the summary's total is −`wanted` of «Итоги» for those days before «Итоги» clamp it at zero.
+     */
+    want: z.enum(["true"]).transform(() => true as const).optional(),
   })
   .strict()
   .refine((v) => !v.from || !v.to || v.from <= v.to, "from must not be after to");
@@ -497,10 +502,17 @@ export const transactionPatch = z
   .object({
     type: txType.optional(),
     category: z.string().trim().min(1).max(64).optional(),
+    /**
+     * Task В6: «нужное» (false) or «желаемое» (true) for this one purchase; null gives it back to its category's side.
+     * Only for a purchase in a category with a side (422 otherwise), checked after `type` and `category` apply. Never
+     * with applyToSimilar: the choice is for one operation, a whole category moves in its own window.
+     */
+    want: z.boolean().nullable().optional(),
     applyToSimilar: z.boolean().default(false),
   })
   .strict()
-  .refine((v) => v.type !== undefined || v.category !== undefined, "type or category is required");
+  .refine((v) => v.type !== undefined || v.category !== undefined || v.want !== undefined, "type, category or want is required")
+  .refine((v) => v.want === undefined || !v.applyToSimilar, { message: "want is for one operation, not with applyToSimilar", path: ["want"] });
 export type TransactionPatch = z.infer<typeof transactionPatch>;
 
 /** shared_budget, help and obligation are earlier answers: still understood, no longer offered. */
@@ -582,6 +594,14 @@ export interface TransactionDto {
    * other row. Absent from an older server.
    */
   exchange?: CashExchangeDto | null;
+  /**
+   * Task В6: the side of this row — false «нужное», true «желаемое» — its own when `wantOverride` is set, else its
+   * category's; null for a row on neither side (no purchase, or a category without a side: «Возвраты», «Без
+   * категории», …). Absent from an older server.
+   */
+  want?: boolean | null;
+  /** Task В6: the owner's choice for this one row, null when it follows its category. Absent from an older server. */
+  wantOverride?: boolean | null;
 }
 
 export interface CashExchangeDto {
@@ -677,15 +697,20 @@ export interface CategoryDto {
   name: string;
   icon: CategoryIcon;
   system: boolean;
+  /**
+   * Task В6: false «нужное», true «желаемое»; null for a system category, which is on neither side. Absent from an
+   * older server.
+   */
+  want?: boolean | null;
 }
-/** POST /categories: a new category, put at the end. */
-export const categoryInput = z.object({ name: categoryName, icon: categoryIcon }).strict();
+/** POST /categories: a new category, put at the end; «нужное» unless `want` says otherwise (В6). */
+export const categoryInput = z.object({ name: categoryName, icon: categoryIcon, want: z.boolean().optional() }).strict();
 export type CategoryInput = z.infer<typeof categoryInput>;
-/** PATCH /categories/:key. A system category refuses a new name (422). */
+/** PATCH /categories/:key. A system category refuses a new name and a side (422). */
 export const categoryPatch = z
-  .object({ name: categoryName.optional(), icon: categoryIcon.optional() })
+  .object({ name: categoryName.optional(), icon: categoryIcon.optional(), want: z.boolean().optional() })
   .strict()
-  .refine((v) => v.name !== undefined || v.icon !== undefined, "name or icon is required");
+  .refine((v) => v.name !== undefined || v.icon !== undefined || v.want !== undefined, "name, icon or want is required");
 export type CategoryPatch = z.infer<typeof categoryPatch>;
 /** PUT /categories/order: every live key exactly once, in the new order (422 otherwise). */
 export const categoryOrder = z.object({ keys: z.array(categoryKey).min(1).max(500) }).strict();
@@ -877,6 +902,14 @@ export const insightsMonthDto = z
       })
       .strict()
       .optional(),
+    /**
+     * Task В6, optional (an older server does not send it): the part of `spent` that went on «желаемое» — purchases
+     * whose own side, else their category's, is «желаемое»; refunds there lower it, «Возвраты» and «Без категории»
+     * are on neither side. Never below zero, and never added to `spent`. «Операции» with want=true list its rows.
+     */
+    wanted: money.refine((n) => n >= 0, "not below zero").optional(),
+    /** The same over the stretch of the month before (`previous`). */
+    previousWanted: money.refine((n) => n >= 0, "not below zero").optional(),
   })
   .strict();
 export type InsightsMonthDto = z.infer<typeof insightsMonthDto>;
