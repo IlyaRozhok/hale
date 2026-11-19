@@ -14,6 +14,7 @@ import { HryvniaLegAmounts1796256000000 } from "../src/db/migrations/0032-hryvni
 import { CashCardAnsweredAt1796342400000 } from "../src/db/migrations/0033-cash-card-answered-at";
 import { CashCardAnswerFrom1796428800000 } from "../src/db/migrations/0034-cash-card-answer-from";
 import { Categories1796515200000 } from "../src/db/migrations/0035-categories";
+import { Observations1796601600000 } from "../src/db/migrations/0036-observations";
 import { CLASSIFIER_VERSION } from "../src/domain/classify";
 import { JobRunner } from "../src/mono/jobs/job-runner";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
@@ -25,7 +26,7 @@ const TABLES = [
   "scheduled_payments", "recurring_payments", "manual_balances", "loans", "settings", "bridge_plans",
   "daily_snapshots", "fx_rates",
       "goals", "jobs", "devices", "notifications_log", "loan_repayments", "payment_links", "cash_cards", "payment_dismissals", "cash_answers",
-  "ledger_checks", "cash_exchanges", "recurring_skips", "categories",
+  "ledger_checks", "cash_exchanges", "recurring_skips", "categories", "observations_shown", "observation_dismissals",
 ];
 
 async function listTables(url: string): Promise<string[]> {
@@ -497,6 +498,40 @@ describe("migrations", () => {
 
     for (let i = migrations.indexOf(Categories1796515200000); i < migrations.length; i++) await ds.undoLastMigration();
     expect(await ds.query(`SELECT to_regclass('categories') AS t`)).toEqual([{ t: null }]);
+    expect(await ds.query(rows)).toEqual(was);
+    await ds.destroy();
+  });
+
+  it("0036 adds two empty tables for observations and changes no existing row (В7)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(Observations1796601600000)) });
+    await before.initialize();
+    await before.runMigrations();
+    const account = (await before.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ('a','black','UAH',0) RETURNING id`))[0].id;
+    await before.query(
+      `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, amount, amount_uah, type, category, raw)
+       VALUES ('t1',$1,'2026-11-08T10:00:00Z','2026-11-08',-100,-100,'spend','cafe','{}')`,
+      [account],
+    );
+    const rows = `SELECT external_id, category, amount_uah FROM transactions ORDER BY id`;
+    const was = await before.query(rows);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    expect(await ds.query(`SELECT * FROM observations_shown`)).toEqual([]);
+    expect(await ds.query(`SELECT * FROM observation_dismissals`)).toEqual([]);
+    expect(await ds.query(rows)).toEqual(was);
+    // One a day; one dismissal per kind and category, the subscriptions kind without a category included.
+    await ds.query(`INSERT INTO observations_shown (local_date, kind, category, observation) VALUES ('2026-11-19','spike','cafe','{}')`);
+    await expect(ds.query(`INSERT INTO observations_shown (local_date, kind, category, observation) VALUES ('2026-11-19','subscriptions',NULL,'{}')`)).rejects.toThrow();
+    await ds.query(`INSERT INTO observation_dismissals (kind, category) VALUES ('subscriptions', NULL), ('spike', 'cafe')`);
+    await expect(ds.query(`INSERT INTO observation_dismissals (kind, category) VALUES ('subscriptions', NULL)`)).rejects.toThrow();
+    await expect(ds.query(`INSERT INTO observation_dismissals (kind, category) VALUES ('other', NULL)`)).rejects.toThrow();
+
+    for (let i = migrations.indexOf(Observations1796601600000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT to_regclass('observations_shown') AS a, to_regclass('observation_dismissals') AS b`)).toEqual([{ a: null, b: null }]);
     expect(await ds.query(rows)).toEqual(was);
     await ds.destroy();
   });

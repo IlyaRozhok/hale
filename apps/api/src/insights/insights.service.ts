@@ -25,6 +25,16 @@ import { IN_LIMIT } from "../transactions/day-totals";
 const AT_PLACE = `${IN_LIMIT} AND t.type = 'spend' AND a.kind <> 'cash'`;
 
 /**
+ * Task В4: every purchase at a place between $1 and $2, each named as «Операции» names its place's latest row; what
+ * findSubscriptions reads. Task В7 reads the same rows for the subscriptions due before the income.
+ */
+export const SUBSCRIPTION_CHARGES_SQL = `SELECT key, first_value(name) OVER (PARTITION BY key ORDER BY occurred_at DESC, id DESC) AS name, date, amount
+         FROM (SELECT ${counterKeySql("t")} AS key, COALESCE(NULLIF(t.counter_name,''), t.description) AS name,
+                      t.local_date::text AS date, (-t.amount_uah)::float8 AS amount, t.occurred_at, t.id
+                 FROM transactions t JOIN accounts a ON a.id = t.account_id
+                WHERE ${AT_PLACE} AND t.amount_uah < 0 AND t.local_date BETWEEN $1 AND $2) p`;
+
+/**
  * Task В1: a month's spending by category against the same days of the month before. Spending is the limit's one
  * definition (IN_LIMIT, from domain/ledger.ts), signed as spentSql signs it: refunds lower their category's sum.
  * Task В3: the month's largest places over the same stretch, by the counterparty key the rest of the app uses.
@@ -77,14 +87,7 @@ export class InsightsService {
       [w.from, w.to, w.previousFrom, w.previousTo],
     )) as OtherPaymentsRow[];
     // Task В4: every purchase at a place over the months looked at, each named as «Операции» names its place's latest row.
-    const charges = (await this.ds.query(
-      `SELECT key, first_value(name) OVER (PARTITION BY key ORDER BY occurred_at DESC, id DESC) AS name, date, amount
-         FROM (SELECT ${counterKeySql("t")} AS key, COALESCE(NULLIF(t.counter_name,''), t.description) AS name,
-                      t.local_date::text AS date, (-t.amount_uah)::float8 AS amount, t.occurred_at, t.id
-                 FROM transactions t JOIN accounts a ON a.id = t.account_id
-                WHERE ${AT_PLACE} AND t.amount_uah < 0 AND t.local_date BETWEEN $1 AND $2) p`,
-      [subscriptionsFrom(w.to), w.to],
-    )) as ChargeRow[];
+    const charges = (await this.ds.query(SUBSCRIPTION_CHARGES_SQL, [subscriptionsFrom(w.to), w.to])) as ChargeRow[];
     return {
       ...buildInsights(w, rows),
       places: buildPlaces(places, history[0]?.d ?? null, w.month),

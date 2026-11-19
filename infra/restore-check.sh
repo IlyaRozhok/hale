@@ -22,7 +22,7 @@ set -euo pipefail
 PSQL=${PSQL:-psql}
 RCLONE=${RCLONE:-rclone}
 MAX_AGE_HOURS=${MAX_AGE_HOURS:-36}
-DEFAULT_TABLES="accounts transactions rules expected_incomes income_events scheduled_payments recurring_payments manual_balances loans loan_repayments settings bridge_plans daily_snapshots fx_rates goals jobs devices notifications_log payment_links cash_cards payment_dismissals cash_answers ledger_checks cash_exchanges recurring_skips categories"
+DEFAULT_TABLES="accounts transactions rules expected_incomes income_events scheduled_payments recurring_payments manual_balances loans loan_repayments settings bridge_plans daily_snapshots fx_rates goals jobs devices notifications_log payment_links cash_cards payment_dismissals cash_answers ledger_checks cash_exchanges recurring_skips categories observations_shown observation_dismissals"
 EXPECTED_TABLES=${EXPECTED_TABLES:-$DEFAULT_TABLES}
 
 fail() { echo "restore-check FAILED: $*" >&2; exit 1; }
