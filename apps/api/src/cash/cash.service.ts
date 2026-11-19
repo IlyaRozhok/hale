@@ -13,6 +13,7 @@ import type {
 } from "@hale/contracts";
 import { randomUUID } from "node:crypto";
 import { DataSource, type EntityManager } from "typeorm";
+import { requireLiveCategory } from "../categories/live";
 import { isAnswerableDeposit } from "../domain/cash-answer";
 import { kyivDate } from "../domain/money";
 import { paymentCover } from "../domain/payment-cover";
@@ -108,6 +109,8 @@ export class CashService {
     const date = this.checkDate(p.date);
     const id = await this.ds.transaction(async (m) => {
       const account = await this.startedAccount(m);
+      // A purchase's category is a live one, own ones included; an unknown or deleted one is refused (В5).
+      if (p.kind === "spend") await requireLiveCategory(m, p.category!);
       const id = await this.insert(m, account, {
         type: TYPE[p.kind],
         amount: signed(p.kind, p.amount),
@@ -151,6 +154,7 @@ export class CashService {
       if (kind === "exchange" && usdc === undefined) throw new UnprocessableEntityException("an exchange needs usdc");
       const category = kind === "spend" ? (p.category ?? (row.type === "spend" ? row.category : null)) : CATEGORY_OF[kind];
       if (!category) throw new UnprocessableEntityException("a purchase needs a category");
+      if (kind === "spend" && p.category !== undefined) await requireLiveCategory(m, p.category);
       const op: Row = {
         type: TYPE[kind],
         amount: signed(kind, p.amount ?? Math.abs(row.amount)),

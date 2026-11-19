@@ -21,6 +21,7 @@ import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory 
 import { binanceOnChange, cashAnswerOf } from "../domain/cash-answer";
 import { PlanService } from "../plan/plan.service";
 import { LimitService } from "../today/limit.service";
+import { requireLiveCategory } from "../categories/live";
 import { type CashAnswerRow, binanceEvent, cashAnswerColumnsSql, cashAnswerFacts, undoAnswer } from "../cash/cash-answer";
 import { exchangeUsdcSql } from "../cash/cash-exchange";
 import { cardCashSql, cardTransferSql } from "../cash/wallet";
@@ -253,6 +254,8 @@ export class TransactionsService {
     if (p.applyToSimilar && !ruleType) throw new UnprocessableEntityException("the row has no type to make a rule from");
 
     const changed = await this.ds.transaction(async (m) => {
+      // Only a live category: an unknown or deleted one is refused (В5).
+      if (p.category !== undefined) await requireLiveCategory(m, p.category);
       let ruleId: number | null = null;
       if (p.applyToSimilar && ruleType) {
         // A name that is short or a generic bank text would catch strangers: rows are still

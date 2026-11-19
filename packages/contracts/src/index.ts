@@ -651,12 +651,59 @@ export interface RuleDto {
   count: number;
 }
 
+// --- categories (В5) ----------------------------------------------------------------
+/**
+ * The icons a category can have: one-colour line icons from a fixed set, no emoji. The first eleven are the
+ * default categories' (the app's icon names); the rest are offered for the owner's own categories.
+ */
+export const CATEGORY_ICONS = [
+  "cart", "coffee", "car", "repeat", "ticket", "heart", "bolt", "phone", "bag", "arrowIn", "circle",
+  "home", "gift", "book", "plane", "paw", "dumbbell", "user", "star", "shirt", "tool", "school", "music", "pill", "baby",
+] as const;
+export const categoryIcon = z.enum(CATEGORY_ICONS);
+export type CategoryIcon = z.infer<typeof categoryIcon>;
+/** What rows, rules and cash operations store. A default category's key is today's value (groceries, cafe, …). */
+export const categoryKey = z.string().trim().min(1).max(64);
+/** Unique among live categories, ignoring case. */
+export const categoryName = z.string().trim().min(1).max(40);
+
+/**
+ * GET /categories: live categories in the owner's order (an older server has no such endpoint: 404). `system`:
+ * «Возвраты» and «Без категории», which are not renamed or deleted. Rows of other types (taxes, transfers, …) store
+ * keys that are not in this list.
+ */
+export interface CategoryDto {
+  key: string;
+  name: string;
+  icon: CategoryIcon;
+  system: boolean;
+}
+/** POST /categories: a new category, put at the end. */
+export const categoryInput = z.object({ name: categoryName, icon: categoryIcon }).strict();
+export type CategoryInput = z.infer<typeof categoryInput>;
+/** PATCH /categories/:key. A system category refuses a new name (422). */
+export const categoryPatch = z
+  .object({ name: categoryName.optional(), icon: categoryIcon.optional() })
+  .strict()
+  .refine((v) => v.name !== undefined || v.icon !== undefined, "name or icon is required");
+export type CategoryPatch = z.infer<typeof categoryPatch>;
+/** PUT /categories/order: every live key exactly once, in the new order (422 otherwise). */
+export const categoryOrder = z.object({ keys: z.array(categoryKey).min(1).max(500) }).strict();
+export type CategoryOrder = z.infer<typeof categoryOrder>;
+/** DELETE /categories/:key: the operations moved to «Без категории». */
+export interface CategoryDeletedDto {
+  deleted: true;
+  moved: number;
+}
+
 // --- cash wallet -------------------------------------------------------------------
-/** Categories a cash purchase can have. */
-export const cashCategory = z.enum([
-  "groceries", "cafe", "transport", "subscriptions", "leisure", "health", "utilities", "telecom", "shopping", "uncategorized",
-]);
-export type CashCategory = z.infer<typeof cashCategory>;
+/**
+ * A cash purchase's category: any live category key (В5), own ones included; the server refuses an unknown or
+ * deleted one with 400. The type keeps the default keys an older app offers.
+ */
+export const cashCategory = categoryKey;
+export type CashCategory =
+  | "groceries" | "cafe" | "transport" | "subscriptions" | "leisure" | "health" | "utilities" | "telecom" | "shopping" | "uncategorized";
 /**
  * spend: a purchase, against the limit; received: cash came in; own_out: cash went to one's own other money;
  * exchange: USDC from Binance exchanged for cash (task Б22), with `usdc` the dollars given. An older server

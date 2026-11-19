@@ -1275,7 +1275,7 @@ describe("changing the answer to «Откуда наличные?» (Б21)", () 
     const { c, ev, deposit } = await setup();
     await answer(deposit, "binance").expect(201);
     // Only the category, or the same type: the answer stays.
-    await api.patch(`/transactions/${deposit}`, { category: "own" }).expect(200);
+    await api.patch(`/transactions/${deposit}`, { category: "groceries" }).expect(200);
     await api.patch(`/transactions/${deposit}`, { type: "own_transfer" }).expect(200);
     expect(await binance()).toBe(500_000 - TAKEN);
 

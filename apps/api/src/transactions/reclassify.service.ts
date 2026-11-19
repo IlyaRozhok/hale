@@ -9,6 +9,8 @@ import {
   type ClassifyRule,
   type TxType,
 } from "../domain/classify";
+import { deletedCategories } from "../categories/live";
+import { storedCategory } from "../domain/categories";
 import { exactPartnerSql, isOwnPair, OWN_PAIR_WINDOW_S, type PairLeg } from "../domain/own-pair";
 import { JobRunner } from "../mono/jobs/job-runner";
 import { PlanService } from "../plan/plan.service";
@@ -125,6 +127,7 @@ export class ReclassifyService implements OnModuleInit, OnApplicationBootstrap {
   async reclassifyIds(ids: readonly number[]): Promise<number> {
     if (ids.length === 0) return 0;
     const ctx = await this.loadContext();
+    const deleted = await deletedCategories(this.ds);
     // In the order they happened: a loan opens before the repayment that closes it.
     const all = (
       (await this.ds.query(`SELECT id FROM transactions WHERE id = ANY($1) ORDER BY occurred_at, id`, [
@@ -157,7 +160,7 @@ export class ReclassifyService implements OnModuleInit, OnApplicationBootstrap {
           },
           ctx,
         );
-        const args = [r.id, out.type, out.category, out.source === "owner" ? "rule" : out.source, out.needsLabel];
+        const args = [r.id, out.type, storedCategory(out.category, deleted), out.source === "owner" ? "rule" : out.source, out.needsLabel];
         const update = (q: DataSource | EntityManager) =>
           q.query(
             `UPDATE transactions SET type=$2, category=$3, type_source=$4, needs_label=$5
