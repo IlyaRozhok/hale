@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { TransactionDto } from "@hale/contracts";
 import { amountTone, formatDollars, formatOriginal, formatSignedMoney, formatSignedOriginal } from "../format";
-import { categoryLabel, typeLabel } from "../labels";
+import { categoryName, type CategoryList, typeLabel } from "../labels";
 import { categoryIcon } from "../categoryIcon";
 import { Icon } from "./Icon";
 
@@ -15,6 +15,8 @@ type Props = {
   last: boolean;
   /** Under «Траты»: a row the limit does not count gets a quiet note. An older server says nothing, so nothing is shown. */
   markOutsideLimit?: boolean;
+  /** The server's categories (В5) for the name and the badge; without them the built-in ones. */
+  categories?: CategoryList;
 };
 
 // One accent: money in is green, everything else plain.
@@ -22,15 +24,15 @@ const TONES = { expense: color.money.neutral, income: color.accent.signal, neutr
 const BADGE = 36;
 
 /** One operation: hryvnias first, the original currency noted. No money is calculated here. */
-export function TxRow({ tx, onPress, first, last, markOutsideLimit = false }: Props) {
+export function TxRow({ tx, onPress, first, last, markOutsideLimit = false, categories }: Props) {
   const foreign = tx.currency !== "UAH";
   const main = tx.amountUah !== null ? formatSignedMoney(tx.amountUah) : formatSignedOriginal(tx.amount, tx.currency);
   const title = tx.counterName ?? tx.description;
   // USDC exchanged for cash (task Б22): the dollars and the rate under the title, «свои» under the amount.
   const exchange = tx.exchange ? `${formatDollars(tx.exchange.usdc)} · курс ₴${tx.exchange.rate.toFixed(2)}` : null;
-  const kind = exchange ?? tx.paymentName ?? (tx.type === "spend" ? categoryLabel(tx.category) : typeLabel(tx.type));
+  const kind = exchange ?? tx.paymentName ?? (tx.type === "spend" ? categoryName(tx.category, categories) : typeLabel(tx.type));
   const tone = amountTone(tx.type, tx.amount);
-  const icon = categoryIcon(tx);
+  const icon = categoryIcon(tx, categories);
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={[styles.row, first && styles.first, last && styles.last]}>
       <View testID={`tx-icon-${icon}`} style={styles.badge}>

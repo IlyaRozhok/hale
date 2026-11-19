@@ -1,17 +1,20 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { CashAnswerDto, CashDepositAnswerName, TransactionDto, TransactionPatch } from "@hale/contracts";
-import { useChangeDepositAnswer, useEditTransaction, useSetCardCash, useSimilarCount } from "../api/queries";
-import { dayMonth, formatMoney, formatSignedMoney, formatSignedOriginal, operationsText, two } from "../format";
+import { useCategoryList, useChangeDepositAnswer, useEditTransaction, useSetCardCash, useSimilarCount } from "../api/queries";
+import { categoryIconOf } from "../categoryIcon";
+import { dayMonth, formatMoney, formatSignedMoney, formatSignedOriginal, two } from "../format";
 import { AmountForm } from "./AmountForm";
-import { SPEND_CATEGORIES, accountLabel, answerText, categoryLabel, typeChips, typeLabel } from "../labels";
+import { accountLabel, alwaysCountText, answerText, categoryChoices, categoryName, typeChips, typeLabel } from "../labels";
+import { CategoryFormSheet } from "./CategoryFormSheet";
 import { ErrorText } from "./ErrorText";
 import { ActionRow } from "./ActionRow";
 import { Chip } from "./Chip";
+import { Icon, type IconName } from "./Icon";
 import { Sheet } from "./Sheet";
 
-const { color, space, touchMin, type } = tokens;
+const { color, radius, space, touchMin, type } = tokens;
 
 type Props = { tx: TransactionDto; onClose: () => void; /** Present when the row is a transfer to someone. */ onAnswer?: () => void };
 
@@ -37,28 +40,60 @@ function creditText(tx: TransactionDto): string | null {
   return part >= Math.round(Math.abs(tx.amount) / 100) ? "Оплачено из кредитного лимита" : `${formatMoney(tx.creditPart)} — из кредитного лимита`;
 }
 
+type Change = Pick<TransactionPatch, "type" | "category">;
+
 /**
- * The operation on top, then its category and type, each changed with one tap; "apply to similar" is on
- * unless turned off. The rare types wait behind "Ещё".
+ * The operation on top, then its category and type, each changed with one tap for this operation alone. After a
+ * change a quiet card asks «Всегда так для …?» (task В5): «Да, всегда» sends the same change for the similar ones,
+ * exactly what the «Применить к похожим» switch did; no answer leaves only this operation changed. The rare types
+ * wait behind "Ещё".
  */
 export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
   const edit = useEditTransaction();
-  const [similar, setSimilar] = useState(true);
+  const always = useEditTransaction();
+  const list = useCategoryList();
+  // The sheet opens with a snapshot of the row; what was saved shows here at once.
+  const [row, setRow] = useState(tx);
+  const [asked, setAsked] = useState<Change | null>(null);
   const [allTypes, setAllTypes] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [failed, setFailed] = useState(false);
-  const count = useSimilarCount(tx.id, undefined, similar);
+  const count = useSimilarCount(tx.id, asked?.type, asked !== null);
+  const busy = edit.isPending || always.isPending;
 
-  const save = (patch: Pick<TransactionPatch, "type" | "category">) => {
+  // A rule needs a type: an operation without one is only ever changed alone.
+  const ask = (change: Change, type: TransactionDto["type"]) => setAsked(type ? change : null);
+
+  const save = (change: Change) => {
     setFailed(false);
+    setAsked(null);
     edit.mutate(
-      { id: tx.id, patch: { ...patch, applyToSimilar: similar } },
-      { onSuccess: onClose, onError: () => setFailed(true) },
+      // This operation alone, as the switch turned off did.
+      { id: tx.id, patch: { ...change, applyToSimilar: false } },
+      {
+        onSuccess: (result) => {
+          setRow(result.transaction);
+          ask(change, result.transaction.type);
+        },
+        onError: () => setFailed(true),
+      },
     );
+  };
+  // The category it already has: nothing to save, but the owner may want it for the similar ones.
+  const pickCategory = (key: string) => (row.category === key ? ask({ category: key }, row.type) : save({ category: key }));
+  const pickType = (type: NonNullable<TransactionDto["type"]>) => (row.type === type ? ask({ type }, row.type) : save({ type }));
+
+  const yes = () => {
+    if (!asked) return;
+    setFailed(false);
+    always.mutate({ id: tx.id, patch: { ...asked, applyToSimilar: true } }, { onSuccess: onClose, onError: () => setFailed(true) });
   };
 
   const title = tx.counterName ?? tx.description;
-  const types = typeChips(tx.amount, tx.type);
+  const types = typeChips(row.amount, row.type);
   const credit = creditText(tx);
+  const askedName = asked === null ? "" : asked.type !== undefined ? typeLabel(asked.type) : categoryName(asked.category ?? null, list);
+  const more = asked !== null && count.data !== undefined ? alwaysCountText(count.data, askedName) : null;
 
   return (
     <Sheet title={title} subtitle={facts(tx)} onClose={onClose}>
@@ -69,32 +104,70 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
       {tx.cashAnswer != null && <CashSource id={tx.id} answer={tx.cashAnswer} onChanged={onClose} />}
       <Text style={styles.heading}>Категория</Text>
       <View style={styles.chips}>
-        {SPEND_CATEGORIES.map((c) => (
-          <Chip key={c} label={categoryLabel(c)} selected={tx.category === c} disabled={edit.isPending} onPress={() => save({ category: c })} />
+        {categoryChoices(list).map((c) => (
+          <CategoryChip
+            key={c.key}
+            label={c.name}
+            icon={categoryIconOf(c.key, list)}
+            selected={row.category === c.key}
+            disabled={busy}
+            onPress={() => pickCategory(c.key)}
+          />
         ))}
+        {/* Only a server that keeps categories can add one. */}
+        {list && <CategoryChip label="Новая" icon="plus" disabled={busy} onPress={() => setCreating(true)} />}
       </View>
+      {asked !== null && (
+        <View style={styles.ask}>
+          <Text style={styles.text}>{"Всегда так для «{name}»?".replace("{name}", title)}</Text>
+          {more !== null && <Text style={styles.note}>{more}</Text>}
+          <View style={styles.answers}>
+            <Answer label="Да, всегда" strong disabled={busy} onPress={yes} />
+            <Answer label="Только эта" disabled={busy} onPress={() => setAsked(null)} />
+          </View>
+        </View>
+      )}
       <Text style={styles.heading}>Тип</Text>
       <View style={styles.chips}>
         {(allTypes ? [...types.shown, ...types.rest] : types.shown).map((t) => (
-          <Chip key={t} label={typeLabel(t)} selected={tx.type === t} disabled={edit.isPending} onPress={() => save({ type: t })} />
+          <Chip key={t} label={typeLabel(t)} selected={row.type === t} disabled={busy} onPress={() => pickType(t)} />
         ))}
         {!allTypes && <Chip label="Ещё" onPress={() => setAllTypes(true)} />}
       </View>
       {failed && <ErrorText>Не удалось сохранить. Попробуйте ещё раз.</ErrorText>}
-      <View style={styles.switchRow}>
-        <View style={styles.switchText}>
-          <Text style={styles.text}>Применить к похожим</Text>
-          {similar && count.data !== undefined && <Text style={styles.note}>{`Изменится ${operationsText(count.data)}`}</Text>}
-        </View>
-        <Switch
-          accessibilityLabel="Применить к похожим"
-          value={similar}
-          onValueChange={setSimilar}
-          trackColor={{ false: color.data.track, true: color.accent.default }}
-          thumbColor={color.fg.default}
-        />
-      </View>
+      {creating && <CategoryFormSheet onClose={() => setCreating(false)} onCreated={(c) => save({ category: c.key })} />}
     </Sheet>
+  );
+}
+
+/** A category to pick: its icon and name in one colour; the chosen one is inverted, as the other chips. */
+function CategoryChip({ label, icon, selected = false, disabled = false, onPress }: {
+  label: string;
+  icon: IconName;
+  selected?: boolean;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected, disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={[styles.pill, selected && styles.pillOn, disabled && styles.disabled]}
+    >
+      <Icon name={icon} color={selected ? color.accent.fgOnAccent : color.fg.muted} size={16} />
+      <Text style={[styles.pillText, selected && styles.pillTextOn]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function Answer({ label, strong = false, disabled, onPress }: { label: string; strong?: boolean; disabled: boolean; onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} style={styles.answer}>
+      <Text style={strong ? styles.answerStrong : styles.answerText}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -180,10 +253,34 @@ function Link({ label, onPress }: { label: string; onPress: () => void }) {
 const styles = StyleSheet.create({
   stack: { gap: space.sm },
   note: { ...type.caption, color: color.fg.muted },
-  switchText: { flex: 1 },
   link: { minHeight: touchMin, justifyContent: "center" },
   linkText: { ...type.label, color: color.accent.default },
-  switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md },
+  pill: {
+    minHeight: touchMin,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.xs,
+    paddingHorizontal: space.lg,
+    borderRadius: radius.full,
+    backgroundColor: color.surface.overlay,
+  },
+  pillOn: { backgroundColor: color.accent.default },
+  pillText: { ...type.label, color: color.fg.default },
+  pillTextOn: { color: color.accent.fgOnAccent },
+  disabled: { opacity: 0.6 },
+  ask: {
+    gap: space.xs,
+    paddingTop: space.md,
+    paddingHorizontal: space.lg,
+    borderRadius: radius.lg,
+    backgroundColor: color.card.fill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.card.edge,
+  },
+  answers: { flexDirection: "row", gap: space.lg },
+  answer: { minHeight: touchMin, justifyContent: "center" },
+  answerStrong: { ...type.label, color: color.fg.default },
+  answerText: { ...type.label, color: color.fg.muted },
   text: { ...type.body, color: color.fg.default, flexShrink: 1 },
   heading: { ...type.label, color: color.fg.muted },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },

@@ -1,5 +1,5 @@
 // Russian names for server codes. No native imports: runs in node tests.
-import type { RecipientLabelName, TxTypeDto } from "@hale/contracts";
+import type { CategoryDto, RecipientLabelName, TxTypeDto } from "@hale/contracts";
 import { formatMoney, pluralIndex } from "./format";
 
 const TYPES: Record<TxTypeDto, string> = {
@@ -79,6 +79,39 @@ export const SPEND_CATEGORIES = [
 
 export const categoryLabel = (category: string | null): string =>
   category === null ? CATEGORIES.uncategorized! : (CATEGORIES[category] ?? category);
+
+/** The server's categories (В5): undefined while loading or after an error, null from an older server. */
+export type CategoryList = readonly CategoryDto[] | null | undefined;
+
+/** What the owner can pick, in order: the server's list, or the built-in one when there is none. */
+export function categoryChoices(list: CategoryList): { key: string; name: string }[] {
+  if (list) return list.map((c) => ({ key: c.key, name: c.name }));
+  return SPEND_CATEGORIES.map((key) => ({ key, name: categoryLabel(key) }));
+}
+
+/** A category's name: the server's when it knows the key, otherwise today's built-in one (type-level keys too). */
+export const categoryName = (category: string | null, list: CategoryList): string =>
+  (category !== null && list?.find((c) => c.key === category)?.name) || categoryLabel(category);
+
+/** Whole phrases, so they can be translated as they are. */
+const ALWAYS_MORE = ["Ещё {n} операция станет «{name}»", "Ещё {n} операции станут «{name}»", "Ещё {n} операций станут «{name}»"] as const;
+
+/**
+ * Under «Всегда так для …?»: how many other operations «Да, всегда» would change. `similar` is the server's count,
+ * the edited operation included; null when there are no others.
+ */
+export function alwaysCountText(similar: number, name: string): string | null {
+  const n = similar - 1;
+  if (n <= 0) return null;
+  return ALWAYS_MORE[pluralIndex(n)].replace("{n}", String(n)).replace("{name}", name);
+}
+
+/** The confirmation of a category's deletion: its operations go to «Без категории» (named as the server names it). */
+export function deleteCategoryText(count: number | null, uncategorized: string): string {
+  if (count === 0) return "В этой категории нет операций.";
+  if (count === null) return "Операции этой категории станут «{name}».".replace("{name}", uncategorized);
+  return "Операции этой категории ({n}) станут «{name}».".replace("{n}", String(count)).replace("{name}", uncategorized);
+}
 
 export const LABEL_CHOICES: { label: RecipientLabelName; text: string; effect: string }[] = [
   { label: "close_regular", text: "Близкий человек, регулярно", effect: "Считается в дневном лимите. Платёж из плана лимит не тратит" },

@@ -19,19 +19,24 @@ jest.mock("@react-native-community/slider", () => {
 const noop = () => undefined;
 const press = async (name: string | RegExp) => fireEvent.press(await screen.findByRole("button", { name }));
 
-describe("apply to similar says how many rows change", () => {
-  it("asks the server for the row's own type, and for the type about to be chosen", async () => {
-    const api = fakeApi({ similarCount: jest.fn(async () => 3) });
+describe("«Всегда так» says how many other rows change (В5)", () => {
+  it("asks nothing until something is changed, then for the row's own type, or for the new type", async () => {
+    const api = fakeApi({ similarCount: jest.fn(async () => 4) });
     await renderWith(<TxEditSheet tx={txFixture({ id: 7, type: "spend" })} onClose={noop} />, api);
-    expect(await screen.findByText("Изменится 3 операции")).toBeTruthy();
+    await screen.findByText("Тип");
+    expect(api.similarCount).not.toHaveBeenCalled();
+    await press("Продукты");
+    expect(await screen.findByText("Ещё 3 операции станут «Продукты»")).toBeTruthy();
     expect(api.similarCount).toHaveBeenCalledWith(7, undefined);
-    await fireEvent(screen.getByLabelText("Применить к похожим"), "valueChange", false);
-    expect(screen.queryByText(/^Изменится/)).toBeNull();
+    await press("Обязательный платёж");
+    expect(await screen.findByText("Ещё 3 операции станут «Обязательный платёж»")).toBeTruthy();
+    expect(api.similarCount).toHaveBeenCalledWith(7, "obligation");
   });
 
-  it("one row reads in the singular", async () => {
-    await renderWith(<TxEditSheet tx={txFixture()} onClose={noop} />, fakeApi({ similarCount: jest.fn(async () => 1) }));
-    expect(await screen.findByText("Изменится 1 операция")).toBeTruthy();
+  it("one other row reads in the singular", async () => {
+    await renderWith(<TxEditSheet tx={txFixture()} onClose={noop} />, fakeApi({ similarCount: jest.fn(async () => 2) }));
+    await press("Продукты");
+    expect(await screen.findByText("Ещё 1 операция станет «Продукты»")).toBeTruthy();
   });
 });
 
@@ -81,7 +86,15 @@ describe("the owner's rules in Settings", () => {
   it("says when there are none", async () => {
     await renderWith(<Settings onClose={noop} />, fakeApi());
     await press("Мои правила");
-    expect(await screen.findByText("Правил пока нет. Они появляются, когда вы меняете операцию с «Применить к похожим» или отвечаете, что это за перевод.")).toBeTruthy();
+    expect(await screen.findByText("Правил пока нет. Они появляются, когда после смены категории или типа вы выбираете «Да, всегда» или отвечаете, что это за перевод.")).toBeTruthy();
+  });
+
+  it("names a rule's category as the server does (В5)", async () => {
+    const own = { ...rules[0]!, category: "c_cat" };
+    const categories = jest.fn(async () => [{ key: "c_cat", name: "Кот", icon: "paw" as const, system: false }]);
+    await renderWith(<Settings onClose={noop} />, fakeApi({ rules: jest.fn(async () => [own]), categories }));
+    await press("Мои правила");
+    expect(await screen.findByText("Трата · Кот · 1 операция")).toBeTruthy();
   });
 });
 
@@ -193,7 +206,7 @@ describe("cash taken from the owner's card at another bank", () => {
 
   it("an ordinary row says nothing about cash", async () => {
     await renderWith(<TxEditSheet tx={txFixture()} onClose={noop} />, fakeApi());
-    await screen.findByText(/^Изменится/);
+    await screen.findByText("Тип");
     expect(screen.queryByText(/^Снял наличными/)).toBeNull();
   });
 });

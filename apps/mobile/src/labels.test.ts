@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { recipientLabelName, txType } from "@hale/contracts";
 import {
-  accountLabel, answerChoices, answerText, categoryLabel, FREQUENT_ANSWERS, LABEL_CHOICES, recipientLine, SPEND_CATEGORIES, TYPE_CHOICES, typeChips,
+  accountLabel, alwaysCountText, answerChoices, answerText, categoryChoices, categoryLabel, categoryName, deleteCategoryText, FREQUENT_ANSWERS, LABEL_CHOICES, recipientLine, SPEND_CATEGORIES, TYPE_CHOICES, typeChips,
   typeLabel,
 } from "./labels";
 
@@ -22,6 +22,43 @@ describe("labels", () => {
     expect(categoryLabel(null)).toBe("Без категории");
     expect(categoryLabel("custom_thing")).toBe("custom_thing");
     for (const c of SPEND_CATEGORIES) expect(categoryLabel(c)).toMatch(/^[А-Яа-яЁё ]+$/);
+  });
+
+  it("takes the server's category names and order, and the built-in ones from an older server (В5)", () => {
+    const list = [
+      { key: "cafe", name: "Кафе", icon: "coffee" as const, system: false },
+      { key: "c_1", name: "Кот", icon: "paw" as const, system: false },
+      { key: "uncategorized", name: "Без категории", icon: "circle" as const, system: true },
+    ];
+    expect(categoryChoices(list)).toEqual([
+      { key: "cafe", name: "Кафе" },
+      { key: "c_1", name: "Кот" },
+      { key: "uncategorized", name: "Без категории" },
+    ]);
+    expect(categoryChoices(undefined).map((c) => c.key)).toEqual([...SPEND_CATEGORIES]);
+    expect(categoryChoices(null)[0]).toEqual({ key: "groceries", name: "Продукты" });
+    expect(categoryName("c_1", list)).toBe("Кот");
+    expect(categoryName("cafe", list)).toBe("Кафе");
+    // A key the list does not know (a type-level one, or a deleted category) keeps today's name.
+    expect(categoryName("tax", list)).toBe("Налоги");
+    expect(categoryName("cash", list)).toBe("Наличные");
+    expect(categoryName(null, list)).toBe("Без категории");
+    expect(categoryName("groceries", undefined)).toBe("Продукты");
+  });
+
+  it("says how many more operations «Да, всегда» would change, in whole phrases", () => {
+    expect(alwaysCountText(24, "Продукты")).toBe("Ещё 23 операции станут «Продукты»");
+    expect(alwaysCountText(2, "Кафе")).toBe("Ещё 1 операция станет «Кафе»");
+    expect(alwaysCountText(6, "Кафе")).toBe("Ещё 5 операций станут «Кафе»");
+    expect(alwaysCountText(22, "Кафе")).toBe("Ещё 21 операция станет «Кафе»");
+    expect(alwaysCountText(1, "Кафе")).toBeNull();
+    expect(alwaysCountText(0, "Кафе")).toBeNull();
+  });
+
+  it("says what deleting a category does to its operations", () => {
+    expect(deleteCategoryText(14, "Без категории")).toBe("Операции этой категории (14) станут «Без категории».");
+    expect(deleteCategoryText(null, "Без категории")).toBe("Операции этой категории станут «Без категории».");
+    expect(deleteCategoryText(0, "Без категории")).toBe("В этой категории нет операций.");
   });
 
   it("offers the transfer answers, each saying what it does to the limit", () => {

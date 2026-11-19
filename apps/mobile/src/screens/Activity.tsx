@@ -4,10 +4,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RouteProp } from "@react-navigation/native";
 import { tokens } from "@hale/tokens";
 import type { TransactionDto } from "@hale/contracts";
-import { useTransactions } from "../api/queries";
+import { useCategoryList, useTransactions } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
 import { dayHeader, formatSignedMoney, kyivDate, operationsText, periodLabel } from "../format";
-import { categoryLabel } from "../labels";
+import { categoryName } from "../labels";
 import { FiltersSheet, type Filters, type Period } from "../components/FiltersSheet";
 import { ErrorText } from "../components/ErrorText";
 import { Field } from "../components/Field";
@@ -116,6 +116,7 @@ export function Activity({ now = () => new Date(), route }: Props) {
     ...(search ? { q: search } : {}),
   });
   const pull = usePullRefresh(list.refetch);
+  const categories = useCategoryList();
   const pages = list.data?.pages ?? [];
   const items = pages.flatMap((p) => p.items);
   const totals = Object.assign({}, ...pages.map((p) => p.dayTotals)) as Record<string, number | undefined>;
@@ -130,7 +131,7 @@ export function Activity({ now = () => new Date(), route }: Props) {
   const activeFilters = (chosenCategory !== null ? 1 : 0) + (period !== null ? 1 : 0);
   const emptyText = search || filtered ? "Ничего не нашлось." : TABS.find((t) => t.tab === tab)!.empty;
   const summary = pages[0]?.summary ?? null;
-  const summaryTitle = [chosenCategory ? categoryLabel(chosenCategory) : null, period ? periodLabel(period.from, period.to) : null].filter(Boolean).join(" · ");
+  const summaryTitle = [chosenCategory ? categoryName(chosenCategory, categories) : null, period ? periodLabel(period.from, period.to) : null].filter(Boolean).join(" · ");
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + space.lg }]}>
@@ -207,6 +208,7 @@ export function Activity({ now = () => new Date(), route }: Props) {
               // Under «Траты» the day total is what the limit counted (the server's figure, see dayTotals in
               // the contract); the rows it left out say so, so the list still adds up to its heading.
               markOutsideLimit={tab === "spend"}
+              categories={categories}
             />
           )}
           contentContainerStyle={{ paddingHorizontal: space.xl, paddingBottom: LAYOUT.tabBar + insets.bottom }}

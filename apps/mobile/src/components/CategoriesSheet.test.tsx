@@ -1,0 +1,172 @@
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { Alert } from "react-native";
+import type { CategoryDto } from "@hale/contracts";
+import { CategoriesSheet } from "./CategoriesSheet";
+import type { QueryClient } from "@tanstack/react-query";
+import { ApiError } from "../api/client";
+import { TRANSACTIONS_KEY } from "../api/queries";
+import { fakeApi, renderWith } from "../testing";
+
+const noop = () => undefined;
+const pressAlert = (alert: jest.SpyInstance, label: string) => {
+  const buttons = alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[];
+  buttons.find((b) => b.text === label)!.onPress!();
+};
+
+const LIST: CategoryDto[] = [
+  { key: "groceries", name: "Продукты", icon: "cart", system: false },
+  { key: "cafe", name: "Кафе и рестораны", icon: "coffee", system: false },
+  { key: "c_cat", name: "Кот", icon: "paw", system: false },
+  { key: "refund", name: "Возвраты", icon: "arrowIn", system: true },
+  { key: "uncategorized", name: "Без категории", icon: "circle", system: true },
+];
+/** The count for the deletion's question has come back (it is not on the screen until the question). */
+const counted = (client: QueryClient) =>
+  waitFor(() => expect(client.getQueryState([...TRANSACTIONS_KEY, "category-count", "c_cat"])?.status).toBe("success"));
+const names = () => screen.getAllByTestId("category-row").map((r) => String(r.props.accessibilityLabel));
+const FOOTNOTE = "Нажмите на категорию, чтобы переименовать или удалить. «Возвраты» и «Без категории» служебные — их не удалить.";
+
+describe("CategoriesSheet (В5)", () => {
+  it("lists the categories in the server's order, with a row for a new one and the footnote", async () => {
+    await renderWith(<CategoriesSheet onClose={noop} />, fakeApi({ categories: jest.fn(async () => LIST) }));
+    expect(await screen.findByText("Кот")).toBeTruthy();
+    expect(screen.getByText("Категории")).toBeTruthy();
+    expect(screen.getByText("Порядок — как в карточке операции")).toBeTruthy();
+    expect(names()).toEqual(["Продукты", "Кафе и рестораны", "Кот", "Возвраты", "Без категории"]);
+    expect(screen.getByRole("button", { name: "Новая категория" })).toBeTruthy();
+    expect(screen.getByText(FOOTNOTE)).toBeTruthy();
+  });
+
+  it("moves a category down and up, sending the whole new order", async () => {
+    // The server keeps what it was sent, so the list read again after the change is the new one.
+    let kept = LIST;
+    const api = fakeApi({
+      categories: jest.fn(async () => kept),
+      reorderCategories: jest.fn(async (keys: string[]) => (kept = keys.map((k) => LIST.find((c) => c.key === k)!))),
+    });
+    await renderWith(<CategoriesSheet onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Ниже: Продукты" }));
+    await waitFor(() => expect(api.reorderCategories).toHaveBeenCalledWith(["cafe", "groceries", "c_cat", "refund", "uncategorized"]));
+    await waitFor(() => expect(names()).toEqual(["Кафе и рестораны", "Продукты", "Кот", "Возвраты", "Без категории"]));
+    await fireEvent.press(screen.getByRole("button", { name: "Выше: Кот" }));
+    await waitFor(() => expect(api.reorderCategories).toHaveBeenLastCalledWith(["cafe", "c_cat", "groceries", "refund", "uncategorized"]));
+  });
+
+  it("the first cannot go up and the last cannot go down", async () => {
+    await renderWith(<CategoriesSheet onClose={noop} />, fakeApi({ categories: jest.fn(async () => LIST) }));
+    await screen.findByText("Кот");
+    expect(screen.getByRole("button", { name: "Выше: Продукты" }).props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Ниже: Без категории" }).props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Ниже: Продукты" }).props.accessibilityState.disabled).toBe(false);
+  });
+
+  it("a refused order goes back and says so", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST), reorderCategories: jest.fn(async () => Promise.reject(new ApiError(422))) });
+    await renderWith(<CategoriesSheet onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Ниже: Продукты" }));
+    expect(await screen.findByText("Не удалось сохранить порядок. Попробуйте ещё раз.")).toBeTruthy();
+    expect(names()).toEqual(["Продукты", "Кафе и рестораны", "Кот", "Возвраты", "Без категории"]);
+  });
+
+  it("renames a category from its row", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST), patchCategory: jest.fn(async () => ({ ...LIST[2]!, name: "Кошка" })) });
+    await renderWith(<CategoriesSheet onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Кот" }));
+    const field = await screen.findByLabelText("Название");
+    expect(field.props.value).toBe("Кот");
+    await fireEvent.changeText(field, "Кошка");
+    await fireEvent.press(screen.getByRole("radio", { name: "Значок: звезда" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(api.patchCategory).toHaveBeenCalledWith("c_cat", { name: "Кошка", icon: "star" }));
+    await waitFor(() => expect(screen.queryByLabelText("Название")).toBeNull());
+  });
+
+  it("a name already taken says so calmly and keeps the window", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST), patchCategory: jest.fn(async () => Promise.reject(new ApiError(409))) });
+    await renderWith(<CategoriesSheet onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Кот" }));
+    await fireEvent.changeText(await screen.findByLabelText("Название"), "Продукты");
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Такая категория уже есть.")).toBeTruthy();
+    expect(screen.getByLabelText("Название")).toBeTruthy();
+  });
+
+  it("a system category keeps its name and cannot be deleted; only its icon changes", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST), patchCategory: jest.fn(async () => LIST[3]!) });
+    await renderWith(<CategoriesSheet onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Возвраты" }));
+    expect(await screen.findByText("Служебная категория: можно сменить только значок")).toBeTruthy();
+    expect(screen.queryByLabelText("Название")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();
+    await fireEvent.press(screen.getByRole("radio", { name: "Значок: подарок" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(api.patchCategory).toHaveBeenCalledWith("refund", { icon: "gift" }));
+  });
+
+  describe("deleting", () => {
+    let alert: jest.SpyInstance;
+    beforeEach(() => {
+      alert = jest.spyOn(Alert, "alert").mockImplementation(noop);
+    });
+    afterEach(() => alert.mockRestore());
+
+    it("asks first, naming how many operations go to «Без категории»", async () => {
+      const api = fakeApi({
+        categories: jest.fn(async () => LIST),
+        transactions: jest.fn(async () => ({ items: [], nextCursor: null, dayTotals: {}, summary: { total: -100_000, count: 14 } })),
+        deleteCategory: jest.fn(async () => ({ deleted: true as const, moved: 14 })),
+      });
+      const { client } = await renderWith(<CategoriesSheet onClose={noop} />, api);
+      await fireEvent.press(await screen.findByRole("button", { name: "Кот" }));
+      await waitFor(() => expect(api.transactions).toHaveBeenCalledWith({ group: "all", category: "c_cat" }));
+      await counted(client);
+      await fireEvent.press(await screen.findByRole("button", { name: "Удалить" }));
+      await waitFor(() => expect(alert).toHaveBeenCalled());
+      expect(alert.mock.calls.at(-1)![0]).toBe("Удалить «Кот»?");
+      expect(alert.mock.calls.at(-1)![1]).toBe("Операции этой категории (14) станут «Без категории».");
+      expect(api.deleteCategory).not.toHaveBeenCalled();
+      await act(async () => pressAlert(alert, "Удалить"));
+      await waitFor(() => expect(api.deleteCategory).toHaveBeenCalledWith("c_cat"));
+      await waitFor(() => expect(screen.queryByLabelText("Название")).toBeNull());
+    });
+
+    it("without a count from the server the question has no number", async () => {
+      const api = fakeApi({ categories: jest.fn(async () => LIST), transactions: jest.fn(async () => ({ items: [], nextCursor: null, dayTotals: {} })) });
+      const { client } = await renderWith(<CategoriesSheet onClose={noop} />, api);
+      await fireEvent.press(await screen.findByRole("button", { name: "Кот" }));
+      await counted(client);
+      await fireEvent.press(await screen.findByRole("button", { name: "Удалить" }));
+      await waitFor(() => expect(alert).toHaveBeenCalled());
+      expect(alert.mock.calls.at(-1)![1]).toBe("Операции этой категории станут «Без категории».");
+    });
+  });
+
+  it("adds a category at the end", async () => {
+    const created: CategoryDto = { key: "c_new", name: "Спорт", icon: "dumbbell", system: false };
+    let kept = LIST;
+    const api = fakeApi({ categories: jest.fn(async () => kept), createCategory: jest.fn(async () => ((kept = [...LIST, created]), created)) });
+    await renderWith(<CategoriesSheet onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Новая категория" }));
+    await fireEvent.changeText(await screen.findByLabelText("Название"), "Спорт");
+    await fireEvent.press(screen.getByRole("radio", { name: "Значок: гантель" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Добавить" }));
+    await waitFor(() => expect(api.createCategory).toHaveBeenCalledWith({ name: "Спорт", icon: "dumbbell" }));
+    await waitFor(() => expect(names().at(-1)).toBe("Спорт"));
+  });
+
+  it("an empty name is not sent", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST), createCategory: jest.fn() });
+    await renderWith(<CategoriesSheet onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Новая категория" }));
+    await fireEvent.changeText(await screen.findByLabelText("Название"), "   ");
+    await fireEvent.press(screen.getByRole("button", { name: "Добавить" }));
+    expect(await screen.findByText("Введите название.")).toBeTruthy();
+    expect(api.createCategory).not.toHaveBeenCalled();
+  });
+
+  it("an older server: one calm line, nothing to change", async () => {
+    await renderWith(<CategoriesSheet onClose={noop} />, fakeApi({ categories: jest.fn(async () => null) }));
+    expect(await screen.findByText("Свои категории появятся после обновления сервера.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Новая категория" })).toBeNull();
+  });
+});

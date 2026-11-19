@@ -7,6 +7,10 @@ import type {
   CashOperationPatch,
   CashStartInput,
   CashWalletDto,
+  CategoryDeletedDto,
+  CategoryDto,
+  CategoryInput,
+  CategoryPatch,
   ExpectedIncomeDto,
   ExpectedIncomeInput,
   ExpectedIncomePatch,
@@ -148,6 +152,13 @@ export interface Api {
   ledgerCheck(): Promise<LedgerCheckDto | null>;
   /** A month's «Итоги» (task В2), the current Kyiv month without `month`; null from an older server that has none. */
   insights(month?: string): Promise<InsightsMonthDto | null>;
+  /** The owner's categories in order (task В5); null from an older server that has none. */
+  categories(): Promise<CategoryDto[] | null>;
+  createCategory(input: CategoryInput): Promise<CategoryDto>;
+  patchCategory(key: string, patch: CategoryPatch): Promise<CategoryDto>;
+  /** Every live key once, in the new order. */
+  reorderCategories(keys: string[]): Promise<CategoryDto[]>;
+  deleteCategory(key: string): Promise<CategoryDeletedDto>;
 }
 
 export type TransactionsFilter = {
@@ -172,7 +183,7 @@ export interface ApiOptions {
 export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch }: ApiOptions): Api {
   const root = baseUrl.replace(/\/+$/, "");
 
-  async function request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
+  async function request<T>(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
     const token = await getToken();
     const headers: Record<string, string> = { accept: "application/json" };
     if (token) headers.authorization = `Bearer ${token}`;
@@ -290,5 +301,17 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
         throw e;
       }
     },
+    categories: async () => {
+      try {
+        return await request<CategoryDto[]>("GET", "/categories");
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null; // an older server keeps the built-in list
+        throw e;
+      }
+    },
+    createCategory: (input) => request("POST", "/categories", input),
+    patchCategory: (key, patch) => request("PATCH", `/categories/${encodeURIComponent(key)}`, patch),
+    reorderCategories: (keys) => request("PUT", "/categories/order", { keys }),
+    deleteCategory: (key) => request("DELETE", `/categories/${encodeURIComponent(key)}`),
   };
 }

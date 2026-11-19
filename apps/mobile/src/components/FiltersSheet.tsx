@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
-import { categoryIcon } from "../categoryIcon";
+import { useCategoryList } from "../api/queries";
+import { categoryIconOf } from "../categoryIcon";
 import { lastDays } from "../format";
-import { SPEND_CATEGORIES, categoryLabel } from "../labels";
+import { categoryChoices } from "../labels";
 import { Chip } from "./Chip";
 import { DateField } from "./DateField";
 import { Icon } from "./Icon";
@@ -38,6 +39,7 @@ export function FiltersSheet({
 }: Props) {
   const [period, setPeriod] = useState<Period | null>(value.period);
   const [category, setCategory] = useState<string | null>(value.category);
+  const list = useCategoryList();
   const quick: { label: string; period: Period }[] = [
     { label: "Сегодня", period: { from: today, to: today } },
     { label: "Неделя", period: lastDays(today, 7) },
@@ -79,25 +81,25 @@ export function FiltersSheet({
         <>
           <Text style={styles.heading}>Категория</Text>
           <View style={styles.chips}>
-            {SPEND_CATEGORIES.map((c) => {
+            {categoryChoices(list).map(({ key: c, name }) => {
               const on = category === c;
               return (
                 <Pressable
                   key={c}
                   accessibilityRole="button"
-                  accessibilityLabel={categoryLabel(c)}
+                  accessibilityLabel={name}
                   accessibilityState={{ selected: on }}
                   onPress={() => setCategory(on ? null : c)}
                   hitSlop={space.xs}
                 style={[styles.pill, on && styles.pillOn]}
                 >
                   <Icon
-                    name={categoryIcon({ type: "spend", category: c })}
+                    name={categoryIconOf(c, list)}
                     color={on ? color.accent.fgOnAccent : color.fg.muted}
                     size={16}
                   />
                   <Text style={[styles.pillText, on && styles.pillTextOn]}>
-                    {categoryLabel(c)}
+                    {name}
                   </Text>
                 </Pressable>
               );
