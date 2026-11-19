@@ -19,6 +19,7 @@ import { creditPart } from "../domain/credit";
 import { UNCATEGORIZED } from "../domain/insights";
 import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
 import { binanceOnChange, cashAnswerOf } from "../domain/cash-answer";
+import { canOverrideWant, categoryWantSql, effectiveWant, wantedSql } from "../domain/want";
 import { PlanService } from "../plan/plan.service";
 import { LimitService } from "../today/limit.service";
 import { requireLiveCategory } from "../categories/live";
@@ -40,6 +41,7 @@ const COLUMNS = `
   CASE WHEN ${cardTransferSql()} THEN ${cardCashSql()}::float8 END AS card_cash,
   ${cashAnswerColumnsSql("t")},
   ${exchangeUsdcSql("t")},
+  t.want_override, ${categoryWantSql("t")} AS category_want,
   COALESCE(
     (SELECT s.name FROM payment_links l JOIN scheduled_payments s ON s.id = l.payment_id WHERE l.transaction_id = t.id),
     (SELECT s.name FROM scheduled_payments s WHERE s.transaction_id = t.id ORDER BY s.id LIMIT 1)
@@ -71,6 +73,8 @@ interface Row extends CashAnswerRow {
   credit_limit_at: number | null;
   in_limit: boolean;
   exchange_usdc: number | null;
+  want_override: boolean | null;
+  category_want: boolean | null;
 }
 
 /** A stored answer about a recipient. */
@@ -118,6 +122,8 @@ const view = (r: Row, rules: readonly AnswerRule[], binanceOpen: boolean): Trans
   inLimit: r.in_limit,
   cashAnswer: cashAnswerView(r, binanceOpen),
   exchange: r.exchange_usdc === null ? null : { usdc: r.exchange_usdc, rate: exchangeRate(Math.abs(r.amount), r.exchange_usdc) },
+  want: effectiveWant(r.type, r.category_want, r.want_override),
+  wantOverride: r.want_override,
 });
 
 const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6})\|(\d{1,10})$/;
@@ -175,6 +181,8 @@ export class TransactionsService {
     if (q.group === "income") where.push(`t.type = ANY(${arg(INCOME_GROUP_TYPES)}::text[])`);
     // An empty category is «Без категории», as «Итоги» file it (domain/insights.ts), so the two show the same rows (В8).
     if (q.category) where.push(`COALESCE(t.category, '${UNCATEGORIZED}') = ${arg(q.category)}`);
+    // Exactly the rows «Итоги» add up as «желаемое» (В6): purchases in the limit on that side.
+    if (q.want) where.push(wantedSql("t", "a"));
     if (q.from) where.push(`t.local_date >= ${arg(q.from)}::date`);
     if (q.to) where.push(`t.local_date <= ${arg(q.to)}::date`);
     if (q.q) {
@@ -204,7 +212,7 @@ export class TransactionsService {
       items: page.map((r) => view(r, rules, binanceOpen)),
       nextCursor: rows.length > q.limit ? encodeCursor(page[page.length - 1]!) : null,
       dayTotals: await this.dayTotals([...new Set(page.map((r) => r.local_date))], filters, filterArgs, counted),
-      summary: q.category || q.from || q.to ? await this.summary(filters, filterArgs, counted) : null,
+      summary: q.category || q.want || q.from || q.to ? await this.summary(filters, filterArgs, counted) : null,
     };
   }
 
@@ -235,6 +243,8 @@ export class TransactionsService {
    * (counterKey; a row without IBAN or name is keyed by its normalised description) and a rule
    * is stored for rows that arrive later. Every changed row becomes type_source 'owner', marked with the
    * rule when one is stored (deleting it gives them back); a row changed alone loses any mark (task Б36).
+   * `want` (В6) is the side of this one row only, never with applyToSimilar (the contract refuses it); an edit of
+   * only `want` changes nothing else about the row.
    */
   async edit(id: number, p: TransactionPatch): Promise<TransactionEditDto> {
     const base = (
@@ -256,25 +266,44 @@ export class TransactionsService {
     const changed = await this.ds.transaction(async (m) => {
       // Only a live category: an unknown or deleted one is refused (В5).
       if (p.category !== undefined) await requireLiveCategory(m, p.category);
-      let ruleId: number | null = null;
-      if (p.applyToSimilar && ruleType) {
-        // A name that is short or a generic bank text would catch strangers: rows are still
-        // changed, but no rule is stored for it.
-        const rule = ruleFor(base);
-        if (rule.kind === "iban" || !isWeakRuleValue(rule.value)) {
-          ruleId = await this.saveRule(m, rule.kind, rule.value, ruleType, p.category ?? null, null, base.amount < 0 ? "out" : "in");
+      let ids = [id];
+      if (p.type !== undefined || p.category !== undefined) {
+        let ruleId: number | null = null;
+        if (p.applyToSimilar && ruleType) {
+          // A name that is short or a generic bank text would catch strangers: rows are still
+          // changed, but no rule is stored for it.
+          const rule = ruleFor(base);
+          if (rule.kind === "iban" || !isWeakRuleValue(rule.value)) {
+            ruleId = await this.saveRule(m, rule.kind, rule.value, ruleType, p.category ?? null, null, base.amount < 0 ? "out" : "in");
+          }
         }
+        const scope = p.applyToSimilar ? similarScope(id, base, ruleType!) : { id };
+        const undone = p.type ? await this.undoCashAnswers(m, scope, p.type) : false;
+        ids = await this.apply(m, scope, p.type ?? null, p.category ?? null, ruleId);
+        const freed = p.type ? await this.plan.unsettle(m, ids, p.type) : null;
+        if (undone || freed) await this.limit.invalidate(freed ?? "cash", m);
       }
-      const scope = p.applyToSimilar ? similarScope(id, base, ruleType!) : { id };
-      const undone = p.type ? await this.undoCashAnswers(m, scope, p.type) : false;
-      const ids = await this.apply(m, scope, p.type ?? null, p.category ?? null, ruleId);
-      const freed = p.type ? await this.plan.unsettle(m, ids, p.type) : null;
-      if (undone || freed) await this.limit.invalidate(freed ?? "cash", m);
+      // After the type and the category: the side is checked against what the row has become (В6).
+      if (p.want !== undefined) await this.setWant(m, id, p.want);
       return ids;
     });
     if (p.type) await this.settle(changed, p.type);
     const row = await this.one(id);
     return { transaction: row, updated: changed.length };
+  }
+
+  /**
+   * The owner's «нужное» / «желаемое» for one purchase (В6); null gives it back to its category's side. Only a
+   * purchase in a category with a side has one (422 otherwise, the whole edit undone). The type, category, type_source
+   * and needs_label of the row stay: this is no retype, and no rule is stored. Money does not change.
+   */
+  private async setWant(m: EntityManager, id: number, want: boolean | null): Promise<void> {
+    const r = (await m.query(`SELECT t.type, ${categoryWantSql("t")} AS category_want FROM transactions t WHERE t.id = $1 FOR UPDATE`, [id]))[0] as
+      | { type: string | null; category_want: boolean | null }
+      | undefined;
+    if (!r) throw new NotFoundException("transaction not found");
+    if (!canOverrideWant(r.type, r.category_want)) throw new UnprocessableEntityException("want: only a purchase in a category with a side");
+    await m.query(`UPDATE transactions SET want_override = $2 WHERE id = $1`, [id, want]);
   }
 
   /** How many rows an edit with applyToSimilar to `type` (or the row's own type) would change. */

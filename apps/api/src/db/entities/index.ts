@@ -48,6 +48,8 @@ export class Transaction {
   @Column({ type: "bigint", nullable: true, transformer: bt }) balance_after!: number | null;
   /** The account's credit limit when the operation arrived by webhook; NULL otherwise (never guessed later). */
   @Column({ type: "bigint", nullable: true, transformer: bt }) credit_limit_at!: number | null;
+  /** В6: the owner's «нужное» (false) / «желаемое» (true) for this one purchase; NULL follows its category. */
+  @Column({ type: "boolean", nullable: true }) want_override!: boolean | null;
   @Column({ type: "jsonb" }) raw!: unknown;
 }
 
@@ -230,6 +232,8 @@ export class Category {
   @Column({ type: "text" }) icon!: string;
   @Column({ type: "integer" }) position!: number;
   @Column({ type: "boolean", default: false }) system!: boolean;
+  /** В6: false «нужное», true «желаемое»; NULL exactly for a system category, which is on neither side. */
+  @Column({ type: "boolean", nullable: true }) want!: boolean | null;
   @Column({ type: "timestamptz", nullable: true }) deleted_at!: Date | null;
 }
 

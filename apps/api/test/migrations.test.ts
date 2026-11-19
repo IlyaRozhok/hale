@@ -15,6 +15,7 @@ import { CashCardAnsweredAt1796342400000 } from "../src/db/migrations/0033-cash-
 import { CashCardAnswerFrom1796428800000 } from "../src/db/migrations/0034-cash-card-answer-from";
 import { Categories1796515200000 } from "../src/db/migrations/0035-categories";
 import { Observations1796601600000 } from "../src/db/migrations/0036-observations";
+import { Want1796688000000 } from "../src/db/migrations/0037-want";
 import { CLASSIFIER_VERSION } from "../src/domain/classify";
 import { JobRunner } from "../src/mono/jobs/job-runner";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
@@ -533,6 +534,49 @@ describe("migrations", () => {
     for (let i = migrations.indexOf(Observations1796601600000); i < migrations.length; i++) await ds.undoLastMigration();
     expect(await ds.query(`SELECT to_regclass('observations_shown') AS a, to_regclass('observation_dismissals') AS b`)).toEqual([{ a: null, b: null }]);
     expect(await ds.query(rows)).toEqual(was);
+    await ds.destroy();
+  });
+
+  it("0037 gives the categories a side and the operations an empty choice of their own; nothing else changes (В6)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(Want1796688000000)) });
+    await before.initialize();
+    await before.runMigrations();
+    const account = (await before.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ('a','black','UAH',0) RETURNING id`))[0].id;
+    await before.query(`INSERT INTO categories (key, name, icon, position) VALUES ('c_own', 'Кот', 'paw', 11), ('c_gone', 'Старое', 'star', 12)`);
+    await before.query(`UPDATE categories SET deleted_at = now() WHERE key = 'c_gone'`);
+    for (const [n, category] of [[1, "cafe"], [2, "groceries"], [3, null], [4, "c_own"]] as const) {
+      await before.query(
+        `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, amount, amount_uah, type, category, type_source, raw)
+         VALUES ($1,$2,'2026-11-08T10:00:00Z','2026-11-08',-100,-100,'spend',$3,'owner','{}')`,
+        [`t${n}`, account, category],
+      );
+    }
+    const rows = `SELECT external_id, type, category, amount_uah, type_source FROM transactions ORDER BY id`;
+    const categories = `SELECT key, name, icon, position, system, deleted_at FROM categories ORDER BY id`;
+    const was = await before.query(rows);
+    const wasCategories = await before.query(categories);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    const sides = (await ds.query(`SELECT key, want FROM categories ORDER BY id`)) as { key: string; want: boolean | null }[];
+    expect(Object.fromEntries(sides.map((c) => [c.key, c.want]))).toEqual({
+      groceries: false, cafe: true, transport: false, subscriptions: true, leisure: true, health: false, utilities: false, telecom: false,
+      shopping: true, refund: null, uncategorized: null, c_own: false, c_gone: false,
+    });
+    expect(await ds.query(`SELECT DISTINCT want_override FROM transactions`)).toEqual([{ want_override: null }]);
+    expect(await ds.query(rows)).toEqual(was);
+    expect(await ds.query(categories)).toEqual(wasCategories);
+    // A system category has no side; every other one has one.
+    await expect(ds.query(`UPDATE categories SET want = false WHERE key = 'refund'`)).rejects.toThrow();
+    await expect(ds.query(`UPDATE categories SET want = NULL WHERE key = 'cafe'`)).rejects.toThrow();
+
+    for (let i = migrations.indexOf(Want1796688000000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT table_name, column_name FROM information_schema.columns WHERE column_name IN ('want', 'want_override')`)).toEqual([]);
+    expect(await ds.query(rows)).toEqual(was);
+    expect(await ds.query(categories)).toEqual(wasCategories);
     await ds.destroy();
   });
 });
