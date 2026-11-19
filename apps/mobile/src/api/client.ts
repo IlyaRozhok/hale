@@ -96,7 +96,7 @@ export interface Api {
   patchManualBalance(id: number, patch: { name?: string; amount?: number }): Promise<ManualBalanceDto>;
   deleteManualBalance(id: number): Promise<void>;
   transactions(query: TransactionsFilter & { cursor?: string }): Promise<TransactionPageDto>;
-  editTransaction(id: number, patch: Pick<TransactionPatch, "type" | "category" | "applyToSimilar">): Promise<TransactionEditDto>;
+  editTransaction(id: number, patch: TransactionEdit): Promise<TransactionEditDto>;
   labelRecipient(counterKey: string, label: RecipientLabelName): Promise<RecipientLabelResultDto>;
   recipient(counterKey: string): Promise<RecipientSummaryDto>;
   settings(): Promise<SettingsDto>;
@@ -175,10 +175,20 @@ export type TransactionsFilter = {
   group?: "spend" | "income" | "all";
   q?: string;
   category?: string;
+  /** Only the purchases «Итоги» count as «желаемое» (task В6). */
+  want?: true;
   /** Kyiv days, both inclusive. */
   from?: string;
   to?: string;
 };
+
+/**
+ * What an edit of one operation sends. `want` (В6) goes in a request of its own: the server refuses it together
+ * with applyToSimilar.
+ */
+export type TransactionEdit =
+  | (Pick<TransactionPatch, "type" | "category"> & { applyToSimilar: boolean })
+  | { want: boolean | null };
 
 export interface ApiOptions {
   baseUrl: string;
@@ -252,10 +262,11 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     createGoal: (input) => request("POST", "/plan/goals", input),
     patchGoal: (id, patch) => request("PATCH", `/plan/goals/${id}`, patch),
     deleteGoal: async (id) => void (await request("DELETE", `/plan/goals/${id}`)),
-    transactions: ({ cursor, needsLabel, group, q: search, category, from, to }) => {
+    transactions: ({ cursor, needsLabel, group, q: search, category, want, from, to }) => {
       const q = [
         group !== undefined && `group=${group}`,
         category !== undefined && `category=${encodeURIComponent(category)}`,
+        want === true && "want=true",
         from !== undefined && `from=${from}`,
         to !== undefined && `to=${to}`,
         search !== undefined && `q=${encodeURIComponent(search)}`,

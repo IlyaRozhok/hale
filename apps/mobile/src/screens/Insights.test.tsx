@@ -522,4 +522,53 @@ describe("Insights", () => {
       expect(insights.mock.calls.length).toBeGreaterThan(1);
     });
   });
+
+  describe("«желаемое» (В6)", () => {
+    const LINE = "Из них на желаемое ₴3,600";
+
+    it("one quiet row under the sum and its caption, before the categories", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ wanted: 360_000, previousWanted: 300_000 })) }));
+      const row = await screen.findByRole("button", { name: LINE });
+      expect(screen.getByText(LINE)).toBeTruthy();
+      // «Потрачено» stays as it was.
+      expect(screen.getByText("₴18,220")).toBeTruthy();
+      const texts = screen.getAllByText(/./).map((t) => t.props.children as unknown);
+      expect(texts.indexOf(LINE)).toBeGreaterThan(texts.indexOf("потрачено · в октябре за те же дни ₴18,040"));
+      expect(texts.indexOf(LINE)).toBeLessThan(texts.indexOf("Категории"));
+      // Silver, no red or sand; a full touch target.
+      const text = StyleSheet.flatten(screen.getByText(LINE).props.style) as { color?: string };
+      expect([tokens.color.status.danger, tokens.color.money.expense, tokens.color.limit.low]).not.toContain(text.color);
+      expect((StyleSheet.flatten(row.props.style) as { minHeight?: number }).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+    });
+
+    it("a tap leads to the operations of «желаемое» over the month's days", async () => {
+      const onOpenWanted = jest.fn();
+      await renderWith(<Insights now={now} onOpenWanted={onOpenWanted} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ wanted: 360_000 })) }));
+      await fireEvent.press(await screen.findByRole("button", { name: LINE }));
+      expect(onOpenWanted).toHaveBeenCalledWith("2026-11-01", "2026-11-16");
+    });
+
+    it("no row from an older server's answer without the field", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture()) }));
+      await screen.findByText("₴18,220");
+      expect(screen.queryByText(/желаемое/)).toBeNull();
+    });
+
+    it("no row when nothing went on «желаемое»", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ wanted: 0 })) }));
+      await screen.findByText("₴18,220");
+      expect(screen.queryByText(/желаемое/)).toBeNull();
+    });
+
+    it("no row when «желаемое» is more than all that was spent (refunds on «нужное»)", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ spent: 100_000, wanted: 150_000 })) }));
+      await screen.findByText("₴1,000");
+      expect(screen.queryByText(/желаемое/)).toBeNull();
+    });
+
+    it("the row shows when «желаемое» is all that was spent", async () => {
+      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ spent: 100_000, wanted: 100_000 })) }));
+      expect(await screen.findByText("Из них на желаемое ₴1,000")).toBeTruthy();
+    });
+  });
 });

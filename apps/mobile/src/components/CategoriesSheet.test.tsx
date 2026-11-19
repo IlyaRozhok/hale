@@ -185,6 +185,79 @@ describe("CategoriesSheet (В5)", () => {
     expect(api.createCategory).not.toHaveBeenCalled();
   });
 
+  describe("«Это скорее»: нужное или желаемое (В6)", () => {
+    const SIDED: CategoryDto[] = [
+      { key: "groceries", name: "Продукты", icon: "cart", system: false, want: false },
+      { key: "cafe", name: "Кафе и рестораны", icon: "coffee", system: false, want: true },
+      { key: "refund", name: "Возвраты", icon: "arrowIn", system: true, want: null },
+    ];
+    const CAPTION = "Действует на все операции категории, кроме тех, где вы выбрали по-другому.";
+    const side = (name: "Нужное" | "Желаемое") => screen.getByRole("radio", { name });
+
+    it("shows the category's side with what it does, and saves a new one", async () => {
+      const api = fakeApi({ categories: jest.fn(async () => SIDED), patchCategory: jest.fn(async () => ({ ...SIDED[1]!, want: false })) });
+      await renderWith(<CategoriesSheet onClose={noop} />, api);
+      await fireEvent.press(await screen.findByRole("button", { name: "Кафе и рестораны" }));
+      expect(await screen.findByText("Это скорее")).toBeTruthy();
+      expect(screen.getByText(CAPTION)).toBeTruthy();
+      expect(side("Желаемое").props.accessibilityState.selected).toBe(true);
+      expect(side("Нужное").props.accessibilityState.selected).toBe(false);
+      expect((StyleSheet.flatten(side("Нужное").props.style) as { minHeight?: number }).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+      // Between the name and the icons, as in the mockup.
+      const texts = screen.getAllByText(/^(Название|Это скорее|Значок)$/).map((t) => String(t.props.children));
+      expect(texts).toEqual(["Название", "Это скорее", "Значок"]);
+      await fireEvent.press(side("Нужное"));
+      await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+      await waitFor(() => expect(api.patchCategory).toHaveBeenCalledWith("cafe", { want: false }));
+    });
+
+    it("the same side sends nothing", async () => {
+      const api = fakeApi({ categories: jest.fn(async () => SIDED), patchCategory: jest.fn() });
+      await renderWith(<CategoriesSheet onClose={noop} />, api);
+      await fireEvent.press(await screen.findByRole("button", { name: "Продукты" }));
+      await fireEvent.press(await screen.findByRole("radio", { name: "Нужное" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+      await waitFor(() => expect(screen.queryByText("Это скорее")).toBeNull());
+      expect(api.patchCategory).not.toHaveBeenCalled();
+    });
+
+    it("a system category has no side", async () => {
+      await renderWith(<CategoriesSheet onClose={noop} />, fakeApi({ categories: jest.fn(async () => SIDED) }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Возвраты" }));
+      expect(await screen.findByText("Служебная категория: можно сменить только значок")).toBeTruthy();
+      expect(screen.queryByText("Это скорее")).toBeNull();
+    });
+
+    it("an older server without sides shows none, for a category or a new one", async () => {
+      await renderWith(<CategoriesSheet onClose={noop} />, fakeApi({ categories: jest.fn(async () => LIST) }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Кот" }));
+      expect(await screen.findByLabelText("Название")).toBeTruthy();
+      expect(screen.queryByText("Это скорее")).toBeNull();
+    });
+
+    it("a new category is «Нужное» unless «Желаемое» is chosen", async () => {
+      const created: CategoryDto = { key: "c_new", name: "Спорт", icon: "star", system: false, want: true };
+      const api = fakeApi({ categories: jest.fn(async () => SIDED), createCategory: jest.fn(async () => created) });
+      await renderWith(<CategoriesSheet onClose={noop} />, api);
+      await fireEvent.press(await screen.findByRole("button", { name: "Новая категория" }));
+      expect((await screen.findByRole("radio", { name: "Нужное" })).props.accessibilityState.selected).toBe(true);
+      await fireEvent.changeText(screen.getByLabelText("Название"), "Спорт");
+      await fireEvent.press(side("Желаемое"));
+      await fireEvent.press(screen.getByRole("button", { name: "Добавить" }));
+      await waitFor(() => expect(api.createCategory).toHaveBeenCalledWith({ name: "Спорт", icon: "star", want: true }));
+    });
+
+    it("a new category left as it is goes as «Нужное»", async () => {
+      const created: CategoryDto = { key: "c_new", name: "Дом", icon: "star", system: false, want: false };
+      const api = fakeApi({ categories: jest.fn(async () => SIDED), createCategory: jest.fn(async () => created) });
+      await renderWith(<CategoriesSheet onClose={noop} />, api);
+      await fireEvent.press(await screen.findByRole("button", { name: "Новая категория" }));
+      await fireEvent.changeText(await screen.findByLabelText("Название"), "Дом");
+      await fireEvent.press(screen.getByRole("button", { name: "Добавить" }));
+      await waitFor(() => expect(api.createCategory).toHaveBeenCalledWith({ name: "Дом", icon: "star", want: false }));
+    });
+  });
+
   it("an older server: one calm line, nothing to change", async () => {
     await renderWith(<CategoriesSheet onClose={noop} />, fakeApi({ categories: jest.fn(async () => null) }));
     expect(await screen.findByText("Свои категории появятся после обновления сервера.")).toBeTruthy();

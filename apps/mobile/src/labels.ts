@@ -113,7 +113,17 @@ export function deleteCategoryText(count: number | null, uncategorized: string):
   return "Операции этой категории ({n}) станут «{name}».".replace("{n}", String(count)).replace("{name}", uncategorized);
 }
 
-export const LABEL_CHOICES: { label: RecipientLabelName; text: string; effect: string }[] = [
+/** «Нужное» (false) or «желаемое» (true), task В6: neutral words, never «лишнее». */
+export const wantLabel = (want: boolean): string => (want ? "Желаемое" : "Нужное");
+
+/** Under «Эта покупка»: the side its category puts purchases on. Whole phrases, so they can be translated. */
+export const usualWantText = (category: string, want: boolean): string =>
+  (want ? "Для «{name}» обычно — желаемое" : "Для «{name}» обычно — нужное").replace("{name}", category);
+
+/** The row of «Итоги» under the month's sum: the part of it that went on «желаемое». */
+export const wantedText = (amount: number): string => "Из них на желаемое {amount}".replace("{amount}", formatMoney(amount));
+
+export const LABEL_CHOICES:{ label: RecipientLabelName; text: string; effect: string }[] = [
   { label: "close_regular", text: "Близкий человек, регулярно", effect: "Считается в дневном лимите. Платёж из плана лимит не тратит" },
   { label: "one_off", text: "Разовая помощь или подарок", effect: "Считается в дневном лимите" },
   { label: "service", text: "Оплата услуги или покупка", effect: "Считается в дневном лимите как трата" },

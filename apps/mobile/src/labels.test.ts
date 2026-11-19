@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { recipientLabelName, txType } from "@hale/contracts";
 import {
   accountLabel, alwaysCountText, answerChoices, answerText, categoryChoices, categoryLabel, categoryName, deleteCategoryText, FREQUENT_ANSWERS, LABEL_CHOICES, recipientLine, SPEND_CATEGORIES, TYPE_CHOICES, typeChips,
-  typeLabel,
+  typeLabel, usualWantText, wantedText, wantLabel,
 } from "./labels";
 
 describe("labels", () => {
@@ -138,5 +138,21 @@ describe("labels", () => {
     // A newer server may send a type the app does not know: it is treated like no type at all.
     const unknown = typeChips(-100, "something_new" as never);
     expect(unknown).toEqual(typeChips(-100, null));
+  });
+});
+
+describe("«нужное» и «желаемое» (В6)", () => {
+  it("names the two sides", () => {
+    expect(wantLabel(false)).toBe("Нужное");
+    expect(wantLabel(true)).toBe("Желаемое");
+  });
+
+  it("says a category's usual side as a whole phrase", () => {
+    expect(usualWantText("Покупки", true)).toBe("Для «Покупки» обычно — желаемое");
+    expect(usualWantText("Продукты", false)).toBe("Для «Продукты» обычно — нужное");
+  });
+
+  it("names the part of the month that went on «желаемое»", () => {
+    expect(wantedText(1_126_000)).toBe("Из них на желаемое ₴11,260");
   });
 });

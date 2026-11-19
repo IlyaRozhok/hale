@@ -1,7 +1,10 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
+import { tokens } from "@hale/tokens";
 import { TxEditSheet } from "./TxEditSheet";
 import type { CategoryDto, TransactionDto } from "@hale/contracts";
 import { fakeApi, renderWith, txFixture } from "../testing";
+import type { TransactionEdit } from "../api/client";
 
 const noop = () => undefined;
 /** 10 November, 14:32 on the device's own clock, whatever zone the tests run in. */
@@ -320,6 +323,111 @@ describe("TxEditSheet: categories from the server and «Всегда так» (�
   });
 });
 
+
+describe("TxEditSheet: «Эта покупка» — нужное или желаемое (В6)", () => {
+  const LIST: CategoryDto[] = [
+    { key: "cafe", name: "Кафе", icon: "coffee", system: false, want: true },
+    { key: "groceries", name: "Продукты", icon: "cart", system: false, want: false },
+    { key: "refund", name: "Возвраты", icon: "arrowIn", system: true, want: null },
+    { key: "uncategorized", name: "Без категории", icon: "circle", system: true, want: null },
+  ];
+  const cafe = txFixture({ id: 7, counterName: "Сільпо", type: "spend", category: "cafe", want: true, wantOverride: null });
+  const side = (name: "Нужное" | "Желаемое") => screen.getByRole("radio", { name });
+  /** The server keeps the side it was sent; null gives the row back to its category's. */
+  const keeping = (base: TransactionDto, categoryWant: boolean) =>
+    jest.fn(async (_id: number, patch: TransactionEdit) => {
+      const own = "want" in patch ? patch.want : (base.wantOverride ?? null);
+      return { transaction: { ...base, wantOverride: own, want: own ?? categoryWant }, updated: 1 };
+    });
+
+  it("shows the side this purchase is on, with its category's usual one under it", async () => {
+    await renderWith(<TxEditSheet tx={cafe} onClose={noop} />, fakeApi({ categories: jest.fn(async () => LIST) }));
+    expect(await screen.findByText("Эта покупка")).toBeTruthy();
+    expect(side("Желаемое").props.accessibilityState.selected).toBe(true);
+    expect(side("Нужное").props.accessibilityState.selected).toBe(false);
+    expect(screen.getByText("Для «Кафе» обычно — желаемое")).toBeTruthy();
+    // Between the categories and the type.
+    const texts = screen.getAllByText(/^(Категория|Эта покупка|Тип)$/).map((t) => String(t.props.children));
+    expect(texts).toEqual(["Категория", "Эта покупка", "Тип"]);
+    const flatStyle = StyleSheet.flatten(side("Нужное").props.style) as { minHeight?: number };
+    expect(flatStyle.minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+  });
+
+  it("the other side is saved at once, alone, and asks nothing about the similar ones", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction: keeping(cafe, true) });
+    const onClose = jest.fn();
+    await renderWith(<TxEditSheet tx={cafe} onClose={onClose} />, api);
+    await fireEvent.press(await screen.findByRole("radio", { name: "Нужное" }));
+    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { want: false }));
+    await waitFor(() => expect(side("Нужное").props.accessibilityState.selected).toBe(true));
+    expect(screen.getByText("Для «Кафе» обычно — желаемое")).toBeTruthy();
+    expect(screen.queryByText(/Всегда так/)).toBeNull();
+    expect(api.similarCount).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("the category's own side gives the purchase back to it", async () => {
+    const moved = { ...cafe, want: false, wantOverride: false };
+    const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction: keeping(moved, true) });
+    await renderWith(<TxEditSheet tx={moved} onClose={noop} />, api);
+    expect((await screen.findByRole("radio", { name: "Нужное" })).props.accessibilityState.selected).toBe(true);
+    await fireEvent.press(side("Желаемое"));
+    await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { want: null }));
+    await waitFor(() => expect(side("Желаемое").props.accessibilityState.selected).toBe(true));
+  });
+
+  it("the side it is already on sends nothing", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST) });
+    await renderWith(<TxEditSheet tx={cafe} onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("radio", { name: "Желаемое" }));
+    expect(api.editTransaction).not.toHaveBeenCalled();
+  });
+
+  it("a failed save says so and keeps the side it was on", async () => {
+    const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction: jest.fn(async () => Promise.reject(new Error("422"))) });
+    await renderWith(<TxEditSheet tx={cafe} onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("radio", { name: "Нужное" }));
+    expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
+    expect(side("Желаемое").props.accessibilityState.selected).toBe(true);
+  });
+
+  it("a new category shows the side the server gives the purchase now, its own choice kept", async () => {
+    const moved = { ...cafe, want: false, wantOverride: false };
+    // The own choice stays on the row; in «Продукты» it is the category's side anyway.
+    const editTransaction = jest.fn(async () => ({ transaction: { ...moved, category: "groceries", want: false }, updated: 1 }));
+    const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction, similarCount: jest.fn(async () => 1) });
+    await renderWith(<TxEditSheet tx={moved} onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Продукты" }));
+    expect(await screen.findByText("Для «Продукты» обычно — нужное")).toBeTruthy();
+    expect(side("Нужное").props.accessibilityState.selected).toBe(true);
+    expect(editTransaction).toHaveBeenCalledWith(7, { category: "groceries", applyToSimilar: false });
+  });
+
+  it("a purchase moved to a category with no side has no block", async () => {
+    const editTransaction = jest.fn(async () => ({ transaction: { ...cafe, category: "uncategorized", want: null }, updated: 1 }));
+    const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction });
+    await renderWith(<TxEditSheet tx={cafe} onClose={noop} />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Без категории" }));
+    await waitFor(() => expect(screen.queryByText("Эта покупка")).toBeNull());
+  });
+
+  it("no block for what is not a purchase, a category with no side, the cash wallet, or an older server", async () => {
+    const cases: [TransactionDto, CategoryDto[] | null][] = [
+      [{ ...cafe, type: "obligation", want: null }, LIST],
+      [{ ...cafe, category: "refund", want: null }, LIST],
+      [{ ...cafe, accountKind: "cash" }, LIST],
+      [{ ...cafe, want: undefined, wantOverride: undefined }, LIST],
+      [cafe, LIST.map((c) => ({ key: c.key, name: c.name, icon: c.icon, system: c.system }))],
+      [cafe, null],
+    ];
+    for (const [tx, list] of cases) {
+      const { unmount } = await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi({ categories: jest.fn(async () => list) }));
+      await screen.findByText("Тип");
+      await waitFor(() => expect(screen.queryByText("Эта покупка")).toBeNull());
+      await unmount();
+    }
+  });
+});
 
 describe("TxEditSheet: the answer to «Откуда наличные?» can be changed (Б21)", () => {
   const deposit = (cashAnswer: TransactionDto["cashAnswer"]) =>

@@ -6,7 +6,7 @@ import type { InsightsMonthDto } from "@hale/contracts";
 import { useCategoryList, useInsights } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
 import { formatMoney, inMonth, kyivDate, monthTitle, pluralIndex } from "../format";
-import { categoryName, type CategoryList } from "../labels";
+import { categoryName, wantedText, type CategoryList } from "../labels";
 import { CategoriesSheet } from "../components/CategoriesSheet";
 import { ErrorText } from "../components/ErrorText";
 import { Glass } from "../components/Glass";
@@ -55,13 +55,15 @@ type Props = {
   now?: () => Date;
   /** Leads to the operations of a category over the shown days of its month. */
   onOpenCategory?: (category: string, from: string, to: string) => void;
+  /** Leads to the purchases of «желаемое» over the same days (task В6). */
+  onOpenWanted?: (from: string, to: string) => void;
 };
 
 /**
  * «Итоги» (task В2): what the month's spending went on, category by category, each with a bright bar for this
  * month and a pale one for the same days of the month before. Earlier months are a step back with the arrows.
  */
-export function Insights({ now = () => new Date(), onOpenCategory }: Props) {
+export function Insights({ now = () => new Date(), onOpenCategory, onOpenWanted }: Props) {
   const insets = useSafeAreaInsets();
   const today = kyivDate(now());
   const thisMonth = today.slice(0, 7);
@@ -100,7 +102,7 @@ export function Insights({ now = () => new Date(), onOpenCategory }: Props) {
         // An older server has no «Итоги» yet.
         <Text style={styles.quiet}>Итоги появятся после обновления сервера.</Text>
       ) : data ? (
-        <Month data={data} past={back > 0} thisYear={today.slice(0, 4)} unfolded={unfolded} onUnfold={() => setUnfolded(true)} onOpenCategory={onOpenCategory} />
+        <Month data={data} past={back > 0} thisYear={today.slice(0, 4)} unfolded={unfolded} onUnfold={() => setUnfolded(true)} onOpenCategory={onOpenCategory} onOpenWanted={onOpenWanted} />
       ) : query.isError ? (
         <Glass style={styles.stack}>
           <ErrorText>Не получилось загрузить итоги. Проверьте связь и попробуйте ещё раз.</ErrorText>
@@ -123,9 +125,17 @@ type MonthProps = {
   unfolded: boolean;
   onUnfold: () => void;
   onOpenCategory?: (category: string, from: string, to: string) => void;
+  onOpenWanted?: (from: string, to: string) => void;
 };
 
-function Month({ data, past, thisYear, unfolded, onUnfold, onOpenCategory }: MonthProps) {
+/**
+ * Task В6, variant А: the part of «потрачено» that went on «желаемое». An older server does not send it; none is
+ * nothing to say; more than all that was spent (refunds landing on «нужное») would read as nonsense, so no row.
+ */
+const wantedShown = (d: InsightsMonthDto): number | null =>
+  d.wanted !== undefined && d.wanted > 0 && d.wanted <= d.spent ? d.wanted : null;
+
+function Month({ data, past, thisYear, unfolded, onUnfold, onOpenCategory, onOpenWanted }: MonthProps) {
   const list = useCategoryList();
   const [editing, setEditing] = useState(false);
   // A category spent on only in the month before has nothing to show for this one.
@@ -137,6 +147,7 @@ function Month({ data, past, thisYear, unfolded, onUnfold, onOpenCategory }: Mon
   // Bars are measured against the largest figure on the screen, of either month; nothing below zero.
   const largest = Math.max(0, ...rows.flatMap((c) => [c.spent, c.previousSpent]));
   const open = (c: Category) => onOpenCategory?.(c.category, `${data.month}-01`, data.through);
+  const wanted = wantedShown(data);
 
   return (
     <>
@@ -145,6 +156,17 @@ function Month({ data, past, thisYear, unfolded, onUnfold, onOpenCategory }: Mon
         <Text style={styles.amount}>{formatMoney(data.spent)}</Text>
         <Text style={styles.note}>{comparison(data)}</Text>
       </View>
+      {wanted !== null && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={wantedText(wanted)}
+          onPress={() => onOpenWanted?.(`${data.month}-01`, data.through)}
+          style={styles.wanted}
+        >
+          <Text style={styles.wantedText}>{wantedText(wanted)}</Text>
+          <Text style={styles.moreSum}>›</Text>
+        </Pressable>
+      )}
       {rows.length === 0 ? (
         <Text style={styles.quiet}>{past ? "Трат не было." : "Трат пока нет."}</Text>
       ) : (
@@ -254,6 +276,9 @@ const styles = StyleSheet.create({
   moreRight: { flexDirection: "row", gap: space.xs },
   moreSum: { ...type.body, color: color.fg.muted, fontVariant: ["tabular-nums"] },
   stack: { gap: space.md },
+  // One quiet row, text on the background: no card, no colour.
+  wanted: { minHeight: touchMin, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md, paddingHorizontal: space.lg, marginTop: -space.sm },
+  wantedText: { ...type.body, color: color.fg.default, fontVariant: ["tabular-nums"], flexShrink: 1 },
   link: { minHeight: touchMin, justifyContent: "center", paddingHorizontal: space.lg },
   linkText: { ...type.label, color: color.fg.muted },
 });

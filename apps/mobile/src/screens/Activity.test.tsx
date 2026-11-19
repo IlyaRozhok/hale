@@ -507,6 +507,84 @@ describe("Activity filters", () => {
     });
   });
 
+  describe("arriving from «Из них на желаемое» of «Итоги» (В6)", () => {
+    type Params = { day?: string; category?: string; want?: boolean; from?: string; to?: string; at: number };
+    let arrive: (p: Omit<Params, "at">) => Promise<void>;
+    function Arriving() {
+      const [params, setParams] = useState<Params>();
+      arrive = (next) => act(async () => setParams((p) => ({ ...next, at: (p?.at ?? 0) + 1 })));
+      return <Activity now={now} route={{ params }} />;
+    }
+    const wanted = { cursor: undefined, group: "spend", want: true, from: "2026-11-01", to: "2026-11-16" };
+
+    it("shows the purchases of «желаемое» over the month's days, named in the summary and counted on the button", async () => {
+      const transactions = summaryPage({ total: -360000, count: 9 });
+      await renderWith(<Activity now={now} route={{ params: { want: true, from: "2026-11-01", to: "2026-11-16", at: 1 } }} />, fakeApi({ transactions }));
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(wanted));
+      expect(await screen.findByRole("button", { name: "Фильтры: 2" })).toBeTruthy();
+      expect(await screen.findByText("Желаемое · 1–16 ноя: −₴3,600 · 9 операций")).toBeTruthy();
+    });
+
+    it("«Сбросить» takes it off with the rest", async () => {
+      const transactions = summaryPage({ total: -360000, count: 9 });
+      await renderWith(<Arriving />, fakeApi({ transactions }));
+      await screen.findByRole("button", { name: "Фильтры" });
+      await arrive({ want: true, from: "2026-11-01", to: "2026-11-16" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(wanted));
+      await fireEvent.press(await screen.findByRole("button", { name: "Фильтры: 2" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Сбросить" }));
+      await windowGone();
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" }));
+      expect(await screen.findByRole("button", { name: "Фильтры" })).toBeTruthy();
+      expect(screen.queryByText(/Желаемое/)).toBeNull();
+
+      // The same again is applied again.
+      await arrive({ want: true, from: "2026-11-01", to: "2026-11-16" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(wanted));
+    });
+
+    it("«Показать» with another period keeps it", async () => {
+      const transactions = summaryPage({ total: -120000, count: 3 });
+      await renderWith(<Arriving />, fakeApi({ transactions }));
+      await screen.findByRole("button", { name: "Фильтры" });
+      await arrive({ want: true, from: "2026-11-01", to: "2026-11-16" });
+      await fireEvent.press(await screen.findByRole("button", { name: "Фильтры: 2" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Неделя" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Показать" }));
+      await windowGone();
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ ...wanted, from: "2026-11-03", to: "2026-11-09" }));
+      expect(await screen.findByText("Желаемое · 3–9 ноя: −₴1,200 · 3 операции")).toBeTruthy();
+    });
+
+    it("a category or a day arriving later takes it off", async () => {
+      const transactions = summaryPage({ total: -360000, count: 9 });
+      await renderWith(<Arriving />, fakeApi({ transactions }));
+      await screen.findByRole("button", { name: "Фильтры" });
+      await arrive({ want: true, from: "2026-11-01", to: "2026-11-16" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(wanted));
+      await arrive({ category: "cafe", from: "2026-11-01", to: "2026-11-16" });
+      await waitFor(() =>
+        expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", category: "cafe", from: "2026-11-01", to: "2026-11-16" }),
+      );
+      await arrive({ want: true, from: "2026-11-01", to: "2026-11-16" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(wanted));
+      await arrive({ day: "2026-11-02" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", from: "2026-11-02", to: "2026-11-02" }));
+      expect(await screen.findByRole("button", { name: "Фильтры: 1" })).toBeTruthy();
+    });
+
+    it("income is not narrowed by it and does not count it", async () => {
+      const transactions = summaryPage({ total: -360000, count: 9 });
+      await renderWith(<Activity now={now} route={{ params: { want: true, from: "2026-11-01", to: "2026-11-16", at: 1 } }} />, fakeApi({ transactions }));
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(wanted));
+      await fireEvent.press(screen.getByRole("button", { name: "Доходы" }));
+      await waitFor(() =>
+        expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "income", from: "2026-11-01", to: "2026-11-16" }),
+      );
+      expect(await screen.findByRole("button", { name: "Фильтры: 1" })).toBeTruthy();
+    });
+  });
+
   describe("arriving from the phrase of the day's observation (В7)", () => {
     const spike = { kind: "spike" as const, period: "month" as const, category: "cafe", spent: 482_000, usual: 310_000, amount: null, from: "2026-11-01", to: "2026-11-09" };
     const TEXT = "Кафе и рестораны с начала ноября ₴4,820. Обычно к этому дню около ₴3,100.";
