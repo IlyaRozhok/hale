@@ -99,4 +99,15 @@ describe("the subscriptions sheet (В4)", () => {
     await fireEvent.press(await screen.findByRole("button", { name: "Закрыть" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
+
+  it("offers «Не показывать такое» only when opened from the phrase of the day (В7)", async () => {
+    const onDismiss = jest.fn();
+    const { unmount } = await renderWith(<SubscriptionsSheet subscriptions={subscriptions} onClose={() => undefined} />, fakeApi());
+    await screen.findByText("Подписки");
+    expect(screen.queryByRole("button", { name: "Не показывать такое" })).toBeNull();
+    await unmount();
+    await renderWith(<SubscriptionsSheet subscriptions={subscriptions} onClose={() => undefined} onDismiss={onDismiss} />, fakeApi());
+    await fireEvent.press(await screen.findByRole("button", { name: "Не показывать такое" }));
+    expect(onDismiss).toHaveBeenCalled();
+  });
 });

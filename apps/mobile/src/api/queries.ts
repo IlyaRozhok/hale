@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { type QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CategoryDto, CategoryInput, CategoryPatch } from "@hale/contracts";
+import type { CategoryDto, CategoryInput, CategoryPatch, ObservationDto, ObservationRef } from "@hale/contracts";
 import type { CategoryList } from "../labels";
 import type { CashOperationInput, CashOperationPatch, CashStartInput, ExpectedIncomeInput, ExpectedIncomePatch, InstallmentInput, InstallmentPatch, LoanInput, LoanPatch, LoanRepayInput, RecipientLabelName, RecurringInput, RecurringPatch, ScheduledPaymentInput, ScheduledPaymentPatch, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
 import type { CashCardAnswer, CashDepositAnswerName, GoalInput, GoalPatch, TxTypeDto } from "@hale/contracts";
-import type { TransactionsFilter } from "./client";
+import { ApiError, type TransactionsFilter } from "./client";
 import { useApi } from "./context";
 
 export const TODAY_KEY = ["today"] as const;
@@ -33,9 +33,9 @@ export function useToday() {
 }
 
 /** A month's «Итоги»; without a month the current one, as the server counts it. Null from an older server. */
-export function useInsights(month?: string) {
+export function useInsights(month?: string, enabled = true) {
   const api = useApi();
-  return useQuery({ queryKey: [...INSIGHTS_KEY, month ?? "current"], queryFn: () => api.insights(month) });
+  return useQuery({ queryKey: [...INSIGHTS_KEY, month ?? "current"], queryFn: () => api.insights(month), enabled });
 }
 
 export function useCalendar(month: string, enabled = true) {
@@ -689,4 +689,53 @@ export function useCategoryCount(): (key: string) => Promise<number | null> {
       return null;
     }
   };
+}
+
+// --- observations (В7) ----------------------------------------------------------------
+export const OBSERVATION_KEY = ["observation"] as const;
+/** Which observation this app has already marked shown, `date:kind:category`: one mark a day, not one per render. */
+const OBSERVATION_SHOWN_KEY = ["observation-shown"] as const;
+
+/** Today's observation for the phrase of the day, or null (none, or an older server). */
+export function useObservation(enabled = true) {
+  const api = useApi();
+  return useQuery({ queryKey: OBSERVATION_KEY, queryFn: () => api.observation(), enabled });
+}
+
+/**
+ * Tells the server the phrase of the day showed `ref` on `date`, once. A 409 means today's observation is another one
+ * by now: the phrase must not keep the old one, so it is asked for again.
+ */
+export function useMarkObservationShown(): (date: string, ref: ObservationRef) => void {
+  const api = useApi();
+  const client = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: (ref: ObservationRef) => api.observationShown(ref),
+    onSuccess: (o: ObservationDto | null) => client.setQueryData(OBSERVATION_KEY, o),
+    onError: (e: unknown) => {
+      // Not marked: the next showing tries again.
+      client.setQueryData(OBSERVATION_SHOWN_KEY, null);
+      if (e instanceof ApiError && e.status === 409) return client.invalidateQueries({ queryKey: OBSERVATION_KEY });
+    },
+  });
+  return (date, ref) => {
+    const mark = `${date}:${ref.kind}:${ref.category ?? ""}`;
+    if (client.getQueryData(OBSERVATION_SHOWN_KEY) === mark) return;
+    client.setQueryData(OBSERVATION_SHOWN_KEY, mark);
+    mutation.mutate(ref);
+  };
+}
+
+/** «Не показывать такое»: then the phrase of the day goes back to what it says on other days. */
+export function useDismissObservation() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (ref: ObservationRef) => api.dismissObservation(ref),
+    // Today's observation is gone at once (the server has none once it is dismissed), then asked for again.
+    onSuccess: () => {
+      client.setQueryData(OBSERVATION_KEY, null);
+      return client.invalidateQueries({ queryKey: OBSERVATION_KEY });
+    },
+  });
 }

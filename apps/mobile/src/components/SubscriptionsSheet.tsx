@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { InsightsMonthDto } from "@hale/contracts";
 import { dayMonthLong, formatMoney, inMonth, pluralIndex } from "../format";
@@ -31,8 +31,9 @@ export const monthlyText = (s: Subscriptions): string => `${formatMoney(s.monthl
 /**
  * The subscriptions found (task В4, variant Б): the ones still charged with their latest sums, then apart the ones
  * not charged for a while, which the total a month leaves out. Notes are grey: a change is news, not an alarm.
+ * Opened from the phrase of the day's observation (В7), it ends with a quiet «Не показывать такое» (`onDismiss`).
  */
-export function SubscriptionsSheet({ subscriptions, onClose }: { subscriptions: Subscriptions; onClose: () => void }) {
+export function SubscriptionsSheet({ subscriptions, onClose, onDismiss }: { subscriptions: Subscriptions; onClose: () => void; onDismiss?: () => void }) {
   const active = subscriptions.items.filter(isActive);
   const missed = subscriptions.items.filter((i) => !isActive(i));
   return (
@@ -68,6 +69,11 @@ export function SubscriptionsSheet({ subscriptions, onClose }: { subscriptions: 
         </View>
       )}
       <Text style={styles.footer}>Нашли по повторам: тот же магазин, близкая сумма, примерно раз в месяц.</Text>
+      {onDismiss && (
+        <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.dismiss}>
+          <Text style={styles.dismissText}>Не показывать такое</Text>
+        </Pressable>
+      )}
     </Sheet>
   );
 }
@@ -105,4 +111,6 @@ const styles = StyleSheet.create({
   quiet: { color: color.fg.muted },
   note: { ...type.caption, color: color.fg.muted, fontVariant: ["tabular-nums"] },
   footer: { ...type.caption, color: color.fg.subtle },
+  dismiss: { minHeight: touchMin, justifyContent: "center", alignSelf: "flex-start" },
+  dismissText: { ...type.label, color: color.fg.muted },
 });

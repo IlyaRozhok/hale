@@ -117,6 +117,32 @@ describe("api client", () => {
     ]);
   });
 
+  it("reads today's observation, marks it shown and dismisses it (В7); an older server has none", async () => {
+    const o = { kind: "spike", period: "month", category: "cafe", spent: 482_000, usual: 310_000, amount: null, from: "2026-11-01", to: "2026-11-19" };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(json({ observation: o }))
+      .mockResolvedValueOnce(json({ observation: null }))
+      .mockResolvedValueOnce(json({ observation: o }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(json({ message: "Cannot GET /observations/today" }, 404))
+      .mockResolvedValueOnce(json({ message: "not today's observation" }, 409));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await expect(api.observation()).resolves.toEqual(o);
+    await expect(api.observation()).resolves.toBeNull();
+    await expect(api.observationShown({ kind: "spike", category: "cafe" })).resolves.toEqual(o);
+    await expect(api.dismissObservation({ kind: "subscriptions", category: null })).resolves.toBeUndefined();
+    await expect(api.observation()).resolves.toBeNull();
+    await expect(api.observationShown({ kind: "spike", category: "cafe" })).rejects.toMatchObject({ status: 409 });
+    const calls = (fetchImpl.mock.calls as unknown as [string, RequestInit][]).map(([url, init]) => [init.method, url.replace("https://api.example.test", ""), init.body]);
+    expect(calls.slice(0, 4)).toEqual([
+      ["GET", "/observations/today", undefined],
+      ["GET", "/observations/today", undefined],
+      ["POST", "/observations/shown", JSON.stringify({ kind: "spike", category: "cafe" })],
+      ["POST", "/observations/dismiss", JSON.stringify({ kind: "subscriptions", category: null })],
+    ]);
+  });
+
   it("login sends no token and returns the token string", async () => {
     const fetchImpl = vi.fn(async () => json({ token: "abc" }));
     const { api } = setup(fetchImpl as unknown as typeof fetch, null);

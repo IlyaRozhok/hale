@@ -28,6 +28,9 @@ import type {
   LoanRepayInput,
   ManualBalanceDto,
   ManualBalanceInput,
+  ObservationDto,
+  ObservationRef,
+  ObservationTodayDto,
   RecipientLabelName,
   RecipientLabelResultDto,
   RecipientSummaryDto,
@@ -159,6 +162,12 @@ export interface Api {
   /** Every live key once, in the new order. */
   reorderCategories(keys: string[]): Promise<CategoryDto[]>;
   deleteCategory(key: string): Promise<CategoryDeletedDto>;
+  /** Today's observation for the phrase of the day (task В7), or none; null too from an older server. */
+  observation(): Promise<ObservationDto | null>;
+  /** The phrase of the day showed it; 409 when today's observation is another one by now. */
+  observationShown(ref: ObservationRef): Promise<ObservationDto | null>;
+  /** «Не показывать такое». */
+  dismissObservation(ref: ObservationRef): Promise<void>;
 }
 
 export type TransactionsFilter = {
@@ -313,5 +322,15 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     patchCategory: (key, patch) => request("PATCH", `/categories/${encodeURIComponent(key)}`, patch),
     reorderCategories: (keys) => request("PUT", "/categories/order", { keys }),
     deleteCategory: (key) => request("DELETE", `/categories/${encodeURIComponent(key)}`),
+    observation: async () => {
+      try {
+        return (await request<ObservationTodayDto>("GET", "/observations/today")).observation;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null; // an older server observes nothing
+        throw e;
+      }
+    },
+    observationShown: async (ref) => (await request<ObservationTodayDto>("POST", "/observations/shown", ref)).observation,
+    dismissObservation: async (ref) => void (await request("POST", "/observations/dismiss", ref)),
   };
 }

@@ -3,7 +3,7 @@ import { Alert, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { BridgeStateDto, DailyStateDto } from "@hale/contracts";
 import { Today } from "./Today";
-import { calendarFixture, fakeApi, loanFixture, loanHistoryFixture, makeClient, renderWith, todayFixture } from "../testing";
+import { calendarFixture, fakeApi, insightsFixture, loanFixture, loanHistoryFixture, makeClient, renderWith, todayFixture } from "../testing";
 import { ApiError, NetworkError } from "../api/client";
 
 jest.mock("../metal", () => {
@@ -175,6 +175,92 @@ describe("Today, normal mode", () => {
       const loansDue = [{ id: 7, amount: 500_000, dueOn: "2026-11-02" }];
       await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ loansDue })) }));
       expect(await screen.findByText("Сегодня срок вернуть займ ₴5,000. Он уже учтён в лимите.")).toBeTruthy();
+    });
+
+    describe("an observation (В7)", () => {
+      const spike = { kind: "spike" as const, period: "month" as const, category: "cafe", spent: 482_000, usual: 310_000, amount: null, from: "2026-11-01", to: "2026-11-19" };
+      const subs = { kind: "subscriptions" as const, period: null, category: null, spent: null, usual: null, amount: 51_900, from: "2026-11-19", to: "2026-11-25" };
+      const SPIKE_TEXT = "Кафе и рестораны с начала ноября ₴4,820. Обычно к этому дню около ₴3,100.";
+      const SUBS_TEXT = "На этой неделе спишутся подписки: около ₴519.";
+      const day19 = jest.fn(async () => todayFixture({ date: "2026-11-19", upcoming: [] }));
+      const calendar19 = jest.fn(async (month: string) =>
+        calendarFixture({ month, today: "2026-11-19", days: [{ date: "2026-11-18", limit: 100_000, spent: 66_000, status: "within" as const }] }),
+      );
+
+      it("takes yesterday's place, is marked shown once, and a tap opens that category's spending", async () => {
+        const onOpenObservation = jest.fn();
+        const observationShown = jest.fn(async () => spike);
+        const api = fakeApi({ today: day19, calendar: calendar19, observation: jest.fn(async () => spike), observationShown });
+        const { client, unmount } = await renderWith(<Today onOpenActivity={noop} onOpenObservation={onOpenObservation} />, api);
+        await fireEvent.press(await screen.findByText(SPIKE_TEXT));
+        expect(screen.queryByText(/^Вчера/)).toBeNull();
+        expect(onOpenObservation).toHaveBeenCalledWith("cafe", "2026-11-01", "2026-11-19");
+        await waitFor(() => expect(observationShown).toHaveBeenCalledWith({ kind: "spike", category: "cafe" }));
+        // Today shown again the same day does not mark it again.
+        await unmount();
+        await renderWith(<Today onOpenActivity={noop} />, api, client);
+        await screen.findByText(SPIKE_TEXT);
+        expect(observationShown).toHaveBeenCalledTimes(1);
+      });
+
+      it("waits behind a question, and is not marked shown while it waits", async () => {
+        const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
+        const observation = jest.fn(async () => spike);
+        const observationShown = jest.fn(async () => spike);
+        await renderWith(
+          <Today onOpenActivity={noop} />,
+          fakeApi({ today: jest.fn(async () => todayFixture({ date: "2026-11-19", upcoming: [], questions })), calendar: calendar19, observation, observationShown }),
+        );
+        expect(await screen.findByText("1 вопрос ждёт ответа. Это пять секунд, и лимит станет точнее.")).toBeTruthy();
+        await waitFor(() => expect(observation).toHaveBeenCalled());
+        expect(screen.queryByText(SPIKE_TEXT)).toBeNull();
+        expect(observationShown).not.toHaveBeenCalled();
+      });
+
+      it("an older server or a failed request: yesterday is said as before", async () => {
+        const observation = jest.fn(async () => {
+          throw new ApiError(500);
+        });
+        await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: day19, calendar: calendar19, observation }));
+        expect(await screen.findByText("Вчера осталось ₴340.")).toBeTruthy();
+      });
+
+      it("another observation by the time it is marked (409): the phrase is asked for again, not kept", async () => {
+        const observation = jest.fn().mockResolvedValueOnce(spike).mockResolvedValue(null);
+        const observationShown = jest.fn(async () => {
+          throw new ApiError(409);
+        });
+        await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: day19, calendar: calendar19, observation, observationShown }));
+        // It was said, so it was marked; the server refused.
+        await waitFor(() => expect(observationShown).toHaveBeenCalledWith({ kind: "spike", category: "cafe" }));
+        expect(await screen.findByText("Вчера осталось ₴340.")).toBeTruthy();
+        expect(screen.queryByText(SPIKE_TEXT)).toBeNull();
+        expect(observation).toHaveBeenCalledTimes(2);
+      });
+
+      it("the subscriptions open their list, where «Не показывать такое» puts yesterday back", async () => {
+        const subscriptions = { monthly: 51_900, items: [{ key: "00000000000000a1", name: "Netflix", amount: 34_900, lastDate: "2026-10-22", raisedBy: 0, missed: 0 }] };
+        const observation = jest.fn().mockResolvedValueOnce(subs).mockResolvedValue(null);
+        const dismissObservation = jest.fn(async () => undefined);
+        const onOpenObservation = jest.fn();
+        const api = fakeApi({
+          today: day19,
+          calendar: calendar19,
+          observation,
+          observationShown: jest.fn(async () => subs),
+          dismissObservation,
+          insights: jest.fn(async () => insightsFixture({ subscriptions })),
+        });
+        await renderWith(<Today onOpenActivity={noop} onOpenObservation={onOpenObservation} />, api);
+        await fireEvent.press(await screen.findByText(SUBS_TEXT));
+        expect(await screen.findByText("Подписки")).toBeTruthy();
+        expect(screen.getByTestId("subscription-row")).toBeTruthy();
+        expect(onOpenObservation).not.toHaveBeenCalled();
+        await fireEvent.press(screen.getByRole("button", { name: "Не показывать такое" }));
+        expect(dismissObservation).toHaveBeenCalledWith({ kind: "subscriptions", category: null });
+        await waitFor(() => expect(screen.queryByText("Подписки")).toBeNull());
+        expect(await screen.findByText("Вчера осталось ₴340.")).toBeTruthy();
+      });
     });
 
     it("a quiet day says nothing", async () => {
