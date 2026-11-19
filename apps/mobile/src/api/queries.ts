@@ -671,12 +671,22 @@ export function useReorderCategories() {
   });
 }
 
-/** How many operations a category has, for the deletion's confirmation; null when the server does not say. */
-export function useCategoryCount(key: string, enabled: boolean) {
+/**
+ * How many operations a category has, asked at the moment the deletion is confirmed, so the question never shows
+ * before the number has come; null when the server does not say or the request fails.
+ */
+export function useCategoryCount(): (key: string) => Promise<number | null> {
   const api = useApi();
-  return useQuery({
-    queryKey: [...TRANSACTIONS_KEY, "category-count", key],
-    queryFn: async () => (await api.transactions({ group: "all", category: key })).summary?.count ?? null,
-    enabled,
-  });
+  const client = useQueryClient();
+  return async (key) => {
+    try {
+      return await client.fetchQuery({
+        queryKey: [...TRANSACTIONS_KEY, "category-count", key],
+        queryFn: async () => (await api.transactions({ group: "all", category: key })).summary?.count ?? null,
+        staleTime: 0,
+      });
+    } catch {
+      return null;
+    }
+  };
 }

@@ -68,8 +68,9 @@ export function CategoryFormSheet({ category, onClose, onCreated }: Props) {
   const [name, setName] = useState(category?.name ?? "");
   const [icon, setIcon] = useState<CategoryIcon>(category && isCategoryIcon(category.icon) ? category.icon : NEW_ICON);
   const [message, setMessage] = useState<string | null>(null);
-  const count = useCategoryCount(category?.key ?? "", category !== undefined && !system);
-  const busy = create.isPending || patch.isPending || remove.isPending;
+  const countOf = useCategoryCount();
+  const [counting, setCounting] = useState(false);
+  const busy = create.isPending || patch.isPending || remove.isPending || counting;
 
   const failed = (e: unknown) =>
     setMessage(e instanceof ApiError && e.status === 409 ? "Такая категория уже есть." : "Не удалось сохранить. Попробуйте ещё раз.");
@@ -105,9 +106,13 @@ export function CategoryFormSheet({ category, onClose, onCreated }: Props) {
     patch.mutate({ key: category.key, patch: changes }, { onSuccess: onClose, onError: failed });
   };
 
-  const confirmDelete = () => {
+  // The count is asked for at the tap and the question waits for it: a quick tap never gets it without the number.
+  const confirmDelete = async () => {
     if (!category) return;
-    const n = count.data === undefined ? null : count.data;
+    setMessage(null);
+    setCounting(true);
+    const n = await countOf(category.key);
+    setCounting(false);
     Alert.alert(`Удалить «${category.name}»?`, deleteCategoryText(n, categoryName("uncategorized", list)), [
       { text: "Отмена", style: "cancel" },
       {
@@ -151,7 +156,7 @@ export function CategoryFormSheet({ category, onClose, onCreated }: Props) {
       {message && <ErrorText>{message}</ErrorText>}
       <PrimaryButton label={category ? "Сохранить" : "Добавить"} disabled={busy} onPress={save} />
       {category && !system && (
-        <Pressable accessibilityRole="button" accessibilityLabel="Удалить" disabled={busy} onPress={confirmDelete} style={styles.delete}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Удалить" disabled={busy} onPress={() => void confirmDelete()} style={styles.delete}>
           <Text style={styles.deleteText}>Удалить</Text>
         </Pressable>
       )}

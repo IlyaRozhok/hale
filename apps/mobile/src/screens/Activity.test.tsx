@@ -738,4 +738,15 @@ describe("Activity: own categories (В5)", () => {
     await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", category: "c_cat" }));
     expect(await screen.findByText("Кот: −₴25 · 2 операции")).toBeTruthy();
   });
+
+  it("a chosen category that has since been deleted drops out of the filters instead of showing its key", async () => {
+    const transactions = jest.fn(async () => ({ items: [txFixture()], nextCursor: null, dayTotals: {}, summary: { total: -2500, count: 2 } }));
+    await renderWith(
+      <Activity route={{ params: { category: "c_gone", from: "2026-11-01", to: "2026-11-16", at: 1 } }} />,
+      fakeApi({ transactions, categories: jest.fn(async () => LIST) }),
+    );
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", from: "2026-11-01", to: "2026-11-16" }));
+    expect(await screen.findByRole("button", { name: "Фильтры: 1" })).toBeTruthy();
+    expect(screen.queryByText(/c_gone/)).toBeNull();
+  });
 });

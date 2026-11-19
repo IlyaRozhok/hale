@@ -1,10 +1,9 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
-import { Alert } from "react-native";
-import type { CategoryDto } from "@hale/contracts";
+import { Alert, StyleSheet } from "react-native";
+import { tokens } from "@hale/tokens";
+import type { CategoryDto, TransactionPageDto } from "@hale/contracts";
 import { CategoriesSheet } from "./CategoriesSheet";
-import type { QueryClient } from "@tanstack/react-query";
 import { ApiError } from "../api/client";
-import { TRANSACTIONS_KEY } from "../api/queries";
 import { fakeApi, renderWith } from "../testing";
 
 const noop = () => undefined;
@@ -20,9 +19,6 @@ const LIST: CategoryDto[] = [
   { key: "refund", name: "Возвраты", icon: "arrowIn", system: true },
   { key: "uncategorized", name: "Без категории", icon: "circle", system: true },
 ];
-/** The count for the deletion's question has come back (it is not on the screen until the question). */
-const counted = (client: QueryClient) =>
-  waitFor(() => expect(client.getQueryState([...TRANSACTIONS_KEY, "category-count", "c_cat"])?.status).toBe("success"));
 const names = () => screen.getAllByTestId("category-row").map((r) => String(r.props.accessibilityLabel));
 const FOOTNOTE = "Нажмите на категорию, чтобы переименовать или удалить. «Возвраты» и «Без категории» служебные — их не удалить.";
 
@@ -58,6 +54,14 @@ describe("CategoriesSheet (В5)", () => {
     expect(screen.getByRole("button", { name: "Выше: Продукты" }).props.accessibilityState.disabled).toBe(true);
     expect(screen.getByRole("button", { name: "Ниже: Без категории" }).props.accessibilityState.disabled).toBe(true);
     expect(screen.getByRole("button", { name: "Ниже: Продукты" }).props.accessibilityState.disabled).toBe(false);
+  });
+
+  it("each arrow is a full touch target", async () => {
+    await renderWith(<CategoriesSheet onClose={noop} />, fakeApi({ categories: jest.fn(async () => LIST) }));
+    const button = await screen.findByRole("button", { name: "Ниже: Кот" });
+    const arrow = StyleSheet.flatten(button.props.style) as { minWidth: number; minHeight: number };
+    expect(arrow.minWidth).toBeGreaterThanOrEqual(tokens.touchMin);
+    expect(arrow.minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
   });
 
   it("a refused order goes back and says so", async () => {
@@ -110,17 +114,20 @@ describe("CategoriesSheet (В5)", () => {
     });
     afterEach(() => alert.mockRestore());
 
-    it("asks first, naming how many operations go to «Без категории»", async () => {
+    it("asks first, naming how many operations go to «Без категории», however quickly «Удалить» is pressed", async () => {
+      // The count comes only when the test lets it: the question must wait for it.
+      let answer: (page: TransactionPageDto) => void = noop;
       const api = fakeApi({
         categories: jest.fn(async () => LIST),
-        transactions: jest.fn(async () => ({ items: [], nextCursor: null, dayTotals: {}, summary: { total: -100_000, count: 14 } })),
+        transactions: jest.fn(() => new Promise((resolve) => (answer = resolve))),
         deleteCategory: jest.fn(async () => ({ deleted: true as const, moved: 14 })),
       });
-      const { client } = await renderWith(<CategoriesSheet onClose={noop} />, api);
+      await renderWith(<CategoriesSheet onClose={noop} />, api);
       await fireEvent.press(await screen.findByRole("button", { name: "Кот" }));
-      await waitFor(() => expect(api.transactions).toHaveBeenCalledWith({ group: "all", category: "c_cat" }));
-      await counted(client);
       await fireEvent.press(await screen.findByRole("button", { name: "Удалить" }));
+      await waitFor(() => expect(api.transactions).toHaveBeenCalledWith({ group: "all", category: "c_cat" }));
+      expect(alert).not.toHaveBeenCalled();
+      await act(async () => answer({ items: [], nextCursor: null, dayTotals: {}, summary: { total: -100_000, count: 14 } }));
       await waitFor(() => expect(alert).toHaveBeenCalled());
       expect(alert.mock.calls.at(-1)![0]).toBe("Удалить «Кот»?");
       expect(alert.mock.calls.at(-1)![1]).toBe("Операции этой категории (14) станут «Без категории».");
@@ -132,12 +139,26 @@ describe("CategoriesSheet (В5)", () => {
 
     it("without a count from the server the question has no number", async () => {
       const api = fakeApi({ categories: jest.fn(async () => LIST), transactions: jest.fn(async () => ({ items: [], nextCursor: null, dayTotals: {} })) });
-      const { client } = await renderWith(<CategoriesSheet onClose={noop} />, api);
+      await renderWith(<CategoriesSheet onClose={noop} />, api);
       await fireEvent.press(await screen.findByRole("button", { name: "Кот" }));
-      await counted(client);
       await fireEvent.press(await screen.findByRole("button", { name: "Удалить" }));
       await waitFor(() => expect(alert).toHaveBeenCalled());
       expect(alert.mock.calls.at(-1)![1]).toBe("Операции этой категории станут «Без категории».");
+    });
+
+    it("a failed count still asks, without the number, and still deletes", async () => {
+      const api = fakeApi({
+        categories: jest.fn(async () => LIST),
+        transactions: jest.fn(async () => Promise.reject(new ApiError(500))),
+        deleteCategory: jest.fn(async () => ({ deleted: true as const, moved: 3 })),
+      });
+      await renderWith(<CategoriesSheet onClose={noop} />, api);
+      await fireEvent.press(await screen.findByRole("button", { name: "Кот" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Удалить" }));
+      await waitFor(() => expect(alert).toHaveBeenCalled());
+      expect(alert.mock.calls.at(-1)![1]).toBe("Операции этой категории станут «Без категории».");
+      await act(async () => pressAlert(alert, "Удалить"));
+      await waitFor(() => expect(api.deleteCategory).toHaveBeenCalledWith("c_cat"));
     });
   });
 

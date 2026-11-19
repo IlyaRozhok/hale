@@ -100,7 +100,7 @@ const styles = StyleSheet.create({
   open: { flex: 1, minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.md },
   badge: { width: BADGE, height: BADGE, borderRadius: radius.md, backgroundColor: color.surface.raised, alignItems: "center", justifyContent: "center" },
   name: { ...type.body, color: color.fg.default, flexShrink: 1 },
-  arrow: { minWidth: touchMin - space.sm, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
+  arrow: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
   off: { opacity: 0.3 },
   note: { ...type.caption, color: color.fg.muted },
 });

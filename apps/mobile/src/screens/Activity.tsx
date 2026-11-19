@@ -117,6 +117,11 @@ export function Activity({ now = () => new Date(), route }: Props) {
   });
   const pull = usePullRefresh(list.refetch);
   const categories = useCategoryList();
+  // A chosen category deleted since (В5): its operations are in «Без категории» now, so the filter is taken off
+  // rather than left showing an empty list under the category's key.
+  useEffect(() => {
+    if (categories && category !== null && !categories.some((c) => c.key === category)) setCategory(null);
+  }, [categories, category]);
   const pages = list.data?.pages ?? [];
   const items = pages.flatMap((p) => p.items);
   const totals = Object.assign({}, ...pages.map((p) => p.dayTotals)) as Record<string, number | undefined>;
