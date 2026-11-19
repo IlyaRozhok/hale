@@ -7,7 +7,7 @@ import type { TransactionDto } from "@hale/contracts";
 import { useCategoryList, useTransactions } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
 import { dayHeader, formatSignedMoney, kyivDate, operationsText, periodLabel } from "../format";
-import { categoryName } from "../labels";
+import { categoryLabel, categoryName } from "../labels";
 import { FiltersSheet, type Filters, type Period } from "../components/FiltersSheet";
 import { ErrorText } from "../components/ErrorText";
 import { Field } from "../components/Field";
@@ -117,10 +117,12 @@ export function Activity({ now = () => new Date(), route }: Props) {
   });
   const pull = usePullRefresh(list.refetch);
   const categories = useCategoryList();
-  // A chosen category deleted since (В5): its operations are in «Без категории» now, so the filter is taken off
-  // rather than left showing an empty list under the category's key.
+  // An own category chosen and deleted since (В5): its operations are in «Без категории» now, so the filter is taken
+  // off rather than left showing an empty list under the category's key. Keys this app names itself stay: the
+  // type-level ones «Итоги» files rows under (transfer, cash, tax, …) are never in the server's list.
   useEffect(() => {
-    if (categories && category !== null && !categories.some((c) => c.key === category)) setCategory(null);
+    const ownGone = category !== null && categoryLabel(category) === category && categories && !categories.some((c) => c.key === category);
+    if (ownGone) setCategory(null);
   }, [categories, category]);
   const pages = list.data?.pages ?? [];
   const items = pages.flatMap((p) => p.items);

@@ -749,4 +749,17 @@ describe("Activity: own categories (В5)", () => {
     expect(await screen.findByRole("button", { name: "Фильтры: 1" })).toBeTruthy();
     expect(screen.queryByText(/c_gone/)).toBeNull();
   });
+
+  it("a type-level key from «Итоги» («Переводы») stays chosen though the list of purchase categories lacks it", async () => {
+    const transactions = jest.fn(async () => ({ items: [txFixture()], nextCursor: null, dayTotals: {}, summary: { total: -2500, count: 2 } }));
+    const categories = jest.fn(async () => LIST);
+    await renderWith(
+      <Activity route={{ params: { category: "transfer", from: "2026-11-01", to: "2026-11-16", at: 1 } }} />,
+      fakeApi({ transactions, categories }),
+    );
+    await waitFor(() => expect(categories).toHaveBeenCalled());
+    expect(await screen.findByText("Переводы · 1–16 ноя: −₴25 · 2 операции")).toBeTruthy();
+    expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", category: "transfer", from: "2026-11-01", to: "2026-11-16" });
+    expect(screen.getByRole("button", { name: "Фильтры: 2" })).toBeTruthy();
+  });
 });
