@@ -1368,13 +1368,35 @@ describe("which accounts are own money (Д2а)", () => {
     expect(r.accounts.setAside).toEqual([]);
   });
 
-  it("a switched-off card with its credit limit untouched and nothing owed is shown nowhere", async () => {
+  it("a switched-off card with its credit limit untouched and nothing owed is set aside at ₴0, so it can be switched back (Д2в)", async () => {
     const black = await account("black", 3_000_000, { creditLimit: 3_000_000 });
-    await account("white", 500_000);
+    const white = await account("white", 500_000);
+    await income("fop", "2026-11-12");
+    const before = await today();
     const after = await switchOff(black);
-    expect(after.accounts.items.map((i: { kind: string }) => i.kind)).toEqual(["white"]);
-    expect(after.accounts.setAside).toEqual([]);
+    // Nothing of the money moves: a card at zero adds zero, and its limit stays credit.
+    expect(after.state).toEqual(before.state);
+    expect(after.accounts.own).toBe(before.accounts.own);
     expect(after.accounts.credit).toBe(3_000_000);
+    expect(after.accounts.items).toEqual([{ kind: "white", name: "Белая карта", own: 500_000, ...card(white) }]);
+    expect(after.accounts.setAside).toEqual([
+      { kind: "black", name: "Чёрная карта", own: 0, creditLimit: 3_000_000, ...card(black, { countsAsOwn: false }) },
+    ]);
+  });
+
+  it("a card spent to exactly zero and switched off is set aside at ₴0; an empty jar and an empty own account stay hidden (Д2в)", async () => {
+    const white = await account("white", 0);
+    const fop = await account("fop", 500_000);
+    await account("jar", 0); // switched off by default, empty: not a place money lies
+    await account("black", 0, { currency: "USD" }); // own, empty, no limit: monobank's spare currency account
+    await income("fop", "2026-11-12");
+    const before = await today();
+    expect(before.accounts.setAside).toEqual([]);
+    const after = await switchOff(white);
+    expect(after.state).toEqual(before.state);
+    expect(after.accounts.own).toBe(500_000);
+    expect(after.accounts.items).toEqual([{ kind: "fop", name: "Счёт ФОП", own: 500_000, ...card(fop) }]);
+    expect(after.accounts.setAside).toEqual([{ kind: "white", name: "Белая карта", own: 0, ...card(white, { countsAsOwn: false }) }]);
   });
 
   it("the person names an account; an empty name gives the default back", async () => {

@@ -6,7 +6,7 @@ import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
 import { lastIncomeBoundary, loanReserve, type ReceivedIncome } from "../domain/loans";
 import { type DailyInput, type DailyState, type DayMark, computeDaily, dayMark, dueWindowEnd, sumDue } from "../domain/daily";
-import { cashCountShortfallSql, countsAsOwnSql, ownPart, spentByDaySql, spentSql } from "../domain/ledger";
+import { cashCountShortfallSql, countsAsOwnSql, ownPart, SET_ASIDE_BY_DEFAULT_KIND, spentByDaySql, spentSql } from "../domain/ledger";
 import { runway } from "../domain/runway";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
 import { quarterLabel, quarterOf } from "../domain/quarter";
@@ -526,9 +526,16 @@ export class TodayService {
       // The fop account has its own slot; every other own account is spendable like the cards.
       if (a.kind === "fop") fop += item.own;
       else cards += item.own;
-      // monobank opens one account per currency; an empty one without a credit limit is not a place money lies, nor
-      // is a switched-off one with nothing owed.
-      if (part.own === 0 && (a.credit_limit <= 0 || !a.own)) continue;
+      if (part.own === 0) {
+        // A switched-off account with nothing in it and nothing owed is listed as set aside at ₴0, so the person can
+        // still find it and switch it back (Д2в); an empty jar is not a place money lies.
+        if (!a.own) {
+          if (a.kind !== SET_ASIDE_BY_DEFAULT_KIND) setAside.push(item);
+          continue;
+        }
+        // monobank opens one account per currency; an empty one without a credit limit is not a place money lies.
+        if (a.credit_limit <= 0) continue;
+      }
       items.push(item);
     }
     // The Binance balance and any other manual balance that counts as own money share one slot.
