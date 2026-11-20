@@ -721,7 +721,11 @@ describe("a planned payment paid with chosen operations", () => {
     it("takes only the rest from the wallet, links it as a part and closes the payment; the day's spending stays", async () => {
       const { id, transfer } = await partlyPaid();
       const spent = await spentOn("2026-11-10");
+      expect((await today()).state.leftToday).toBe(280_000);
       expect((await api.post(`/cash/payments/${id}`).expect(201)).body.balance).toBe(1_100_000);
+      // The open payment kept its whole ₴36,000 reserved (Б9); closed, it frees it while the wallet gives only ₴9,000:
+      // the day gets more, as when the last part is linked or the payment is closed by hand.
+      expect((await today()).state.leftToday).toBe(370_000);
 
       expect(await paidAt(id)).not.toBeNull();
       expect(await row(`SELECT closed_by_links, transaction_id FROM scheduled_payments WHERE id=$1`, [id])).toEqual({

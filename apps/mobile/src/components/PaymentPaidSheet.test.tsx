@@ -89,7 +89,7 @@ describe("a payment paid in parts (Б9)", () => {
       const api = fakeApi(wallet(2_000_000));
       await renderWith(<PaymentPaidSheet payment={partly} today="2026-11-09" onClose={onClose} />, api);
       await fireEvent(await screen.findByLabelText("Наличными из кошелька"), "valueChange", true);
-      expect(screen.getByText("Наличные уменьшатся на ₴9,000 — остаток платежа. Лимит не изменится.")).toBeTruthy();
+      expect(screen.getByText("Наличные уменьшатся на ₴9,000 — остаток платежа.")).toBeTruthy();
       await press("Оплачено");
       await waitFor(() => expect(api.payFromWallet).toHaveBeenCalledWith(11));
       expect(api.markPaid).not.toHaveBeenCalled();

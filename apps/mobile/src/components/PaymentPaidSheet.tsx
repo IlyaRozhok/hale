@@ -120,7 +120,7 @@ export function PaymentPaidSheet({ payment, today, onClose }: Props) {
           ? "Платёж закроется, выбранные операции станут им и не потратят лимит."
           : inCash && covers
             ? alreadyPaid > 0
-              ? `Наличные уменьшатся на ${formatMoney(cashDue)} — остаток платежа. Лимит не изменится.`
+              ? `Наличные уменьшатся на ${formatMoney(cashDue)} — остаток платежа.`
               : `Наличные уменьшатся на ${formatMoney(payment.amount)}, лимит не изменится.`
             : "Платёж закроется, деньги под него больше не откладываются."}
       </Text>
