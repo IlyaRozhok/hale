@@ -1,4 +1,4 @@
-// Accounts and money shaped like the owner's (Д2а): every bank account kind, a card with a credit limit, a dollar
+// Accounts and money shaped like the owner's (Д2а): every bank account kind, the black card with a credit limit, a dollar
 // account, the cash wallet, Binance and a balance set aside, a payment and an income ahead, spending on every kind.
 // The migration test fills a database at 0037 with it and checks that the limit, the reserve and own money read
 // the same after 0038 as they did before it.
@@ -17,7 +17,8 @@ export async function fillOwnerAccounts(q: Query): Promise<void> {
     ["fop", "fop", "UAH", 500_000, 0],
     ["jar", "jar", "UAH", 2_000_000, 0],
     ["platinum", "other", "UAH", 210_000, 0],
-    ["iron", "other", "UAH", 900_000, 1_000_000],
+    // The owner has no card with a credit limit besides the black one (his answer of 20 November 2026).
+    ["iron", "other", "UAH", 900_000, 0],
     ["cash", "cash", "UAH", 0, 0],
   ];
   const ids: Record<string, number> = {};

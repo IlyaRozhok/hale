@@ -1353,6 +1353,21 @@ describe("which accounts are own money (Д2а)", () => {
     ]);
   });
 
+  it("an 'other' card the migration marked off, in debt: its debt now lowers own money and its limit enters the credit (risk 14)", async () => {
+    // Before Д2а such a card was left out whole: its debt was invisible and its limit was not credit.
+    const iron = await account("other", 900_000, { creditLimit: 1_000_000 });
+    const white = await account("white", 500_000);
+    await ds.query(`UPDATE accounts SET counts_as_own = false WHERE id = $1`, [iron]); // as migration 0038 marks it
+    const r = await today();
+    expect(r.accounts.own).toBe(400_000);
+    expect(r.accounts.credit).toBe(1_000_000);
+    expect(r.accounts.items).toEqual([
+      { kind: "other", name: "Карта monobank", own: -100_000, creditLimit: 1_000_000, ...card(iron, { countsAsOwn: false }) },
+      { kind: "white", name: "Белая карта", own: 500_000, ...card(white) },
+    ]);
+    expect(r.accounts.setAside).toEqual([]);
+  });
+
   it("a switched-off card with its credit limit untouched and nothing owed is shown nowhere", async () => {
     const black = await account("black", 3_000_000, { creditLimit: 3_000_000 });
     await account("white", 500_000);
