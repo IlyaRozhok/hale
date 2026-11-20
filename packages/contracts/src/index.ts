@@ -392,7 +392,10 @@ export interface OwnMoneyItemDto {
   source?: "account" | "manual" | "cash";
   /** The row's id in its source; absent for the wallet. */
   id?: number;
-  /** Whether the place counts as own money: true in `items`, false in `setAside`. */
+  /**
+   * The person's mark (or the kind's default): whether the place counts as own money. Always false in `setAside`; in
+   * `items` usually true, but a switched-off card in debt is there too with false, since its debt stays in own money.
+   */
   countsAsOwn?: boolean;
 }
 

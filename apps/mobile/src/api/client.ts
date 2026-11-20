@@ -1,5 +1,7 @@
 import type {
+  AccountDto,
   AccountFilterKind,
+  AccountPatch,
   BridgePreviewDto,
   CalendarDto,
   CashCardAnswer,
@@ -79,6 +81,9 @@ export class NetworkError extends Error {
   }
 }
 
+/** What the app changes on a balance kept by hand; its currency stays as it was made. */
+export type ManualBalancePatch = Partial<Pick<ManualBalanceInput, "name" | "amount" | "counts_as_own">>;
+
 export interface Api {
   login(password: string, deviceName: string): Promise<string>;
   today(): Promise<TodayDto>;
@@ -93,9 +98,11 @@ export interface Api {
   dismissUsdcMatch(transactionId: number): Promise<void>;
   manualBalances(): Promise<ManualBalanceDto[]>;
   createManualBalance(input: ManualBalanceInput): Promise<ManualBalanceDto>;
-  /** Changes the name, the amount or both; the server keeps what is left out. */
-  patchManualBalance(id: number, patch: { name?: string; amount?: number }): Promise<ManualBalanceDto>;
+  /** Changes the name, the amount, whether it counts as own money, or several; the server keeps what is left out. */
+  patchManualBalance(id: number, patch: ManualBalancePatch): Promise<ManualBalanceDto>;
   deleteManualBalance(id: number): Promise<void>;
+  /** A bank account's own-money mark and name (Д2а); `name: null` gives the default name back. */
+  patchAccount(id: number, patch: AccountPatch): Promise<AccountDto>;
   transactions(query: TransactionsFilter & { cursor?: string }): Promise<TransactionPageDto>;
   editTransaction(id: number, patch: TransactionEdit): Promise<TransactionEditDto>;
   labelRecipient(counterKey: string, label: RecipientLabelName): Promise<RecipientLabelResultDto>;
@@ -261,6 +268,7 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     createManualBalance: (input) => request("POST", "/plan/manual-balances", input),
     patchManualBalance: (id, patch) => request("PATCH", `/plan/manual-balances/${id}`, patch),
     deleteManualBalance: async (id) => void (await request("DELETE", `/plan/manual-balances/${id}`)),
+    patchAccount: (id, patch) => request("PATCH", `/plan/accounts/${id}`, patch),
     goals: () => request("GET", "/plan/goals"),
     createGoal: (input) => request("POST", "/plan/goals", input),
     patchGoal: (id, patch) => request("PATCH", `/plan/goals/${id}`, patch),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { recipientLabelName, txType } from "@hale/contracts";
 import {
-  accountChoices, accountLabel, alwaysCountText, answerChoices, answerText, categoryChoices, categoryLabel, categoryName, deleteCategoryText, FREQUENT_ANSWERS, LABEL_CHOICES, recipientLine, SPEND_CATEGORIES, TYPE_CHOICES, typeChips,
+  accountChoices, accountLabel, alwaysCountText, balanceFieldLabel, NEW_ACCOUNT_CURRENCIES, answerChoices, answerText, categoryChoices, categoryLabel, categoryName, deleteCategoryText, FREQUENT_ANSWERS, LABEL_CHOICES, recipientLine, SPEND_CATEGORIES, TYPE_CHOICES, typeChips,
   typeLabel, usualWantText, wantedText, wantLabel,
 } from "./labels";
 
@@ -122,6 +122,21 @@ describe("labels", () => {
     expect(accountChoices(["white", "jar", "something_new"])).toEqual([{ kind: "white", name: "Белая карта" }]);
     expect(accountChoices([])).toEqual([]);
     expect(accountChoices(undefined)).toEqual([]);
+  });
+
+  it("names the balance field of an account kept by hand by its currency, as one phrase (Д2б)", () => {
+    expect(balanceFieldLabel("UAH")).toBe("Остаток, ₴");
+    expect(balanceFieldLabel("USD")).toBe("Остаток, $");
+    expect(balanceFieldLabel("EUR")).toBe("Остаток, €");
+    expect(balanceFieldLabel("PLN")).toBe("Остаток, PLN");
+  });
+
+  it("offers hryvnias, dollars and euros for a new account (Д2б)", () => {
+    expect(NEW_ACCOUNT_CURRENCIES).toEqual([
+      { code: "UAH", label: "₴" },
+      { code: "USD", label: "$" },
+      { code: "EUR", label: "€" },
+    ]);
   });
 
   it("offers the frequent types by where the money goes, the rest behind", () => {

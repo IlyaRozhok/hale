@@ -4,7 +4,8 @@ import type { CategoryDto, CategoryInput, CategoryPatch, ObservationDto, Observa
 import type { CategoryList } from "../labels";
 import type { CashOperationInput, CashOperationPatch, CashStartInput, ExpectedIncomeInput, ExpectedIncomePatch, InstallmentInput, InstallmentPatch, LoanInput, LoanPatch, LoanRepayInput, RecipientLabelName, RecurringInput, RecurringPatch, ScheduledPaymentInput, ScheduledPaymentPatch, SettingsDto, SettingsPatch, TodayDto } from "@hale/contracts";
 import type { CashCardAnswer, CashDepositAnswerName, GoalInput, GoalPatch, TxTypeDto } from "@hale/contracts";
-import { ApiError, type TransactionEdit, type TransactionsFilter } from "./client";
+import type { AccountPatch, ManualBalanceInput } from "@hale/contracts";
+import { ApiError, type ManualBalancePatch, type TransactionEdit, type TransactionsFilter } from "./client";
 import { useApi } from "./context";
 
 export const TODAY_KEY = ["today"] as const;
@@ -137,6 +138,7 @@ function useManualBalanceMutation<V>(mutationFn: (vars: V) => Promise<unknown>) 
         client.invalidateQueries({ queryKey: MANUAL_BALANCES_KEY }),
         client.invalidateQueries({ queryKey: TODAY_KEY }),
         client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY }),
+        client.invalidateQueries({ queryKey: INSIGHTS_KEY }),
       ]),
   });
 }
@@ -151,7 +153,24 @@ export function useCreateSetAside() {
 
 export function usePatchManualBalance() {
   const api = useApi();
-  return useManualBalanceMutation(({ id, patch }: { id: number; patch: { name?: string; amount?: number } }) => api.patchManualBalance(id, patch));
+  return useManualBalanceMutation(({ id, patch }: { id: number; patch: ManualBalancePatch }) => api.patchManualBalance(id, patch));
+}
+
+/**
+ * A new account kept by hand (Д2б): a name, a currency, a balance and whether it counts as own money. The mark is
+ * always sent: the server's default for a balance without it is still own money, the window's is set aside.
+ */
+export function useCreateAccount() {
+  const api = useApi();
+  return useManualBalanceMutation((input: { name: string; amount: number; currency: ManualBalanceInput["currency"]; countsAsOwn: boolean }) =>
+    api.createManualBalance({ name: input.name, amount: input.amount, currency: input.currency, counts_as_own: input.countsAsOwn }),
+  );
+}
+
+/** A bank account's own-money mark or name (Д2б): own money is in the day's limit, so «Сегодня» and the plan reload. */
+export function usePatchAccount() {
+  const api = useApi();
+  return useManualBalanceMutation(({ id, patch }: { id: number; patch: AccountPatch }) => api.patchAccount(id, patch));
 }
 
 export function useDeleteManualBalance() {

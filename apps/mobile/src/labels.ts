@@ -51,6 +51,22 @@ const ACCOUNTS = new Map([
 /** The account an operation went through, by the server's kind; null for a kind with no name here. */
 export const accountLabel = (kind: string): string | null => ACCOUNTS.get(kind) ?? null;
 
+const BALANCE_FIELDS = new Map([
+  ["UAH", "Остаток, ₴"],
+  ["USD", "Остаток, $"],
+  ["EUR", "Остаток, €"],
+]);
+
+/** The balance field of an account kept by hand, by its currency (Д2б); a rarer currency goes by its code. */
+export const balanceFieldLabel = (currency: string): string => BALANCE_FIELDS.get(currency) ?? `Остаток, ${currency}`;
+
+/** The currencies offered for a new account (Д2б): the server takes more, the window shows these three. */
+export const NEW_ACCOUNT_CURRENCIES = [
+  { code: "UAH", label: "₴" },
+  { code: "USD", label: "$" },
+  { code: "EUR", label: "€" },
+] as const;
+
 const ACCOUNT_FILTER_KINDS: readonly AccountFilterKind[] = ["black", "white", "fop", "cash"];
 
 /**
