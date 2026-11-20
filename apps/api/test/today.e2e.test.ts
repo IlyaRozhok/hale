@@ -1304,16 +1304,62 @@ describe("which accounts are own money (Д2а)", () => {
     expect(r.accounts.setAside).toEqual([{ kind: "other", name: "Карта monobank", own: 210_000, ...card(platinum, { countsAsOwn: false }) }]);
   });
 
-  it("a card switched off with a credit limit lends nothing to own money or the credit", async () => {
+  /** Switches the account off and reads «Сегодня» as the app does, with the day's row the switch fixed afresh. */
+  const switchOff = async (id: number) => {
+    await api.patch(`/plan/accounts/${id}`, { countsAsOwn: false }).expect(200);
+    return (await api.get("/today").expect(200)).body;
+  };
+  const neverRaises = (before: { state: Record<string, number> }, after: { state: Record<string, number> }) => {
+    for (const k of ["free", "dailyLimit", "leftToday"]) expect(after.state[k], k).toBeLessThanOrEqual(before.state[k]!);
+  };
+
+  it("switching off a card in debt hides no debt: own money, the credit and the limit stay as they were", async () => {
     const black = await account("black", 1_000_000, { creditLimit: 3_000_000 });
-    await account("white", 500_000);
-    await api.patch(`/plan/accounts/${black}`, { countsAsOwn: false }).expect(200);
-    const r = await today();
-    expect(r.accounts.own).toBe(500_000);
-    expect(r.accounts.credit).toBe(0);
-    expect(r.accounts.setAside).toEqual([
+    const white = await account("white", 500_000);
+    await income("fop", "2026-11-12");
+    await tx(black, -42_000, "spend");
+    const before = await today();
+    expect(before.accounts.own).toBe(-1_500_000);
+    const after = await switchOff(black);
+    neverRaises(before, after);
+    expect(after.state).toEqual(before.state);
+    expect(after.accounts.own).toBe(-1_500_000);
+    expect(after.accounts.credit).toBe(3_000_000);
+    // The debt stays among own money, marked as switched off; nothing of the card is set aside.
+    expect(after.accounts.items).toEqual([
       { kind: "black", name: "Чёрная карта", own: -2_000_000, creditLimit: 3_000_000, ...card(black, { countsAsOwn: false }) },
+      { kind: "white", name: "Белая карта", own: 500_000, ...card(white) },
     ]);
+    expect(after.accounts.setAside).toEqual([]);
+  });
+
+  it("switching off a card with money above its credit limit sets aside only that money and keeps the credit", async () => {
+    const black = await account("black", 4_000_000, { creditLimit: 3_000_000 });
+    const white = await account("white", 500_000);
+    await income("fop", "2026-11-12");
+    await tx(black, -42_000, "spend");
+    const before = await today();
+    expect(before.accounts.own).toBe(1_500_000);
+    const after = await switchOff(black);
+    neverRaises(before, after);
+    expect(after.state.dailyLimit).toBeLessThan(before.state.dailyLimit);
+    // Its purchases still spend the limit.
+    expect(after.state.leftToday).toBe(after.state.dailyLimit - 42_000);
+    expect(after.accounts.own).toBe(500_000);
+    expect(after.accounts.credit).toBe(3_000_000);
+    expect(after.accounts.items).toEqual([{ kind: "white", name: "Белая карта", own: 500_000, ...card(white) }]);
+    expect(after.accounts.setAside).toEqual([
+      { kind: "black", name: "Чёрная карта", own: 1_000_000, creditLimit: 3_000_000, ...card(black, { countsAsOwn: false }) },
+    ]);
+  });
+
+  it("a switched-off card with its credit limit untouched and nothing owed is shown nowhere", async () => {
+    const black = await account("black", 3_000_000, { creditLimit: 3_000_000 });
+    await account("white", 500_000);
+    const after = await switchOff(black);
+    expect(after.accounts.items.map((i: { kind: string }) => i.kind)).toEqual(["white"]);
+    expect(after.accounts.setAside).toEqual([]);
+    expect(after.accounts.credit).toBe(3_000_000);
   });
 
   it("the person names an account; an empty name gives the default back", async () => {

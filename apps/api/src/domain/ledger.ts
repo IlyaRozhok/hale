@@ -1,5 +1,6 @@
-// One definition of what an operation does: how much it spends from the day limit, how it changes
-// own money, which category it goes to and what it is linked with (audit 6.5, step 1).
+// One definition of what an operation does: how much it spends from the day limit, how it changes the
+// cash wallet, which category it goes to and what it is linked with (audit 6.5, step 1); and which accounts
+// are own money (Д2а). Own money itself is read from the balances on «Сегодня», not summed from operations.
 // Pure: no Nest, no I/O, no clock. The SQL helpers below are built from the same constants so the
 // services can filter in the database without a second copy of the rule.
 //
@@ -34,6 +35,16 @@ export function defaultCountsAsOwn(kind: AccountKind): boolean {
 export function countsAsOwn(kind: AccountKind, mark: boolean | null | undefined): boolean {
   if (kind === "cash") return true;
   return mark ?? defaultCountsAsOwn(kind);
+}
+
+/**
+ * How an account's balance (less its credit limit, in kopecks) splits between own money and money set aside (Д2а).
+ * Counted as own, all of it is own money. Switched off, only what is there is set aside: a debt stays in own money, so
+ * switching a card off never raises own money or the limit and never hides a debt.
+ */
+export function ownPart(balance: Minor, own: boolean): { own: Minor; setAside: Minor } {
+  if (own || balance <= 0) return { own: balance, setAside: 0 };
+  return { own: 0, setAside: balance };
 }
 
 /** SQL over `a` (accounts): countsAsOwn, for the services that read balances in the database. */
@@ -108,8 +119,6 @@ export interface LedgerLinksInput {
 export interface LedgerRow {
   type: TxType | null;
   accountKind: AccountKind;
-  /** The account's mark that it is own money (accounts.counts_as_own); null or left out follows the kind (countsAsOwn). */
-  accountCountsAsOwn?: boolean | null;
   /** Signed hryvnia kopecks; positive is money in. Null when there was no rate. */
   amountUah: Minor | null;
   /** Kyiv day, 'YYYY-MM-DD'. */
@@ -138,12 +147,6 @@ export interface LedgerEffect {
   limitSpend: Minor;
   /** Shown in the «Траты» list group. */
   inSpendGroup: boolean;
-  /**
-   * Change to own money (the accounts that count as own, and the wallet); null without a hryvnia amount.
-   * It is a per-row view at the rate of the operation day (amount_uah). «Сегодня» converts foreign-currency
-   * balances at today's rate and adds manual_balances (Binance), so a sum of ownMoney will not reproduce it.
-   */
-  ownMoney: Minor | null;
   /** The stored category, unchanged. */
   category: string | null;
   links: LedgerLink[];
@@ -203,12 +206,6 @@ export function walletChange(row: LedgerRow, ctx: LedgerContext): Minor {
   return change;
 }
 
-function ownMoneyChange(row: LedgerRow, ctx: LedgerContext): Minor | null {
-  if (row.amountUah === null) return null;
-  const onAccount = row.accountKind !== "cash" && countsAsOwn(row.accountKind, row.accountCountsAsOwn) ? row.amountUah : 0;
-  return onAccount + walletChange(row, ctx);
-}
-
 function linksOf(input: LedgerLinksInput | undefined): LedgerLink[] {
   if (!input) return [];
   const out: LedgerLink[] = [];
@@ -225,7 +222,6 @@ export function ledgerEffect(row: LedgerRow, ctx: LedgerContext): LedgerEffect {
     // `0 - x` rather than `-x`: a zero amount gives 0, not -0.
     limitSpend: countsAgainstLimit(row, ctx) ? 0 - row.amountUah! : 0,
     inSpendGroup: inSpendGroup(row, ctx),
-    ownMoney: ownMoneyChange(row, ctx),
     category: row.category,
     links: linksOf(row.links),
   };

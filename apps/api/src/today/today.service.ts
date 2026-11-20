@@ -6,7 +6,7 @@ import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
 import { lastIncomeBoundary, loanReserve, type ReceivedIncome } from "../domain/loans";
 import { type DailyInput, type DailyState, type DayMark, computeDaily, dayMark, dueWindowEnd, sumDue } from "../domain/daily";
-import { cashCountShortfallSql, countsAsOwnSql, spentByDaySql, spentSql } from "../domain/ledger";
+import { cashCountShortfallSql, countsAsOwnSql, ownPart, spentByDaySql, spentSql } from "../domain/ledger";
 import { runway } from "../domain/runway";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
 import { quarterLabel, quarterOf } from "../domain/quarter";
@@ -499,7 +499,8 @@ export class TodayService {
     const setAsideUah = (amount: number, alpha: string): number => convert(amount, alpha).uah;
 
     // own money, and the places it lies: the items add up exactly to it (task Б25). Which bank accounts are own money
-    // is the person's mark, or the kind's default (countsAsOwn, Д2а); the others are listed as set aside.
+    // is the person's mark, or the kind's default (countsAsOwn, Д2а); what a switched-off account holds is listed as set
+    // aside, and what it owes stays in own money.
     const items: OwnMoneyItemDto[] = [];
     const setAside: OwnMoneyItemDto[] = [];
     const accounts: {
@@ -511,22 +512,24 @@ export class TodayService {
     );
     let cards = 0, fop = 0, credit = 0;
     for (const a of accounts) {
-      // monobank opens one account per currency; an empty one without a credit limit is not a place money lies.
-      const empty = a.balance === a.credit_limit && a.credit_limit <= 0;
-      if (!a.own) {
-        if (empty) continue;
-        setAside.push(this.accountItem(a, setAsideUah));
+      // A credit limit on any card (an 'other' card's too) is taken off its balance and counted as credit, as the black
+      // card's is — whether the card is own money or not, so switching it off leaves the shortage plan's credit alone.
+      const limit = a.kind === "fop" ? 0 : uah(a.credit_limit, a.currency);
+      if (a.kind !== "fop") credit += limit;
+      // A switched-off account sets aside only what is there; its debt stays in own money (ownPart).
+      const part = ownPart(a.balance - a.credit_limit, a.own);
+      if (part.setAside > 0) {
+        setAside.push(this.accountItem(a, part.setAside, limit, setAsideUah));
         continue;
       }
-      const item = this.accountItem(a, uah);
-      // The fop account has its own slot; every other own account is spendable like the cards, and a credit limit on
-      // any of them (an 'other' card's too) is taken off its balance and counted as credit, as the black card's is.
+      const item = this.accountItem(a, part.own, limit, uah);
+      // The fop account has its own slot; every other own account is spendable like the cards.
       if (a.kind === "fop") fop += item.own;
-      else {
-        cards += item.own;
-        credit += item.creditLimit ?? 0;
-      }
-      if (!empty) items.push(item);
+      else cards += item.own;
+      // monobank opens one account per currency; an empty one without a credit limit is not a place money lies, nor
+      // is a switched-off one with nothing owed.
+      if (part.own === 0 && (a.credit_limit <= 0 || !a.own)) continue;
+      items.push(item);
     }
     // The Binance balance and any other manual balance that counts as own money share one slot.
     const manual: { id: number; name: string; amount: number; currency: string; counts_as_own: boolean }[] = await m.query(
@@ -697,22 +700,23 @@ export class TodayService {
     };
   }
 
-  /** One bank account as a place money lies: its balance less its credit limit, in hryvnias, with its currency amount. */
+  /**
+   * One bank account as a place money lies: `native` (its balance less its credit limit, or the part of it this row
+   * shows, in the account's currency) in hryvnias, with its currency amount and its credit limit in hryvnias.
+   */
   private accountItem(
-    a: { id: number; kind: BankAccountKind; currency: string; balance: number; credit_limit: number; name: string | null; title: string | null; own: boolean },
+    a: { id: number; kind: BankAccountKind; currency: string; name: string | null; title: string | null; own: boolean },
+    native: number,
+    creditLimit: number,
     uah: (amount: number, alpha: string) => number,
   ): OwnMoneyItemDto {
-    const native = a.balance - a.credit_limit;
     const item: OwnMoneyItemDto = { kind: a.kind, name: accountName(a), own: uah(native, a.currency) };
     // A currency account shows its own amount under the hryvnias, like Binance.
     if (a.currency !== "UAH") {
       item.currency = a.currency;
       item.amount = native;
     }
-    if (a.kind !== "fop") {
-      const limit = uah(a.credit_limit, a.currency);
-      if (limit > 0) item.creditLimit = limit;
-    }
+    if (creditLimit > 0) item.creditLimit = creditLimit;
     return { ...item, id: a.id, source: "account", countsAsOwn: a.own };
   }
 
