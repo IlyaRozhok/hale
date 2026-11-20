@@ -9,6 +9,7 @@ import {
   observationTodayDto,
   scheduledPaymentInput,
   settingsPatch,
+  transactionsQuery,
 } from "./index";
 
 describe("contracts", () => {
@@ -27,6 +28,15 @@ describe("contracts", () => {
   });
   it("rejects unknown settings keys", () => {
     expect(settingsPatch.safeParse({ nope: 1 }).success).toBe(false);
+  });
+  it("narrows «Операции» to one of the person's accounts by its kind, and to nothing else (Д1)", () => {
+    for (const account of ["black", "white", "fop", "cash"]) {
+      expect(transactionsQuery.safeParse({ account }).success).toBe(true);
+    }
+    expect(transactionsQuery.safeParse({ account: "jar" }).success).toBe(false);
+    expect(transactionsQuery.safeParse({ account: "other" }).success).toBe(false);
+    expect(transactionsQuery.safeParse({ account: "" }).success).toBe(false);
+    expect(transactionsQuery.safeParse({}).success).toBe(true);
   });
   it("takes an optional month for «Итоги» and nothing else", () => {
     expect(insightsMonthQuery.safeParse({}).success).toBe(true);

@@ -3,11 +3,11 @@ import { ActivityIndicator, Pressable, SectionList, StyleSheet, Text, View } fro
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RouteProp } from "@react-navigation/native";
 import { tokens } from "@hale/tokens";
-import type { TransactionDto } from "@hale/contracts";
+import type { AccountFilterKind, TransactionDto } from "@hale/contracts";
 import { useCategoryList, useDismissObservation, useObservation, useTransactions } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
 import { dayHeader, formatSignedMoney, kyivDate, operationsText, periodLabel } from "../format";
-import { categoryLabel, categoryName, wantLabel } from "../labels";
+import { accountChoices, accountLabel, categoryLabel, categoryName, wantLabel } from "../labels";
 import { observationText } from "../dayPhrase";
 import { FiltersSheet, type Filters, type Period } from "../components/FiltersSheet";
 import { ErrorText } from "../components/ErrorText";
@@ -64,6 +64,10 @@ export function Activity({ now = () => new Date(), route }: Props) {
   const [period, setPeriod] = useState<Period | null>(null);
   // Only the purchases «Итоги» count as «желаемое» (В6): set by arriving from there, taken off by «Сбросить».
   const [want, setWant] = useState(false);
+  // One account (Д1), on every tab: offered only once the server has named the person's accounts.
+  const [account, setAccount] = useState<AccountFilterKind | null>(null);
+  // The last list of them the server named, kept while a page with new filters loads.
+  const [accountKinds, setAccountKinds] = useState<AccountFilterKind[] | undefined>(undefined);
   const [filtering, setFiltering] = useState(false);
   // Arrived from the phrase of the day's observation (В7): the card above the list stays until the filters change.
   const [fromObservation, setFromObservation] = useState(false);
@@ -86,7 +90,7 @@ export function Activity({ now = () => new Date(), route }: Props) {
   // Arriving from a day of the limit calendar, or from a category of «Итоги»: that spending, and nothing
   // chosen before it. Done while rendering, so the list is never asked for with the old filters first.
   const params = route?.params;
-  const target: (Filters & { want: boolean }) | null = params?.day
+  const target: (Omit<Filters, "account"> & { want: boolean }) | null = params?.day
     ? { category: null, want: false, period: { from: params.day, to: params.day } }
     : params?.category && params.from && params.to
       ? { category: params.category, want: false, period: { from: params.from, to: params.to } }
@@ -102,6 +106,7 @@ export function Activity({ now = () => new Date(), route }: Props) {
     setTab("spend");
     setCategory(target.category);
     setWant(target.want);
+    setAccount(null);
     setPeriod(target.period);
     setSearching(false);
     setText("");
@@ -129,6 +134,7 @@ export function Activity({ now = () => new Date(), route }: Props) {
   const chosenWant = withCategories && want;
   const list = useTransactions({
     group: tab,
+    ...(account ? { account } : {}),
     ...(chosenCategory ? { category: chosenCategory } : {}),
     ...(chosenWant ? { want: true as const } : {}),
     ...(period ? { from: period.from, to: period.to } : {}),
@@ -146,6 +152,10 @@ export function Activity({ now = () => new Date(), route }: Props) {
     if (ownGone) setCategory(null);
   }, [categories, category]);
   const pages = list.data?.pages ?? [];
+  const namedKinds = pages[0]?.accountKinds;
+  useEffect(() => {
+    if (namedKinds) setAccountKinds(namedKinds);
+  }, [namedKinds]);
   const items = pages.flatMap((p) => p.items);
   const totals = Object.assign({}, ...pages.map((p) => p.dayTotals)) as Record<string, number | undefined>;
   const today = kyivDate(now());
@@ -155,8 +165,8 @@ export function Activity({ now = () => new Date(), route }: Props) {
     else acc.push({ date: tx.localDate, data: [tx] });
     return acc;
   }, []);
-  const filtered = chosenCategory !== null || chosenWant || period !== null;
-  const activeFilters = (chosenCategory !== null ? 1 : 0) + (chosenWant ? 1 : 0) + (period !== null ? 1 : 0);
+  const filtered = account !== null || chosenCategory !== null || chosenWant || period !== null;
+  const activeFilters = (account !== null ? 1 : 0) + (chosenCategory !== null ? 1 : 0) + (chosenWant ? 1 : 0) + (period !== null ? 1 : 0);
   const emptyText = search || filtered ? "Ничего не нашлось." : TABS.find((t) => t.tab === tab)!.empty;
   const summary = pages[0]?.summary ?? null;
   // Said only while the list is still the observation's: its category over its days.
@@ -167,6 +177,7 @@ export function Activity({ now = () => new Date(), route }: Props) {
       : null;
   const noticedCategory = noticed !== null ? (seen?.category ?? null) : null;
   const summaryTitle = [
+    account ? accountLabel(account) : null,
     chosenCategory ? categoryName(chosenCategory, categories) : null,
     chosenWant ? wantLabel(true) : null,
     period ? periodLabel(period.from, period.to) : null,
@@ -295,13 +306,15 @@ export function Activity({ now = () => new Date(), route }: Props) {
         <FiltersSheet
           today={kyivDate(now())}
           // The remembered category, also under "Доходы": the window does not show it there, and hands it back untouched.
-          value={{ period, category }}
+          value={{ period, category, account }}
           withCategories={withCategories}
+          accounts={accountChoices(accountKinds)}
           onApply={(f) => {
             setPeriod(f.period);
             setCategory(f.category);
+            setAccount(f.account);
             // The window has no «желаемое» of its own: «Сбросить» (nothing left chosen) takes it off with the rest.
-            if (f.period === null && f.category === null) setWant(false);
+            if (f.period === null && f.category === null && f.account === null) setWant(false);
             setFromObservation(false);
           }}
           onClose={() => setFiltering(false)}

@@ -1,5 +1,5 @@
 // Russian names for server codes. No native imports: runs in node tests.
-import type { CategoryDto, RecipientLabelName, TxTypeDto } from "@hale/contracts";
+import type { AccountFilterKind, CategoryDto, RecipientLabelName, TxTypeDto } from "@hale/contracts";
 import { formatMoney, pluralIndex } from "./format";
 
 const TYPES: Record<TxTypeDto, string> = {
@@ -50,6 +50,16 @@ const ACCOUNTS = new Map([
 
 /** The account an operation went through, by the server's kind; null for a kind with no name here. */
 export const accountLabel = (kind: string): string | null => ACCOUNTS.get(kind) ?? null;
+
+const ACCOUNT_FILTER_KINDS: readonly AccountFilterKind[] = ["black", "white", "fop", "cash"];
+
+/**
+ * Task Д1: the accounts «Операции» can be narrowed to, of the kinds the server names: cards, then the fop account, then
+ * cash. A kind the filter does not know (a jar, or one from a newer server) is left out.
+ */
+export function accountChoices(kinds: readonly string[] | undefined): { kind: AccountFilterKind; name: string }[] {
+  return ACCOUNT_FILTER_KINDS.filter((k) => kinds?.includes(k)).map((kind) => ({ kind, name: accountLabel(kind)! }));
+}
 
 const CATEGORIES: Record<string, string> = {
   groceries: "Продукты",

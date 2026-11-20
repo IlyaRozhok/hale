@@ -210,6 +210,16 @@ describe("api client", () => {
     expect(calls[2]![1].body).toBe(JSON.stringify({ category: "cafe", applyToSimilar: true }));
   });
 
+  it("asks for one account's operations together with the other filters, and never sends an empty account (Д1)", async () => {
+    const fetchImpl = vi.fn(async () => json({ items: [], nextCursor: null, dayTotals: {} }));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await api.transactions({ group: "spend", account: "white", category: "cafe", want: true, from: "2026-11-01", to: "2026-11-19" });
+    await api.transactions({ group: "income" });
+    const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
+    expect(calls[0]![0]).toBe("https://api.example.test/transactions?group=spend&account=white&category=cafe&want=true&from=2026-11-01&to=2026-11-19");
+    expect(calls[1]![0]).toBe("https://api.example.test/transactions?group=income");
+  });
+
   it("asks for «желаемое» over days and sends a purchase's side alone (В6)", async () => {
     const fetchImpl = vi.fn(async () => json({ items: [], nextCursor: null, dayTotals: {} }));
     const { api } = setup(fetchImpl as unknown as typeof fetch);
