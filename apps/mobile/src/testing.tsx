@@ -177,6 +177,7 @@ export function fakeApi(over: Partial<Api> = {}): { [K in keyof Api]: jest.Mock 
     createManualBalance: jest.fn(async () => balanceFixture()),
     patchManualBalance: jest.fn(async () => balanceFixture()),
     deleteManualBalance: jest.fn(async () => undefined),
+    patchAccount: jest.fn(async (id: number) => ({ id, kind: "other", name: "Детская карта", countsAsOwn: true })),
     transactions: jest.fn(async () => ({ items: [txFixture()], nextCursor: null, dayTotals: { "2026-11-02": -8500 } })),
     editTransaction: jest.fn(async () => ({ transaction: txFixture(), updated: 1 })),
     labelRecipient: jest.fn(async () => ({ updated: 1 })),

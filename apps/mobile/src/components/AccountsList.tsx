@@ -2,8 +2,7 @@ import type { OwnMoneyItemDto, TodayDto } from "@hale/contracts";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import { formatDollars, formatMoney, formatOriginal } from "../format";
-import { accountLabel } from "../labels";
-import { wholeShares } from "../ownMoney";
+import { placeName, placeOpens, wholeShares } from "../ownMoney";
 import { Line } from "./Line";
 
 const { color, space, touchMin, type } = tokens;
@@ -35,13 +34,21 @@ function caption(item: OwnMoneyItemDto): string | null {
   return null;
 }
 
-type MoneyProps = { own: number; items: OwnMoneyItemDto[]; onCash: () => void; onBinance: () => void };
+type MoneyProps = {
+  own: number;
+  items: OwnMoneyItemDto[];
+  onCash: () => void;
+  onBinance: () => void;
+  /** Opens the account window of a bank account or a balance kept by hand, with its amount as the row shows it. */
+  onAccount: (item: OwnMoneyItemDto, amount: string) => void;
+};
 
 /**
  * Own money as one figure, then the places it lies, which add up to it exactly (task Б25). A card in
- * credit goes last, with its minus and a word on its limit; cash and Binance open their windows.
+ * credit goes last, with its minus and a word on its limit; cash and Binance open their windows, and on a newer
+ * server every other place opens the account window (Д2б).
  */
-export function OwnMoney({ own, items, onCash, onBinance }: MoneyProps) {
+export function OwnMoney({ own, items, onCash, onBinance, onAccount }: MoneyProps) {
   const ordered = [...items.filter((i) => i.own >= 0), ...items.filter((i) => i.own < 0)];
   // Rounded together, not one by one, so the rows add up to the figure above them to the hryvnia.
   const whole = wholeShares(own, ordered.map((i) => i.own));
@@ -52,8 +59,11 @@ export function OwnMoney({ own, items, onCash, onBinance }: MoneyProps) {
         <Text style={styles.caption}>свои деньги — сумма строк ниже</Text>
       </View>
       {ordered.map((item, i) => {
-        const press = item.kind === "cash" ? onCash : item.kind === "binance" ? onBinance : undefined;
-        return <Place key={`${item.kind}:${i}`} label={accountLabel(item.kind) ?? item.name} item={item} amount={formatMoney(whole[i]! * 100)} onPress={press} />;
+        const amount = formatMoney(whole[i]! * 100);
+        const opens = placeOpens(item);
+        const press =
+          opens === "cash" ? onCash : opens === "binance" ? onBinance : opens === null ? undefined : () => onAccount(item, amount);
+        return <Place key={`${item.kind}:${item.id ?? i}`} label={placeName(item)} item={item} amount={amount} onPress={press} />;
       })}
     </>
   );

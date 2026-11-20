@@ -57,6 +57,22 @@ describe("api client", () => {
     ]);
   });
 
+  it("changes a bank account's mark and name, and a hand-kept account's mark (Д2б)", async () => {
+    const fetchImpl = vi.fn(async () => json({ id: 5, kind: "other", name: "Детская карта", countsAsOwn: false }));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await expect(api.patchAccount(5, { countsAsOwn: false })).resolves.toEqual({ id: 5, kind: "other", name: "Детская карта", countsAsOwn: false });
+    await api.patchAccount(5, { name: null });
+    await api.patchManualBalance(9, { name: "Депозит", amount: 5_000_000, counts_as_own: true });
+    await api.createManualBalance({ name: "Депозит", amount: 5_000_000, currency: "UAH", counts_as_own: false });
+    const calls = (fetchImpl.mock.calls as unknown as [string, RequestInit][]).map(([url, init]) => [init.method, url.replace("https://api.example.test", ""), init.body]);
+    expect(calls).toEqual([
+      ["PATCH", "/plan/accounts/5", JSON.stringify({ countsAsOwn: false })],
+      ["PATCH", "/plan/accounts/5", JSON.stringify({ name: null })],
+      ["PATCH", "/plan/manual-balances/9", JSON.stringify({ name: "Депозит", amount: 5_000_000, counts_as_own: true })],
+      ["POST", "/plan/manual-balances", JSON.stringify({ name: "Депозит", amount: 5_000_000, currency: "UAH", counts_as_own: false })],
+    ]);
+  });
+
   it("reads the latest ledger check, and has none from an empty answer or an older server (Б11)", async () => {
     const check = { ranAt: "2026-11-12T03:00:00.000Z", issues: [] };
     const fetchImpl = vi

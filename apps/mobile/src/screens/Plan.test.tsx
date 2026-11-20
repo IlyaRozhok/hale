@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Alert, StyleSheet } from "react-native";
+import type { OwnMoneyItemDto } from "@hale/contracts";
 import { Plan } from "./Plan";
 import { Today } from "./Today";
 import { balanceFixture, fakeApi, goalFixture, loanFixture, loanHistoryFixture, makeClient, openPlanPart, ownItemsFixture, pickDate, renderWith, taxFixture, todayFixture, todayWithItems } from "../testing";
@@ -161,6 +162,114 @@ describe("Plan, money place by place (task Б25)", () => {
     expect(await screen.findByRole("button", { name: /^Ещё: Binance/ })).toBeTruthy();
     expect((await screen.findByRole("button", { name: "Наличные" })).props.accessibilityHint).toBe("не начат");
     expect(screen.getAllByText("₴5,000")).toHaveLength(2);
+  });
+});
+
+describe("Plan, own and hand-kept accounts (Д2б, variant А)", () => {
+  const items = (): OwnMoneyItemDto[] => [
+    { kind: "white", name: "Белая карта", own: 1_431_300, id: 2, source: "account", countsAsOwn: true },
+    { kind: "other", name: "Детская карта", own: 210_000, id: 5, source: "account", countsAsOwn: true },
+    { kind: "cash", name: "Наличные", own: 3_025_000, source: "cash", countsAsOwn: true },
+    { kind: "binance", name: "Binance", own: 579_900, currency: "USD", amount: 12_600, id: 7, source: "manual", countsAsOwn: true },
+    // A card switched off while in debt: its debt stays in own money.
+    { kind: "black", name: "Чёрная карта", own: -3_000_000, creditLimit: 3_000_000, id: 1, source: "account", countsAsOwn: false },
+  ];
+  const setAside = (): OwnMoneyItemDto[] => [
+    { kind: "manual", name: "SOL", own: 4_145_625, currency: "USD", amount: 100_500, id: 9, source: "manual", countsAsOwn: false },
+    { kind: "manual", name: "Депозит Приват", own: 5_000_000, currency: "UAH", amount: 5_000_000, id: 10, source: "manual", countsAsOwn: false },
+  ];
+  const newer = (aside: OwnMoneyItemDto[] = setAside()) => {
+    const today = todayWithItems(items());
+    return {
+      today: jest.fn(async () => ({ ...today, accounts: { ...today.accounts, setAside: aside } })),
+      cash: jest.fn(async () => ({ started: true, start: "2026-11-01", balance: 3_025_000 })),
+      manualBalances: jest.fn(async () => [balanceFixture({ amount: 12_600 })]),
+    };
+  };
+
+  it("lists the set-aside places from «Сегодня» in «Отложено», with a quiet link to add an account under it", async () => {
+    await renderWith(<Plan />, fakeApi(newer()));
+    expect((await screen.findByRole("button", { name: "SOL" })).props.accessibilityHint).toBe("$1,005");
+    expect(screen.getByRole("button", { name: "Депозит Приват" }).props.accessibilityHint).toBe("₴50,000");
+    const titles = screen.getAllByText(/^(Деньги|Отложено|Добавить счёт|Приходит)$/).map((t) => t.props.children);
+    expect(titles).toEqual(["Деньги", "Отложено", "Добавить счёт", "Приходит"]);
+    // The old «+ Добавить» and the folded «Отложено» part are gone.
+    expect(screen.queryByRole("button", { name: "Добавить в отложенное" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Ещё: .*отложено/ })).toBeNull();
+  });
+
+  it("shows a switched-off card in debt among own money, and its window has the switch off", async () => {
+    const api = fakeApi(newer());
+    await renderWith(<Plan />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Чёрная карта" }));
+    expect(await screen.findByText("приходит из monobank")).toBeTruthy();
+    expect(screen.getByLabelText("Входит в свои деньги").props.value).toBe(false);
+  });
+
+  it("opens a card's window from its row, and switching it off refreshes «Сегодня»", async () => {
+    const api = fakeApi(newer());
+    await renderWith(<Plan />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Детская карта" }));
+    expect(await screen.findByText("monobank")).toBeTruthy();
+    expect(screen.getByLabelText("Название").props.value).toBe("Детская карта");
+    // The row under the window and the window itself show the same amount.
+    expect(screen.getAllByText("₴2,100")).toHaveLength(2);
+    await fireEvent(screen.getByLabelText("Входит в свои деньги"), "valueChange", false);
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(api.patchAccount).toHaveBeenCalledWith(5, { countsAsOwn: false }));
+    await waitFor(() => expect(api.today.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it("opens a set-aside account kept by hand in the account window", async () => {
+    const api = fakeApi(newer());
+    await renderWith(<Plan />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Депозит Приват" }));
+    expect((await screen.findByLabelText("Остаток, ₴")).props.value).toBe("50000");
+    expect(screen.getByLabelText("Входит в свои деньги").props.value).toBe(false);
+  });
+
+  it("keeps Binance's own window", async () => {
+    await renderWith(<Plan />, fakeApi(newer()));
+    await fireEvent.press(await screen.findByRole("button", { name: "Binance" }));
+    expect(await screen.findByText("Баланс Binance")).toBeTruthy();
+  });
+
+  it("adds an account from the link: set aside unless switched on, and refreshes «Сегодня»", async () => {
+    const api = fakeApi(newer());
+    await renderWith(<Plan />, api);
+    await fireEvent.press(await screen.findByRole("button", { name: "Добавить счёт" }));
+    expect(await screen.findByText("Новый счёт")).toBeTruthy();
+    await fireEvent.changeText(screen.getByLabelText("Название"), "Конверт");
+    await fireEvent.changeText(screen.getByLabelText("Остаток"), "3000");
+    const add = screen.getAllByRole("button", { name: "Добавить счёт" });
+    await fireEvent.press(add[add.length - 1]!);
+    await waitFor(() => expect(api.createManualBalance).toHaveBeenCalledWith({ name: "Конверт", amount: 300_000, currency: "UAH", counts_as_own: false }));
+    await waitFor(() => expect(api.today.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it("with nothing set aside there is no «Отложено» group, and the link to add an account stays", async () => {
+    await renderWith(<Plan />, fakeApi(newer([])));
+    expect(await screen.findByRole("button", { name: "Добавить счёт" })).toBeTruthy();
+    expect(screen.queryByText("Отложено")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Ещё: .*отложено/ })).toBeNull();
+  });
+
+  it("shows a switched-off Binance once, in «Отложено», opening its own window", async () => {
+    const binance: OwnMoneyItemDto = { kind: "binance", name: "Binance", own: 579_900, currency: "USD", amount: 12_600, id: 7, source: "manual", countsAsOwn: false };
+    const today = todayWithItems(items().filter((i) => i.kind !== "binance"));
+    await renderWith(<Plan />, fakeApi({ ...newer(), today: jest.fn(async () => ({ ...today, accounts: { ...today.accounts, setAside: [binance] } })) }));
+    expect((await screen.findByRole("button", { name: "Binance" })).props.accessibilityHint).toBe("$126");
+    expect(screen.getAllByRole("button", { name: "Binance" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /^Ещё: Binance/ })).toBeNull();
+  });
+
+  it("an older server's cards open nothing, and «Отложено» is as it was", async () => {
+    await renderWith(<Plan />, fakeApi({ manualBalances: jest.fn(async () => [balanceFixture()]), today: jest.fn(async () => todayWithItems()) }));
+    expect(await screen.findByText("Белая карта")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Белая карта" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Чёрная карта" })).toBeNull();
+    expect(await screen.findByRole("button", { name: /^Ещё: .*отложено/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Добавить счёт" })).toBeNull();
   });
 });
 
