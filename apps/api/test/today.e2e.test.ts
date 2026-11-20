@@ -1181,21 +1181,21 @@ describe("tax reserve and own money", () => {
 
 describe("accounts items (task Б25)", () => {
   it("lists where own money is, place by place, adding up exactly to own money", async () => {
-    await account("black", 0, { creditLimit: 3_000_000 }); // the whole credit limit is spent
-    await account("white", 1_431_300);
-    await account("fop", 300_000);
+    const black = await account("black", 0, { creditLimit: 3_000_000 }); // the whole credit limit is spent
+    const white = await account("white", 1_431_300);
+    const fop = await account("fop", 300_000);
     await ds.query(`INSERT INTO manual_balances (name, amount, currency) VALUES ('Binance', 12600, 'USD')`);
     await ds.query(`INSERT INTO manual_balances (name, amount, currency) VALUES ('Cash box', 50000, 'UAH')`);
     await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-02T08:00:00Z', 41.5)`);
     await api.post("/cash/start", { amount: 3_025_000 }).expect(201);
     const r = await today();
     expect(r.accounts.items).toEqual([
-      { kind: "black", name: "Чёрная карта", own: -3_000_000, creditLimit: 3_000_000 },
-      { kind: "white", name: "Белая карта", own: 1_431_300 },
-      { kind: "fop", name: "Счёт ФОП", own: 300_000 },
-      { kind: "cash", name: "Наличные", own: 3_025_000 },
-      { kind: "binance", name: "Binance", own: 522_900, currency: "USD", amount: 12_600 },
-      { kind: "manual", name: "Cash box", own: 50_000, currency: "UAH", amount: 50_000 },
+      { kind: "black", name: "Чёрная карта", own: -3_000_000, creditLimit: 3_000_000, id: black, source: "account", countsAsOwn: true },
+      { kind: "white", name: "Белая карта", own: 1_431_300, id: white, source: "account", countsAsOwn: true },
+      { kind: "fop", name: "Счёт ФОП", own: 300_000, id: fop, source: "account", countsAsOwn: true },
+      { kind: "cash", name: "Наличные", own: 3_025_000, source: "cash", countsAsOwn: true },
+      { kind: "binance", name: "Binance", own: 522_900, currency: "USD", amount: 12_600, id: 1, source: "manual", countsAsOwn: true },
+      { kind: "manual", name: "Cash box", own: 50_000, currency: "UAH", amount: 50_000, id: 2, source: "manual", countsAsOwn: true },
     ]);
     const sum = (r.accounts.items as { own: number }[]).reduce((s, i) => s + i.own, 0);
     expect(sum).toBe(r.accounts.own);
@@ -1203,36 +1203,221 @@ describe("accounts items (task Б25)", () => {
   });
 
   it("shows a card with part of its credit limit used as a negative amount with its limit", async () => {
-    await account("black", 1_000_000, { creditLimit: 3_000_000 });
+    const black = await account("black", 1_000_000, { creditLimit: 3_000_000 });
     const r = await today();
-    expect(r.accounts.items).toEqual([{ kind: "black", name: "Чёрная карта", own: -2_000_000, creditLimit: 3_000_000 }]);
+    expect(r.accounts.items).toEqual([
+      { kind: "black", name: "Чёрная карта", own: -2_000_000, creditLimit: 3_000_000, id: black, source: "account", countsAsOwn: true },
+    ]);
     expect(r.accounts.own).toBe(-2_000_000);
   });
 
   it("leaves out cash before the wallet starts and Binance when it is not set", async () => {
-    await account("white", 500_000);
+    const white = await account("white", 500_000);
     const r = await today();
-    expect(r.accounts.items).toEqual([{ kind: "white", name: "Белая карта", own: 500_000 }]);
+    expect(r.accounts.items).toEqual([{ kind: "white", name: "Белая карта", own: 500_000, id: white, source: "account", countsAsOwn: true }]);
   });
 
   it("leaves out empty accounts without a credit limit, and shows a currency account with money in its own currency", async () => {
-    await account("white", 975_700);
+    const white = await account("white", 975_700);
     await account("fop", 0, { currency: "USD" }); // monobank gives one account per currency
     await account("fop", 0, { currency: "EUR" });
     await account("black", 0, { currency: "USD" });
-    await account("black", 0, { creditLimit: 3_000_000 }); // empty, but its limit is spent: it stays
-    await account("fop", 12_345, { currency: "USD" });
-    await account("black", 5_000, { currency: "EUR" });
+    const black = await account("black", 0, { creditLimit: 3_000_000 }); // empty, but its limit is spent: it stays
+    const fopUsd = await account("fop", 12_345, { currency: "USD" });
+    const blackEur = await account("black", 5_000, { currency: "EUR" });
     await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-02T08:00:00Z', 41.5), ('EUR', '2026-11-02T08:00:00Z', 48)`);
     const r = await today();
     expect(r.accounts.items).toEqual([
-      { kind: "white", name: "Белая карта", own: 975_700 },
-      { kind: "black", name: "Чёрная карта", own: -3_000_000, creditLimit: 3_000_000 },
-      { kind: "fop", name: "Счёт ФОП", own: Math.round(12_345 * 41.5), currency: "USD", amount: 12_345 },
-      { kind: "black", name: "Чёрная карта", own: 5_000 * 48, currency: "EUR", amount: 5_000 },
+      { kind: "white", name: "Белая карта", own: 975_700, id: white, source: "account", countsAsOwn: true },
+      { kind: "black", name: "Чёрная карта", own: -3_000_000, creditLimit: 3_000_000, id: black, source: "account", countsAsOwn: true },
+      { kind: "fop", name: "Счёт ФОП", own: Math.round(12_345 * 41.5), currency: "USD", amount: 12_345, id: fopUsd, source: "account", countsAsOwn: true },
+      { kind: "black", name: "Чёрная карта", own: 5_000 * 48, currency: "EUR", amount: 5_000, id: blackEur, source: "account", countsAsOwn: true },
     ]);
     const sum = (r.accounts.items as { own: number }[]).reduce((s, i) => s + i.own, 0);
     expect(sum).toBe(r.accounts.own);
+  });
+});
+
+describe("which accounts are own money (Д2а)", () => {
+  const card = (id: number, over: object = {}) => ({ id, source: "account", countsAsOwn: true, ...over });
+
+  it("a new 'other' card is own money from the start, its credit limit taken off like the black card's", async () => {
+    const iron = await account("other", 900_000, { creditLimit: 1_000_000 });
+    const platinum = await account("other", 210_000);
+    const r = await today();
+    expect(r.accounts.items).toEqual([
+      { kind: "other", name: "Карта monobank", own: -100_000, creditLimit: 1_000_000, ...card(iron) },
+      { kind: "other", name: "Карта monobank", own: 210_000, ...card(platinum) },
+    ]);
+    expect(r.accounts.own).toBe(110_000);
+    expect(r.accounts.credit).toBe(1_000_000);
+    expect(r.accounts.setAside).toEqual([]);
+  });
+
+  it("a jar stays set aside, by its own title, until the person switches it on", async () => {
+    const jar = await account("jar", 2_000_000);
+    await ds.query(`UPDATE accounts SET title = 'Отпуск' WHERE id = $1`, [jar]);
+    await account("jar", 0); // an empty jar is not a place money lies
+    let r = await today();
+    expect(r.accounts.items).toEqual([]);
+    expect(r.accounts.setAside).toEqual([{ kind: "jar", name: "Отпуск", own: 2_000_000, ...card(jar, { countsAsOwn: false }) }]);
+    expect(r.accounts.own).toBe(0);
+
+    await api.patch(`/plan/accounts/${jar}`, { countsAsOwn: true }).expect(200);
+    r = (await api.get("/today").expect(200)).body;
+    expect(r.accounts.items).toEqual([{ kind: "jar", name: "Отпуск", own: 2_000_000, ...card(jar) }]);
+    expect(r.accounts.own).toBe(2_000_000);
+  });
+
+  it("an account switched off stops being own money and the day's limit moves at once; its purchases still spend the limit", async () => {
+    const black = await account("black", 5_000_000);
+    const white = await account("white", 1_000_000);
+    await income("fop", "2026-11-12");
+    await tx(white, -42_000, "spend");
+    const before = await today();
+    expect(before.accounts.own).toBe(6_000_000);
+    expect(before.state.leftToday).toBe(before.state.dailyLimit - 42_000);
+
+    const res = await api.patch(`/plan/accounts/${white}`, { countsAsOwn: false }).expect(200);
+    expect(res.body).toEqual({ id: white, kind: "white", name: "Белая карта", countsAsOwn: false });
+    const after = (await api.get("/today").expect(200)).body;
+    expect(after.accounts.own).toBe(5_000_000);
+    expect(after.accounts.items).toEqual([{ kind: "black", name: "Чёрная карта", own: 5_000_000, ...card(black) }]);
+    expect(after.accounts.setAside).toEqual([{ kind: "white", name: "Белая карта", own: 1_000_000, ...card(white, { countsAsOwn: false }) }]);
+    // Own money fell by the card's balance (₴10,000 over 10 days): the day's row is fixed afresh, not tomorrow.
+    expect(after.state.dailyLimit).toBe(before.state.dailyLimit - 100_000);
+    expect(after.state.leftToday).toBe(after.state.dailyLimit - 42_000);
+
+    await api.patch(`/plan/accounts/${white}`, { countsAsOwn: true }).expect(200);
+    const back = (await api.get("/today").expect(200)).body;
+    expect(back.accounts.own).toBe(6_000_000);
+    expect(back.state.dailyLimit).toBe(before.state.dailyLimit);
+  });
+
+  it("an account the migration marked off stays off, whatever its kind", async () => {
+    const white = await account("white", 1_000_000);
+    const platinum = await account("other", 210_000);
+    await ds.query(`UPDATE accounts SET counts_as_own = false WHERE id = $1`, [platinum]);
+    const r = await today();
+    expect(r.accounts.own).toBe(1_000_000);
+    expect(r.accounts.items).toEqual([{ kind: "white", name: "Белая карта", own: 1_000_000, ...card(white) }]);
+    expect(r.accounts.setAside).toEqual([{ kind: "other", name: "Карта monobank", own: 210_000, ...card(platinum, { countsAsOwn: false }) }]);
+  });
+
+  /** Switches the account off and reads «Сегодня» as the app does, with the day's row the switch fixed afresh. */
+  const switchOff = async (id: number) => {
+    await api.patch(`/plan/accounts/${id}`, { countsAsOwn: false }).expect(200);
+    return (await api.get("/today").expect(200)).body;
+  };
+  const neverRaises = (before: { state: Record<string, number> }, after: { state: Record<string, number> }) => {
+    for (const k of ["free", "dailyLimit", "leftToday"]) expect(after.state[k], k).toBeLessThanOrEqual(before.state[k]!);
+  };
+
+  it("switching off a card in debt hides no debt: own money, the credit and the limit stay as they were", async () => {
+    const black = await account("black", 1_000_000, { creditLimit: 3_000_000 });
+    const white = await account("white", 500_000);
+    await income("fop", "2026-11-12");
+    await tx(black, -42_000, "spend");
+    const before = await today();
+    expect(before.accounts.own).toBe(-1_500_000);
+    const after = await switchOff(black);
+    neverRaises(before, after);
+    expect(after.state).toEqual(before.state);
+    expect(after.accounts.own).toBe(-1_500_000);
+    expect(after.accounts.credit).toBe(3_000_000);
+    // The debt stays among own money, marked as switched off; nothing of the card is set aside.
+    expect(after.accounts.items).toEqual([
+      { kind: "black", name: "Чёрная карта", own: -2_000_000, creditLimit: 3_000_000, ...card(black, { countsAsOwn: false }) },
+      { kind: "white", name: "Белая карта", own: 500_000, ...card(white) },
+    ]);
+    expect(after.accounts.setAside).toEqual([]);
+  });
+
+  it("switching off a card with money above its credit limit sets aside only that money and keeps the credit", async () => {
+    const black = await account("black", 4_000_000, { creditLimit: 3_000_000 });
+    const white = await account("white", 500_000);
+    await income("fop", "2026-11-12");
+    await tx(black, -42_000, "spend");
+    const before = await today();
+    expect(before.accounts.own).toBe(1_500_000);
+    const after = await switchOff(black);
+    neverRaises(before, after);
+    expect(after.state.dailyLimit).toBeLessThan(before.state.dailyLimit);
+    // Its purchases still spend the limit.
+    expect(after.state.leftToday).toBe(after.state.dailyLimit - 42_000);
+    expect(after.accounts.own).toBe(500_000);
+    expect(after.accounts.credit).toBe(3_000_000);
+    expect(after.accounts.items).toEqual([{ kind: "white", name: "Белая карта", own: 500_000, ...card(white) }]);
+    expect(after.accounts.setAside).toEqual([
+      { kind: "black", name: "Чёрная карта", own: 1_000_000, creditLimit: 3_000_000, ...card(black, { countsAsOwn: false }) },
+    ]);
+  });
+
+  it("an 'other' card the migration marked off, in debt: its debt now lowers own money and its limit enters the credit (risk 14)", async () => {
+    // Before Д2а such a card was left out whole: its debt was invisible and its limit was not credit.
+    const iron = await account("other", 900_000, { creditLimit: 1_000_000 });
+    const white = await account("white", 500_000);
+    await ds.query(`UPDATE accounts SET counts_as_own = false WHERE id = $1`, [iron]); // as migration 0038 marks it
+    const r = await today();
+    expect(r.accounts.own).toBe(400_000);
+    expect(r.accounts.credit).toBe(1_000_000);
+    expect(r.accounts.items).toEqual([
+      { kind: "other", name: "Карта monobank", own: -100_000, creditLimit: 1_000_000, ...card(iron, { countsAsOwn: false }) },
+      { kind: "white", name: "Белая карта", own: 500_000, ...card(white) },
+    ]);
+    expect(r.accounts.setAside).toEqual([]);
+  });
+
+  it("a switched-off card with its credit limit untouched and nothing owed is shown nowhere", async () => {
+    const black = await account("black", 3_000_000, { creditLimit: 3_000_000 });
+    await account("white", 500_000);
+    const after = await switchOff(black);
+    expect(after.accounts.items.map((i: { kind: string }) => i.kind)).toEqual(["white"]);
+    expect(after.accounts.setAside).toEqual([]);
+    expect(after.accounts.credit).toBe(3_000_000);
+  });
+
+  it("the person names an account; an empty name gives the default back", async () => {
+    const platinum = await account("other", 210_000);
+    const res = await api.patch(`/plan/accounts/${platinum}`, { name: "Детская карта" }).expect(200);
+    expect(res.body).toEqual({ id: platinum, kind: "other", name: "Детская карта", countsAsOwn: true });
+    expect((await today()).accounts.items[0].name).toBe("Детская карта");
+    await api.patch(`/plan/accounts/${platinum}`, { name: null }).expect(200);
+    expect((await today()).accounts.items[0].name).toBe("Карта monobank");
+  });
+
+  it("refuses the wallet, an unknown account and a bad body", async () => {
+    await api.post("/cash/start", { amount: 100_000 }).expect(201);
+    const cash = (await ds.query(`SELECT id FROM accounts WHERE kind = 'cash'`))[0].id as number;
+    const white = await account("white", 1_000);
+    await api.patch(`/plan/accounts/${cash}`, { countsAsOwn: false }).expect(400);
+    await api.patch(`/plan/accounts/999999`, { countsAsOwn: false }).expect(404);
+    await api.patch(`/plan/accounts/${white}`, { countsAsOwn: "no" }).expect(400);
+    await api.patch(`/plan/accounts/${white}`, { kind: "black" }).expect(400);
+    await api.patch(`/plan/accounts/${white}`, { name: "" }).expect(400);
+  });
+
+  it("a balance kept by hand carries its id; one set aside is listed with the set-aside accounts", async () => {
+    await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-02T08:00:00Z', 41.5), ('EUR', '2026-11-02T08:00:00Z', 48)`);
+    const binance = (await api.post("/plan/manual-balances", { name: "Binance", amount: 12_600, currency: "USD", counts_as_own: true }).expect(201)).body.id;
+    const deposit = (await api.post("/plan/manual-balances", { name: "Депозит", amount: 100_000, currency: "EUR", counts_as_own: false }).expect(201)).body.id;
+    const r = await today();
+    expect(r.accounts.items).toEqual([
+      { kind: "binance", name: "Binance", own: 522_900, currency: "USD", amount: 12_600, id: binance, source: "manual", countsAsOwn: true },
+    ]);
+    expect(r.accounts.setAside).toEqual([
+      { kind: "manual", name: "Депозит", own: 4_800_000, currency: "EUR", amount: 100_000, id: deposit, source: "manual", countsAsOwn: false },
+    ]);
+    expect(r.accounts.own).toBe(522_900);
+  });
+
+  it("a balance kept by hand takes only a currency the server can turn into hryvnias", async () => {
+    for (const currency of ["UAH", "USD", "EUR"]) {
+      await api.post("/plan/manual-balances", { name: currency, amount: 1, currency }).expect(201);
+    }
+    await api.post("/plan/manual-balances", { name: "x", amount: 1, currency: "XYZ" }).expect(400);
+    const id = (await api.post("/plan/manual-balances", { name: "y", amount: 1, currency: "USD" }).expect(201)).body.id;
+    await api.patch(`/plan/manual-balances/${id}`, { currency: "XYZ" }).expect(400);
   });
 });
 

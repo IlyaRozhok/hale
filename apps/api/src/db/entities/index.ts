@@ -16,6 +16,10 @@ export class Account {
   @Column({ type: "timestamptz", nullable: true }) balance_at!: Date | null;
   @Column({ type: "text", nullable: true }) iban!: string | null;
   @Column({ type: "text", nullable: true }) title!: string | null;
+  /** Д2а: the person's mark that the account is own money; null follows the kind (domain/ledger.ts countsAsOwn). */
+  @Column({ type: "boolean", nullable: true }) counts_as_own!: boolean | null;
+  /** Д2а: the person's own name for the account; null shows the default one. */
+  @Column({ type: "text", nullable: true }) name!: string | null;
 }
 
 @Entity("transactions")

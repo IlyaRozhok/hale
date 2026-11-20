@@ -3,6 +3,7 @@ import type { DataSource } from "typeorm";
 import { createDataSource } from "../db/data-source";
 import { Account, Job, Transaction } from "../db/entities";
 import { createMigratedDatabase } from "../../test/app";
+import { countsAsOwnSql } from "../domain/ledger";
 import { ImportService, SPLIT_THRESHOLD, WINDOW_JOB_KIND } from "./import.service";
 import { JobRunner, MAX_ATTEMPTS } from "./jobs/job-runner";
 import { MonoApiError } from "./mono.errors";
@@ -89,6 +90,31 @@ describe("enqueueHistory", () => {
     const jobs = await ds.getRepository(Job).find();
     expect(jobs.length).toBe(3 * 3);
     expect(jobs.every((j) => j.kind === WINDOW_JOB_KIND && j.status === "pending")).toBe(true);
+  });
+
+  it("brings a card of another type in as own money and a jar as set aside, and a sync keeps the person's mark (Д2а)", async () => {
+    const { service } = setup(async () => []);
+    const info = {
+      ...clientInfo,
+      accounts: [...clientInfo.accounts, { id: "acc-iron", balance: 900000, creditLimit: 1000000, type: "iron", currencyCode: 980, maskedPan: [] }],
+    };
+    await service.syncAccounts(info as never);
+    const marks = async () =>
+      (await ds.query(`SELECT external_id, kind, ${countsAsOwnSql("accounts")} AS own FROM accounts ORDER BY external_id`)) as unknown[];
+    expect(await marks()).toEqual([
+      { external_id: "acc-iron", kind: "other", own: true },
+      { external_id: "acc-uah", kind: "black", own: true },
+      { external_id: "acc-usd", kind: "white", own: true },
+      { external_id: "jar-1", kind: "jar", own: false },
+    ]);
+    await ds.query(`UPDATE accounts SET counts_as_own = NOT ${countsAsOwnSql("accounts")} WHERE external_id IN ('acc-iron', 'jar-1')`);
+    await service.syncAccounts(info as never);
+    expect(await marks()).toEqual([
+      { external_id: "acc-iron", kind: "other", own: false },
+      { external_id: "acc-uah", kind: "black", own: true },
+      { external_id: "acc-usd", kind: "white", own: true },
+      { external_id: "jar-1", kind: "jar", own: true },
+    ]);
   });
 
   it("does not duplicate windows when enqueued twice", async () => {

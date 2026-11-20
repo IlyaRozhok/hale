@@ -16,11 +16,17 @@ import { CashCardAnswerFrom1796428800000 } from "../src/db/migrations/0034-cash-
 import { Categories1796515200000 } from "../src/db/migrations/0035-categories";
 import { Observations1796601600000 } from "../src/db/migrations/0036-observations";
 import { Want1796688000000 } from "../src/db/migrations/0037-want";
+import { AccountCountsAsOwn1796774400000 } from "../src/db/migrations/0038-account-counts-as-own";
 import { CLASSIFIER_VERSION } from "../src/domain/classify";
 import { JobRunner } from "../src/mono/jobs/job-runner";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
 import { kyivDate } from "../src/domain/money";
 import { createTestDatabase } from "./db";
+import request from "supertest";
+import { createTestApp, TEST_PASSWORD } from "./app";
+import { fillOwnerAccounts, OWNER_ACCOUNTS_NOW } from "./owner-accounts";
+import { Clock } from "../src/time/clock";
+import { TodayService } from "../src/today/today.service";
 
 const TABLES = [
   "accounts", "transactions", "rules", "expected_incomes", "income_events",
@@ -577,6 +583,56 @@ describe("migrations", () => {
     expect(await ds.query(`SELECT table_name, column_name FROM information_schema.columns WHERE column_name IN ('want', 'want_override')`)).toEqual([]);
     expect(await ds.query(rows)).toEqual(was);
     expect(await ds.query(categories)).toEqual(wasCategories);
+    await ds.destroy();
+  });
+
+  it("0038 marks which bank accounts are own money by today's rule, and the owner's limit, reserve and own money stay the same (Д2а)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(AccountCountsAsOwn1796774400000)) });
+    await before.initialize();
+    await before.runMigrations();
+    await fillOwnerAccounts((sql, args) => before.query(sql, args));
+    const accounts = `SELECT external_id, kind, currency, balance, credit_limit, title, iban FROM accounts ORDER BY id`;
+    const others = `SELECT (SELECT count(*) FROM transactions)::int AS t, (SELECT json_agg(m ORDER BY id) FROM manual_balances m) AS m`;
+    const was = await before.query(accounts);
+    const wasOthers = await before.query(others);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    // The rule of before: the cards, the fop account and the wallet are own; jars and every 'other' account are not.
+    const flags = (await ds.query(`SELECT external_id, counts_as_own FROM accounts ORDER BY id`)) as { external_id: string; counts_as_own: boolean | null }[];
+    expect(Object.fromEntries(flags.map((f) => [f.external_id, f.counts_as_own]))).toEqual({
+      black: true, white: true, "white-usd": true, fop: true, jar: false, platinum: false, iron: false, cash: true,
+    });
+    expect(await ds.query(accounts)).toEqual(was);
+    expect(await ds.query(others)).toEqual(wasOthers);
+    // A bank account that arrives later carries no mark: it follows its kind's default.
+    await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ('new', 'other', 'UAH', 0)`);
+    expect((await ds.query(`SELECT counts_as_own FROM accounts WHERE external_id = 'new'`))[0].counts_as_own).toBeNull();
+    await ds.query(`DELETE FROM accounts WHERE external_id = 'new'`);
+
+    // What the owner sees is what the server before this change showed on the same data (recorded on main).
+    const app = await createTestApp(url);
+    app.get(Clock).fixed = new Date(OWNER_ACCOUNTS_NOW);
+    const login = await request(app.getHttpServer()).post("/auth/login").send({ password: TEST_PASSWORD, deviceName: "t" });
+    await app.get(TodayService).ensureSnapshot();
+    const body = (await request(app.getHttpServer()).get("/today").set("Authorization", `Bearer ${login.body.token as string}`).expect(200)).body;
+    await app.close();
+    expect({ free: body.state.free, dailyLimit: body.state.dailyLimit, leftToday: body.state.leftToday, reserve: body.runway.reserve }).toEqual({
+      free: 4352200, dailyLimit: 295746, leftToday: 211746, reserve: 10,
+    });
+    expect({ own: body.accounts.own, credit: body.accounts.credit, fop: body.accounts.fop, binance: body.accounts.binance, cash: body.accounts.cash }).toEqual({
+      own: 5852200, credit: 3000000, fop: 500000, binance: 522900, cash: 2983000,
+    });
+    expect(body.accounts.items.map((i: { name: string; own: number }) => [i.name, i.own])).toEqual([
+      ["Чёрная карта", 0], ["Белая карта", 1431300], ["Белая карта", 415000], ["Счёт ФОП", 500000], ["Наличные", 2983000], ["Binance", 522900],
+    ]);
+
+    for (let i = migrations.indexOf(AccountCountsAsOwn1796774400000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'accounts' AND column_name IN ('counts_as_own', 'name')`)).toEqual([]);
+    expect(await ds.query(accounts)).toEqual(was);
     await ds.destroy();
   });
 });

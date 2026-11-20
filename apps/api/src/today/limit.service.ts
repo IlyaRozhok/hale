@@ -3,7 +3,7 @@ import type { EntityManager } from "typeorm";
 import { TodayService } from "./today.service";
 
 /** What the person changed, as the log names it: a limit that moved mid-day can then be traced to its cause. */
-export type LimitReason = "plan" | "income" | "payment_paid" | "loan" | "cash" | "binance" | "settings" | "tax_estimate";
+export type LimitReason = "plan" | "income" | "payment_paid" | "loan" | "cash" | "binance" | "settings" | "tax_estimate" | "accounts";
 
 /**
  * The one place a change by the person's own hand reaches the day's limit (task Б4; the owner's decision of

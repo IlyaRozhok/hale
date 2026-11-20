@@ -9,10 +9,13 @@ import {
   LIMIT_EXCLUDED_ACCOUNT_KIND,
   LIMIT_TYPES,
   OUT_OF_LIMIT_PAYMENT_TYPES,
-  OWN_MONEY_ACCOUNT_KINDS,
+  SET_ASIDE_BY_DEFAULT_KIND,
   SPEND_GROUP_TYPES,
   cashCountShortSql,
   cashOutCounts,
+  countsAsOwn,
+  countsAsOwnSql,
+  defaultCountsAsOwn,
   countsAgainstLimit,
   inSpendGroup,
   ledgerEffect,
@@ -21,6 +24,7 @@ import {
   limitSql,
   outOfLimitPayment,
   outOfLimitPaymentSql,
+  ownPart,
   spendGroupSql,
   walletChange,
 } from "./ledger";
@@ -93,11 +97,10 @@ describe("ledgerEffect: what one operation does to the limit", () => {
     expect(ledgerEffect(row({ accountKind: "other" }), WITH_WALLET).limitSpend).toBe(42_000);
   });
 
-  it("a shortfall a count of the pocket found is not the day's spending (Б47 (2)), but it still lowers own money", () => {
+  it("a shortfall a count of the pocket found is not the day's spending (Б47 (2))", () => {
     const short = row({ accountKind: "cash", amountUah: -60_000, category: "uncategorized", cashCountShort: true });
     expect(ledgerEffect(short, WITH_WALLET).limitSpend).toBe(0);
     expect(countsAgainstLimit(short, WITH_WALLET)).toBe(false);
-    expect(ledgerEffect(short, WITH_WALLET).ownMoney).toBe(-60_000);
     expect(limitSpentByDay([short], WITH_WALLET).size).toBe(0);
     // Listed under «Траты», marked as outside the limit.
     expect(ledgerEffect(short, WITH_WALLET).inSpendGroup).toBe(true);
@@ -139,26 +142,63 @@ describe("ledgerEffect: the «Траты» list group today", () => {
   });
 });
 
-describe("ledgerEffect: own money", () => {
-  it("a purchase on a card lowers own money by its amount", () => {
-    expect(ledgerEffect(row(), WITH_WALLET).ownMoney).toBe(-42_000);
+describe("which accounts are own money (Д2а)", () => {
+  it("without a mark every kind but a jar is own money, an 'other' card included", () => {
+    expect(ACCOUNT_KINDS.filter((k) => countsAsOwn(k, null))).toEqual(["black", "white", "fop", "other", "cash"]);
+    expect(ACCOUNT_KINDS.filter((k) => countsAsOwn(k, undefined))).toEqual(["black", "white", "fop", "other", "cash"]);
   });
 
-  it("the fop account and the wallet are own money; jars and 'other' accounts are not", () => {
-    expect(ledgerEffect(row({ accountKind: "fop" }), WITH_WALLET).ownMoney).toBe(-42_000);
-    expect(ledgerEffect(row({ accountKind: "cash" }), WITH_WALLET).ownMoney).toBe(-42_000);
-    expect(ledgerEffect(row({ accountKind: "jar" }), WITH_WALLET).ownMoney).toBe(0);
-    expect(ledgerEffect(row({ accountKind: "other" }), WITH_WALLET).ownMoney).toBe(0);
+  it("the person's mark decides: an account switched off is not own money, a jar switched on is", () => {
+    expect(countsAsOwn("white", false)).toBe(false);
+    expect(countsAsOwn("other", false)).toBe(false);
+    expect(countsAsOwn("jar", true)).toBe(true);
   });
 
-  it("a withdrawal after the wallet start only moves money into the wallet", () => {
-    expect(ledgerEffect(row({ type: "cash_out", amountUah: -100_000, localDate: CASH_START }), WITH_WALLET).ownMoney).toBe(0);
+  it("the wallet is always own money, whatever its mark says", () => {
+    expect(countsAsOwn("cash", false)).toBe(true);
   });
 
-  it("a withdrawal from a jar on or after the wallet start is not own money and does not reach the wallet", () => {
-    for (const localDate of [CASH_START, "2026-11-11"]) {
-      expect(ledgerEffect(row({ type: "cash_out", accountKind: "jar", amountUah: -100_000, localDate }), WITH_WALLET).ownMoney).toBe(0);
+  it("a purchase from an account switched off still spends the limit: the limit has no mark", () => {
+    expect(ledgerEffect(row({ accountKind: "other" }), WITH_WALLET).limitSpend).toBe(42_000);
+  });
+
+  it("an account counted as own is own money whole, debt and all", () => {
+    expect(ownPart(1_000_000, true)).toEqual({ own: 1_000_000, setAside: 0 });
+    expect(ownPart(-2_000_000, true)).toEqual({ own: -2_000_000, setAside: 0 });
+  });
+
+  it("an account switched off sets aside only what is there; its debt stays in own money", () => {
+    expect(ownPart(1_000_000, false)).toEqual({ own: 0, setAside: 1_000_000 });
+    expect(ownPart(-2_000_000, false)).toEqual({ own: -2_000_000, setAside: 0 });
+    expect(ownPart(0, false)).toEqual({ own: 0, setAside: 0 });
+  });
+
+  it("switching an account off never raises own money, and the two parts add up to the balance", () => {
+    for (const seed of SEEDS) {
+      const r = rng(seed);
+      const balance = Math.floor(r() * 10_000_000) - 5_000_000;
+      const off = ownPart(balance, false);
+      expect(off.own, `seed ${seed}`).toBeLessThanOrEqual(ownPart(balance, true).own);
+      expect(off.own + off.setAside, `seed ${seed}`).toBe(balance);
+      expect(off.setAside, `seed ${seed}`).toBeGreaterThanOrEqual(0);
     }
+  });
+});
+
+describe("walletChange: what one operation does to the cash wallet", () => {
+  it("a withdrawal after the wallet start moves its money into the wallet", () => {
+    expect(walletChange(row({ type: "cash_out", amountUah: -100_000, localDate: CASH_START }), WITH_WALLET)).toBe(100_000);
+  });
+
+  it("a withdrawal from a jar on or after the wallet start does not reach the wallet", () => {
+    for (const localDate of [CASH_START, "2026-11-11"]) {
+      expect(walletChange(row({ type: "cash_out", accountKind: "jar", amountUah: -100_000, localDate }), WITH_WALLET)).toBe(0);
+    }
+  });
+
+  it("a shortfall a count of the pocket found lowers the wallet (Б47 (2))", () => {
+    const short = row({ accountKind: "cash", amountUah: -60_000, category: "uncategorized", cashCountShort: true });
+    expect(walletChange(short, WITH_WALLET)).toBe(-60_000);
   });
 
   describe("on the start day, by the start moment (Б39)", () => {
@@ -166,10 +206,9 @@ describe("ledgerEffect: own money", () => {
     const STARTED_AT: LedgerContext = { cashStart: CASH_START, cashStartedAt: Date.parse(`${CASH_START}T13:00:00Z`) };
     const withdrawal = (time: string) => row({ type: "cash_out", amountUah: -100_000, localDate: CASH_START, occurredAt: Date.parse(`${CASH_START}T${time}Z`) });
 
-    it("a withdrawal before the moment leaves the card and does not reach the wallet: the opening balance holds it", () => {
+    it("a withdrawal before the moment does not reach the wallet: the opening balance holds it", () => {
       const e = ledgerEffect(withdrawal("08:00:00"), STARTED_AT);
       expect(walletChange(withdrawal("08:00:00"), STARTED_AT)).toBe(0);
-      expect(e.ownMoney).toBe(-100_000);
       // Not spending either, as before: the start day stays day-based on the spending side.
       expect(e.limitSpend).toBe(0);
       expect(e.inSpendGroup).toBe(false);
@@ -178,7 +217,6 @@ describe("ledgerEffect: own money", () => {
     it("a withdrawal at or after the moment goes into the wallet", () => {
       for (const time of ["13:00:00", "14:00:00"]) {
         expect(walletChange(withdrawal(time), STARTED_AT), time).toBe(100_000);
-        expect(ledgerEffect(withdrawal(time), STARTED_AT).ownMoney, time).toBe(0);
       }
     });
 
@@ -199,31 +237,24 @@ describe("ledgerEffect: own money", () => {
     });
   });
 
-  it("a withdrawal before the wallet start leaves own money", () => {
-    expect(ledgerEffect(row({ type: "cash_out", amountUah: -100_000, localDate: "2026-11-09" }), WITH_WALLET).ownMoney).toBe(-100_000);
-    expect(ledgerEffect(row({ type: "cash_out", amountUah: -100_000 }), NO_WALLET).ownMoney).toBe(-100_000);
+  it("a withdrawal before the wallet start does not reach it", () => {
+    expect(walletChange(row({ type: "cash_out", amountUah: -100_000, localDate: "2026-11-09" }), WITH_WALLET)).toBe(0);
+    expect(walletChange(row({ type: "cash_out", amountUah: -100_000 }), NO_WALLET)).toBe(0);
   });
 
-  it("a deposit the owner said came from the wallet changes nothing in total", () => {
+  it("a deposit the owner said came from the wallet leaves the wallet", () => {
     const deposit = row({ type: "own_transfer", amountUah: 30_000, fromWallet: true, category: "own" });
-    expect(ledgerEffect(deposit, WITH_WALLET).ownMoney).toBe(0);
+    expect(walletChange(deposit, WITH_WALLET)).toBe(-30_000);
   });
 
   it("cash taken from a transfer to the owner's card at another bank goes into the wallet", () => {
     const toOtherBank = row({ type: "own_transfer", amountUah: -200_000, walletCash: 150_000, category: "own" });
-    expect(ledgerEffect(toOtherBank, WITH_WALLET).ownMoney).toBe(-50_000);
+    expect(walletChange(toOtherBank, WITH_WALLET)).toBe(150_000);
   });
 
-  it("wallet rows mean nothing while there is no wallet", () => {
-    expect(ledgerEffect(row({ accountKind: "cash" }), NO_WALLET).ownMoney).toBe(0);
-  });
-
-  it("a transfer to a jar leaves own money", () => {
-    expect(ledgerEffect(row({ type: "goal_contribution", amountUah: -10_000 }), WITH_WALLET).ownMoney).toBe(-10_000);
-  });
-
-  it("is unknown without a hryvnia amount", () => {
-    expect(ledgerEffect(row({ amountUah: null }), WITH_WALLET).ownMoney).toBeNull();
+  it("wallet rows mean nothing while there is no wallet, nor rows without a hryvnia amount", () => {
+    expect(walletChange(row({ accountKind: "cash" }), NO_WALLET)).toBe(0);
+    expect(walletChange(row({ accountKind: "cash", amountUah: null }), WITH_WALLET)).toBe(0);
   });
 });
 
@@ -303,7 +334,9 @@ describe("SQL built from the same data", () => {
     expect(LIMIT_TYPES).toEqual(["spend", "person_transfer"]);
     expect(LIMIT_EXCLUDED_ACCOUNT_KIND).toBe("jar");
     expect(CASH_START_SQL).toBe("(SELECT cash_start FROM settings WHERE id=1)");
-    expect([...OWN_MONEY_ACCOUNT_KINDS].sort()).toEqual(["black", "cash", "fop", "white"]);
+    expect(ACCOUNT_KINDS.filter(defaultCountsAsOwn)).toEqual(["black", "white", "fop", "other", "cash"]);
+    expect(SET_ASIDE_BY_DEFAULT_KIND).toBe("jar");
+    expect(countsAsOwnSql("x")).toBe("(x.kind = 'cash' OR COALESCE(x.counts_as_own, x.kind <> 'jar'))");
   });
 });
 
@@ -458,20 +491,7 @@ describe("properties (300 seeded cases each)", () => {
       for (const t of rows) {
         const e = ledgerEffect(t, ctx);
         expect(Number.isInteger(e.limitSpend), `seed ${seed}`).toBe(true);
-        if (e.ownMoney !== null) expect(Number.isInteger(e.ownMoney), `seed ${seed}`).toBe(true);
       }
-    }
-  });
-
-  it("a transfer between two own accounts nets to zero own money", () => {
-    const own = ["black", "white", "fop"] as const;
-    for (const seed of SEEDS) {
-      const r = rng(seed);
-      const amount = 1 + Math.floor(r() * 1_000_000);
-      const ctx = { cashStart: r() < 0.5 ? null : CASH_START };
-      const out = row({ type: "own_transfer", accountKind: pick(r, own), amountUah: -amount, category: "own" });
-      const into = row({ type: "own_transfer", accountKind: pick(r, own), amountUah: amount, category: "own" });
-      expect(ledgerEffect(out, ctx).ownMoney! + ledgerEffect(into, ctx).ownMoney!, `seed ${seed}`).toBe(0);
     }
   });
 

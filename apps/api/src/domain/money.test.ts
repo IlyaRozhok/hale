@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { addDays, daysBetween, hryvniaLeg, kyivDate, ownMoney, toUah, type Rates } from "./money.js";
+import { MANUAL_BALANCE_CURRENCIES } from "@hale/contracts";
+import { CURRENCY_ALPHA, addDays, daysBetween, hryvniaLeg, kyivDate, ownMoney, toUah, type Rates } from "./money.js";
+
+describe("MANUAL_BALANCE_CURRENCIES (Д2а)", () => {
+  it("are the currencies the server turns into hryvnias", () => {
+    expect([...MANUAL_BALANCE_CURRENCIES].sort()).toEqual(Object.values(CURRENCY_ALPHA).sort());
+  });
+});
 
 describe("ownMoney", () => {
   it("is zero when balance equals the credit limit (untouched credit)", () => {
