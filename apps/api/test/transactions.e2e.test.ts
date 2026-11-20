@@ -892,6 +892,51 @@ describe("filters by category and period", () => {
     await api.get("/transactions?want=false").expect(400);
     await api.get("/transactions?want=yes").expect(400);
   });
+
+  it("filters by the account's kind with a summary, together with the other filters (Д1)", async () => {
+    const black = await account("black");
+    const white = await account("white");
+    const whiteUsd = await account("white", "USD");
+    await account("jar");
+    await tx(black, { description: "Black cafe", amount: -10_000, category: "cafe", at: "2026-11-05T10:00:00.000Z" });
+    await tx(white, { description: "White cafe", amount: -20_000, category: "cafe", at: "2026-11-05T11:00:00.000Z" });
+    await tx(white, { description: "White shop", amount: -40_000, category: "groceries", at: "2026-11-06T10:00:00.000Z" });
+    await tx(whiteUsd, { description: "White old", amount: -100, amountUah: -4_100, category: "cafe", at: "2026-10-01T10:00:00.000Z" });
+    await tx(white, { description: "White income", amount: 500_000, type: "income", at: "2026-11-07T10:00:00.000Z" });
+
+    const all = await api.get("/transactions?account=white").expect(200);
+    expect(all.body.items.map((i: { description: string }) => i.description)).toEqual(["White income", "White shop", "White cafe", "White old"]);
+    expect(all.body.summary).toEqual({ total: 500_000 - 20_000 - 40_000 - 4_100, count: 4 });
+
+    const spend = await api.get("/transactions?group=spend&account=white&category=cafe&from=2026-11-01&to=2026-11-30").expect(200);
+    expect(spend.body.items.map((i: { description: string }) => i.description)).toEqual(["White cafe"]);
+    expect(spend.body.summary).toEqual({ total: -20_000, count: 1 });
+
+    const income = await api.get("/transactions?group=income&account=black").expect(200);
+    expect(income.body.items).toEqual([]);
+    expect(income.body.summary).toEqual({ total: 0, count: 0 });
+
+    await api.get("/transactions?account=jar").expect(400);
+    await api.get("/transactions?account=card").expect(400);
+  });
+
+  it("names the kinds of the person's accounts to filter by, on the first page only (Д1)", async () => {
+    const white = await account("white");
+    await account("black");
+    await account("black", "USD");
+    await account("jar");
+    await account("other");
+    await tx(white, { description: "A", at: "2026-11-05T10:00:00.000Z" });
+    await tx(white, { description: "B", at: "2026-11-04T10:00:00.000Z" });
+    const first = await api.get("/transactions?limit=1").expect(200);
+    expect(first.body.accountKinds).toEqual(["black", "white"]);
+    const next = await api.get(`/transactions?limit=1&cursor=${first.body.nextCursor as string}`).expect(200);
+    expect(next.body.accountKinds).toBeUndefined();
+
+    await account("fop");
+    await account("cash");
+    expect((await api.get("/transactions?account=fop").expect(200)).body.accountKinds).toEqual(["black", "white", "fop", "cash"]);
+  });
 });
 
 describe("a tax closed by its operations, one of them retyped (Б26)", () => {

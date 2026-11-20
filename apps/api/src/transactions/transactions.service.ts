@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import type {
+  AccountFilterKind,
   CashAnswerDto,
   RuleDto,
   RecipientLabelName,
@@ -159,6 +160,9 @@ const ANSWERED_TYPES = ["person_transfer", "obligation", "debt_payment", "spend"
  */
 const INCOME_GROUP_TYPES: readonly string[] = ["income", "person_in", "cash_in"];
 
+/** What «Операции» can be narrowed to by account (Д1): the own-money kinds, in the order they are offered. */
+const ACCOUNT_FILTER_KINDS: readonly AccountFilterKind[] = ["black", "white", "fop", "cash"];
+
 export class InvalidCursorError extends Error {}
 
 @Injectable()
@@ -183,6 +187,8 @@ export class TransactionsService {
     if (q.category) where.push(`COALESCE(t.category, '${UNCATEGORIZED}') = ${arg(q.category)}`);
     // Exactly the rows «Итоги» add up as «желаемое» (В6): purchases in the limit on that side.
     if (q.want) where.push(wantedSql("t", "a"));
+    // By kind, not by account: a card's hryvnia and dollar accounts are one card to the person (Д1).
+    if (q.account) where.push(`a.kind = ${arg(q.account)}`);
     if (q.from) where.push(`t.local_date >= ${arg(q.from)}::date`);
     if (q.to) where.push(`t.local_date <= ${arg(q.to)}::date`);
     if (q.q) {
@@ -212,8 +218,19 @@ export class TransactionsService {
       items: page.map((r) => view(r, rules, binanceOpen)),
       nextCursor: rows.length > q.limit ? encodeCursor(page[page.length - 1]!) : null,
       dayTotals: await this.dayTotals([...new Set(page.map((r) => r.local_date))], filters, filterArgs, counted),
-      summary: q.category || q.want || q.from || q.to ? await this.summary(filters, filterArgs, counted) : null,
+      summary: q.category || q.want || q.account || q.from || q.to ? await this.summary(filters, filterArgs, counted) : null,
+      ...(q.cursor ? {} : { accountKinds: await this.accountKinds() }),
     };
+  }
+
+  /** The kinds of the person's own-money accounts, in the order the filter offers them (Д1). Jars and 'other' are not offered. */
+  private async accountKinds(): Promise<AccountFilterKind[]> {
+    const rows: { kind: AccountFilterKind }[] = await this.ds.query(
+      `SELECT DISTINCT kind FROM accounts WHERE kind = ANY($1::text[])`,
+      [ACCOUNT_FILTER_KINDS],
+    );
+    const have = new Set(rows.map((r) => r.kind));
+    return ACCOUNT_FILTER_KINDS.filter((k) => have.has(k));
   }
 
   /** The sum and count of the `counted` rows under the filters, ignoring the cursor. */

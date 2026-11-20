@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { recipientLabelName, txType } from "@hale/contracts";
 import {
-  accountLabel, alwaysCountText, answerChoices, answerText, categoryChoices, categoryLabel, categoryName, deleteCategoryText, FREQUENT_ANSWERS, LABEL_CHOICES, recipientLine, SPEND_CATEGORIES, TYPE_CHOICES, typeChips,
+  accountChoices, accountLabel, alwaysCountText, answerChoices, answerText, categoryChoices, categoryLabel, categoryName, deleteCategoryText, FREQUENT_ANSWERS, LABEL_CHOICES, recipientLine, SPEND_CATEGORIES, TYPE_CHOICES, typeChips,
   typeLabel, usualWantText, wantedText, wantLabel,
 } from "./labels";
 
@@ -110,6 +110,18 @@ describe("labels", () => {
     expect(accountLabel("cash")).toBe("Наличные");
     expect(accountLabel("something_new")).toBeNull();
     expect(accountLabel("toString")).toBeNull();
+  });
+
+  it("offers the person's accounts to filter by, by name, leaving out a kind it cannot name (Д1)", () => {
+    expect(accountChoices(["black", "white", "fop", "cash"])).toEqual([
+      { kind: "black", name: "Чёрная карта" },
+      { kind: "white", name: "Белая карта" },
+      { kind: "fop", name: "Счёт ФОП" },
+      { kind: "cash", name: "Наличные" },
+    ]);
+    expect(accountChoices(["white", "jar", "something_new"])).toEqual([{ kind: "white", name: "Белая карта" }]);
+    expect(accountChoices([])).toEqual([]);
+    expect(accountChoices(undefined)).toEqual([]);
   });
 
   it("offers the frequent types by where the money goes, the rest behind", () => {

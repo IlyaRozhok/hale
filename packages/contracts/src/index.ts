@@ -493,10 +493,17 @@ export const transactionsQuery = z
      * side. With a period, the summary's total is −`wanted` of «Итоги» for those days before «Итоги» clamp it at zero.
      */
     want: z.enum(["true"]).transform(() => true as const).optional(),
+    /**
+     * Task Д1: only the rows of the person's accounts of this kind (both currencies of a card). An older server
+     * refuses it (400): the app sends it only when the page named `accountKinds`.
+     */
+    account: z.enum(["black", "white", "fop", "cash"]).optional(),
   })
   .strict()
   .refine((v) => !v.from || !v.to || v.from <= v.to, "from must not be after to");
 export type TransactionsQuery = z.infer<typeof transactionsQuery>;
+/** The kinds of account «Операции» can be narrowed to (task Д1). */
+export type AccountFilterKind = NonNullable<TransactionsQuery["account"]>;
 
 export const transactionPatch = z
   .object({
@@ -634,10 +641,16 @@ export interface TransactionPageDto {
    */
   dayTotals: Record<string, number>;
   /**
-   * With a category or a period chosen: the sum and the count of everything found; under group "spend" of
+   * With a category, «желаемое», an account or a period chosen: the sum and the count of everything found; under group "spend" of
    * the rows that count against the limit only. Otherwise null; absent from an older server.
    */
   summary?: { total: number; count: number } | null;
+  /**
+   * Task Д1: the kinds of the person's accounts the list can be narrowed to, in the order black, white, fop, cash
+   * (the wallet once it is started). Only on the first page (without a cursor). Absent from an older server, which
+   * also refuses `account`: no such filter is offered then.
+   */
+  accountKinds?: AccountFilterKind[];
 }
 
 export interface TransactionEditDto {

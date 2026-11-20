@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import type { AccountFilterKind } from "@hale/contracts";
 import { tokens } from "@hale/tokens";
 import { useCategoryList } from "../api/queries";
 import { categoryIconOf } from "../categoryIcon";
@@ -14,7 +15,7 @@ import { Sheet } from "./Sheet";
 const { color, radius, space, touchMin, type } = tokens;
 
 export type Period = { from: string; to: string };
-export type Filters = { period: Period | null; category: string | null };
+export type Filters = { period: Period | null; category: string | null; account: AccountFilterKind | null };
 
 type Props = {
   today: string;
@@ -22,6 +23,8 @@ type Props = {
   /** Categories are spending's: offered wherever spending is listed, not for income. Where they are not
    *  offered, "Показать" passes the incoming category through and only "Сбросить" clears it. */
   withCategories: boolean;
+  /** The person's accounts the list can be narrowed to (task Д1); with none the window has no «Счёт». */
+  accounts: { kind: AccountFilterKind; name: string }[];
   onApply: (f: Filters) => void;
   onClose: () => void;
 };
@@ -29,16 +32,18 @@ type Props = {
 const same = (a: Period | null, b: Period) =>
   a !== null && a.from === b.from && a.to === b.to;
 
-/** Everything that narrows the list, in one window: a period, and where spending is listed a category. */
+/** Everything that narrows the list, in one window: a period, an account, and where spending is listed a category. */
 export function FiltersSheet({
   today,
   value,
   withCategories,
+  accounts,
   onApply,
   onClose,
 }: Props) {
   const [period, setPeriod] = useState<Period | null>(value.period);
   const [category, setCategory] = useState<string | null>(value.category);
+  const [account, setAccount] = useState<AccountFilterKind | null>(value.account);
   const list = useCategoryList();
   const quick: { label: string; period: Period }[] = [
     { label: "Сегодня", period: { from: today, to: today } },
@@ -77,6 +82,21 @@ export function FiltersSheet({
         onChange={(d) => setPeriod({ from: !period || d < period.from ? d : period.from, to: d })}
         max={today}
       />
+      {accounts.length > 0 && (
+        <>
+          <Text style={styles.heading}>Счёт</Text>
+          <View style={styles.chips}>
+            {accounts.map((a) => (
+              <Chip
+                key={a.kind}
+                label={a.name}
+                selected={account === a.kind}
+                onPress={() => setAccount(account === a.kind ? null : a.kind)}
+              />
+            ))}
+          </View>
+        </>
+      )}
       {withCategories && (
         <>
           <Text style={styles.heading}>Категория</Text>
@@ -110,12 +130,12 @@ export function FiltersSheet({
       {/* Without the category block the category is the one that came in: remembered for spending, not erased here. */}
       <PrimaryButton
         label="Показать"
-        onPress={() => apply({ period, category })}
+        onPress={() => apply({ period, category, account })}
       />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Сбросить"
-        onPress={() => apply({ period: null, category: null })}
+        onPress={() => apply({ period: null, category: null, account: null })}
         style={styles.reset}
       >
         <Text style={styles.resetText}>Сбросить</Text>

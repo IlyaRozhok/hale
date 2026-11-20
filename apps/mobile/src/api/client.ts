@@ -1,4 +1,5 @@
 import type {
+  AccountFilterKind,
   BridgePreviewDto,
   CalendarDto,
   CashCardAnswer,
@@ -177,6 +178,8 @@ export type TransactionsFilter = {
   category?: string;
   /** Only the purchases «Итоги» count as «желаемое» (task В6). */
   want?: true;
+  /** Only this kind of account (task Д1). Sent only when the server named the kinds: an older one refuses it. */
+  account?: AccountFilterKind;
   /** Kyiv days, both inclusive. */
   from?: string;
   to?: string;
@@ -262,9 +265,10 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     createGoal: (input) => request("POST", "/plan/goals", input),
     patchGoal: (id, patch) => request("PATCH", `/plan/goals/${id}`, patch),
     deleteGoal: async (id) => void (await request("DELETE", `/plan/goals/${id}`)),
-    transactions: ({ cursor, needsLabel, group, q: search, category, want, from, to }) => {
+    transactions: ({ cursor, needsLabel, group, q: search, account, category, want, from, to }) => {
       const q = [
         group !== undefined && `group=${group}`,
+        account !== undefined && `account=${account}`,
         category !== undefined && `category=${encodeURIComponent(category)}`,
         want === true && "want=true",
         from !== undefined && `from=${from}`,
