@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { type QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CategoryDto, CategoryInput, CategoryPatch, ObservationDto, ObservationRef } from "@hale/contracts";
 import type { CategoryList } from "../labels";
-import type { CashOperationInput, CashOperationPatch, CashStartInput, ExpectedIncomeInput, ExpectedIncomePatch, InstallmentInput, InstallmentPatch, LoanInput, LoanPatch, LoanRepayInput, RecipientLabelName, RecurringInput, RecurringPatch, ScheduledPaymentInput, ScheduledPaymentPatch, SettingsDto, SettingsPatch, TodayDto, TransactionPatch } from "@hale/contracts";
+import type { CashOperationInput, CashOperationPatch, CashStartInput, ExpectedIncomeInput, ExpectedIncomePatch, InstallmentInput, InstallmentPatch, LoanInput, LoanPatch, LoanRepayInput, RecipientLabelName, RecurringInput, RecurringPatch, ScheduledPaymentInput, ScheduledPaymentPatch, SettingsDto, SettingsPatch, TodayDto } from "@hale/contracts";
 import type { CashCardAnswer, CashDepositAnswerName, GoalInput, GoalPatch, TxTypeDto } from "@hale/contracts";
-import { ApiError, type TransactionsFilter } from "./client";
+import { ApiError, type TransactionEdit, type TransactionsFilter } from "./client";
 import { useApi } from "./context";
 
 export const TODAY_KEY = ["today"] as const;
@@ -185,7 +185,7 @@ export function useEditTransaction() {
   const api = useApi();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: number; patch: Pick<TransactionPatch, "type" | "category" | "applyToSimilar"> }) =>
+    mutationFn: ({ id, patch }: { id: number; patch: TransactionEdit }) =>
       api.editTransaction(id, patch),
     // A new type undoes an answer about where cash came from (Б21): the wallet and Binance may change too.
     onSuccess: () =>

@@ -210,6 +210,29 @@ describe("api client", () => {
     expect(calls[2]![1].body).toBe(JSON.stringify({ category: "cafe", applyToSimilar: true }));
   });
 
+  it("asks for «желаемое» over days and sends a purchase's side alone (В6)", async () => {
+    const fetchImpl = vi.fn(async () => json({ items: [], nextCursor: null, dayTotals: {} }));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await api.transactions({ group: "spend", want: true, from: "2026-11-01", to: "2026-11-19" });
+    await api.editTransaction(7, { want: true });
+    await api.editTransaction(7, { want: null });
+    const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
+    expect(calls[0]![0]).toBe("https://api.example.test/transactions?group=spend&want=true&from=2026-11-01&to=2026-11-19");
+    // Never with applyToSimilar: the server refuses the two together.
+    expect(calls[1]![1].body).toBe(JSON.stringify({ want: true }));
+    expect(calls[2]![1].body).toBe(JSON.stringify({ want: null }));
+  });
+
+  it("sends a category's side when it is made or changed (В6)", async () => {
+    const fetchImpl = vi.fn(async () => json({ key: "c_1", name: "Кот", icon: "paw", system: false, want: true }));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await api.createCategory({ name: "Кот", icon: "paw", want: true });
+    await api.patchCategory("c_1", { want: false });
+    const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
+    expect(calls[0]![1].body).toBe(JSON.stringify({ name: "Кот", icon: "paw", want: true }));
+    expect(calls[1]![1].body).toBe(JSON.stringify({ want: false }));
+  });
+
   it("covers labels, settings, payments, loans and the push token", async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
     const { api } = setup(fetchImpl as unknown as typeof fetch);

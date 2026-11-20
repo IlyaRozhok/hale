@@ -6,8 +6,8 @@ import { useCategoryList, useChangeDepositAnswer, useEditTransaction, useSetCard
 import { categoryIconOf } from "../categoryIcon";
 import { dayMonth, formatMoney, formatSignedMoney, formatSignedOriginal, two } from "../format";
 import { AmountForm } from "./AmountForm";
-import { accountLabel, alwaysCountText, answerText, categoryChoices, categoryName, typeChips, typeLabel } from "../labels";
-import { CategoryFormSheet } from "./CategoryFormSheet";
+import { accountLabel, alwaysCountText, answerText, categoryChoices, categoryName, typeChips, typeLabel, usualWantText } from "../labels";
+import { CategoryFormSheet, WantSwitch } from "./CategoryFormSheet";
 import { ErrorText } from "./ErrorText";
 import { ActionRow } from "./ActionRow";
 import { Chip } from "./Chip";
@@ -46,11 +46,13 @@ type Change = Pick<TransactionPatch, "type" | "category">;
  * The operation on top, then its category and type, each changed with one tap for this operation alone. After a
  * change a quiet card asks «Всегда так для …?» (task В5): «Да, всегда» sends the same change for the similar ones,
  * exactly what the «Применить к похожим» switch did; no answer leaves only this operation changed. The rare types
- * wait behind "Ещё".
+ * wait behind "Ещё". A purchase in a category with a side has «Эта покупка» (task В6): «нужное» or «желаемое» for it
+ * alone, saved at once in a request of its own, with no question about the similar ones.
  */
 export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
   const edit = useEditTransaction();
   const always = useEditTransaction();
+  const side = useEditTransaction();
   const list = useCategoryList();
   // The sheet opens with a snapshot of the row; what was saved shows here at once.
   const [row, setRow] = useState(tx);
@@ -59,7 +61,7 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
   const [creating, setCreating] = useState(false);
   const [failed, setFailed] = useState(false);
   const count = useSimilarCount(tx.id, asked?.type, asked !== null);
-  const busy = edit.isPending || always.isPending;
+  const busy = edit.isPending || always.isPending || side.isPending;
 
   // A rule needs a type: an operation without one is only ever changed alone.
   const ask = (change: Change, type: TransactionDto["type"]) => setAsked(type ? change : null);
@@ -82,6 +84,21 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
   // The category it already has: nothing to save, but the owner may want it for the similar ones.
   const pickCategory = (key: string) => (row.category === key ? ask({ category: key }, row.type) : save({ category: key }));
   const pickType = (type: NonNullable<TransactionDto["type"]>) => (row.type === type ? ask({ type }, row.type) : save({ type }));
+
+  // The side of its category, from the server's list; none for a system one or from an older server.
+  const categoryWant = list?.find((c) => c.key === row.category)?.want;
+  // A wallet row is changed only in the cash wallet, and the server refuses it here. A category change keeps the own
+  // choice on the server: the row it sends back says which side the purchase is on now.
+  const sided = row.type === "spend" && row.accountKind !== "cash" && typeof categoryWant === "boolean" && typeof row.want === "boolean";
+  const pickWant = (want: boolean) => {
+    if (!sided || want === row.want) return;
+    setFailed(false);
+    side.mutate(
+      // The category's own side gives the purchase back to it.
+      { id: tx.id, patch: { want: want === categoryWant ? null : want } },
+      { onSuccess: (result) => setRow(result.transaction), onError: () => setFailed(true) },
+    );
+  };
 
   const yes = () => {
     if (!asked) return;
@@ -125,6 +142,13 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
             <Answer label="Да, всегда" strong disabled={busy} onPress={yes} />
             <Answer label="Только эта" disabled={busy} onPress={() => setAsked(null)} />
           </View>
+        </View>
+      )}
+      {sided && (
+        <View style={styles.stack}>
+          <Text style={styles.heading}>Эта покупка</Text>
+          <WantSwitch value={row.want === true} disabled={busy} onChange={pickWant} />
+          <Text style={styles.note}>{usualWantText(categoryName(row.category, list), categoryWant === true)}</Text>
         </View>
       )}
       <Text style={styles.heading}>Тип</Text>

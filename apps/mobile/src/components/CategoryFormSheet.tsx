@@ -5,7 +5,7 @@ import { CATEGORY_ICONS, type CategoryDto, type CategoryIcon } from "@hale/contr
 import { ApiError } from "../api/client";
 import { useCategoryCount, useCategoryList, useCreateCategory, useDeleteCategory, usePatchCategory } from "../api/queries";
 import { isCategoryIcon } from "../categoryIcon";
-import { categoryName, deleteCategoryText } from "../labels";
+import { categoryName, deleteCategoryText, wantLabel } from "../labels";
 import { ErrorText } from "./ErrorText";
 import { Field } from "./Field";
 import { Icon } from "./Icon";
@@ -56,8 +56,9 @@ type Props = {
 };
 
 /**
- * A category's name and icon (task В5). A new one is added at the end of the list. A system one («Возвраты»,
- * «Без категории») keeps its name and is not deleted; only its icon changes.
+ * A category's name, its side and icon (tasks В5, В6). A new one is added at the end of the list, «Нужное» unless
+ * chosen otherwise. A system one («Возвраты», «Без категории») keeps its name, has no side and is not deleted; only
+ * its icon changes. An older server sends no side, and then none is offered.
  */
 export function CategoryFormSheet({ category, onClose, onCreated }: Props) {
   const list = useCategoryList();
@@ -67,6 +68,9 @@ export function CategoryFormSheet({ category, onClose, onCreated }: Props) {
   const system = category?.system ?? false;
   const [name, setName] = useState(category?.name ?? "");
   const [icon, setIcon] = useState<CategoryIcon>(category && isCategoryIcon(category.icon) ? category.icon : NEW_ICON);
+  // A server that keeps sides sends one (null for a system category) with every category it lists.
+  const sided = category ? !system && typeof category.want === "boolean" : (list ?? []).some((c) => c.want !== undefined);
+  const [want, setWant] = useState(category?.want ?? false);
   const [message, setMessage] = useState<string | null>(null);
   const countOf = useCategoryCount();
   const [counting, setCounting] = useState(false);
@@ -84,7 +88,7 @@ export function CategoryFormSheet({ category, onClose, onCreated }: Props) {
     setMessage(null);
     if (!category) {
       create.mutate(
-        { name: trimmed, icon },
+        { name: trimmed, icon, ...(sided ? { want } : {}) },
         {
           onSuccess: (created) => {
             onCreated?.(created);
@@ -98,6 +102,7 @@ export function CategoryFormSheet({ category, onClose, onCreated }: Props) {
     const changes = {
       ...(!system && trimmed !== category.name ? { name: trimmed } : {}),
       ...(icon !== category.icon ? { icon } : {}),
+      ...(sided && want !== category.want ? { want } : {}),
     };
     if (Object.keys(changes).length === 0) {
       onClose();
@@ -135,6 +140,13 @@ export function CategoryFormSheet({ category, onClose, onCreated }: Props) {
           <Field label="Название" value={name} onChangeText={setName} maxLength={NAME_MAX} autoFocus={!category} />
         </>
       )}
+      {sided && (
+        <>
+          <Text style={styles.heading}>Это скорее</Text>
+          <WantSwitch value={want} onChange={setWant} />
+          <Text style={styles.caption}>Действует на все операции категории, кроме тех, где вы выбрали по-другому.</Text>
+        </>
+      )}
       <Text style={styles.heading}>Значок</Text>
       <View style={styles.grid}>
         {CATEGORY_ICONS.map((i) => {
@@ -164,10 +176,51 @@ export function CategoryFormSheet({ category, onClose, onCreated }: Props) {
   );
 }
 
+/**
+ * «Нужное» / «Желаемое» side by side (task В6): in a category's window and on one purchase. Silver only: neither
+ * side is better than the other.
+ */
+export function WantSwitch({ value, disabled = false, onChange }: { value: boolean; disabled?: boolean; onChange: (want: boolean) => void }) {
+  return (
+    <View accessibilityRole="radiogroup" style={styles.segment}>
+      {[false, true].map((side) => {
+        const on = value === side;
+        return (
+          <Pressable
+            key={String(side)}
+            accessibilityRole="radio"
+            accessibilityLabel={wantLabel(side)}
+            accessibilityState={{ selected: on, disabled }}
+            disabled={disabled}
+            onPress={() => onChange(side)}
+            style={[styles.segmentItem, on && styles.segmentOn]}
+          >
+            <Text style={[styles.segmentText, on && styles.segmentTextOn]}>{wantLabel(side)}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 const CELL = touchMin;
 
 const styles = StyleSheet.create({
   heading: { ...type.label, color: color.fg.muted },
+  caption: { ...type.caption, color: color.fg.muted },
+  segment: {
+    flexDirection: "row",
+    padding: space.xs,
+    gap: space.xs,
+    borderRadius: radius.full,
+    backgroundColor: color.card.fill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.card.edge,
+  },
+  segmentItem: { flex: 1, minHeight: touchMin, alignItems: "center", justifyContent: "center", borderRadius: radius.full },
+  segmentOn: { backgroundColor: color.accent.default },
+  segmentText: { ...type.label, color: color.fg.muted },
+  segmentTextOn: { color: color.accent.fgOnAccent },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
   cell: {
     width: CELL,

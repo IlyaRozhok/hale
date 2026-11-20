@@ -7,7 +7,7 @@ import type { TransactionDto } from "@hale/contracts";
 import { useCategoryList, useDismissObservation, useObservation, useTransactions } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
 import { dayHeader, formatSignedMoney, kyivDate, operationsText, periodLabel } from "../format";
-import { categoryLabel, categoryName } from "../labels";
+import { categoryLabel, categoryName, wantLabel } from "../labels";
 import { observationText } from "../dayPhrase";
 import { FiltersSheet, type Filters, type Period } from "../components/FiltersSheet";
 import { ErrorText } from "../components/ErrorText";
@@ -39,10 +39,11 @@ const isTransferToSomeone = (t: TransactionDto) => t.amount < 0 && (t.recipientL
 /**
  * What a move to the operations may carry: `day` asks for that one day's spending (the limit calendar);
  * `category` with `from`..`to` for that category's spending over those days («Итоги», task В2); with `observation`
- * they came from the phrase of the day's observation (task В7), which is said again above the list. `at` differs on
- * every arrival, so the same one twice in a row is applied twice.
+ * they came from the phrase of the day's observation (task В7), which is said again above the list; `want` with
+ * `from`..`to` for the purchases of «желаемое» over those days («Из них на желаемое» of «Итоги», task В6). `at`
+ * differs on every arrival, so the same one twice in a row is applied twice.
  */
-export type ActivityParams = { day?: string; category?: string; from?: string; to?: string; at?: number; observation?: boolean } | undefined;
+export type ActivityParams = { day?: string; category?: string; want?: boolean; from?: string; to?: string; at?: number; observation?: boolean } | undefined;
 
 type Props = {
   /** Test seam for the current moment. */
@@ -61,6 +62,8 @@ export function Activity({ now = () => new Date(), route }: Props) {
   const [open, setOpen] = useState<TransactionDto | null>(null);
   const [category, setCategory] = useState<string | null>(null);
   const [period, setPeriod] = useState<Period | null>(null);
+  // Only the purchases «Итоги» count as «желаемое» (В6): set by arriving from there, taken off by «Сбросить».
+  const [want, setWant] = useState(false);
   const [filtering, setFiltering] = useState(false);
   // Arrived from the phrase of the day's observation (В7): the card above the list stays until the filters change.
   const [fromObservation, setFromObservation] = useState(false);
@@ -83,17 +86,22 @@ export function Activity({ now = () => new Date(), route }: Props) {
   // Arriving from a day of the limit calendar, or from a category of «Итоги»: that spending, and nothing
   // chosen before it. Done while rendering, so the list is never asked for with the old filters first.
   const params = route?.params;
-  const target: Filters | null = params?.day
-    ? { category: null, period: { from: params.day, to: params.day } }
+  const target: (Filters & { want: boolean }) | null = params?.day
+    ? { category: null, want: false, period: { from: params.day, to: params.day } }
     : params?.category && params.from && params.to
-      ? { category: params.category, period: { from: params.from, to: params.to } }
-      : null;
-  const arrival = target ? `${target.category ?? ""}:${target.period?.from}..${target.period?.to}@${params?.at ?? 0}` : null;
+      ? { category: params.category, want: false, period: { from: params.from, to: params.to } }
+      : params?.want === true && params.from && params.to
+        ? { category: null, want: true, period: { from: params.from, to: params.to } }
+        : null;
+  const arrival = target
+    ? `${target.category ?? ""}:${target.want ? "want" : ""}:${target.period?.from}..${target.period?.to}@${params?.at ?? 0}`
+    : null;
   const [applied, setApplied] = useState<string | null>(null);
   if (target && arrival !== applied) {
     setApplied(arrival);
     setTab("spend");
     setCategory(target.category);
+    setWant(target.want);
     setPeriod(target.period);
     setSearching(false);
     setText("");
@@ -117,9 +125,12 @@ export function Activity({ now = () => new Date(), route }: Props) {
   // on the button and in the summary, until it is taken off in the window.
   const withCategories = tab !== "income";
   const chosenCategory = withCategories ? category : null;
+  // «Желаемое» is purchases only: like a category, it does not narrow income and waits there untouched.
+  const chosenWant = withCategories && want;
   const list = useTransactions({
     group: tab,
     ...(chosenCategory ? { category: chosenCategory } : {}),
+    ...(chosenWant ? { want: true as const } : {}),
     ...(period ? { from: period.from, to: period.to } : {}),
     ...(search ? { q: search } : {}),
   });
@@ -144,8 +155,8 @@ export function Activity({ now = () => new Date(), route }: Props) {
     else acc.push({ date: tx.localDate, data: [tx] });
     return acc;
   }, []);
-  const filtered = chosenCategory !== null || period !== null;
-  const activeFilters = (chosenCategory !== null ? 1 : 0) + (period !== null ? 1 : 0);
+  const filtered = chosenCategory !== null || chosenWant || period !== null;
+  const activeFilters = (chosenCategory !== null ? 1 : 0) + (chosenWant ? 1 : 0) + (period !== null ? 1 : 0);
   const emptyText = search || filtered ? "Ничего не нашлось." : TABS.find((t) => t.tab === tab)!.empty;
   const summary = pages[0]?.summary ?? null;
   // Said only while the list is still the observation's: its category over its days.
@@ -155,7 +166,13 @@ export function Activity({ now = () => new Date(), route }: Props) {
       ? observationText(seen, categories, today)
       : null;
   const noticedCategory = noticed !== null ? (seen?.category ?? null) : null;
-  const summaryTitle = [chosenCategory ? categoryName(chosenCategory, categories) : null, period ? periodLabel(period.from, period.to) : null].filter(Boolean).join(" · ");
+  const summaryTitle = [
+    chosenCategory ? categoryName(chosenCategory, categories) : null,
+    chosenWant ? wantLabel(true) : null,
+    period ? periodLabel(period.from, period.to) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + space.lg }]}>
@@ -283,6 +300,8 @@ export function Activity({ now = () => new Date(), route }: Props) {
           onApply={(f) => {
             setPeriod(f.period);
             setCategory(f.category);
+            // The window has no «желаемое» of its own: «Сбросить» (nothing left chosen) takes it off with the rest.
+            if (f.period === null && f.category === null) setWant(false);
             setFromObservation(false);
           }}
           onClose={() => setFiltering(false)}
