@@ -23,8 +23,9 @@ const COVER_TOLERANCE = 2_000;
  * "Оплачено" for a planned payment. The owner may say which operations paid it, several if the sum
  * was put together; otherwise in cash from the wallet (only when the wallet covers it) or just paid.
  * Operations that do not cover it leave it open (task Б9): the sheet says how much is missing, and a
- * partly paid payment shows what is paid and takes no cash on top. An older server sends no `paid`,
- * and closes the payment on any operation: then none of this is shown.
+ * partly paid payment shows what is paid. Its rest can be paid in cash from the wallet (task Б54): the
+ * server takes only the rest then. An older server sends no `paid`, and closes the payment on any
+ * operation: then none of this is shown.
  * `payment.amount` is in hryvnias whatever `currency` says: "Сегодня" converts a foreign payment
  * before sending it, so every amount here takes the hryvnia sign.
  */
@@ -46,8 +47,10 @@ export function PaymentPaidSheet({ payment, today, onClose }: Props) {
   const alreadyPaid = payment.paid ?? 0;
   const missing = payment.amount - alreadyPaid - pickedSum;
   const staysOpen = knowsParts && picked.length > 0 && missing > COVER_TOLERANCE;
-  const canOfferCash = w?.started === true && payment.currency === "UAH" && picked.length === 0 && alreadyPaid === 0;
-  const covers = canOfferCash && w.balance >= payment.amount;
+  // In cash goes what is not paid yet: the whole amount, or the rest of a partly paid payment.
+  const cashDue = payment.amount - alreadyPaid;
+  const canOfferCash = w?.started === true && payment.currency === "UAH" && picked.length === 0 && cashDue > 0;
+  const covers = canOfferCash && w.balance >= cashDue;
   const busy = markPaid.isPending || payFromWallet.isPending || payWith.isPending;
   const toggle = (txId: number) => setChosen((c) => (c.includes(txId) ? c.filter((x) => x !== txId) : [...c, txId]));
   const due = payment.dueOn < today ? `просрочен с ${shortDate(payment.dueOn)}` : `до ${shortDate(payment.dueOn)}`;
@@ -104,7 +107,11 @@ export function PaymentPaidSheet({ payment, today, onClose }: Props) {
         </View>
       )}
       {canOfferCash && !covers && (
-        <Text style={styles.muted}>{`В кошельке по записям ${formatMoney(w.balance)}. Если наличные были до начала учёта, просто отметьте оплату.`}</Text>
+        <Text style={styles.muted}>
+          {alreadyPaid > 0
+            ? `В кошельке по записям ${formatMoney(w.balance)}, остаток платежа — ${formatMoney(cashDue)}. Если наличные были до начала учёта, просто отметьте оплату.`
+            : `В кошельке по записям ${formatMoney(w.balance)}. Если наличные были до начала учёта, просто отметьте оплату.`}
+        </Text>
       )}
       <Text style={styles.muted}>
         {staysOpen
@@ -112,7 +119,9 @@ export function PaymentPaidSheet({ payment, today, onClose }: Props) {
           : picked.length > 0
           ? "Платёж закроется, выбранные операции станут им и не потратят лимит."
           : inCash && covers
-            ? `Наличные уменьшатся на ${formatMoney(payment.amount)}, лимит не изменится.`
+            ? alreadyPaid > 0
+              ? `Наличные уменьшатся на ${formatMoney(cashDue)} — остаток платежа. Лимит не изменится.`
+              : `Наличные уменьшатся на ${formatMoney(payment.amount)}, лимит не изменится.`
             : "Платёж закроется, деньги под него больше не откладываются."}
       </Text>
       {failed && <ErrorText>Не удалось сохранить. Попробуйте ещё раз.</ErrorText>}

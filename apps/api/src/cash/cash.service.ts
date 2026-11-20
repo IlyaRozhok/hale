@@ -233,6 +233,11 @@ export class CashService {
   /**
    * A planned payment paid in cash: closed and linked to a wallet row of its own type, which is not
    * spending against the limit. Only when the recorded cash covers it: the wallet never goes below zero.
+   *
+   * A payment partly paid by operations already (task Б9) takes from the wallet only the rest (task Б54):
+   * the cash row is linked as one more part, as payWith links one, and the payment closes by the same cover
+   * rule, so losing a part later opens it again the same way (task Б26). An unpaid one is paid whole through
+   * its own row, as before.
    */
   async payPlanned(id: number): Promise<CashWalletDto> {
     return this.ds.transaction(async (m) => {
@@ -241,14 +246,22 @@ export class CashService {
       )[0] as { name: string; amount: number; currency: string; paid_at: Date | null } | undefined;
       if (!p) throw new NotFoundException("payment not found");
       if (p.paid_at !== null) throw new ConflictException("the payment is already paid");
-      // Its parts are paid already: the whole amount from the wallet on top would pay it twice (task Б9).
-      if ((await linkedSum(m, id)) > 0) throw new ConflictException("the payment is partly paid by operations");
       const account = await this.startedAccount(m);
       if (p.currency !== "UAH") throw new UnprocessableEntityException("only a payment in hryvnias can be paid in cash");
+      const linked = await linkedSum(m, id);
+      // Nothing linked: the whole amount. Otherwise what the parts leave unpaid; it is above the tolerance, or they
+      // would have closed the payment.
+      const due = linked > 0 ? paymentCover(p.amount, linked).remaining : p.amount;
+      if (due <= 0) throw new ConflictException("the payment is already covered by operations");
       const { balance } = await walletBalance(m);
-      if (balance < p.amount) throw new UnprocessableEntityException("the wallet has less cash than the payment");
-      const tx = await this.insert(m, account, { type: "obligation", amount: -p.amount, category: "transfer", date: this.today(), note: p.name });
-      await m.query(`UPDATE scheduled_payments SET paid_at=now(), transaction_id=$2 WHERE id=$1`, [id, tx]);
+      if (balance < due) throw new UnprocessableEntityException("the wallet has less cash than the payment");
+      const tx = await this.insert(m, account, { type: "obligation", amount: -due, category: "transfer", date: this.today(), note: p.name });
+      if (linked === 0) {
+        await m.query(`UPDATE scheduled_payments SET paid_at=now(), transaction_id=$2 WHERE id=$1`, [id, tx]);
+      } else {
+        await m.query(`INSERT INTO payment_links (payment_id, transaction_id) VALUES ($1, $2)`, [id, tx]);
+        if (paymentCover(p.amount, await linkedSum(m, id)).closed) await this.closeByLinks(m, id);
+      }
       await this.limit.invalidate("payment_paid", m);
       return this.wallet(m);
     });
@@ -391,19 +404,21 @@ export class CashService {
       const amount = paymentUah(p, await latestRates(m));
       if (amount === null) throw new UnprocessableEntityException("no rate for the payment's currency");
       const cover = paymentCover(amount, await linkedSum(m, paymentId));
-      if (cover.closed) {
-        // Closed by its links: it opens again if it loses one and the rest no longer cover it (task Б26).
-        await m.query(
-          `UPDATE scheduled_payments SET closed_by_links = true,
-                  paid_at = (SELECT max(t.occurred_at) FROM payment_links l JOIN transactions t ON t.id = l.transaction_id
-                              WHERE l.payment_id = $1) WHERE id=$1`,
-          [paymentId],
-        );
-      }
+      if (cover.closed) await this.closeByLinks(m, paymentId);
       // The rows changed type even when the payment stays open: the day is fixed afresh either way.
       await this.limit.invalidate("payment_paid", m);
       return { linked: chosen.length, closed: cover.closed, remaining: cover.remaining };
     });
+  }
+
+  /** Closed by its links, on the day of the latest: it opens again if it loses one and the rest no longer cover it (task Б26). */
+  private async closeByLinks(m: EntityManager, paymentId: number): Promise<void> {
+    await m.query(
+      `UPDATE scheduled_payments SET closed_by_links = true,
+              paid_at = (SELECT max(t.occurred_at) FROM payment_links l JOIN transactions t ON t.id = l.transaction_id
+                          WHERE l.payment_id = $1) WHERE id=$1`,
+      [paymentId],
+    );
   }
 
   /** See paymentCandidateIds: the same rule asks «Это оплата?» on the home screen. */
