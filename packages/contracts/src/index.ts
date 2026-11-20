@@ -217,10 +217,15 @@ export interface GoalDto {
 }
 
 // --- manual balances --------------------------------------------------------
+/**
+ * Currencies a balance kept by hand may be in (Д2а): the ones the server turns into hryvnias, the rates monobank gives
+ * (CURRENCY_ALPHA on the server). A balance whose rate is missing counts as 0 and marks the rate stale.
+ */
+export const MANUAL_BALANCE_CURRENCIES = ["UAH", "USD", "EUR", "GBP", "PLN", "CHF", "CZK"] as const;
 const balanceShape = {
   name: z.string().min(1).max(100),
   amount: money,
-  currency,
+  currency: z.enum(MANUAL_BALANCE_CURRENCIES),
   counts_as_own: z.boolean(),
 };
 export const manualBalanceInput = z
@@ -228,6 +233,27 @@ export const manualBalanceInput = z
   .strict();
 export const manualBalancePatch = partial(z.object(balanceShape));
 export type ManualBalanceInput = z.infer<typeof manualBalanceInput>;
+
+// --- bank accounts (Д2а) -------------------------------------------------------
+/**
+ * The person's own mark on a bank account: whether its money is own money, and their name for it (null gives the
+ * default name back). The cash wallet is always own money and is not changed here.
+ */
+export const accountPatch = partial(
+  z.object({
+    countsAsOwn: z.boolean(),
+    name: z.string().trim().min(1).max(100).nullable(),
+  }),
+);
+export type AccountPatch = z.infer<typeof accountPatch>;
+
+export interface AccountDto {
+  id: number;
+  kind: "black" | "white" | "fop" | "jar" | "other";
+  /** The person's name, or the default one. */
+  name: string;
+  countsAsOwn: boolean;
+}
 
 export interface ManualBalanceDto {
   id: number;
@@ -349,14 +375,25 @@ export interface DailyStateDto {
  * One place own money lies (task Б25). `own` is in kopecks and may be negative: a card's balance less
  * its credit limit. `creditLimit` is set on a card that has one. A balance kept by hand (`binance`,
  * `manual`) also carries its own currency and amount in that currency's minor units.
+ * In `setAside` the same shape is a place money lies that is not own money; `own` is then its value in hryvnias.
+ * `jar` and `other` (a monobank card of another type) come only from a newer server (Д2а).
  */
 export interface OwnMoneyItemDto {
-  kind: "black" | "white" | "fop" | "cash" | "binance" | "manual";
+  kind: "black" | "white" | "fop" | "jar" | "other" | "cash" | "binance" | "manual";
   name: string;
   own: number;
   creditLimit?: number;
   currency?: string;
   amount?: number;
+  /**
+   * Where the row is kept, to open and change it (Д2а; absent from an older server): `account` is a bank account
+   * (`PATCH /plan/accounts/:id`), `manual` a balance kept by hand (`/plan/manual-balances/:id`), `cash` the wallet.
+   */
+  source?: "account" | "manual" | "cash";
+  /** The row's id in its source; absent for the wallet. */
+  id?: number;
+  /** Whether the place counts as own money: true in `items`, false in `setAside`. */
+  countsAsOwn?: boolean;
 }
 
 export interface TodayDto {
@@ -367,7 +404,19 @@ export interface TodayDto {
   rateStale: boolean;
   /** `cash` is the wallet, already inside `own`; 0 until the wallet is started. */
   /** `items` (newer servers) add up exactly to `own`; an older server leaves it out. */
-  accounts: { own: number; credit: number; fop: number; binance: number; cash: number; items?: OwnMoneyItemDto[] };
+  /**
+   * `setAside` (Д2а; absent from an older server): the bank accounts and balances kept by hand the person keeps out
+   * of own money, leaving out empty accounts as `items` does; not part of `own`.
+   */
+  accounts: {
+    own: number;
+    credit: number;
+    fop: number;
+    binance: number;
+    cash: number;
+    items?: OwnMoneyItemDto[];
+    setAside?: OwnMoneyItemDto[];
+  };
   /** `amount` in kopecks, already converted to hryvnias; `currency` is the payment's own. */
   upcoming: {
     id: string;

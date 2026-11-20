@@ -6,7 +6,7 @@ import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
 import { lastIncomeBoundary, loanReserve, type ReceivedIncome } from "../domain/loans";
 import { type DailyInput, type DailyState, type DayMark, computeDaily, dayMark, dueWindowEnd, sumDue } from "../domain/daily";
-import { cashCountShortfallSql, spentByDaySql, spentSql } from "../domain/ledger";
+import { cashCountShortfallSql, countsAsOwnSql, spentByDaySql, spentSql } from "../domain/ledger";
 import { runway } from "../domain/runway";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
 import { quarterLabel, quarterOf } from "../domain/quarter";
@@ -31,8 +31,15 @@ const DEFAULT_LIFESTYLE_CAP = 10_000_000;
 /** Design §5.3: about ₴450 a day, used while the owner has not set a food floor (0 would mean a ₴0 bridge limit). */
 const DEFAULT_FOOD_FLOOR = 45_000;
 const MAX_RECIPIENT_QUESTIONS = 3;
-/** What the owner calls each bank account in the list of own money (task Б25). */
-const ACCOUNT_NAMES = { black: "Чёрная карта", white: "Белая карта", fop: "Счёт ФОП" } as const;
+/**
+ * What a bank account is called in the list of own money (task Б25) while the person has not named it (Д2а): a monobank
+ * card of another type is «Карта monobank», a jar its own title from the bank.
+ */
+const ACCOUNT_NAMES = { black: "Чёрная карта", white: "Белая карта", fop: "Счёт ФОП", other: "Карта monobank", jar: "Банка" } as const;
+export type BankAccountKind = keyof typeof ACCOUNT_NAMES;
+export function accountName(a: { kind: BankAccountKind; name: string | null; title: string | null }): string {
+  return a.name ?? (a.kind === "jar" ? a.title : null) ?? ACCOUNT_NAMES[a.kind];
+}
 /** The row of the day the shortage mode came on. */
 const START: DayMark = "bridge_start";
 /** Older transfers are history: asking about them now changes nothing. */
@@ -69,7 +76,7 @@ interface Facts {
   credit: number;
   usdRate: number;
   rateStale: boolean;
-  slots: { own: number; fop: number; binance: number; cash: number; items: OwnMoneyItemDto[] };
+  slots: { own: number; fop: number; binance: number; cash: number; items: OwnMoneyItemDto[]; setAside: OwnMoneyItemDto[] };
   upcoming: TodayDto["upcoming"];
   /** Where the stretch to the next income ends: its day, or the horizon's end. */
   end: string;
@@ -475,62 +482,73 @@ export class TodayService {
 
     const rates = await this.rates(m);
     let stale = false;
-    /** Converts to hryvnias; a missing rate counts as 0 and marks the rate stale rather than failing the screen. */
-    const uah = (amount: number, alpha: string): number => {
-      if (alpha === "UAH") return amount;
+    /** Converts to hryvnias; a missing rate counts as 0 and is reported stale rather than failing the screen. */
+    const convert = (amount: number, alpha: string): { uah: number; stale: boolean } => {
+      if (alpha === "UAH") return { uah: amount, stale: false };
       const code = CODE_BY_ALPHA.get(alpha);
-      if (code === undefined || !rates[alpha]) {
-        stale = true;
-        return 0;
-      }
-      const r = toUah(amount, code, rates, nowIso);
+      if (code === undefined || !rates[alpha]) return { uah: 0, stale: true };
+      return toUah(amount, code, rates, nowIso);
+    };
+    /** Converts money the day counts with: a stale rate marks the screen's rates stale. */
+    const uah = (amount: number, alpha: string): number => {
+      const r = convert(amount, alpha);
       stale ||= r.stale;
       return r.uah;
     };
+    /** Converts money set aside: it is not the day's, so its rate does not mark the screen's rates stale. */
+    const setAsideUah = (amount: number, alpha: string): number => convert(amount, alpha).uah;
 
-    // own money, and the places it lies: the items add up exactly to it (task Б25)
+    // own money, and the places it lies: the items add up exactly to it (task Б25). Which bank accounts are own money
+    // is the person's mark, or the kind's default (countsAsOwn, Д2а); the others are listed as set aside.
     const items: OwnMoneyItemDto[] = [];
-    const accounts: { kind: "black" | "white" | "fop"; currency: string; balance: number; credit_limit: number }[] = await m.query(
-      `SELECT kind, currency, balance::float8 AS balance, credit_limit::float8 AS credit_limit FROM accounts
-        WHERE kind IN ('black','white','fop') ORDER BY id`,
+    const setAside: OwnMoneyItemDto[] = [];
+    const accounts: {
+      id: number; kind: BankAccountKind; currency: string; balance: number; credit_limit: number; name: string | null; title: string | null; own: boolean;
+    }[] = await m.query(
+      `SELECT a.id, a.kind, a.currency, a.balance::float8 AS balance, a.credit_limit::float8 AS credit_limit, a.name, a.title,
+              ${countsAsOwnSql("a")} AS own
+         FROM accounts a WHERE a.kind <> 'cash' ORDER BY a.id`,
     );
     let cards = 0, fop = 0, credit = 0;
     for (const a of accounts) {
-      const native = a.balance - a.credit_limit;
-      const own = uah(native, a.currency);
-      const item: OwnMoneyItemDto = { kind: a.kind, name: ACCOUNT_NAMES[a.kind], own };
-      // A currency account shows its own amount under the hryvnias, like Binance.
-      if (a.currency !== "UAH") {
-        item.currency = a.currency;
-        item.amount = native;
-      }
-      if (a.kind === "fop") fop += own;
-      else {
-        cards += own;
-        const limit = uah(a.credit_limit, a.currency);
-        credit += limit;
-        if (limit > 0) item.creditLimit = limit;
-      }
       // monobank opens one account per currency; an empty one without a credit limit is not a place money lies.
-      if (native === 0 && a.credit_limit <= 0) continue;
-      items.push(item);
+      const empty = a.balance === a.credit_limit && a.credit_limit <= 0;
+      if (!a.own) {
+        if (empty) continue;
+        setAside.push(this.accountItem(a, setAsideUah));
+        continue;
+      }
+      const item = this.accountItem(a, uah);
+      // The fop account has its own slot; every other own account is spendable like the cards, and a credit limit on
+      // any of them (an 'other' card's too) is taken off its balance and counted as credit, as the black card's is.
+      if (a.kind === "fop") fop += item.own;
+      else {
+        cards += item.own;
+        credit += item.creditLimit ?? 0;
+      }
+      if (!empty) items.push(item);
     }
     // The Binance balance and any other manual balance that counts as own money share one slot.
-    const manual: { name: string; amount: number; currency: string }[] = await m.query(
-      `SELECT name, amount::float8 AS amount, currency FROM manual_balances WHERE counts_as_own ORDER BY id`,
+    const manual: { id: number; name: string; amount: number; currency: string; counts_as_own: boolean }[] = await m.query(
+      `SELECT id, name, amount::float8 AS amount, currency, counts_as_own FROM manual_balances ORDER BY id`,
     );
-    const manualItems: OwnMoneyItemDto[] = manual.map((b) => ({
+    const manualItem = (b: (typeof manual)[number]): OwnMoneyItemDto => ({
       kind: b.name === BINANCE ? "binance" : "manual",
       name: b.name,
-      own: uah(b.amount, b.currency),
+      own: (b.counts_as_own ? uah : setAsideUah)(b.amount, b.currency),
       currency: b.currency,
       amount: b.amount,
-    }));
+      id: b.id,
+      source: "manual",
+      countsAsOwn: b.counts_as_own,
+    });
+    const manualItems = manual.filter((b) => b.counts_as_own).map(manualItem);
+    setAside.push(...manual.filter((b) => !b.counts_as_own).map(manualItem));
     const binance = manualItems.reduce((s, b) => s + b.own, 0);
     // The cash wallet is spendable own money, like the cards.
     const wallet = await walletBalance(m);
     cards += wallet.balance;
-    if (wallet.start !== null) items.push({ kind: "cash", name: "Наличные", own: wallet.balance });
+    if (wallet.start !== null) items.push({ kind: "cash", name: "Наличные", own: wallet.balance, source: "cash", countsAsOwn: true });
     items.push(...manualItems);
 
     // income dates and loans
@@ -660,7 +678,7 @@ export class TodayService {
       credit,
       usdRate: usd?.rate ?? 0,
       rateStale: stale || usdStale,
-      slots: { own: cards + fop + binance, fop, binance, cash: wallet.balance, items },
+      slots: { own: cards + fop + binance, fop, binance, cash: wallet.balance, items, setAside },
       cashStart: wallet.start,
       loans,
       loansDue,
@@ -677,6 +695,25 @@ export class TodayService {
         `SELECT id, name, saved_cents::float8 AS saved, target_cents::float8 AS target FROM goals ORDER BY sort, id`,
       ),
     };
+  }
+
+  /** One bank account as a place money lies: its balance less its credit limit, in hryvnias, with its currency amount. */
+  private accountItem(
+    a: { id: number; kind: BankAccountKind; currency: string; balance: number; credit_limit: number; name: string | null; title: string | null; own: boolean },
+    uah: (amount: number, alpha: string) => number,
+  ): OwnMoneyItemDto {
+    const native = a.balance - a.credit_limit;
+    const item: OwnMoneyItemDto = { kind: a.kind, name: accountName(a), own: uah(native, a.currency) };
+    // A currency account shows its own amount under the hryvnias, like Binance.
+    if (a.currency !== "UAH") {
+      item.currency = a.currency;
+      item.amount = native;
+    }
+    if (a.kind !== "fop") {
+      const limit = uah(a.credit_limit, a.currency);
+      if (limit > 0) item.creditLimit = limit;
+    }
+    return { ...item, id: a.id, source: "account", countsAsOwn: a.own };
   }
 
   /** What counted against the limit between two dates: spend (refunds reduce it), cash out and person transfers. */
@@ -925,7 +962,9 @@ export class TodayService {
       runway: { endOn: f.end, incomeOn: f.end === f.input.nextIncomeOn ? f.end : null, ...run, events },
       usdRate: f.usdRate,
       rateStale: f.rateStale,
-      accounts: { own: f.slots.own, credit: f.credit, fop: f.slots.fop, binance: f.slots.binance, cash: f.slots.cash, items: f.slots.items },
+      accounts: {
+        own: f.slots.own, credit: f.credit, fop: f.slots.fop, binance: f.slots.binance, cash: f.slots.cash, items: f.slots.items, setAside: f.slots.setAside,
+      },
       upcoming: f.upcoming,
       questions,
       badCases,

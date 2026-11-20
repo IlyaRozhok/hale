@@ -14,11 +14,32 @@ import type { Minor } from "./money";
 export type AccountKind = "black" | "white" | "fop" | "jar" | "other" | "cash";
 export const ACCOUNT_KINDS: readonly AccountKind[] = ["black", "white", "fop", "jar", "other", "cash"];
 
+/** The kind whose money is set aside unless the person says otherwise: a jar is savings. */
+export const SET_ASIDE_BY_DEFAULT_KIND: AccountKind = "jar";
+
 /**
- * Accounts whose money is the owner's own: the cards, the fop account and the cash wallet, as the
- * «Сегодня» sum reads them. Jars are savings and 'other' accounts are not read at all.
+ * Whether an account of this kind is own money while the person has not marked it (Д2а): every kind but a jar. A card
+ * of another monobank type ('other') is own from the start, since its purchases already spend the limit. Accounts that
+ * existed before the mark carry the earlier rule written out (migration 0038): their 'other' accounts are off.
  */
-export const OWN_MONEY_ACCOUNT_KINDS: ReadonlySet<AccountKind> = new Set(["black", "white", "fop", "cash"]);
+export function defaultCountsAsOwn(kind: AccountKind): boolean {
+  return kind !== SET_ASIDE_BY_DEFAULT_KIND;
+}
+
+/**
+ * Whether an account's money is own money (Д2а): the person's mark (accounts.counts_as_own), or the kind's default
+ * when there is none. The cash wallet is always own money. An account that is not own money still spends the limit
+ * with its purchases: countsAgainstLimit does not look at the mark.
+ */
+export function countsAsOwn(kind: AccountKind, mark: boolean | null | undefined): boolean {
+  if (kind === "cash") return true;
+  return mark ?? defaultCountsAsOwn(kind);
+}
+
+/** SQL over `a` (accounts): countsAsOwn, for the services that read balances in the database. */
+export function countsAsOwnSql(a = "a"): string {
+  return `(${a}.kind = 'cash' OR COALESCE(${a}.counts_as_own, ${a}.kind <> '${SET_ASIDE_BY_DEFAULT_KIND}'))`;
+}
 
 /** Types that always count against the limit (spend refunds reduce it). */
 export const LIMIT_TYPES = ["spend", "person_transfer"] as const satisfies readonly TxType[];
@@ -87,6 +108,8 @@ export interface LedgerLinksInput {
 export interface LedgerRow {
   type: TxType | null;
   accountKind: AccountKind;
+  /** The account's mark that it is own money (accounts.counts_as_own); null or left out follows the kind (countsAsOwn). */
+  accountCountsAsOwn?: boolean | null;
   /** Signed hryvnia kopecks; positive is money in. Null when there was no rate. */
   amountUah: Minor | null;
   /** Kyiv day, 'YYYY-MM-DD'. */
@@ -116,7 +139,7 @@ export interface LedgerEffect {
   /** Shown in the «Траты» list group. */
   inSpendGroup: boolean;
   /**
-   * Change to own money (cards, fop and wallet together); null without a hryvnia amount.
+   * Change to own money (the accounts that count as own, and the wallet); null without a hryvnia amount.
    * It is a per-row view at the rate of the operation day (amount_uah). «Сегодня» converts foreign-currency
    * balances at today's rate and adds manual_balances (Binance), so a sum of ownMoney will not reproduce it.
    */
@@ -182,7 +205,7 @@ export function walletChange(row: LedgerRow, ctx: LedgerContext): Minor {
 
 function ownMoneyChange(row: LedgerRow, ctx: LedgerContext): Minor | null {
   if (row.amountUah === null) return null;
-  const onAccount = row.accountKind !== "cash" && OWN_MONEY_ACCOUNT_KINDS.has(row.accountKind) ? row.amountUah : 0;
+  const onAccount = row.accountKind !== "cash" && countsAsOwn(row.accountKind, row.accountCountsAsOwn) ? row.amountUah : 0;
   return onAccount + walletChange(row, ctx);
 }
 

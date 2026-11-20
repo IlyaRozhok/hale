@@ -9,10 +9,12 @@ import {
   LIMIT_EXCLUDED_ACCOUNT_KIND,
   LIMIT_TYPES,
   OUT_OF_LIMIT_PAYMENT_TYPES,
-  OWN_MONEY_ACCOUNT_KINDS,
   SPEND_GROUP_TYPES,
   cashCountShortSql,
   cashOutCounts,
+  countsAsOwn,
+  countsAsOwnSql,
+  defaultCountsAsOwn,
   countsAgainstLimit,
   inSpendGroup,
   ledgerEffect,
@@ -144,11 +146,28 @@ describe("ledgerEffect: own money", () => {
     expect(ledgerEffect(row(), WITH_WALLET).ownMoney).toBe(-42_000);
   });
 
-  it("the fop account and the wallet are own money; jars and 'other' accounts are not", () => {
+  it("without a mark the fop account, the wallet and an 'other' card are own money; a jar is not (Д2а)", () => {
     expect(ledgerEffect(row({ accountKind: "fop" }), WITH_WALLET).ownMoney).toBe(-42_000);
     expect(ledgerEffect(row({ accountKind: "cash" }), WITH_WALLET).ownMoney).toBe(-42_000);
     expect(ledgerEffect(row({ accountKind: "jar" }), WITH_WALLET).ownMoney).toBe(0);
-    expect(ledgerEffect(row({ accountKind: "other" }), WITH_WALLET).ownMoney).toBe(0);
+    expect(ledgerEffect(row({ accountKind: "other" }), WITH_WALLET).ownMoney).toBe(-42_000);
+  });
+
+  it("the person's mark decides: an account switched off is not own money, a jar switched on is (Д2а)", () => {
+    expect(ledgerEffect(row({ accountCountsAsOwn: false }), WITH_WALLET).ownMoney).toBe(0);
+    expect(ledgerEffect(row({ accountKind: "other", accountCountsAsOwn: false }), WITH_WALLET).ownMoney).toBe(0);
+    expect(ledgerEffect(row({ accountKind: "jar", accountCountsAsOwn: true }), WITH_WALLET).ownMoney).toBe(-42_000);
+    expect(ledgerEffect(row({ accountKind: "white", accountCountsAsOwn: null }), WITH_WALLET).ownMoney).toBe(-42_000);
+  });
+
+  it("a purchase from an account switched off still spends the limit (Д2а)", () => {
+    expect(ledgerEffect(row({ accountCountsAsOwn: false }), WITH_WALLET).limitSpend).toBe(42_000);
+    expect(ledgerEffect(row({ accountKind: "other", accountCountsAsOwn: false }), WITH_WALLET).limitSpend).toBe(42_000);
+  });
+
+  it("the wallet is always own money, whatever its mark says", () => {
+    expect(countsAsOwn("cash", false)).toBe(true);
+    expect(ledgerEffect(row({ accountKind: "cash", accountCountsAsOwn: false }), WITH_WALLET).ownMoney).toBe(-42_000);
   });
 
   it("a withdrawal after the wallet start only moves money into the wallet", () => {
@@ -303,7 +322,8 @@ describe("SQL built from the same data", () => {
     expect(LIMIT_TYPES).toEqual(["spend", "person_transfer"]);
     expect(LIMIT_EXCLUDED_ACCOUNT_KIND).toBe("jar");
     expect(CASH_START_SQL).toBe("(SELECT cash_start FROM settings WHERE id=1)");
-    expect([...OWN_MONEY_ACCOUNT_KINDS].sort()).toEqual(["black", "cash", "fop", "white"]);
+    expect(ACCOUNT_KINDS.filter(defaultCountsAsOwn)).toEqual(["black", "white", "fop", "other", "cash"]);
+    expect(countsAsOwnSql("x")).toBe("(x.kind = 'cash' OR COALESCE(x.counts_as_own, x.kind <> 'jar'))");
   });
 });
 

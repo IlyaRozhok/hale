@@ -14,6 +14,8 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import {
+  type AccountDto,
+  accountPatch,
   confirmIncomeInput,
   expectedIncomeInput,
   expectedIncomePatch,
@@ -37,7 +39,9 @@ import {
 import { DataSource, type ObjectLiteral, type Repository } from "typeorm";
 import type { z } from "zod";
 import { ExpectedIncome, Goal, Loan, ManualBalance, RecurringPayment, ScheduledPayment, Settings } from "../db/entities";
+import { type AccountKind, countsAsOwn } from "../domain/ledger";
 import { LimitService } from "../today/limit.service";
+import { type BankAccountKind, accountName } from "../today/today.service";
 import { LoansService } from "./loans.service";
 import { PlanEntriesService } from "./plan-entries.service";
 import { PlanService } from "./plan.service";
@@ -288,6 +292,31 @@ export class PlanController {
   @Delete("loans/:id")
   deleteLoan(@Param("id", ParseIntPipe) id: number) {
     return this.loans.remove(id);
+  }
+
+  // --- bank accounts (Д2а) ---------------------------------------------------
+  // The person marks whether a bank account's money is own money, and names it. Own money is in the day's limit, so a
+  // change of the mark fixes the day afresh in the same transaction; its purchases spend the limit either way.
+  @Patch("accounts/:id")
+  async patchAccount(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<AccountDto> {
+    const data = parse(accountPatch, body);
+    return this.ds.transaction(async (m) => {
+      const before = (await m.query(`SELECT id, kind, counts_as_own, name, title FROM accounts WHERE id=$1 FOR UPDATE`, [id]))[0] as
+        | { id: number; kind: AccountKind; counts_as_own: boolean | null; name: string | null; title: string | null }
+        | undefined;
+      if (!before) throw new NotFoundException();
+      if (before.kind === "cash") throw new BadRequestException("the cash wallet is always own money");
+      const after = {
+        ...before,
+        counts_as_own: data.countsAsOwn ?? before.counts_as_own,
+        name: data.name === undefined ? before.name : data.name,
+      };
+      await m.query(`UPDATE accounts SET counts_as_own=$2, name=$3 WHERE id=$1`, [id, after.counts_as_own, after.name]);
+      const own = countsAsOwn(after.kind, after.counts_as_own);
+      if (own !== countsAsOwn(before.kind, before.counts_as_own)) await this.limit.invalidate("accounts", m);
+      const kind = after.kind as BankAccountKind;
+      return { id, kind, name: accountName({ kind, name: after.name, title: after.title }), countsAsOwn: own };
+    });
   }
 
   // --- manual balances ------------------------------------------------------
