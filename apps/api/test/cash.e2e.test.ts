@@ -495,6 +495,8 @@ describe("a planned payment paid in cash", () => {
     expect(await row(`SELECT description, type, amount::int AS amount FROM transactions WHERE id=$1`, [p.transaction_id])).toEqual({
       description: "Квартплата", type: "obligation", amount: -1_700_000,
     });
+    // Paid whole through its own row, as before Б54: no part is linked.
+    expect(await ds.query(`SELECT 1 FROM payment_links`)).toEqual([]);
     await api.post(`/cash/payments/${id}`).expect(409);
   });
 
@@ -698,13 +700,86 @@ describe("a planned payment paid with chosen operations", () => {
       expect((await today()).upcoming).toEqual([]);
     });
 
-    it("a partly paid payment is not paid in full from the wallet on top of its parts", async () => {
+  });
+
+  // Б54: ₴36,000 a month, ₴27,000 sent from the card and the rest handed over in cash.
+  describe("the rest of a partly paid payment in cash (Б54)", () => {
+    const paidAt = async (id: number) => (await row(`SELECT paid_at FROM scheduled_payments WHERE id=$1`, [id])).paid_at as Date | null;
+    const links = async (id: number) =>
+      ((await ds.query(`SELECT transaction_id FROM payment_links WHERE payment_id=$1 ORDER BY transaction_id`, [id])) as { transaction_id: number }[]).map(
+        (r) => r.transaction_id,
+      );
+    const partlyPaid = async (walletStart = 2_000_000) => {
+      const c = await card();
+      await start(walletStart, "2026-11-01").expect(201);
+      const id = await plan(3_600_000);
+      const transfer = await bankTx(c, -2_700_000, "person_transfer", "2026-11-08");
+      await api.post(`/cash/payments/${id}/links`, { transactionIds: [transfer] }).expect(201);
+      return { id, transfer };
+    };
+
+    it("takes only the rest from the wallet, links it as a part and closes the payment; the day's spending stays", async () => {
+      const { id, transfer } = await partlyPaid();
+      const spent = await spentOn("2026-11-10");
+      expect((await today()).state.leftToday).toBe(280_000);
+      expect((await api.post(`/cash/payments/${id}`).expect(201)).body.balance).toBe(1_100_000);
+      // The open payment kept its whole ₴36,000 reserved (Б9); closed, it frees it while the wallet gives only ₴9,000:
+      // the day gets more, as when the last part is linked or the payment is closed by hand.
+      expect((await today()).state.leftToday).toBe(370_000);
+
+      expect(await paidAt(id)).not.toBeNull();
+      expect(await row(`SELECT closed_by_links, transaction_id FROM scheduled_payments WHERE id=$1`, [id])).toEqual({
+        closed_by_links: true, transaction_id: null,
+      });
+      const [first, cashRow] = await links(id);
+      expect(first).toBe(transfer);
+      expect(
+        await row(`SELECT t.description, t.type, t.amount::int AS amount, a.kind FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE t.id=$1`, [cashRow]),
+      ).toEqual({ description: "Квартплата", type: "obligation", amount: -900_000, kind: "cash" });
+      // The cash row is the payment, out of the limit: the day spent nothing more.
+      expect(await spentOn("2026-11-10")).toBe(spent);
+      expect((await today()).upcoming).toEqual([]);
+      await api.post(`/cash/payments/${id}`).expect(409);
+      expect((await wallet()).balance).toBe(1_100_000);
+    });
+
+    it("is refused when the wallet has less than the rest; nothing changes", async () => {
+      const { id, transfer } = await partlyPaid(800_000);
+      await api.post(`/cash/payments/${id}`).expect(422);
+      expect((await wallet()).balance).toBe(800_000);
+      expect(await paidAt(id)).toBeNull();
+      expect(await links(id)).toEqual([transfer]);
+    });
+
+    it("the payment opens again when the transfer is retyped away; the cash stays linked as a part", async () => {
+      const { id, transfer } = await partlyPaid();
+      await api.post(`/cash/payments/${id}`).expect(201);
+      const cashRow = (await links(id)).find((t) => t !== transfer)!;
+      await api.patch(`/transactions/${transfer}`, { type: "spend" }).expect(200);
+      expect(await paidAt(id)).toBeNull();
+      expect(await links(id)).toEqual([cashRow]);
+      expect((await today()).upcoming).toMatchObject([{ id: String(id), amount: 3_600_000, paid: 900_000 }]);
+    });
+
+    it("deleting the cash row opens the payment again and gives the wallet its cash back", async () => {
+      const { id, transfer } = await partlyPaid();
+      await api.post(`/cash/payments/${id}`).expect(201);
+      const cashRow = (await links(id)).find((t) => t !== transfer)!;
+      await api.del(`/cash/operations/${cashRow}`).expect(200);
+      expect(await paidAt(id)).toBeNull();
+      expect(await links(id)).toEqual([transfer]);
+      expect((await wallet()).balance).toBe(2_000_000);
+    });
+
+    it("a partly paid foreign payment is still not paid in cash", async () => {
       const c = await card();
       await start(2_000_000, "2026-11-01").expect(201);
-      const id = await plan(1_700_000);
-      const part = await bankTx(c, -310_500, "person_transfer", "2026-11-08");
+      await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-09T09:00:00Z', 41.5)`);
+      const id = (await ds.query(`INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES ('obligation','Подписка',10000,'USD','2026-11-08') RETURNING id`))[0]
+        .id as number;
+      const part = await bankTx(c, -200_000, "person_transfer", "2026-11-08");
       await api.post(`/cash/payments/${id}/links`, { transactionIds: [part] }).expect(201);
-      await api.post(`/cash/payments/${id}`).expect(409);
+      await api.post(`/cash/payments/${id}`).expect(422);
       expect((await wallet()).balance).toBe(2_000_000);
       expect(await paidAt(id)).toBeNull();
     });
