@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExpectedIncomeDto, OwnMoneyItemDto } from "@hale/contracts";
-import { goalsLine, hasNamedIncomes, incomeDetail, incomePlaces, incomesLine, incomeWhen, installmentGroups, installmentsLine, nextIncomeLine, paymentsLine, taxLine } from "./planSummary";
+import { goalsLine, hasNamedIncomes, incomeDetail, incomePlaces, incomesLine, incomeWhen, installmentGroups, installmentsLine, nextIncomeLine, paymentsLine, taxesShown, taxLine } from "./planSummary";
 import { dateLabel, monthGrid, monthTitle } from "./format";
 
 const pay = (over: object) => ({ id: 1, kind: "obligation", name: "Квартира", amount: 100_000, currency: "UAH", due_on: "2026-11-26", paid_at: null, recurring_id: null, tax_quarter: null, is_estimate: false, ...over }) as never;
@@ -138,6 +138,18 @@ describe("tax line", () => {
   it("sums what is unpaid, with the nearest date", () => {
     expect(taxLine([pay({ kind: "tax", due_on: "2026-11-20", amount: 100_000 }), pay({ kind: "tax", due_on: "2027-02-20", amount: 50_000 }), pay({ kind: "tax", paid_at: "x" }), pay({})])).toBe("₴1,500, ближайший 20.11");
     expect(taxLine([])).toBe("нет");
+  });
+});
+
+describe("whether «Налоги» is shown (Д4)", () => {
+  it("is hidden only when the server says there are no taxes and no tax payment is unpaid", () => {
+    expect(taxesShown(false, [])).toBe(false);
+    expect(taxesShown(false, undefined)).toBe(false);
+    expect(taxesShown(false, [pay({ kind: "tax", paid_at: "x" }), pay({})])).toBe(false);
+    expect(taxesShown(false, [pay({ kind: "tax" })])).toBe(true);
+    expect(taxesShown(true, [])).toBe(true);
+    // An older server does not say: taxes are shown, as before.
+    expect(taxesShown(undefined, [])).toBe(true);
   });
 });
 

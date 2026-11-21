@@ -38,7 +38,7 @@ import { estimateDueOn, precedingQuarter, quarterBounds, quarterOf } from "../do
 import { taxReserve } from "../domain/tax";
 import { Clock, KYIV_TZ } from "../time/clock";
 import { LimitService, type LimitReason } from "../today/limit.service";
-import { quarterTaxFacts } from "../today/tax-facts";
+import { paysFopTax, quarterTaxFacts } from "../today/tax-facts";
 import { INTEREST_TEXT, SHORT_LOAN_TEXT } from "./short-loan";
 import { ScheduledPayment, type IncomeEvent } from "../db/entities";
 import { answerOther, keepAnswer, rowBefore, undoAnswer } from "../cash/cash-answer";
@@ -171,6 +171,8 @@ export class PlanService implements OnApplicationBootstrap {
       paidAgainstCurrentQuarter: facts.paidUnmatched,
       unpaidScheduled: 0,
       currentQuarterHasRows: false,
+      // Without an income that pays the fop tax nothing accrues, so no estimate is written (Д4).
+      paysFopTax: await paysFopTax(this.ds.manager),
     });
     if (amount <= 0) return false;
     const made: unknown[] = await this.ds.query(

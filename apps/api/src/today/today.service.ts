@@ -12,7 +12,7 @@ import { runway } from "../domain/runway";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
 import { quarterLabel, quarterOf } from "../domain/quarter";
 import { runOutDate } from "../domain/run-out";
-import { taxReserve } from "../domain/tax";
+import { taxesOn, taxReserve } from "../domain/tax";
 import { usdcMatchRows } from "../domain/usdc-match";
 import { PAID_QUESTION_WINDOW_DAYS, type PayableTx, type Payment, paidQuestions } from "../domain/recurring-match";
 import { BINANCE } from "../plan/plan.service";
@@ -22,7 +22,7 @@ import { counterKeySql } from "../transactions/counter-key";
 import { paymentCandidateIds } from "../cash/candidates";
 import { cardTransferSql, walletBalance } from "../cash/wallet";
 import { Clock, KYIV_TZ, kyivDaySql } from "../time/clock";
-import { quarterTaxFacts } from "./tax-facts";
+import { paysFopTax, quarterTaxFacts } from "./tax-facts";
 
 const STALE_SYNC_MS = 6 * 3_600_000;
 const AVG_DAYS = 7;
@@ -91,6 +91,8 @@ interface Facts {
   syncedAt: Date | null;
   limitVisual: "mercury" | "ring";
   goals: TodayDto["goals"];
+  /** Whether the person has taxes (task Д4): an income pays the fop tax, or a tax payment is still unpaid. */
+  taxes: boolean;
   now: Date;
 }
 
@@ -318,6 +320,7 @@ export class TodayService {
         fopIncome: sum(incomes.filter((i) => i.pays_fop_tax)),
         taxRateBp: settings.tax_rate_bp,
         esvQuarter: settings.esv_quarter,
+        paysFopTax: await paysFopTax(m),
         recurring: sum(recurring),
         installments: sum(installments),
         lifestyleCap,
@@ -633,6 +636,7 @@ export class TodayService {
     // tax reserve
     const { fopIncome, paidUnmatched: paidTax } = await quarterTaxFacts(m, q.start, q.end);
     const thisQuarter = quarterLabel(date);
+    const paysTax = await paysFopTax(m);
     const realRows = await m.query(
       `SELECT 1 FROM scheduled_payments WHERE kind='tax' AND tax_quarter=$1 AND NOT is_estimate LIMIT 1`,
       [thisQuarter],
@@ -645,6 +649,7 @@ export class TodayService {
       daysInQuarter: q.daysIn,
       paidAgainstCurrentQuarter: paidTax,
       currentQuarterHasRows: realRows.length > 0,
+      paysFopTax: paysTax,
     };
     const reserve = taxReserve({ ...taxInput, unpaidScheduled });
     const accrued = taxReserve({ ...taxInput, unpaidScheduled: 0 });
@@ -705,6 +710,7 @@ export class TodayService {
       trackingStart: settings.tracking_start,
       syncedAt: settings.last_contact,
       limitVisual: settings.limit_visual,
+      taxes: taxesOn({ paysFopTax: paysTax, unpaidTaxRows: unpaid.filter((p) => p.kind === "tax").length }),
       goals: await m.query(
         `SELECT id, name, saved_cents::float8 AS saved, target_cents::float8 AS target FROM goals ORDER BY sort, id`,
       ),
@@ -995,6 +1001,7 @@ export class TodayService {
       limitVisual: f.limitVisual,
       goals: f.goals,
       streak: await this.streak(m, f.date),
+      taxes: f.taxes,
     };
   }
 }

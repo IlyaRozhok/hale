@@ -3,6 +3,7 @@ import request from "supertest";
 import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
+import { createOwnerIncomesDatabase, ownerIncomesView } from "./owner-incomes";
 import { NotificationsService } from "../src/notifications/notifications.service";
 import { PlanService } from "../src/plan/plan.service";
 import { Clock } from "../src/time/clock";
@@ -480,5 +481,44 @@ describe("what a recompute must keep", () => {
     expect(await row()).toBe(`{"local_date":"2026-11-02","daily_limit":100000,"mode":"bridge_start"}`);
     expect((await ds.query(`SELECT credit_plan::int AS c FROM bridge_plans`))[0].c).toBe(767_500 + 1_800_000);
     expect((await today()).state.dailyLimit).toBe(100_000);
+  });
+});
+
+describe("the owner's taxes stay as they were (Д4)", () => {
+  type View = {
+    state: { free: number; dailyLimit: number };
+    runway: { reserve: number };
+    leftForGoalsMonthly: number;
+    tax: { name: string; amount: number; tax_quarter: string }[];
+  };
+  const view = async (paysTax: boolean): Promise<View> => {
+    const url = await createOwnerIncomesDatabase();
+    if (!paysTax) {
+      const db = new DS({ type: "postgres", url });
+      await db.initialize();
+      await db.query(`UPDATE expected_incomes SET pays_fop_tax = false`);
+      await db.destroy();
+    }
+    return (await ownerIncomesView(url)) as View;
+  };
+
+  it("his fop income pays the tax: the limit, the reserve and the quarter's estimate are what main showed", async () => {
+    // The same figures the 0039 migration test recorded on main before this task.
+    expect(await view(true)).toMatchObject({
+      state: { free: 5762200, dailyLimit: 333333 },
+      runway: { reserve: 5179534 },
+      leftForGoalsMonthly: 5620000,
+      tax: [{ name: "Налог за 4 кв. 2026 (оценка)", amount: 1200000, tax_quarter: "2026-Q4" }],
+    });
+  });
+
+  it("the same money with no income paying the tax holds nothing back and writes no estimate", async () => {
+    const off = await view(false);
+    // 6% of October's 200,000 hryvnias on the fop account is no longer held; ESV is 0 in his settings.
+    expect(off.state.free).toBe(5762200 + 1200000);
+    expect(off.runway.reserve).toBe(5179534 + 1200000);
+    // 6% of the 60,000 hryvnias of fop income expected this month is no longer taken off what is left for goals.
+    expect(off.leftForGoalsMonthly).toBe(5620000 + 360000);
+    expect(off.tax).toEqual([]);
   });
 });
