@@ -1,6 +1,7 @@
 // What the Plan screen's lines say, from the same rows its windows list. No native imports: runs in node tests.
-import type { ExpectedIncomeDto, GoalDto, IncomeEventDto, ScheduledPaymentDto } from "@hale/contracts";
+import type { ExpectedIncomeDto, GoalDto, IncomeAccount, IncomeEventDto, OwnMoneyItemDto, ScheduledPaymentDto } from "@hale/contracts";
 import { formatDollars, formatMoney, shortDate } from "./format";
+import { placeName } from "./ownMoney";
 
 /** An amount in its own currency, whole units: the lines are a summary. */
 export const moneyIn = (minor: number, currency: string): string => (currency === "USD" ? formatDollars(minor) : formatMoney(minor));
@@ -22,6 +23,53 @@ export function incomesLine(expected: readonly ExpectedIncomeDto[], events: read
   if (!event || !income) return "не указаны";
   return `следующий ${shortDate(event.expected_on)}, ${moneyIn(income.amount, income.currency)}`;
 }
+
+/** When an income comes (Д3б): its window or day, both days of a twice-monthly one, or no schedule. An older server: its window. */
+export function incomeWhen(i: ExpectedIncomeDto): string {
+  const end = i.window_end_day;
+  if (i.schedule === "none") return "без расписания";
+  if (i.schedule === "twice" && i.second_day != null) return `${end}-го и ${i.second_day}-го`;
+  return i.window_start_day === end ? `${end}-го` : `${i.window_start_day}–${end} числа`;
+}
+
+/** A place money lies that an income can come to, with the account the server knows it by. */
+export interface IncomePlace {
+  account: IncomeAccount;
+  name: string;
+  /** A bank account reads «на счёт …», a balance kept by hand «на …», the wallet «наличными». */
+  to: string;
+}
+
+/** The places «Сегодня» lists (own and set aside) that an income can be sent to: those with an id, and the wallet. */
+export function incomePlaces(items: readonly OwnMoneyItemDto[]): IncomePlace[] {
+  const out: IncomePlace[] = [];
+  for (const item of items) {
+    if (item.source === "cash") out.push({ account: { source: "cash" }, name: item.name, to: "наличными" });
+    else if (item.id === undefined) continue;
+    else if (item.source === "account") out.push({ account: { source: "account", id: item.id }, name: placeName(item), to: `на счёт ${placeName(item)}` });
+    else if (item.source === "manual") out.push({ account: { source: "manual", id: item.id }, name: item.name, to: `на ${item.name}` });
+  }
+  return out;
+}
+
+export const sameAccount = (a: IncomeAccount | null | undefined, b: IncomeAccount | null | undefined): boolean =>
+  !!a && !!b && a.source === b.source && (a.source === "cash" || a.id === (b as { id: number }).id);
+
+/** An income's row: its amount, when it comes and, when known, where to. */
+export function incomeDetail(i: ExpectedIncomeDto, items: readonly OwnMoneyItemDto[]): string {
+  const place = incomePlaces(items).find((p) => sameAccount(p.account, i.account));
+  return [moneyIn(i.amount, i.currency), incomeWhen(i), ...(place ? [place.to] : [])].join(" · ");
+}
+
+/** The line under the list of incomes: the next one not yet received. */
+export function nextIncomeLine(expected: readonly ExpectedIncomeDto[], events: readonly IncomeEventDto[]): string | null {
+  const event = nextEvent(events);
+  const income = event && expected.find((x) => x.id === event.expected_income_id);
+  return event && income ? `Следующий — ${shortDate(event.expected_on)}, ${moneyIn(income.amount, income.currency)}.` : null;
+}
+
+/** A server since Д3а names every income; an older one does not, and takes only the old fields. No incomes: a newer server is assumed. */
+export const hasNamedIncomes = (incomes: readonly ExpectedIncomeDto[]): boolean => incomes.every((i) => i.name !== undefined);
 
 export function paymentsLine(payments: readonly ScheduledPaymentDto[]): string {
   const first = unpaid(payments, "obligation")[0];

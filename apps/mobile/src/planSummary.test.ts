@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { goalsLine, incomesLine, installmentGroups, installmentsLine, paymentsLine, taxLine } from "./planSummary";
+import type { ExpectedIncomeDto, OwnMoneyItemDto } from "@hale/contracts";
+import { goalsLine, hasNamedIncomes, incomeDetail, incomePlaces, incomesLine, incomeWhen, installmentGroups, installmentsLine, nextIncomeLine, paymentsLine, taxLine } from "./planSummary";
 import { dateLabel, monthGrid, monthTitle } from "./format";
 
 const pay = (over: object) => ({ id: 1, kind: "obligation", name: "Квартира", amount: 100_000, currency: "UAH", due_on: "2026-11-26", paid_at: null, recurring_id: null, tax_quarter: null, is_estimate: false, ...over }) as never;
@@ -30,6 +31,64 @@ describe("incomes line", () => {
 
   it("says when nothing is expected", () => {
     expect(incomesLine([], [])).toBe("не указаны");
+  });
+});
+
+describe("incomes, named (Д3б)", () => {
+  const fop: ExpectedIncomeDto = {
+    id: 1, source: "fop", amount: 500_000, currency: "USD", window_start_day: 1, window_end_day: 5, name: "ФОП", schedule: "monthly",
+    second_day: null, pays_fop_tax: true, crypto: false, account: { source: "account", id: 4 },
+  };
+  const usdc: ExpectedIncomeDto = {
+    ...fop, id: 2, source: "usdc", amount: 120_000, name: "USDC", window_start_day: 20, window_end_day: 20, pays_fop_tax: false, crypto: true,
+    account: { source: "manual", id: 7 },
+  };
+  const places: OwnMoneyItemDto[] = [
+    { kind: "fop", name: "ФОП", own: 0, source: "account", id: 4 },
+    { kind: "white", name: "Белая карта", own: 0, source: "account", id: 5 },
+    { kind: "cash", name: "Наличные", own: 0, source: "cash" },
+    { kind: "binance", name: "Binance", own: 0, source: "manual", id: 7 },
+    { kind: "black", name: "Чёрная карта", own: 0 },
+  ];
+
+  it("says when an income comes: a window, a day, two days, or no schedule", () => {
+    expect(incomeWhen(fop)).toBe("1–5 числа");
+    expect(incomeWhen(usdc)).toBe("20-го");
+    expect(incomeWhen({ ...fop, schedule: "twice", window_start_day: 5, window_end_day: 5, second_day: 20 })).toBe("5-го и 20-го");
+    expect(incomeWhen({ ...fop, schedule: "none" })).toBe("без расписания");
+    // An older server has no schedule: its window, as before.
+    expect(incomeWhen({ ...fop, schedule: undefined })).toBe("1–5 числа");
+  });
+
+  it("offers the places money lies that an income can come to, as «Сегодня» lists them", () => {
+    expect(incomePlaces(places).map((p) => [p.name, p.account])).toEqual([
+      ["ФОП", { source: "account", id: 4 }],
+      ["Белая карта", { source: "account", id: 5 }],
+      ["Наличные", { source: "cash" }],
+      ["Binance", { source: "manual", id: 7 }],
+    ]);
+  });
+
+  it("describes a row: amount, when, and where it comes", () => {
+    expect(incomeDetail(fop, places)).toBe("$5,000 · 1–5 числа · на счёт ФОП");
+    expect(incomeDetail(usdc, places)).toBe("$1,200 · 20-го · на Binance");
+    expect(incomeDetail({ ...fop, account: { source: "cash" } }, places)).toBe("$5,000 · 1–5 числа · наличными");
+    // No account, an account not in the list, or an older server: no third part.
+    expect(incomeDetail({ ...fop, account: null }, places)).toBe("$5,000 · 1–5 числа");
+    expect(incomeDetail({ ...fop, account: { source: "account", id: 99 } }, places)).toBe("$5,000 · 1–5 числа");
+    expect(incomeDetail({ ...fop, account: undefined }, [])).toBe("$5,000 · 1–5 числа");
+  });
+
+  it("names the next income under the list", () => {
+    const ev = (id: number, expected_income_id: number, expected_on: string) => ({ id, expected_income_id, period: expected_on.slice(0, 7), expected_on, status: "expected" });
+    expect(nextIncomeLine([fop, usdc], [ev(1, 2, "2026-11-20"), ev(2, 1, "2026-12-01")])).toBe("Следующий — 20.11, $1,200.");
+    expect(nextIncomeLine([fop], [])).toBeNull();
+  });
+
+  it("knows an older server by incomes without names", () => {
+    expect(hasNamedIncomes([fop, usdc])).toBe(true);
+    expect(hasNamedIncomes([{ ...fop, name: undefined }])).toBe(false);
+    expect(hasNamedIncomes([])).toBe(true);
   });
 });
 
