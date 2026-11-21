@@ -17,36 +17,72 @@ const day = z.number().int().min(1).max(31);
 const partial = <T extends z.ZodRawShape>(shape: z.ZodObject<T>) => shape.partial().strict();
 
 // --- expected incomes -------------------------------------------------------
+/** The kind an income had before Д3а, kept for an older app: `fop` pays the fop tax, `usdc` comes in crypto. */
 export const incomeSource = z.enum(["fop", "usdc"]);
-export const expectedIncomeInput = z
-  .object({
-    source: incomeSource,
-    amount: money.positive(),
-    currency,
-    window_start_day: day,
-    window_end_day: day,
-  })
+/** «Раз в месяц», «Два раза в месяц», «Без расписания». */
+export const incomeSchedule = z.enum(["monthly", "twice", "none"]);
+/** The account an income comes to, as `GET /today` names its rows: a bank or a manual account by id, or the cash wallet. */
+export const incomeAccount = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("account"), id: z.number().int().positive() }).strict(),
+  z.object({ source: z.literal("manual"), id: z.number().int().positive() }).strict(),
+  z.object({ source: z.literal("cash") }).strict(),
+]);
+export type IncomeSchedule = z.infer<typeof incomeSchedule>;
+export type IncomeAccount = z.infer<typeof incomeAccount>;
+const incomeShape = z.object({
+  /** An older app sends only this: the name and the flags follow from it. */
+  source: incomeSource,
+  name: z.string().trim().min(1).max(60),
+  amount: money.positive(),
+  currency,
+  /** The window of the month's (first) payment. Not needed without a schedule. */
+  window_start_day: day,
+  window_end_day: day,
+  schedule: incomeSchedule,
+  /** The day of the second payment, for `twice` only. */
+  second_day: day.nullable(),
+  /** «С этого дохода платится налог ФОП». */
+  pays_fop_tax: z.boolean(),
+  /** «Приходит в крипте — спросить о выводе». */
+  crypto: z.boolean(),
+  account: incomeAccount.nullable(),
+});
+/**
+ * A new income: by its name (Д3а), or by its old kind alone, as an older app sends it. What only the whole income can
+ * tell (the second day of a twice-monthly one, the fop tax with two payments a month) the server checks, on a change too.
+ */
+export const expectedIncomeInput = incomeShape
+  .partial()
+  .required({ amount: true, currency: true })
   .strict()
-  .refine((v) => v.window_start_day <= v.window_end_day, "window start is after its end");
-export const expectedIncomePatch = partial(
-  z.object({
-    source: incomeSource,
-    amount: money.positive(),
-    currency,
-    window_start_day: day,
-    window_end_day: day,
-  }),
-);
+  .refine((v) => v.source !== undefined || v.name !== undefined, "an income needs a name")
+  .refine(
+    (v) => v.schedule === "none" || (v.window_start_day !== undefined && v.window_end_day !== undefined),
+    "an income with a schedule needs its days",
+  )
+  .refine(
+    (v) => v.window_start_day === undefined || v.window_end_day === undefined || v.window_start_day <= v.window_end_day,
+    "window start is after its end",
+  );
+export const expectedIncomePatch = partial(incomeShape);
 export type ExpectedIncomeInput = z.infer<typeof expectedIncomeInput>;
 export type ExpectedIncomePatch = z.infer<typeof expectedIncomePatch>;
 
 export interface ExpectedIncomeDto {
   id: number;
-  source: "fop" | "usdc";
+  /** null for an income that neither pays the fop tax nor comes in crypto (Д3а). */
+  source: "fop" | "usdc" | null;
   amount: number;
   currency: string;
   window_start_day: number;
   window_end_day: number;
+  /** The fields below are absent from a server older than Д3а. */
+  name?: string;
+  schedule?: IncomeSchedule;
+  second_day?: number | null;
+  pays_fop_tax?: boolean;
+  crypto?: boolean;
+  account?: IncomeAccount | null;
 }
 
 export interface IncomeEventDto {
@@ -55,6 +91,8 @@ export interface IncomeEventDto {
   period: string;
   expected_on: string;
   status: string;
+  /** 2 for the second payment of a twice-monthly income, else 1. Absent from a server older than Д3а. */
+  slot?: number;
 }
 
 export const incomeDateInput = z.object({ date: isoDate }).strict();

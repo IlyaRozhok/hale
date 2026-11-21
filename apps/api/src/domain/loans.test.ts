@@ -92,7 +92,7 @@ describe("loanReserve: loans with a return date behave as a payment on that date
 
 describe("lastIncomeBoundary: which received income closes the loan cycle (Б33)", () => {
   const ev = (o: Partial<ReceivedIncome> = {}): ReceivedIncome => ({
-    source: "fop", receivedOn: "2026-11-06", amountUah: 200_000, expectedAmount: 5_000_000, currency: "UAH", byBank: true, ...o,
+    paysFopTax: true, receivedOn: "2026-11-06", amountUah: 200_000, expectedAmount: 5_000_000, currency: "UAH", byBank: true, ...o,
   });
   const october = ev({ receivedOn: "2026-10-20", amountUah: 5_000_000 });
 
@@ -113,7 +113,7 @@ describe("lastIncomeBoundary: which received income closes the loan cycle (Б33)
 
   it("a fop income confirmed by hand and a USDC income count as before, whatever their amount", () => {
     expect(lastIncomeBoundary([october, ev({ byBank: false, amountUah: null })], {})).toBe("2026-11-06");
-    expect(lastIncomeBoundary([october, ev({ source: "usdc", amountUah: null, byBank: false })], {})).toBe("2026-11-06");
+    expect(lastIncomeBoundary([october, ev({ paysFopTax: false, amountUah: null, byBank: false })], {})).toBe("2026-11-06");
   });
 
   it("is null with nothing received, and skips an event with no day", () => {

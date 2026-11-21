@@ -17,6 +17,7 @@ import { Categories1796515200000 } from "../src/db/migrations/0035-categories";
 import { Observations1796601600000 } from "../src/db/migrations/0036-observations";
 import { Want1796688000000 } from "../src/db/migrations/0037-want";
 import { AccountCountsAsOwn1796774400000 } from "../src/db/migrations/0038-account-counts-as-own";
+import { IncomeSources1796860800000 } from "../src/db/migrations/0039-income-sources";
 import { CLASSIFIER_VERSION } from "../src/domain/classify";
 import { JobRunner } from "../src/mono/jobs/job-runner";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
@@ -25,6 +26,7 @@ import { createTestDatabase } from "./db";
 import request from "supertest";
 import { createTestApp, TEST_PASSWORD } from "./app";
 import { fillOwnerAccounts, OWNER_ACCOUNTS_NOW } from "./owner-accounts";
+import { fillOwnerIncomes, ownerIncomesView } from "./owner-incomes";
 import { Clock } from "../src/time/clock";
 import { TodayService } from "../src/today/today.service";
 
@@ -634,5 +636,74 @@ describe("migrations", () => {
     expect(await ds.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'accounts' AND column_name IN ('counts_as_own', 'name')`)).toEqual([]);
     expect(await ds.query(accounts)).toEqual(was);
     await ds.destroy();
+  });
+
+  it("0039 turns fop and usdc into named incomes with their flags, and the owner's limit, free money, tax and questions stay the same (Д3а)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(IncomeSources1796860800000)) });
+    await before.initialize();
+    await before.runMigrations();
+    await fillOwnerIncomes((sql, args) => before.query(sql, args));
+    const events = `SELECT id, expected_income_id, period, expected_on::text AS expected_on, status, amount_uah, matched_transaction_id FROM income_events ORDER BY id`;
+    const was = await before.query(events);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    const incomes = await ds.query(
+      `SELECT x.source, x.name, x.schedule, x.second_day, x.pays_fop_tax, x.crypto, a.external_id AS account, m.name AS manual, x.to_cash
+         FROM expected_incomes x LEFT JOIN accounts a ON a.id = x.account_id LEFT JOIN manual_balances m ON m.id = x.manual_balance_id ORDER BY x.id`,
+    );
+    expect(incomes).toEqual([
+      { source: "fop", name: "ФОП", schedule: "monthly", second_day: null, pays_fop_tax: true, crypto: false, account: "fop", manual: null, to_cash: false },
+      { source: "usdc", name: "USDC", schedule: "monthly", second_day: null, pays_fop_tax: false, crypto: true, account: null, manual: "Binance", to_cash: false },
+    ]);
+    // Every event is the month's only one: the first of its month.
+    expect(await ds.query(events)).toEqual(was);
+    expect(await ds.query(`SELECT DISTINCT slot FROM income_events`)).toEqual([{ slot: 1 }]);
+    await ds.destroy();
+
+    // What the owner sees is what the server before this change showed on the same data (recorded on main).
+    expect(await ownerIncomesView(url)).toEqual({
+      state: { free: 5762200, dailyLimit: 333333, leftToday: 249333, needsIncomeDate: false },
+      runway: { reserve: 5179534, endOn: "2026-11-12", incomeOn: "2026-11-12" },
+      accounts: { own: 6962200, fop: 500000, binance: 522900 },
+      questions: [
+        ["usdc_arrived:4", "usdc_arrived", "Пришло на Binance?", 120000],
+        ["usdc_match:3:9", "usdc_match", "Пришло ₴50,000 (05.11). Это вывод с Binance?", null],
+      ],
+      leftForGoalsMonthly: 5620000,
+      events: [
+        [2, 1, "2026-10", "2026-10-28", "received", 20000000],
+        [3, 2, "2026-10", "2026-10-12", "received", 4980000],
+        [1, 1, "2026-11", "2026-11-25", "expected", null],
+        [4, 2, "2026-11", "2026-11-12", "expected", null],
+        [7, 1, "2026-12", "2026-12-28", "expected", null],
+        [8, 2, "2026-12", "2026-12-12", "expected", null],
+      ],
+      incomes: [
+        [1, "fop", 6000000, "UAH", 25, 28],
+        [2, "usdc", 120000, "USD", 8, 12],
+      ],
+      tax: [{ name: "Налог за 4 кв. 2026 (оценка)", amount: 1200000, tax_quarter: "2026-Q4" }],
+    });
+
+    const back = createDataSource(url);
+    await back.initialize();
+    // An income with neither flag has no source, and a second payment of a month has no place before 0039: both go down.
+    const plain = (await back.query(
+      `INSERT INTO expected_incomes (name, amount, currency, window_start_day, window_end_day, schedule, second_day)
+       VALUES ('Основная работа', 3800000, 'UAH', 5, 5, 'twice', 20) RETURNING id`,
+    ))[0].id;
+    await back.query(`INSERT INTO income_events (expected_income_id, period, expected_on, slot) VALUES ($1, '2026-11', '2026-11-05', 1), ($1, '2026-11', '2026-11-20', 2)`, [plain]);
+    await back.query(`INSERT INTO income_events (expected_income_id, period, expected_on, slot) VALUES (1, '2027-01', '2027-01-28', 1), (1, '2027-01', '2027-01-30', 2)`);
+    const kept = (await back.query(events)).filter((e: { period: string; expected_income_id: number }) => e.period !== "2027-01" && e.expected_income_id !== plain);
+    for (let i = migrations.indexOf(IncomeSources1796860800000); i < migrations.length; i++) await back.undoLastMigration();
+    expect(await back.query(`SELECT column_name FROM information_schema.columns WHERE column_name IN ('name', 'schedule', 'slot', 'pays_fop_tax', 'crypto') AND table_name IN ('expected_incomes', 'income_events')`)).toEqual([]);
+    expect(await back.query(`SELECT id, source FROM expected_incomes ORDER BY id`)).toEqual([{ id: 1, source: "fop" }, { id: 2, source: "usdc" }]);
+    expect((await back.query(events)).filter((e: { period: string }) => e.period !== "2027-01")).toEqual(kept);
+    expect((await back.query(`SELECT period, expected_on::text AS on FROM income_events WHERE period = '2027-01'`))).toEqual([{ period: "2027-01", on: "2027-01-28" }]);
+    await back.destroy();
   });
 });

@@ -44,6 +44,10 @@ describe("seed-private", () => {
     expect(await ds.query(`SELECT name, day_of_month, active FROM recurring_payments`)).toEqual([
       { name: "Rent", day_of_month: 6, active: true },
     ]);
+    // An income by its old kind gets its name and flag (Д3а), and is known by that name on the next run.
+    expect(await ds.query(`SELECT source, name, schedule, pays_fop_tax, crypto FROM expected_incomes`)).toEqual([
+      { source: "usdc", name: "USDC", schedule: "monthly", pays_fop_tax: false, crypto: true },
+    ]);
   });
 
   it("writes settings on the first seed only, never over the owner's changes", async () => {

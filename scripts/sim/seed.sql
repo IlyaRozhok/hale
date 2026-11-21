@@ -13,7 +13,7 @@ UPDATE settings SET lifestyle_cap=6000000, food_floor=45000, tax_rate_bp=0, esv_
 
 INSERT INTO accounts (external_id, kind, currency, balance, credit_limit) VALUES ('sim-black','black','UAH',3764000,0);
 INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', now(), 41.5);
-INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop', 9000000, 'UAH', 15, 25);
+INSERT INTO expected_incomes (source, name, pays_fop_tax, amount, currency, window_start_day, window_end_day) VALUES ('fop', 'ФОП', true, 9000000, 'UAH', 15, 25);
 INSERT INTO income_events (expected_income_id, period, expected_on, status)
   VALUES (1, to_char(pg_temp.d(8), 'YYYY-MM'), pg_temp.d(8), 'expected');
 INSERT INTO scheduled_payments (kind, name, amount, currency, due_on) VALUES

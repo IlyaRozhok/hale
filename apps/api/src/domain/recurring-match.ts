@@ -436,9 +436,12 @@ export function repairTaxLinks(payments: readonly Payment[], held: readonly Held
 
 export interface ExpectedForEvents {
   id: number;
-  source: "fop" | "usdc";
   window_start_day: number;
   window_end_day: number;
+  /** Д3а; monthly when absent. */
+  schedule?: "monthly" | "twice" | "none";
+  /** The day of the second payment of a twice-monthly income. */
+  second_day?: number | null;
 }
 
 export interface PlannedEvent {
@@ -447,6 +450,8 @@ export interface PlannedEvent {
   period: string;
   expected_on: string;
   status: "expected";
+  /** 1, or 2 for the second payment of a twice-monthly income in the month. */
+  slot: 1 | 2;
 }
 
 /**
@@ -461,7 +466,11 @@ export function windowEndDate(period: string, windowEndDay: number): string {
   return `${period}-${String(Math.min(windowEndDay, last)).padStart(2, "0")}`;
 }
 
-/** Events for the month of `today` and the next one, one per expected income per month, on its window's end. */
+/**
+ * Events for the month of `today` and the next one: per expected income and month one on its window's end, and for a
+ * twice-monthly income a second on its second day (Д3а). An income without a schedule expects none: it never sets the
+ * next income date, and is received only by hand.
+ */
 export function monthlyEvents(expected: readonly ExpectedForEvents[], today: string): PlannedEvent[] {
   const year = Number(today.slice(0, 4));
   const month = Number(today.slice(5, 7));
@@ -471,7 +480,11 @@ export function monthlyEvents(expected: readonly ExpectedForEvents[], today: str
     const m = ((month - 1 + i) % 12) + 1;
     const period = `${y}-${String(m).padStart(2, "0")}`;
     for (const e of expected) {
-      out.push({ expected_income_id: e.id, period, expected_on: windowEndDate(period, e.window_end_day), status: "expected" });
+      if (e.schedule === "none") continue;
+      out.push({ expected_income_id: e.id, period, expected_on: windowEndDate(period, e.window_end_day), status: "expected", slot: 1 });
+      if (e.schedule === "twice" && e.second_day) {
+        out.push({ expected_income_id: e.id, period, expected_on: windowEndDate(period, e.second_day), status: "expected", slot: 2 });
+      }
     }
   }
   return out;

@@ -101,7 +101,7 @@ export async function binanceEvent(m: EntityManager): Promise<number | null> {
   const r = (
     await m.query(
       `SELECT e.id FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id
-        WHERE x.source = 'usdc' AND e.status = 'received'
+        WHERE x.crypto AND e.status = 'received'
           AND (SELECT rate FROM fx_rates WHERE currency = 'USD' ORDER BY fetched_at DESC LIMIT 1) > 0
         ORDER BY e.received_at DESC NULLS LAST, e.id DESC LIMIT 1`,
     )

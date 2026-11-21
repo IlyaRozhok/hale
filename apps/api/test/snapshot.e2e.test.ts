@@ -77,7 +77,7 @@ async function tx(accountId: number, amount: number, type: string, date = "2026-
 async function income(on: string): Promise<void> {
   const exp = (
     await ds.query(
-      `INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop',500000,'UAH',15,25) RETURNING id`,
+      `INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ('fop', true, false, 500000,'UAH',15,25) RETURNING id`,
     )
   )[0].id;
   await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,$2,$3,'expected')`, [exp, on.slice(0, 7), on]);

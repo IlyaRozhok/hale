@@ -1,9 +1,10 @@
 import { ConflictException, Inject, Injectable, Logger } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
-import type { BridgePreviewDto, CalendarDto, OwnMoneyItemDto, SettingsPreviewDto, TodayDto } from "@hale/contracts";
+import type { BridgePreviewDto, CalendarDto, IncomeSchedule, OwnMoneyItemDto, SettingsPreviewDto, TodayDto } from "@hale/contracts";
 import { DataSource, type EntityManager } from "typeorm";
 import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
+import { paymentsPerMonth } from "../domain/incomes";
 import { lastIncomeBoundary, loanReserve, type ReceivedIncome } from "../domain/loans";
 import { type DailyInput, type DailyState, type DayMark, computeDaily, dayMark, dueWindowEnd, sumDue } from "../domain/daily";
 import { cashCountShortfallSql, countsAsOwnSql, ownPart, SET_ASIDE_BY_DEFAULT_KIND, spentByDaySql, spentSql } from "../domain/ledger";
@@ -290,13 +291,16 @@ export class TodayService {
     const sum = (rows: Row[]) => rows.reduce((t, r) => t + uah(r.amount, r.currency), 0);
     const month = kyivDate(now).slice(0, 7);
 
-    // This month's expected income: each source's event (received or pending), else its template.
-    const incomes: (Row & { source: string })[] = await m.query(
-      `SELECT x.source, x.amount::float8 AS amount, x.currency FROM expected_incomes x
-        WHERE EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id AND e.period = $1)
-           OR NOT EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id)`,
-      [month],
-    );
+    // This month's expected income: each income's month (received or pending), else its template; a twice-monthly one
+    // brings its amount twice, one without a schedule nothing (Д3а): no money is counted on that is not expected.
+    const incomes: (Row & { pays_fop_tax: boolean })[] = (
+      (await m.query(
+        `SELECT x.pays_fop_tax, x.schedule, x.amount::float8 AS amount, x.currency FROM expected_incomes x
+          WHERE EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id AND e.period = $1)
+             OR NOT EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id)`,
+        [month],
+      )) as (Row & { pays_fop_tax: boolean; schedule: IncomeSchedule })[]
+    ).map((i) => ({ ...i, amount: i.amount * paymentsPerMonth(i.schedule) }));
     const settings = (await m.query(`SELECT tax_rate_bp, esv_quarter::float8 AS esv_quarter FROM settings WHERE id=1`))[0] as {
       tax_rate_bp: number;
       esv_quarter: number;
@@ -311,7 +315,7 @@ export class TodayService {
       dailyLimit,
       leftForGoalsMonthly: leftForGoalsMonthly({
         income: sum(incomes),
-        fopIncome: sum(incomes.filter((i) => i.source === "fop")),
+        fopIncome: sum(incomes.filter((i) => i.pays_fop_tax)),
         taxRateBp: settings.tax_rate_bp,
         esvQuarter: settings.esv_quarter,
         recurring: sum(recurring),
@@ -565,7 +569,7 @@ export class TodayService {
     const next = (await m.query(`SELECT min(expected_on)::text AS d FROM income_events WHERE status <> 'received'`))[0].d as string | null;
     // A small fop income marks its month received but does not end the loan cycle (Б33): see lastIncomeBoundary.
     const received: ReceivedIncome[] = await m.query(
-      `SELECT x.source, (${kyivDaySql("e.received_at")})::text AS "receivedOn", e.amount_uah::float8 AS "amountUah",
+      `SELECT x.pays_fop_tax AS "paysFopTax", (${kyivDaySql("e.received_at")})::text AS "receivedOn", e.amount_uah::float8 AS "amountUah",
               x.amount::float8 AS "expectedAmount", x.currency, e.matched_transaction_id IS NOT NULL AS "byBank"
          FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id WHERE e.status = 'received'`,
     );
@@ -741,7 +745,7 @@ export class TodayService {
     const event = (
       await m.query(
         `SELECT e.id, e.period FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id
-          WHERE x.source='usdc' AND e.status='received' ORDER BY e.received_at DESC NULLS LAST, e.id DESC LIMIT 1`,
+          WHERE x.crypto AND e.status='received' ORDER BY e.received_at DESC NULLS LAST, e.id DESC LIMIT 1`,
       )
     )[0] as { id: number; period: string } | undefined;
     if (!event) return [];
@@ -781,7 +785,7 @@ export class TodayService {
       ? ((
           await m.query(
             `SELECT e.id FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id
-              WHERE x.source='usdc' AND e.status='received' ORDER BY e.received_at DESC NULLS LAST, e.id DESC LIMIT 1`,
+              WHERE x.crypto AND e.status='received' ORDER BY e.received_at DESC NULLS LAST, e.id DESC LIMIT 1`,
           )
         )[0] as { id: number } | undefined)
       : undefined;
@@ -882,10 +886,12 @@ export class TodayService {
   private async dto(f: Facts, state: DailyState, plan: Plan | null, shortageStart?: { nextLimit?: number }): Promise<TodayDto> {
     const m = this.ds.manager;
     const questions: TodayDto["questions"] = [];
+    // A crypto income's month (Д3а: a second payment's window is its own day) asks whether the money came.
     const usdc: { id: number; expected_amount: number }[] = await m.query(
       `SELECT e.id, x.amount::float8 AS expected_amount FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id
-        WHERE x.source='usdc' AND e.status <> 'received' AND e.period=$1
-          AND $2::int BETWEEN x.window_start_day AND x.window_end_day ORDER BY e.id`,
+        WHERE x.crypto AND e.status <> 'received' AND e.period=$1
+          AND (CASE WHEN e.slot = 2 THEN $2::int = x.second_day ELSE $2::int BETWEEN x.window_start_day AND x.window_end_day END)
+        ORDER BY e.id`,
       [f.date.slice(0, 7), Number(f.date.slice(8, 10))],
     );
     for (const e of usdc) {

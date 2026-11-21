@@ -738,24 +738,24 @@ describe("monthlyDueDates", () => {
 
 describe("monthlyEvents", () => {
   const expected = [
-    { id: 1, source: "usdc" as const, window_start_day: 15, window_end_day: 25 },
-    { id: 2, source: "fop" as const, window_start_day: 15, window_end_day: 25 },
+    { id: 1, window_start_day: 15, window_end_day: 25 },
+    { id: 2, window_start_day: 15, window_end_day: 25 },
   ];
 
-  it("makes one event per source for this and next month, dated the 25th", () => {
+  it("makes one event per income for this and next month, dated the 25th", () => {
     const ev = monthlyEvents(expected, "2026-11-02");
     expect(ev).toEqual([
-      { expected_income_id: 1, period: "2026-11", expected_on: "2026-11-25", status: "expected" },
-      { expected_income_id: 2, period: "2026-11", expected_on: "2026-11-25", status: "expected" },
-      { expected_income_id: 1, period: "2026-12", expected_on: "2026-12-25", status: "expected" },
-      { expected_income_id: 2, period: "2026-12", expected_on: "2026-12-25", status: "expected" },
+      { expected_income_id: 1, period: "2026-11", expected_on: "2026-11-25", status: "expected", slot: 1 },
+      { expected_income_id: 2, period: "2026-11", expected_on: "2026-11-25", status: "expected", slot: 1 },
+      { expected_income_id: 1, period: "2026-12", expected_on: "2026-12-25", status: "expected", slot: 1 },
+      { expected_income_id: 2, period: "2026-12", expected_on: "2026-12-25", status: "expected", slot: 1 },
     ]);
   });
 
   it("rolls over the year and clamps to the month length", () => {
-    const ev = monthlyEvents([{ id: 1, source: "usdc", window_start_day: 15, window_end_day: 25 }], "2026-12-30");
+    const ev = monthlyEvents([{ id: 1, window_start_day: 15, window_end_day: 25 }], "2026-12-30");
     expect(ev.map((e) => e.period)).toEqual(["2026-12", "2027-01"]);
-    const feb = monthlyEvents([{ id: 1, source: "usdc", window_start_day: 15, window_end_day: 31 }], "2027-02-01");
+    const feb = monthlyEvents([{ id: 1, window_start_day: 15, window_end_day: 31 }], "2027-02-01");
     expect(feb[0]!.expected_on).toBe("2027-02-28");
   });
 
@@ -763,8 +763,8 @@ describe("monthlyEvents", () => {
   it("dates each event on its own window's end, not on the 25th", () => {
     const ev = monthlyEvents(
       [
-        { id: 1, source: "fop", window_start_day: 5, window_end_day: 10 },
-        { id: 2, source: "usdc", window_start_day: 12, window_end_day: 15 },
+        { id: 1, window_start_day: 5, window_end_day: 10 },
+        { id: 2, window_start_day: 12, window_end_day: 15 },
       ],
       "2026-11-02",
     );
@@ -774,13 +774,28 @@ describe("monthlyEvents", () => {
   });
 
   it("clamps a window end past the month's last day to that day", () => {
-    const ev = monthlyEvents([{ id: 1, source: "fop", window_start_day: 25, window_end_day: 31 }], "2026-11-02");
+    const ev = monthlyEvents([{ id: 1, window_start_day: 25, window_end_day: 31 }], "2026-11-02");
     expect(ev.map((e) => e.expected_on)).toEqual(["2026-11-30", "2026-12-31"]);
   });
 
   it("takes the end even from a window whose start is after it (the API refuses one)", () => {
-    const ev = monthlyEvents([{ id: 1, source: "fop", window_start_day: 20, window_end_day: 10 }], "2026-11-02");
+    const ev = monthlyEvents([{ id: 1, window_start_day: 20, window_end_day: 10 }], "2026-11-02");
     expect(ev.map((e) => e.expected_on)).toEqual(["2026-11-10", "2026-12-10"]);
+  });
+
+  // Д3а: «Два раза в месяц» expects a second payment on its day; «Без расписания» expects nothing.
+  it("adds the second payment of a twice-monthly income and nothing for an income without a schedule", () => {
+    const ev = monthlyEvents(
+      [
+        { id: 1, window_start_day: 5, window_end_day: 5, schedule: "twice", second_day: 31 },
+        { id: 2, window_start_day: 1, window_end_day: 31, schedule: "none", second_day: null },
+        { id: 3, window_start_day: 1, window_end_day: 5, schedule: "monthly", second_day: null },
+      ],
+      "2026-11-02",
+    );
+    expect(ev.map((e) => [e.expected_income_id, e.slot, e.expected_on])).toEqual([
+      [1, 1, "2026-11-05"], [1, 2, "2026-11-30"], [3, 1, "2026-11-05"], [1, 1, "2026-12-05"], [1, 2, "2026-12-31"], [3, 1, "2026-12-05"],
+    ]);
   });
 });
 

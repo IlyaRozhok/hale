@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   exchangeRate,
   expectedIncomeInput,
+  expectedIncomePatch,
   insightsMonthDto,
   insightsMonthQuery,
   isoDate,
@@ -25,6 +26,30 @@ describe("contracts", () => {
     expect(
       expectedIncomeInput.safeParse({ source: "fop", amount: 1, currency: "USD", window_start_day: 25, window_end_day: 15 }).success,
     ).toBe(false);
+  });
+  it("takes an income by its old kind alone, as an older app sends it, or by its name with a schedule, an account and flags (Д3а)", () => {
+    expect(expectedIncomeInput.safeParse({ source: "usdc", amount: 1, currency: "USD", window_start_day: 8, window_end_day: 12 }).success).toBe(true);
+    const job = { name: "Основная работа", amount: 3_800_000, currency: "UAH", window_start_day: 5, window_end_day: 5 };
+    expect(expectedIncomeInput.safeParse(job).success).toBe(true);
+    expect(
+      expectedIncomeInput.safeParse({
+        ...job, schedule: "twice", second_day: 20, pays_fop_tax: false, crypto: false, account: { source: "account", id: 3 },
+      }).success,
+    ).toBe(true);
+    expect(expectedIncomeInput.safeParse({ ...job, account: { source: "manual", id: 1 } }).success).toBe(true);
+    expect(expectedIncomeInput.safeParse({ ...job, account: { source: "cash" } }).success).toBe(true);
+    expect(expectedIncomeInput.safeParse({ ...job, account: null }).success).toBe(true);
+    // No schedule, no days.
+    expect(expectedIncomeInput.safeParse({ name: "Заказчик А", amount: 1, currency: "USD", schedule: "none" }).success).toBe(true);
+    // Neither a name nor an old kind; a schedule that needs its days without them; a name of spaces; an unknown account.
+    expect(expectedIncomeInput.safeParse({ amount: 1, currency: "UAH", window_start_day: 5, window_end_day: 5 }).success).toBe(false);
+    expect(expectedIncomeInput.safeParse({ name: "x", amount: 1, currency: "UAH" }).success).toBe(false);
+    expect(expectedIncomeInput.safeParse({ ...job, name: "  " }).success).toBe(false);
+    expect(expectedIncomeInput.safeParse({ ...job, account: { source: "bank", id: 1 } }).success).toBe(false);
+    expect(expectedIncomeInput.safeParse({ ...job, account: { source: "cash", id: 1 } }).success).toBe(false);
+    expect(expectedIncomeInput.safeParse({ ...job, schedule: "weekly" }).success).toBe(false);
+    expect(expectedIncomePatch.safeParse({ name: "Заказчик Б", schedule: "none", account: null, pays_fop_tax: true }).success).toBe(true);
+    expect(expectedIncomePatch.safeParse({ slot: 2 }).success).toBe(false);
   });
   it("rejects unknown settings keys", () => {
     expect(settingsPatch.safeParse({ nope: 1 }).success).toBe(false);

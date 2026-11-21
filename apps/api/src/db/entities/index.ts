@@ -71,11 +71,20 @@ export class Rule {
 @Entity("expected_incomes")
 export class ExpectedIncome {
   @id() id!: number;
-  @Column({ type: "text" }) source!: "fop" | "usdc";
+  /** Kept for an older app: follows the flags (domain/incomes sourceOf). */
+  @Column({ type: "text", nullable: true }) source!: "fop" | "usdc" | null;
+  @Column({ type: "text" }) name!: string;
   @money() amount!: number;
   @Column({ type: "text" }) currency!: string;
   @Column({ type: "smallint" }) window_start_day!: number;
   @Column({ type: "smallint" }) window_end_day!: number;
+  @Column({ type: "text" }) schedule!: "monthly" | "twice" | "none";
+  @Column({ type: "smallint", nullable: true }) second_day!: number | null;
+  @Column({ type: "boolean" }) pays_fop_tax!: boolean;
+  @Column({ type: "boolean" }) crypto!: boolean;
+  @Column({ type: "integer", nullable: true }) account_id!: number | null;
+  @Column({ type: "integer", nullable: true }) manual_balance_id!: number | null;
+  @Column({ type: "boolean" }) to_cash!: boolean;
 }
 
 @Entity("income_events")
@@ -83,6 +92,8 @@ export class IncomeEvent {
   @id() id!: number;
   @Column({ type: "integer" }) expected_income_id!: number;
   @Column({ type: "text" }) period!: string;
+  /** 2 for the second payment of a twice-monthly income in the month. */
+  @Column({ type: "smallint", default: 1 }) slot!: number;
   @Column({ type: "date" }) expected_on!: string;
   @Column({ type: "timestamptz", nullable: true }) received_at!: Date | null;
   @Column({ type: "bigint", transformer: bt, nullable: true }) amount_uah!: number | null;
