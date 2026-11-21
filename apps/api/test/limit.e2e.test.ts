@@ -425,6 +425,21 @@ describe("the night jobs that used to delete the row", () => {
     // Its event lands on its window's end, the 12th (Б28): 10 days instead of 30.
     await fixedNow(Math.floor(1_000_000 / 10));
   });
+
+  it("an income without a schedule, which never gets rows, does not fix the day afresh every hour (Д3а)", async () => {
+    const card = await account("black", 1_000_000);
+    await income("2026-11-20");
+    await ds.query(
+      `INSERT INTO expected_incomes (name, schedule, amount, currency, window_start_day, window_end_day) VALUES ('Заказчик А', 'none', 100000, 'USD', 1, 31)`,
+    );
+    await ensure();
+    const fixed = await row2(TODAY);
+    expect(fixed).not.toBeNull();
+    // Money that arrives on its own keeps the day's limit; the hourly job must too.
+    await setBalance(card, 4_000_000);
+    await app.get(PlanService).hourlyJob();
+    expect(await row2(TODAY)).toBe(fixed);
+  });
 });
 
 const row2 = async (date: string): Promise<string | null> =>

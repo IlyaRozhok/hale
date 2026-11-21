@@ -469,7 +469,7 @@ export function windowEndDate(period: string, windowEndDay: number): string {
 /**
  * Events for the month of `today` and the next one: per expected income and month one on its window's end, and for a
  * twice-monthly income a second on its second day (Д3а). An income without a schedule expects none: it never sets the
- * next income date, and is received only by hand.
+ * next income date and has no event to receive.
  */
 export function monthlyEvents(expected: readonly ExpectedForEvents[], today: string): PlannedEvent[] {
   const year = Number(today.slice(0, 4));

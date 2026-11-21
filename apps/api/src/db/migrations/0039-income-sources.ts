@@ -10,7 +10,9 @@ import type { MigrationInterface, QueryRunner } from "typeorm";
 // Existing rows: the fop income is named «ФОП», pays the fop tax and comes to the fop account (the hryvnia one first);
 // the usdc income is named «USDC», comes in crypto and comes to the Binance balance, if there is one. Both stay monthly
 // with their windows. Every event is slot 1. No other row changes, so the limit, free money and the tax read the same.
-// Down: incomes with neither flag and the second payments of a month are deleted, the rest loses the new columns.
+// Down: incomes with neither flag and the second payments of a month are deleted, the rest loses the new columns. An
+// income with a flag but without a schedule stays and becomes monthly on its stored window (1–31 unless one was given):
+// the code before 0039 then expects it on the month's last day.
 export class IncomeSources1796860800000 implements MigrationInterface {
   name = "IncomeSources1796860800000";
 

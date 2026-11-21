@@ -1614,6 +1614,15 @@ describe("incomes with a name, a schedule, an account and flags (Д3а)", () => 
     expect(await ds.query(november, [fopId])).toEqual([{ status: "received", tx: t }]);
   });
 
+  it("asks «Пришло на Binance?» about a second payment on the 31st on a short month's last day", async () => {
+    await api.post("/plan/expected-incomes", { ...job, crypto: true, currency: "USD", schedule: "twice", second_day: 31 }).expect(201);
+    app.get(Clock).fixed = new Date("2026-11-30T10:00:00Z");
+    const second = ((await api.get("/plan/incomes")).body as Event[]).find((e) => e.period === "2026-11" && e.slot === 2)!;
+    expect(second.expected_on).toBe("2026-11-30");
+    const questions = (await api.get("/today").expect(200)).body.questions as { id: string }[];
+    expect(questions.map((q) => q.id)).toContain(`usdc_arrived:${second.id}`);
+  });
+
   it("refuses an income that is wrong as a whole, or names an account that is not there", async () => {
     await api.post("/plan/expected-incomes", { ...job, schedule: "twice" }).expect(400);
     await api.post("/plan/expected-incomes", { ...job, schedule: "twice", second_day: 5 }).expect(400);

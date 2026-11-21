@@ -886,13 +886,16 @@ export class TodayService {
   private async dto(f: Facts, state: DailyState, plan: Plan | null, shortageStart?: { nextLimit?: number }): Promise<TodayDto> {
     const m = this.ds.manager;
     const questions: TodayDto["questions"] = [];
-    // A crypto income's month (Д3а: a second payment's window is its own day) asks whether the money came.
+    // A crypto income's month (Д3а: a second payment's window is its own day, clamped to the month's length as its event
+    // is dated by windowEndDate) asks whether the money came.
     const usdc: { id: number; expected_amount: number }[] = await m.query(
       `SELECT e.id, x.amount::float8 AS expected_amount FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id
         WHERE x.crypto AND e.status <> 'received' AND e.period=$1
-          AND (CASE WHEN e.slot = 2 THEN $2::int = x.second_day ELSE $2::int BETWEEN x.window_start_day AND x.window_end_day END)
+          AND (CASE WHEN e.slot = 2
+                    THEN $2::int = LEAST(x.second_day, EXTRACT(DAY FROM date_trunc('month', $3::date) + interval '1 month - 1 day')::int)
+                    ELSE $2::int BETWEEN x.window_start_day AND x.window_end_day END)
         ORDER BY e.id`,
-      [f.date.slice(0, 7), Number(f.date.slice(8, 10))],
+      [f.date.slice(0, 7), Number(f.date.slice(8, 10)), f.date],
     );
     for (const e of usdc) {
       questions.push({ id: `usdc_arrived:${e.id}`, kind: "usdc_arrived", text: "Пришло на Binance?", expectedAmount: e.expected_amount });

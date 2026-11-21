@@ -118,8 +118,10 @@ export class PlanService implements OnApplicationBootstrap {
    */
   private async generate(fixLimit = true): Promise<void> {
     const today = kyivDate(this.clock.now());
+    // An income without a schedule never gets rows (Д3а): it is not waiting for its first ones.
     const [{ fresh }] = (await this.ds.query(
-      `SELECT EXISTS (SELECT 1 FROM expected_incomes x WHERE NOT EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id)) AS fresh`,
+      `SELECT EXISTS (SELECT 1 FROM expected_incomes x
+                       WHERE x.schedule <> 'none' AND NOT EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id)) AS fresh`,
     )) as [{ fresh: boolean }];
     await this.generateEvents(today);
     // Events the old rule left waiting after a small fop income are received now (Б33).
