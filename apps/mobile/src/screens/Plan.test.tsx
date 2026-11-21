@@ -445,13 +445,18 @@ describe("Plan, incomes", () => {
     await renderWith(<Plan />, api);
     await press("Доходы");
     await press("Новый доход");
-    await fireEvent.press(screen.getByRole("radio", { name: "ФОП" }));
-    await fireEvent.changeText(screen.getByLabelText("Сумма дохода"), "100 000");
+    await fireEvent.changeText(screen.getByLabelText("Название"), "Основная работа");
+    await fireEvent.changeText(screen.getByLabelText("Сумма"), "100 000");
     await fireEvent.changeText(screen.getByLabelText("С какого числа"), "20");
     await fireEvent.changeText(screen.getByLabelText("По какое число"), "25");
     await press("Сохранить доход");
-    await waitFor(() => expect(api.createExpectedIncome).toHaveBeenCalledWith({ source: "fop", amount: 10_000_000, currency: "UAH", window_start_day: 20, window_end_day: 25 }));
-    await waitFor(() => expect(screen.queryByLabelText("Сумма дохода")).toBeNull());
+    await waitFor(() =>
+      expect(api.createExpectedIncome).toHaveBeenCalledWith({
+        name: "Основная работа", amount: 10_000_000, currency: "UAH", schedule: "monthly", window_start_day: 20, window_end_day: 25, second_day: null,
+        pays_fop_tax: false, crypto: false, account: null,
+      }),
+    );
+    await waitFor(() => expect(screen.queryByLabelText("Сумма")).toBeNull());
   });
 
   it("refuses days that do not make a window", async () => {
@@ -459,11 +464,12 @@ describe("Plan, incomes", () => {
     await renderWith(<Plan />, api);
     await press("Доходы");
     await press("Новый доход");
-    await fireEvent.changeText(screen.getByLabelText("Сумма дохода"), "100");
+    await fireEvent.changeText(screen.getByLabelText("Название"), "Основная работа");
+    await fireEvent.changeText(screen.getByLabelText("Сумма"), "100");
     await fireEvent.changeText(screen.getByLabelText("С какого числа"), "25");
     await fireEvent.changeText(screen.getByLabelText("По какое число"), "20");
     await press("Сохранить доход");
-    expect(await screen.findByText("Проверьте сумму и числа.")).toBeTruthy();
+    expect(await screen.findByText("Проверьте название, сумму и числа.")).toBeTruthy();
     expect(api.createExpectedIncome).not.toHaveBeenCalled();
   });
 
@@ -471,8 +477,9 @@ describe("Plan, incomes", () => {
     const api = fakeApi(withIncome());
     await renderWith(<Plan />, api);
     await press("Доходы");
-    expect(await screen.findByText("$800, следующий 05.11")).toBeTruthy();
-    await press("Изменить: USDC");
+    expect(await screen.findByText("$800 · 1–5 числа")).toBeTruthy();
+    expect(screen.getByText("Следующий — 05.11, $800.")).toBeTruthy();
+    await press("USDC");
     expect(screen.getByLabelText("Сумма дохода").props.value).toBe("800");
     await fireEvent.changeText(screen.getByLabelText("Сумма дохода"), "900");
     await pickDate("Следующий доход", "2999-11-07");
@@ -485,7 +492,7 @@ describe("Plan, incomes", () => {
     const api = fakeApi(withIncome());
     await renderWith(<Plan />, api);
     await press("Доходы");
-    await press("Изменить: USDC");
+    await press("USDC");
     await press("Сохранить доход");
     await waitFor(() => expect(api.patchExpectedIncome).toHaveBeenCalled());
     expect(api.setIncomeDate).not.toHaveBeenCalled();
@@ -496,6 +503,7 @@ describe("Plan, incomes", () => {
     const api = fakeApi(withIncome());
     await renderWith(<Plan />, api);
     await press("Доходы");
+    await press("USDC");
     await press("Удалить: USDC");
     expect(api.deleteExpectedIncome).not.toHaveBeenCalled();
     await act(async () => alert.mock.calls[0]![2]!.find((b) => b.style === "destructive")!.onPress!());
