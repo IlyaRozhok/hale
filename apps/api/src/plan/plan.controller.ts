@@ -15,6 +15,7 @@ import {
 } from "@nestjs/common";
 import {
   type AccountDto,
+  type ExpectedIncomeDto,
   accountPatch,
   confirmIncomeInput,
   expectedIncomeInput,
@@ -39,6 +40,7 @@ import {
 import { DataSource, type ObjectLiteral, type Repository } from "typeorm";
 import type { z } from "zod";
 import { ExpectedIncome, Goal, Loan, ManualBalance, RecurringPayment, ScheduledPayment, Settings } from "../db/entities";
+import { type IncomeRow, changedIncome, incomeDto, incomeProblem, newIncome } from "../domain/incomes";
 import { type AccountKind, countsAsOwn } from "../domain/ledger";
 import { LimitService } from "../today/limit.service";
 import { type BankAccountKind, accountName } from "../today/today.service";
@@ -81,27 +83,40 @@ export class PlanController {
 
   // --- expected incomes -----------------------------------------------------
   @Get("expected-incomes")
-  listExpected(): Promise<ExpectedIncome[]> {
-    return this.ds.getRepository(ExpectedIncome).find({ order: { id: "ASC" } });
+  async listExpected(): Promise<ExpectedIncomeDto[]> {
+    return (await this.ds.getRepository(ExpectedIncome).find({ order: { id: "ASC" } })).map(incomeDto);
   }
 
+  /** A new income (Д3а): by its name, schedule, account and flags, or by its old kind alone, as an older app sends it. */
   @Post("expected-incomes")
-  async createExpected(@Body() body: unknown): Promise<ExpectedIncome> {
+  async createExpected(@Body() body: unknown): Promise<ExpectedIncomeDto> {
+    const income = newIncome(parse(expectedIncomeInput, body));
+    await this.checkIncome(income);
     const repo = this.ds.getRepository(ExpectedIncome);
-    const row = await repo.save(repo.create(parse(expectedIncomeInput, body)));
+    const row = await repo.save(repo.create(income));
     await this.entries.generated();
-    return row;
+    return incomeDto(row);
   }
 
   @Patch("expected-incomes/:id")
-  async patchExpected(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<ExpectedIncome> {
+  async patchExpected(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<ExpectedIncomeDto> {
     const data = parse(expectedIncomePatch, body);
-    const repo = this.ds.getRepository(ExpectedIncome);
-    const cur = await repo.findOneBy({ id });
+    const cur = await this.ds.getRepository(ExpectedIncome).findOneBy({ id });
     if (!cur) throw new NotFoundException();
-    const merged = { ...cur, ...data };
-    if (merged.window_start_day > merged.window_end_day) throw new BadRequestException("window start is after its end");
-    return this.entries.patchExpected(id, data);
+    const next = changedIncome(cur, data);
+    await this.checkIncome(next);
+    return incomeDto(await this.entries.patchExpected(id, cur, next));
+  }
+
+  /** Refuses an income that is wrong as a whole, or one that names an account that is not there. */
+  private async checkIncome(i: IncomeRow): Promise<void> {
+    const problem = incomeProblem(i);
+    if (problem) throw new BadRequestException(problem);
+    const missing = async (table: "accounts" | "manual_balances", id: number | null) =>
+      id !== null && (await this.ds.query(`SELECT 1 FROM ${table} WHERE id=$1`, [id])).length === 0;
+    if ((await missing("accounts", i.account_id)) || (await missing("manual_balances", i.manual_balance_id))) {
+      throw new BadRequestException("account not found");
+    }
   }
 
   @Delete("expected-incomes/:id")

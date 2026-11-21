@@ -175,7 +175,7 @@ describe("observations", () => {
       // Own money below zero: the card's balance is under its credit limit, the income comes on the 24th.
       await ds.query(`UPDATE accounts SET balance=1_000_000, credit_limit=3_000_000 WHERE id=$1`, [black]);
       const exp = (
-        await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop',500000,'UAH',20,28) RETURNING id`)
+        await ds.query(`INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ('fop', true, false, 500000,'UAH',20,28) RETURNING id`)
       )[0].id;
       await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-11','2026-11-24','expected')`, [exp]);
       // Netflix charges on the 20th: before the income. Spotify on the 26th: after it.

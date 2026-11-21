@@ -12,6 +12,7 @@ import { DataSource, type EntityManager } from "typeorm";
 import { ruleMatches } from "../domain/classify";
 import { reopensOnUnlink } from "../domain/payment-cover";
 import {
+  type ExpectedForEvents,
   type HeldTaxLink,
   type PayableTx,
   type Payment,
@@ -117,8 +118,10 @@ export class PlanService implements OnApplicationBootstrap {
    */
   private async generate(fixLimit = true): Promise<void> {
     const today = kyivDate(this.clock.now());
+    // An income without a schedule never gets rows (Д3а): it is not waiting for its first ones.
     const [{ fresh }] = (await this.ds.query(
-      `SELECT EXISTS (SELECT 1 FROM expected_incomes x WHERE NOT EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id)) AS fresh`,
+      `SELECT EXISTS (SELECT 1 FROM expected_incomes x
+                       WHERE x.schedule <> 'none' AND NOT EXISTS (SELECT 1 FROM income_events e WHERE e.expected_income_id = x.id)) AS fresh`,
     )) as [{ fresh: boolean }];
     await this.generateEvents(today);
     // Events the old rule left waiting after a small fop income are received now (Б33).
@@ -317,14 +320,15 @@ export class PlanService implements OnApplicationBootstrap {
 
   /** Creates this and next month's events. Returns how many were new. */
   async generateEvents(today: string = kyivDate(this.clock.now())): Promise<number> {
-    const expected: { id: number; source: "fop" | "usdc"; window_start_day: number; window_end_day: number }[] =
-      await this.ds.query(`SELECT id, source, window_start_day, window_end_day FROM expected_incomes ORDER BY id`);
+    const expected: ExpectedForEvents[] = await this.ds.query(
+      `SELECT id, window_start_day, window_end_day, schedule, second_day FROM expected_incomes ORDER BY id`,
+    );
     let created = 0;
     for (const e of monthlyEvents(expected, today)) {
       const r: unknown[] = await this.ds.query(
-        `INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,$2,$3,$4)
-         ON CONFLICT (expected_income_id, period) DO NOTHING RETURNING id`,
-        [e.expected_income_id, e.period, e.expected_on, e.status],
+        `INSERT INTO income_events (expected_income_id, period, expected_on, status, slot) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (expected_income_id, period, slot) DO NOTHING RETURNING id`,
+        [e.expected_income_id, e.period, e.expected_on, e.status, e.slot],
       );
       created += r.length;
     }
@@ -334,7 +338,7 @@ export class PlanService implements OnApplicationBootstrap {
   listEvents(): Promise<IncomeEvent[]> {
     return this.ds.query(
       `SELECT id, expected_income_id, period, expected_on::text AS expected_on, received_at, amount_uah::float8 AS amount_uah,
-              status, matched_transaction_id
+              status, matched_transaction_id, slot
          FROM income_events ORDER BY period, expected_income_id, id`,
     );
   }
@@ -359,7 +363,7 @@ export class PlanService implements OnApplicationBootstrap {
       const ev = await this.lockEvent(m, id);
       if (ev.status !== "received") {
         const received = amount ?? ev.expected_amount;
-        const balanceDelta = ev.source === "usdc" ? received : 0;
+        const balanceDelta = ev.crypto ? received : 0;
         await this.markReceived(m, { ...ev, expected_amount: received }, null);
         if (balanceDelta > 0) {
           await m.query(
@@ -381,7 +385,7 @@ export class PlanService implements OnApplicationBootstrap {
   async matchTransaction(eventId: number, transactionId: number): Promise<IncomeEvent> {
     return this.ds.transaction(async (m) => {
       const ev = await this.lockEvent(m, eventId);
-      if (ev.source !== "usdc") throw new UnprocessableEntityException("only USDC events can be matched");
+      if (!ev.crypto) throw new UnprocessableEntityException("only USDC events can be matched");
       const tx = (await m.query(`SELECT id, type, usdc_checked FROM transactions WHERE id=$1 FOR UPDATE`, [transactionId]))[0] as
         | { id: number; type: string | null; usdc_checked: boolean }
         | undefined;
@@ -407,7 +411,7 @@ export class PlanService implements OnApplicationBootstrap {
    */
   async answerBinance(m: EntityManager, eventId: number, transactionId: number): Promise<void> {
     const ev = await this.lockEvent(m, eventId);
-    if (ev.source !== "usdc") throw new UnprocessableEntityException("only USDC events can be matched");
+    if (!ev.crypto) throw new UnprocessableEntityException("only USDC events can be matched");
     const tx = (
       await m.query(
         `SELECT t.id, t.type, t.amount::float8 AS amount, t.amount_uah::float8 AS amount_uah, a.kind AS account_kind
@@ -701,7 +705,7 @@ export class PlanService implements OnApplicationBootstrap {
    */
   private async releaseFopIncome(m: EntityManager, ids: readonly number[]): Promise<boolean> {
     const taken: { id: number }[] = await m.query(
-      `SELECT e.id FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id AND x.source='fop'
+      `SELECT e.id FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id AND x.pays_fop_tax
         WHERE e.status='received' AND e.matched_transaction_id = ANY($1::int[]) FOR UPDATE OF e`,
       [ids],
     );
@@ -714,7 +718,7 @@ export class PlanService implements OnApplicationBootstrap {
     if (taken.length === 0 && months.length === 0) return false;
     // What was received before, so that any event the pass leaves waiting is seen, not only the rows' own (Б53).
     const received: { id: number }[] = await m.query(
-      `SELECT e.id FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id AND x.source='fop' WHERE e.status='received'`,
+      `SELECT e.id FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id AND x.pays_fop_tax WHERE e.status='received'`,
     );
     const takenIds = taken.map((e) => e.id);
     if (takenIds.length > 0) {
@@ -927,7 +931,10 @@ export class PlanService implements OnApplicationBootstrap {
     );
   }
 
-  /** Every fop event with the fop income its month takes, by domain/fop-income's rule for its expected income. */
+  /**
+   * Every fop event with the fop income its month takes, by domain/fop-income's rule for its expected income. A fop
+   * event is one of an income that pays the fop tax (Д3а); such an income has one event a month (domain/incomes).
+   */
   private async fopEventIncome(m: EntityManager): Promise<FopEventIncome[]> {
     const events: {
       id: number;
@@ -941,8 +948,9 @@ export class PlanService implements OnApplicationBootstrap {
     }[] = await m.query(
       `SELECT e.id, e.expected_income_id, e.period, e.status, e.matched_transaction_id, e.amount_uah::float8 AS amount_uah,
               x.window_start_day, mt.local_date::text AS matched_on
-         FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id AND x.source='fop'
+         FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id AND x.pays_fop_tax
          LEFT JOIN transactions mt ON mt.id = e.matched_transaction_id
+        WHERE e.slot = 1
         ORDER BY e.expected_income_id, e.period`,
     );
     if (events.length === 0) return [];
@@ -983,13 +991,13 @@ export class PlanService implements OnApplicationBootstrap {
   private async lockEvent(m: EntityManager, id: number) {
     const ev = (
       await m.query(
-        `SELECT e.id, e.status, e.matched_transaction_id, x.source, x.amount::float8 AS expected_amount, x.currency
+        `SELECT e.id, e.status, e.matched_transaction_id, x.crypto, x.amount::float8 AS expected_amount, x.currency
            FROM income_events e JOIN expected_incomes x ON x.id = e.expected_income_id
           WHERE e.id=$1 FOR UPDATE OF e`,
         [id],
       )
     )[0] as
-      | { id: number; status: string; matched_transaction_id: number | null; source: "fop" | "usdc"; expected_amount: number; currency: string }
+      | { id: number; status: string; matched_transaction_id: number | null; crypto: boolean; expected_amount: number; currency: string }
       | undefined;
     if (!ev) throw new NotFoundException("income event not found");
     return ev;
@@ -1020,7 +1028,7 @@ export class PlanService implements OnApplicationBootstrap {
     return (
       await m.query(
         `SELECT id, expected_income_id, period, expected_on::text AS expected_on, received_at, amount_uah::float8 AS amount_uah,
-                status, matched_transaction_id FROM income_events WHERE id=$1`,
+                status, matched_transaction_id, slot FROM income_events WHERE id=$1`,
         [id],
       )
     )[0];

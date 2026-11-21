@@ -1495,3 +1495,154 @@ describe("goals", () => {
     await api.del("/plan/goals/999").expect(404);
   });
 });
+
+describe("incomes with a name, a schedule, an account and flags (Д3а)", () => {
+  beforeEach(() => {
+    app.get(Clock).fixed = new Date("2026-11-02T10:00:00Z");
+  });
+  afterEach(() => {
+    app.get(Clock).fixed = null;
+  });
+  type Event = { id: number; expected_income_id: number; period: string; expected_on: string; slot: number; status: string };
+  const events = async () =>
+    ((await api.get("/plan/incomes").expect(200)).body as Event[]).map((e) => [e.expected_income_id, e.period, e.slot, e.expected_on, e.status]);
+  const job = { name: "Основная работа", amount: 3_800_000, currency: "UAH", window_start_day: 5, window_end_day: 5 };
+
+  it("an older app's income by its old kind gets its name and flag; the answer keeps the old fields", async () => {
+    const fop = await account("fop");
+    const r = await api
+      .post("/plan/expected-incomes", { source: "fop", amount: 500_000, currency: "USD", window_start_day: 1, window_end_day: 5 })
+      .expect(201);
+    expect(r.body).toEqual({
+      id: r.body.id, source: "fop", amount: 500_000, currency: "USD", window_start_day: 1, window_end_day: 5,
+      name: "ФОП", schedule: "monthly", second_day: null, pays_fop_tax: true, crypto: false, account: null,
+    });
+    await api.patch(`/plan/expected-incomes/${r.body.id}`, { account: { source: "account", id: fop } }).expect(200);
+    const usdc = await api
+      .post("/plan/expected-incomes", { source: "usdc", amount: 120_000, currency: "USD", window_start_day: 20, window_end_day: 20 })
+      .expect(201);
+    expect(usdc.body).toMatchObject({ source: "usdc", name: "USDC", pays_fop_tax: false, crypto: true });
+    expect((await api.get("/plan/expected-incomes").expect(200)).body.map((i: { name: string; account: unknown }) => [i.name, i.account])).toEqual([
+      ["ФОП", { source: "account", id: fop }],
+      ["USDC", null],
+    ]);
+  });
+
+  it("«Два раза в месяц» expects both payments each month, and the next income is the nearest one not received", async () => {
+    const white = await account("white");
+    const r = await api
+      .post("/plan/expected-incomes", { ...job, schedule: "twice", second_day: 20, account: { source: "account", id: white } })
+      .expect(201);
+    expect(r.body).toMatchObject({ source: null, name: "Основная работа", schedule: "twice", second_day: 20, account: { source: "account", id: white } });
+    const id = r.body.id as number;
+    expect(await events()).toEqual([
+      [id, "2026-11", 1, "2026-11-05", "expected"], [id, "2026-11", 2, "2026-11-20", "expected"],
+      [id, "2026-12", 1, "2026-12-05", "expected"], [id, "2026-12", 2, "2026-12-20", "expected"],
+    ]);
+    // Another run makes nothing new.
+    await app.get(PlanService).generateEvents("2026-11-02");
+    expect(await events()).toHaveLength(4);
+    expect((await api.get("/today").expect(200)).body.runway.incomeOn).toBe("2026-11-05");
+    const first = ((await api.get("/plan/incomes")).body as Event[])[0]!.id;
+    await api.post(`/plan/incomes/${first}/confirm`).expect(201);
+    const today = (await api.get("/today").expect(200)).body;
+    expect(today.runway.incomeOn).toBe("2026-11-20");
+    // A plain income adds nothing to Binance and asks nothing about it.
+    expect(await ds.query(`SELECT 1 FROM manual_balances`)).toEqual([]);
+    expect(today.questions.map((q: { kind: string }) => q.kind)).not.toContain("usdc_arrived");
+  });
+
+  it("«Без расписания» expects nothing: the limit runs on 30 days and nothing asks for an income date", async () => {
+    await account("black");
+    await api
+      .post("/plan/expected-incomes", { name: "Заказчик А", amount: 100_000, currency: "USD", schedule: "none", account: { source: "cash" } })
+      .expect(201);
+    expect(await events()).toEqual([]);
+    expect((await api.get("/plan/expected-incomes").expect(200)).body[0]).toMatchObject({
+      schedule: "none", window_start_day: 1, window_end_day: 31, account: { source: "cash" },
+    });
+    const today = (await api.get("/today").expect(200)).body;
+    expect(today.runway.incomeOn).toBeNull();
+    expect(today.state.daysLeft).toBe(30);
+    expect(today.questions.map((q: { kind: string }) => q.kind)).not.toContain("income_date");
+  });
+
+  it("a change of schedule takes the payments still expected with it and leaves what was received", async () => {
+    const id = (await api.post("/plan/expected-incomes", { ...job, schedule: "twice", second_day: 20 }).expect(201)).body.id as number;
+    const first = ((await api.get("/plan/incomes")).body as Event[])[0]!.id;
+    await api.post(`/plan/incomes/${first}/confirm`).expect(201);
+    // The second day moves its own payments only.
+    await api.patch(`/plan/expected-incomes/${id}`, { second_day: 25 }).expect(200);
+    expect(await events()).toEqual([
+      [id, "2026-11", 1, "2026-11-05", "received"], [id, "2026-11", 2, "2026-11-25", "expected"],
+      [id, "2026-12", 1, "2026-12-05", "expected"], [id, "2026-12", 2, "2026-12-25", "expected"],
+    ]);
+    const monthly = await api.patch(`/plan/expected-incomes/${id}`, { schedule: "monthly" }).expect(200);
+    expect(monthly.body).toMatchObject({ schedule: "monthly", second_day: null });
+    expect(await events()).toEqual([[id, "2026-11", 1, "2026-11-05", "received"], [id, "2026-12", 1, "2026-12-05", "expected"]]);
+    await api.patch(`/plan/expected-incomes/${id}`, { schedule: "twice", second_day: 20 }).expect(200);
+    expect(await events()).toEqual([
+      [id, "2026-11", 1, "2026-11-05", "received"], [id, "2026-11", 2, "2026-11-20", "expected"],
+      [id, "2026-12", 1, "2026-12-05", "expected"], [id, "2026-12", 2, "2026-12-20", "expected"],
+    ]);
+    await api.patch(`/plan/expected-incomes/${id}`, { schedule: "none" }).expect(200);
+    expect(await events()).toEqual([[id, "2026-11", 1, "2026-11-05", "received"]]);
+  });
+
+  it("the flags decide, not the name: a named income in crypto goes to Binance, «ФОП» without its tax flag is not received by fop money", async () => {
+    const coin = (
+      await api
+        .post("/plan/expected-incomes", { name: "Заказчик А", crypto: true, amount: 50_000, currency: "USD", window_start_day: 1, window_end_day: 5 })
+        .expect(201)
+    ).body;
+    expect(coin.source).toBe("usdc");
+    const ev = ((await api.get("/plan/incomes")).body as Event[]).find((e) => e.expected_income_id === coin.id)!.id;
+    await api.post(`/plan/incomes/${ev}/confirm`).expect(201);
+    expect(await ds.query(`SELECT name, amount::int AS amount FROM manual_balances`)).toEqual([{ name: "Binance", amount: 50_000 }]);
+
+    const fopId = (
+      await api.post("/plan/expected-incomes", { source: "fop", amount: 500_000, currency: "UAH", window_start_day: 15, window_end_day: 25 }).expect(201)
+    ).body.id as number;
+    await api.patch(`/plan/expected-incomes/${fopId}`, { pays_fop_tax: false }).expect(200);
+    expect((await api.get("/plan/expected-incomes")).body.find((i: { id: number }) => i.id === fopId)).toMatchObject({ source: null, pays_fop_tax: false });
+    const t = await tx(await account("fop"), { amount: 500_000, description: "From client", date: "2026-11-10" });
+    await reclassify([t]);
+    const november = `SELECT status, matched_transaction_id AS tx FROM income_events WHERE expected_income_id=$1 AND period='2026-11'`;
+    expect(await ds.query(november, [fopId])).toEqual([{ status: "expected", tx: null }]);
+    // Switched back on, the month is received by that money at once, as the hourly job would.
+    await api.patch(`/plan/expected-incomes/${fopId}`, { pays_fop_tax: true }).expect(200);
+    expect(await ds.query(november, [fopId])).toEqual([{ status: "received", tx: t }]);
+  });
+
+  it("asks «Пришло на Binance?» about a second payment on the 31st on a short month's last day", async () => {
+    await api.post("/plan/expected-incomes", { ...job, crypto: true, currency: "USD", schedule: "twice", second_day: 31 }).expect(201);
+    app.get(Clock).fixed = new Date("2026-11-30T10:00:00Z");
+    const second = ((await api.get("/plan/incomes")).body as Event[]).find((e) => e.period === "2026-11" && e.slot === 2)!;
+    expect(second.expected_on).toBe("2026-11-30");
+    const questions = (await api.get("/today").expect(200)).body.questions as { id: string }[];
+    expect(questions.map((q) => q.id)).toContain(`usdc_arrived:${second.id}`);
+  });
+
+  it("refuses an income that is wrong as a whole, or names an account that is not there", async () => {
+    await api.post("/plan/expected-incomes", { ...job, schedule: "twice" }).expect(400);
+    await api.post("/plan/expected-incomes", { ...job, schedule: "twice", second_day: 5 }).expect(400);
+    await api.post("/plan/expected-incomes", { ...job, second_day: 20 }).expect(400);
+    await api.post("/plan/expected-incomes", { ...job, schedule: "twice", second_day: 20, pays_fop_tax: true }).expect(400);
+    await api.post("/plan/expected-incomes", { ...job, account: { source: "account", id: 999 } }).expect(400);
+    await api.post("/plan/expected-incomes", { ...job, account: { source: "manual", id: 999 } }).expect(400);
+    await api.post("/plan/expected-incomes", { amount: 1, currency: "UAH", window_start_day: 1, window_end_day: 1 }).expect(400);
+    const id = (await api.post("/plan/expected-incomes", { ...job, pays_fop_tax: true }).expect(201)).body.id as number;
+    await api.patch(`/plan/expected-incomes/${id}`, { schedule: "twice", second_day: 20 }).expect(400);
+    await api.patch(`/plan/expected-incomes/${id}`, { window_start_day: 6 }).expect(400);
+    await api.patch(`/plan/expected-incomes/999`, { name: "x" }).expect(404);
+    expect((await api.get("/plan/expected-incomes")).body).toHaveLength(1);
+  });
+
+  it("what is left for goals counts a twice-monthly income twice and one without a schedule not at all", async () => {
+    await ds.query(`UPDATE settings SET tax_rate_bp=0`);
+    await api.post("/plan/expected-incomes", { ...job, amount: 1_000_000, schedule: "twice", second_day: 20 }).expect(201);
+    await api.post("/plan/expected-incomes", { name: "Заказчик А", amount: 5_000_000, currency: "UAH", schedule: "none" }).expect(201);
+    const preview = (await api.post("/settings/preview", { lifestyleCap: 100_000 }).expect(201)).body;
+    expect(preview.leftForGoalsMonthly).toBe(1_900_000);
+  });
+});

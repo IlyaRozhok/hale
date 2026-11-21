@@ -85,7 +85,7 @@ async function tx(accountId: number, amount: number, type: string, date = TODAY)
 async function income(on: string, source: "fop" | "usdc" = "fop"): Promise<number> {
   const exp = (
     await ds.query(
-      `INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ($1,$2,$3,1,28) RETURNING id`,
+      `INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ($1,$1='fop',$1='usdc',$2,$3,1,28) RETURNING id`,
       [source, source === "fop" ? 500_000 : 100_000, source === "fop" ? "UAH" : "USD"],
     )
   )[0].id;
@@ -420,10 +420,25 @@ describe("the night jobs that used to delete the row", () => {
     await account("black", 4_000_000, { creditLimit: 3_000_000 });
     await ensure();
     expect((await today()).state.dailyLimit).toBe(Math.floor(1_000_000 / 30));
-    await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop',500000,'UAH',12,12)`);
+    await ds.query(`INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ('fop', true, false, 500000,'UAH',12,12)`);
     await app.get(PlanService).hourlyJob();
     // Its event lands on its window's end, the 12th (Б28): 10 days instead of 30.
     await fixedNow(Math.floor(1_000_000 / 10));
+  });
+
+  it("an income without a schedule, which never gets rows, does not fix the day afresh every hour (Д3а)", async () => {
+    const card = await account("black", 1_000_000);
+    await income("2026-11-20");
+    await ds.query(
+      `INSERT INTO expected_incomes (name, schedule, amount, currency, window_start_day, window_end_day) VALUES ('Заказчик А', 'none', 100000, 'USD', 1, 31)`,
+    );
+    await ensure();
+    const fixed = await row2(TODAY);
+    expect(fixed).not.toBeNull();
+    // Money that arrives on its own keeps the day's limit; the hourly job must too.
+    await setBalance(card, 4_000_000);
+    await app.get(PlanService).hourlyJob();
+    expect(await row2(TODAY)).toBe(fixed);
   });
 });
 

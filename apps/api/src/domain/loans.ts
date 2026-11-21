@@ -68,7 +68,8 @@ export function loanReserve(i: LoanReserveInput): LoanReserve {
 
 /** A received income event, as the loan cycle boundary sees it. */
 export interface ReceivedIncome {
-  source: "fop" | "usdc";
+  /** The income pays the fop tax (before Д3а, the fop income): it is received by the month's money on the fop account. */
+  paysFopTax: boolean;
   /** The Kyiv day it was received; null when the day is unknown. */
   receivedOn: string | null;
   /** What arrived, in kopecks; null when not recorded. */
@@ -91,7 +92,7 @@ export function lastIncomeBoundary(events: readonly ReceivedIncome[], rates: Rea
   let last: string | null = null;
   for (const e of events) {
     if (e.receivedOn === null) continue;
-    if (e.source === "fop" && e.byBank) {
+    if (e.paysFopTax && e.byBank) {
       const rate = e.currency === "UAH" ? 1 : rates[e.currency];
       if (!rate || e.amountUah === null || e.amountUah * 2 < e.expectedAmount * rate) continue;
     }

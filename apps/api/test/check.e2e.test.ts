@@ -233,7 +233,7 @@ describe("POST /check/run and GET /check/latest", () => {
       await ds.query(`INSERT INTO manual_balances (name, amount, currency, counts_as_own) VALUES ('Binance', 500000, 'USD', true)`);
       const exp = (
         await ds.query(
-          `INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('usdc', 500000, 'USD', 1, 5) RETURNING id`,
+          `INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ('usdc', false, true, 500000, 'USD', 1, 5) RETURNING id`,
         )
       )[0].id;
       return (

@@ -4,7 +4,7 @@
  *   DATABASE_URL=postgres://... pnpm seed:private
  *
  * Idempotent: everything is inserted only when no row with the same natural key exists
- * (incomes by source, payments by kind + name + due
+ * (incomes by name, payments by kind + name + due
  * date, recurring series by name, balances by name), so running it again changes nothing.
  * Settings are written only while the settings row is still at its defaults.
  * Today's fixed limit is removed: it was computed without this data. Income events and recurring
@@ -13,6 +13,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { newIncome } from "../apps/api/src/domain/incomes";
 import { kyivDate } from "../apps/api/src/domain/money";
 import { precedingQuarter } from "../apps/api/src/domain/quarter";
 import { seedFile, type SeedFile, type SeedPayment } from "../packages/contracts/src/index";
@@ -83,11 +84,16 @@ export async function applySeed(db: Queryable, seed: SeedFile, now: Date = new D
       [...Object.values(s), today],
     );
   }
-  for (const e of seed.expected_incomes) {
+  for (const e of seed.expected_incomes.map(newIncome)) {
     result.incomes += await inserted(
-      `INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day)
-       SELECT $1::text,$2,$3,$4,$5 WHERE NOT EXISTS (SELECT 1 FROM expected_incomes WHERE source=$1::text) RETURNING id`,
-      [e.source, e.amount, e.currency, e.window_start_day, e.window_end_day],
+      `INSERT INTO expected_incomes (source, name, amount, currency, window_start_day, window_end_day, schedule, second_day,
+                                     pays_fop_tax, crypto, account_id, manual_balance_id, to_cash)
+       SELECT $1::text,$2::text,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
+        WHERE NOT EXISTS (SELECT 1 FROM expected_incomes WHERE name=$2::text) RETURNING id`,
+      [
+        e.source, e.name, e.amount, e.currency, e.window_start_day, e.window_end_day, e.schedule, e.second_day,
+        e.pays_fop_tax, e.crypto, e.account_id, e.manual_balance_id, e.to_cash,
+      ],
     );
   }
   for (const p of expandPayments(seed)) {

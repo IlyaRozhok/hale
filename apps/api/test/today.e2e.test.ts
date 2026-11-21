@@ -83,7 +83,7 @@ async function tx(
 async function income(source: "fop" | "usdc", on: string, over: { status?: string; start?: number; end?: number } = {}): Promise<number> {
   const exp = (
     await ds.query(
-      `INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+      `INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ($1,$1='fop',$1='usdc',$2,$3,$4,$5) RETURNING id`,
       [source, 500_000, source === "usdc" ? "USD" : "UAH", over.start ?? 15, over.end ?? 25],
     )
   )[0].id;
@@ -2580,7 +2580,7 @@ describe("settings preview", () => {
 
   it("uses a template for a source with no event yet, and skips a source whose events are all in other months", async () => {
     await account("black", 30_000_000);
-    await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop', 1000000, 'UAH', 15, 25)`);
+    await ds.query(`INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ('fop', true, false, 1000000, 'UAH', 15, 25)`);
     await ds.query(`UPDATE settings SET tax_rate_bp=0`);
     const low = await preview(100_000);
     expect(low.leftForGoalsMonthly).toBe(900_000); // template counted: 1,000,000 - cap 100,000

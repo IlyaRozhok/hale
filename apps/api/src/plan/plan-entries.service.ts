@@ -1,7 +1,8 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { ExpectedIncomePatch, InstallmentInput, InstallmentPatch, RecurringInput, RecurringPatch } from "@hale/contracts";
+import type { InstallmentInput, InstallmentPatch, RecurringInput, RecurringPatch } from "@hale/contracts";
 import { DataSource } from "typeorm";
 import { ExpectedIncome, RecurringPayment } from "../db/entities";
+import type { IncomeRow } from "../domain/incomes";
 import { kyivDate } from "../domain/money";
 import { windowEndDate } from "../domain/recurring-match";
 import { Clock } from "../time/clock";
@@ -135,25 +136,38 @@ export class PlanEntriesService {
     return { deleted: true };
   }
 
-  async patchExpected(id: number, data: ExpectedIncomePatch): Promise<ExpectedIncome> {
+  /**
+   * The income as it now is (`next`, already checked). Its events still expected follow it; what was received stays.
+   * Б28: they move to the window's new end, or a second payment to its new day, except a date the owner set himself.
+   * Д3а: without a schedule nothing is expected any more, so they go; leaving «Два раза в месяц» takes the second
+   * payments; a schedule that starts expecting gets its events at once.
+   */
+  async patchExpected(id: number, cur: IncomeRow, next: IncomeRow): Promise<ExpectedIncome> {
     const row = await this.ds.transaction(async (m) => {
       const repo = m.getRepository(ExpectedIncome);
-      if (Object.keys(data).length > 0) await repo.update(id, data);
+      const { source, name, amount, currency, window_start_day, window_end_day, schedule, second_day } = next;
+      const { pays_fop_tax, crypto, account_id, manual_balance_id, to_cash } = next;
+      await repo.update(id, {
+        source, name, amount, currency, window_start_day, window_end_day, schedule, second_day, pays_fop_tax, crypto, account_id, manual_balance_id, to_cash,
+      });
       const r = await repo.findOneBy({ id });
       if (!r) throw new NotFoundException();
-      if (data.window_end_day !== undefined) {
-        // Б28: the events still expected follow the window's new end, except a date the owner set himself.
-        const events = (await m.query(
-          `SELECT id, period FROM income_events WHERE expected_income_id=$1 AND status <> 'received' AND NOT date_set_by_hand`,
-          [id],
-        )) as { id: number; period: string }[];
-        for (const e of events) {
-          await m.query(`UPDATE income_events SET expected_on=$2 WHERE id=$1`, [e.id, windowEndDate(e.period, r.window_end_day)]);
-        }
+      const waiting = `expected_income_id=$1 AND status <> 'received'`;
+      if (r.schedule === "none") await m.query(`DELETE FROM income_events WHERE ${waiting}`, [id]);
+      else if (r.schedule !== "twice") await m.query(`DELETE FROM income_events WHERE ${waiting} AND slot = 2`, [id]);
+      // Only a day that changed moves its events: a date left as it was stays where it is.
+      const moved = [r.window_end_day !== cur.window_end_day ? 1 : null, r.second_day !== cur.second_day ? 2 : null].filter((s) => s !== null);
+      const events = (await m.query(
+        `SELECT id, period, slot FROM income_events WHERE ${waiting} AND NOT date_set_by_hand AND slot = ANY($2::int[])`,
+        [id, moved],
+      )) as { id: number; period: string; slot: number }[];
+      for (const e of events) {
+        const day = e.slot === 2 ? r.second_day! : r.window_end_day;
+        await m.query(`UPDATE income_events SET expected_on=$2 WHERE id=$1`, [e.id, windowEndDate(e.period, day)]);
       }
       return r;
     });
-    await this.freshLimit();
+    await this.generated();
     return row;
   }
 }

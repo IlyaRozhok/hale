@@ -452,7 +452,7 @@ describe("cash paid in at a terminal", () => {
     await start(0).expect(201);
     await ds.query(`INSERT INTO fx_rates (currency, fetched_at, rate) VALUES ('USD', '2026-11-10T09:00:00Z', 40)`);
     await ds.query(`INSERT INTO manual_balances (name, amount, currency, counts_as_own) VALUES ('Binance', 500000, 'USD', true)`);
-    const exp = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('usdc', 500000, 'USD', 1, 5) RETURNING id`))[0].id;
+    const exp = (await ds.query(`INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ('usdc', false, true, 500000, 'USD', 1, 5) RETURNING id`))[0].id;
     const ev = (await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status, received_at) VALUES ($1,'2026-11','2026-11-03','received','2026-11-03T10:00:00Z') RETURNING id`, [exp]))[0].id;
     const deposit = await bankTx(c, 400_000, "cash_in", "2026-11-10");
     const questions = (await today()).questions as { id: string; kind: string }[];
@@ -1184,7 +1184,7 @@ describe("changing the answer to «Откуда наличные?» (Б21)", () 
   const event = async (status = "received") => {
     const exp = (
       await ds.query(
-        `INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('usdc', 500000, 'USD', 1, 5) RETURNING id`,
+        `INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ('usdc', false, true, 500000, 'USD', 1, 5) RETURNING id`,
       )
     )[0].id;
     return (

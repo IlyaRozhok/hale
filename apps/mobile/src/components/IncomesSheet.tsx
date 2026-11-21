@@ -18,6 +18,9 @@ const { color, space, type } = tokens;
 
 const SOURCES = { fop: "ФОП", usdc: "USDC" } as const;
 
+/** The income's own name (a server since Д3а gives one), else its old kind's. */
+const incomeTitle = (i: ExpectedIncomeDto): string => i.name ?? (i.source ? SOURCES[i.source] : "");
+
 const day = (text: string): number | null => {
   const n = Number(text.trim());
   return text.trim() !== "" && Number.isInteger(n) && n >= 1 && n <= 31 ? n : null;
@@ -42,11 +45,11 @@ export function IncomesSheet({ onClose }: { onClose: () => void }) {
       {incomes.data?.map((i) => (
         <EntryRow
           key={i.id}
-          title={SOURCES[i.source]}
+          title={incomeTitle(i)}
           detail={detail(i)}
           onEdit={() => setEditing(i)}
           onDelete={() =>
-            askDelete(SOURCES[i.source], "Лимит будет посчитан без этого дохода.", () =>
+            askDelete(incomeTitle(i), "Лимит будет посчитан без этого дохода.", () =>
               remove.mutate(i.id, { onError: () => Alert.alert("Не удалось удалить", "Проверьте связь и попробуйте ещё раз.") }),
             )
           }
@@ -103,7 +106,7 @@ function IncomeForm({ income, nextId, nextDate, onClose }: FormProps) {
   };
 
   return (
-    <Sheet title={income ? SOURCES[income.source] : "Новый доход"} onClose={onClose}>
+    <Sheet title={income ? incomeTitle(income) : "Новый доход"} onClose={onClose}>
       {!income && (
         <View style={styles.row}>
           {(Object.keys(SOURCES) as (keyof typeof SOURCES)[]).map((s) => (

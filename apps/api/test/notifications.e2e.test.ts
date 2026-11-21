@@ -60,7 +60,7 @@ beforeEach(async () => {
   await ds.query(`UPDATE devices SET push_token=NULL`);
   await ds.query(`DELETE FROM devices WHERE name <> 'login-device'`);
   await ds.query(`UPDATE settings SET last_sync_at='2026-11-13T07:00:00Z', tracking_start='2026-01-01', lifestyle_cap=100000000, food_floor=45000`);
-  const fop = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop',500000,'UAH',15,25) RETURNING id`))[0].id;
+  const fop = (await ds.query(`INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ('fop', true, false, 500000,'UAH',15,25) RETURNING id`))[0].id;
   await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-12','2026-12-20','expected')`, [fop]);
   sent = [];
   answer = {};
@@ -138,7 +138,7 @@ describe("tick", () => {
 
   it("allows one ordinary notification a day, by log", async () => {
     await device("a", "ExponentPushToken[a]");
-    const exp = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('usdc',270000,'USD',15,25) RETURNING id`))[0].id;
+    const exp = (await ds.query(`INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ('usdc', false, true, 270000,'USD',15,25) RETURNING id`))[0].id;
     await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-11','2026-11-20','expected')`, [exp]);
     at("2026-11-16T08:00:00Z");
     await svc.tick();
@@ -170,7 +170,7 @@ async function spendTx(accountId: number, amount: number, type: string, date: st
   )[0].id;
 }
 const usdcEvent = async () => {
-  const exp = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('usdc',270000,'USD',15,25) RETURNING id`))[0].id;
+  const exp = (await ds.query(`INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ('usdc', false, true, 270000,'USD',15,25) RETURNING id`))[0].id;
   await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-11','2026-11-20','expected')`, [exp]);
 };
 
@@ -221,7 +221,7 @@ describe("fix round 1", () => {
   it("keeps quiet about an overspend on the day the shortage came on, and speaks up the next day (Б17)", async () => {
     await device("a", "ExponentPushToken[a]");
     await ds.query(`TRUNCATE income_events, expected_incomes RESTART IDENTITY CASCADE`);
-    const fop = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop',500000,'UAH',15,25) RETURNING id`))[0].id;
+    const fop = (await ds.query(`INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ('fop', true, false, 500000,'UAH',15,25) RETURNING id`))[0].id;
     await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-11','2026-11-12','expected')`, [fop]);
     const card = (await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance, credit_limit) VALUES ('acc-s','black','UAH',4000000,3000000) RETURNING id`))[0].id;
     const evening = async (day: string) => {
@@ -256,7 +256,7 @@ describe("fix round 1", () => {
   it("speaks up about an overspend on a day that began in shortage after an ordinary day", async () => {
     await device("a", "ExponentPushToken[a]");
     await ds.query(`TRUNCATE income_events, expected_incomes RESTART IDENTITY CASCADE`);
-    const fop = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop',500000,'UAH',15,25) RETURNING id`))[0].id;
+    const fop = (await ds.query(`INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ('fop', true, false, 500000,'UAH',15,25) RETURNING id`))[0].id;
     await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-11','2026-11-12','expected')`, [fop]);
     const card = (await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance, credit_limit) VALUES ('acc-s','black','UAH',4000000,3000000) RETURNING id`))[0].id;
     at("2026-11-01T08:00:00Z");
@@ -281,7 +281,7 @@ describe("fix round 1", () => {
   it("speaks up about an overspend that crosses into shortage on the same ₴450: the day is judged by its limit", async () => {
     await device("a", "ExponentPushToken[a]");
     await ds.query(`TRUNCATE income_events, expected_incomes RESTART IDENTITY CASCADE`);
-    const fop = (await ds.query(`INSERT INTO expected_incomes (source, amount, currency, window_start_day, window_end_day) VALUES ('fop',500000,'UAH',15,25) RETURNING id`))[0].id;
+    const fop = (await ds.query(`INSERT INTO expected_incomes (source, pays_fop_tax, crypto, amount, currency, window_start_day, window_end_day) VALUES ('fop', true, false, 500000,'UAH',15,25) RETURNING id`))[0].id;
     await ds.query(`INSERT INTO income_events (expected_income_id, period, expected_on, status) VALUES ($1,'2026-11','2026-11-12','expected')`, [fop]);
     const card = (await ds.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ('acc-s','black','UAH',10000) RETURNING id`))[0].id;
     at("2026-11-01T08:00:00Z");
