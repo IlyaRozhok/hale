@@ -518,8 +518,7 @@ export interface TodayDto {
 }
 
 /**
- * The pace of spending (task А24), in kopecks. The limit does not change with it; «around the limit — until the
- * income» is the limit itself and is true whenever `hint` is present.
+ * The pace of spending (task А24), in kopecks. The limit does not change with it.
  */
 export interface PaceDto {
   /** The usual day: the average spent a day over the last 7 days, today left out. */
@@ -529,12 +528,13 @@ export interface PaceDto {
   /** The next known income's day. */
   incomeOn: string;
   /**
-   * A calm middle step: spending about `daily` a day (between the limit and `avgDaily`, a whole ₴100), the same free
-   * money lasts until `lastsUntil`, later than `runOutOn` and before `incomeOn`. Absent when there is no such step, or
-   * when from now on the limit itself would not last until the income (what is left of today's limit plus a whole
-   * limit for each later day, against the free money now).
+   * A calm middle step: spending about `daily` a day (the middle of the limit and `avgDaily`, a whole ₴100), the same
+   * free money lasts until `lastsUntil`, later than `runOutOn` and before `incomeOn`. `untilIncome` (task А24а2): about
+   * this much a day from tomorrow lasts until the income — the free money without what is left of today's limit, over
+   * the days after today before the income, rounded down to a whole ₴100; above 0 and below `daily`. Absent when there
+   * is no such step, and when the income is tomorrow.
    */
-  hint?: { daily: number; lastsUntil: string };
+  hint?: { daily: number; lastsUntil: string; untilIncome: number };
 }
 
 /** Own money without the tax reserve and debts, at the start of each day, if every day spends its limit. */

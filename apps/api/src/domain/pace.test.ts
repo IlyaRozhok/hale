@@ -54,9 +54,10 @@ describe("pace", () => {
   });
 
   describe("the hint", () => {
-    it("is the middle of the limit and the pace, rounded down to ₴100, with the day it lasts until", () => {
+    it("is the middle of the limit and the pace, rounded down to ₴100, with the day it lasts until and what lasts until the income", () => {
       // (4,600 + 2,300) / 2 = 3,450 → ₴3,400; 53,000 / 3,400 = 15 whole days → 7 December.
-      expect(pace({ ...base, avgDailySpend: 460_000 })?.hint).toEqual({ daily: 340_000, lastsUntil: "2026-12-07" });
+      // From tomorrow: (53,000 − 2,300 left of today's limit) / 22 days = 2,304.55 → ₴2,300.
+      expect(pace({ ...base, avgDailySpend: 460_000 })?.hint).toEqual({ daily: 340_000, lastsUntil: "2026-12-07", untilIncome: 230_000 });
     });
 
     it("lasts until a day from the same free money, and that day is between the pace's and the income", () => {
@@ -64,13 +65,20 @@ describe("pace", () => {
       expect(p.hint!.lastsUntil).toBe(runOutDate({ free: base.free, avgDailySpend: p.hint!.daily, today: base.today }));
       expect(p.hint!.lastsUntil > p.runOutOn).toBe(true);
       expect(p.hint!.lastsUntil < p.incomeOn).toBe(true);
-      expect(p.hint!.daily).toBeGreaterThan(base.dailyLimit);
+      expect(p.hint!.daily).toBeGreaterThan(p.hint!.untilIncome);
       expect(p.hint!.daily).toBeLessThan(460_000);
     });
 
-    it("is absent when the rounded middle is no step above the limit", () => {
-      // (2,390 + 2,300) / 2 = 2,345 → ₴2,300, the limit itself.
+    it("is absent when the rounded middle is no step above what lasts until the income", () => {
+      // (2,390 + 2,300) / 2 = 2,345 → ₴2,300, the same as what lasts until the income.
       const p = pace({ ...base, avgDailySpend: 239_000 });
+      expect(p).not.toBeNull();
+      expect(p!.hint).toBeUndefined();
+    });
+
+    it("is absent when what lasts until the income is above the middle", () => {
+      // A ₴2,000 limit (the lifestyle cap): (53,000 − 2,000) / 22 = 2,318 → ₴2,300; the middle (2,500 + 2,000) / 2 → ₴2,200.
+      const p = pace({ ...base, dailyLimit: 200_000, avgDailySpend: 250_000 });
       expect(p).not.toBeNull();
       expect(p!.hint).toBeUndefined();
     });
@@ -82,30 +90,53 @@ describe("pace", () => {
       expect(p!.hint).toBeUndefined();
     });
 
-    it("is absent when the limit itself does not last until the income (the food floor lifted it)", () => {
-      // ₴5,000 over 23 days is ₴217 a day; the limit was lifted to the ₴450 floor and would run out before the income.
-      const p = pace({ ...base, free: 500_000, dailyLimit: 45_000, avgDailySpend: 100_000 });
+    it("names its own amount until the income when the food floor lifted the limit", () => {
+      // ₴5,000 over 23 days is ₴217 a day; the limit is the ₴450 floor. (5,000 − 450) / 22 = 206.8 → ₴200 until the income.
+      expect(pace({ ...base, free: 500_000, dailyLimit: 45_000, avgDailySpend: 100_000 })?.hint).toEqual({
+        daily: 70_000,
+        lastsUntil: "2026-11-29",
+        untilIncome: 20_000,
+      });
+    });
+
+    it("is absent when what lasts until the income rounds down to ₴0", () => {
+      // (2,000 − 450) / 22 = ₴70.45 a day, though ₴1,700 a day (the middle) lasts one day longer than the pace.
+      const p = pace({ ...base, free: 200_000, dailyLimit: 45_000, avgDailySpend: 300_000 });
       expect(p).not.toBeNull();
       expect(p!.hint).toBeUndefined();
     });
 
-    it("stays once something is spent today under the limit: the limit is set against what it still needs", () => {
-      // ₴150 spent today, ₴52,850 left; from now the limit needs 2,150 today + 22 × 2,300 = ₴52,750.
-      // (A whole 23 × 2,300 = ₴52,900 would no longer fit, though the sentence is still true.)
+    it("is absent when the income is tomorrow: there is no later day to spread the money over (and no division by zero)", () => {
+      const p = pace({ ...base, today: "2026-12-14", free: 100_000, dailyLimit: 45_000, avgDailySpend: 460_000 });
+      expect(p).toMatchObject({ runOutOn: "2026-12-14", incomeOn: "2026-12-15" });
+      expect(p!.hint).toBeUndefined();
+    });
+
+    it("after a spend today under the limit, leaves the rest of today's limit out of the money until the income", () => {
+      // ₴150 spent today, ₴52,850 left: (52,850 − 2,150) / 22 = 2,304.55 → ₴2,300.
       expect(pace({ ...base, free: 5_285_000, spentToday: 15_000, avgDailySpend: 460_000 })?.hint).toEqual({
         daily: 340_000,
         lastsUntil: "2026-12-07",
+        untilIncome: 230_000,
       });
     });
 
-    it("after today went over the limit, stays only while a limit a day still lasts from tomorrow", () => {
-      // ₴3,000 spent today, ₴50,000 left; nothing is left of today's limit and 22 × 2,300 = ₴50,600 is needed: short.
-      expect(pace({ ...base, free: 5_000_000, spentToday: 300_000, avgDailySpend: 460_000 })?.hint).toBeUndefined();
-      // With a ₴2,200 limit 22 × 2,200 = ₴48,400 fits in ₴50,000.
-      expect(pace({ ...base, free: 5_000_000, dailyLimit: 220_000, spentToday: 300_000, avgDailySpend: 460_000 })?.hint).toEqual({
+    it("after today went over the limit, still shows with what lasts from tomorrow", () => {
+      // ₴3,000 spent today, ₴50,000 left, nothing left of today's limit: 50,000 / 22 = 2,272.73 → ₴2,200.
+      expect(pace({ ...base, free: 5_000_000, spentToday: 300_000, avgDailySpend: 460_000 })?.hint).toEqual({
         daily: 340_000,
         lastsUntil: "2026-12-06",
+        untilIncome: 220_000,
       });
+    });
+
+    it("rounds what lasts until the income down, so the sentence stays true", () => {
+      for (const [free, spentToday] of [[5_000_000, 300_000], [5_285_000, 15_000], [5_300_000, 0], [4_999_999, 0]] as const) {
+        const hint = pace({ ...base, free, spentToday, avgDailySpend: 460_000 })!.hint!;
+        expect(hint.untilIncome % 10_000).toBe(0);
+        expect(Math.max(0, base.dailyLimit - spentToday) + hint.untilIncome * 22).toBeLessThanOrEqual(free);
+        expect(Math.max(0, base.dailyLimit - spentToday) + (hint.untilIncome + 10_000) * 22).toBeGreaterThan(free);
+      }
     });
 
     it("keeps whole kopecks", () => {
