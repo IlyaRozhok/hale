@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { StyleSheet } from "react-native";
-import { DarkTheme, NavigationContainer, type NavigationProp, type ParamListBase } from "@react-navigation/native";
+import { useState, type ReactNode } from "react";
+import { StyleSheet, View } from "react-native";
+import { DarkTheme, NavigationContainer, useIsFocused, type NavigationProp, type ParamListBase } from "@react-navigation/native";
 import { createNativeBottomTabNavigator } from "@bottom-tabs/react-navigation";
 import { tokens } from "@hale/tokens";
 import { Activity } from "./screens/Activity";
@@ -44,26 +44,56 @@ function InsightsTab({ navigation }: { navigation: NavigationProp<ParamListBase>
 const Nothing = () => null;
 
 /**
- * The bottom menu is the system one (UITabBarController): on iOS 26 a glass capsule of four tabs with names,
+ * A tab that is left hides its screen at once. iOS 26 cross-fades the tabs natively, from the tap, and the
+ * screens are transparent over one shared background, so the screen being left stayed visible through the new
+ * one for the whole fade. Hidden, it leaves only the new screen coming in over the background.
+ */
+function Scene({ name, children }: { name: string; children: ReactNode }) {
+  const focused = useIsFocused();
+  return (
+    <View testID={`tab-scene-${name}`} style={[styles.layout, !focused && styles.away]}>
+      {children}
+    </View>
+  );
+}
+
+/**
+ * The bottom menu is the system one (UITabBarController): on iOS 26 a glass capsule of four tabs, icons only,
  * and «+» beside it as a separate glass circle (the tab of the search role). «+» does not switch tabs:
  * it opens «Добавить» over the current screen (Д5). The screens leave LAYOUT.tabBar under their content for it.
+ *
+ * The names stay as the tabs' accessibility labels, for VoiceOver.
  */
 export function MainTabs() {
   const [adding, setAdding] = useState(false);
   return (
     <NavigationContainer theme={theme}>
-      <Tabs.Navigator tabBarActiveTintColor={color.fg.default} screenOptions={{ sceneStyle: styles.scene }}>
+      <Tabs.Navigator
+        tabBarActiveTintColor={color.fg.default}
+        labeled={false}
+        screenOptions={{ sceneStyle: styles.scene }}
+        screenLayout={({ route, children }) => <Scene name={route.name}>{children}</Scene>}
+      >
+        {/* SF Symbols in outline, filled while their tab is the current one. */}
         <Tabs.Screen
           name="Today"
           component={TodayTab}
           options={{ title: "Сегодня", tabBarIcon: ({ focused }) => ({ sfSymbol: focused ? "house.fill" : "house" }) }}
         />
-        <Tabs.Screen name="Activity" component={Activity} options={{ title: "Операции", tabBarIcon: () => ({ sfSymbol: "list.bullet" }) }} />
-        <Tabs.Screen name="Plan" component={Plan} options={{ title: "План", tabBarIcon: () => ({ sfSymbol: "target" }) }} />
+        <Tabs.Screen
+          name="Activity"
+          component={Activity}
+          options={{ title: "Операции", tabBarIcon: ({ focused }) => ({ sfSymbol: focused ? "list.bullet.rectangle.fill" : "list.bullet.rectangle" }) }}
+        />
+        <Tabs.Screen
+          name="Plan"
+          component={Plan}
+          options={{ title: "План", tabBarIcon: ({ focused }) => ({ sfSymbol: focused ? "wallet.bifold.fill" : "wallet.bifold" }) }}
+        />
         <Tabs.Screen
           name="Insights"
           component={InsightsTab}
-          options={{ title: "Итоги", tabBarIcon: ({ focused }) => ({ sfSymbol: focused ? "chart.bar.fill" : "chart.bar" }) }}
+          options={{ title: "Итоги", tabBarIcon: ({ focused }) => ({ sfSymbol: focused ? "chart.pie.fill" : "chart.pie" }) }}
         />
         <Tabs.Screen
           name="Add"
@@ -84,4 +114,6 @@ export function MainTabs() {
 
 const styles = StyleSheet.create({
   scene: { backgroundColor: "transparent" },
+  layout: { flex: 1 },
+  away: { opacity: 0 },
 });
