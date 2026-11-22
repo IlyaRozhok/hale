@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
-import { StyleSheet } from "react-native";
+import { StyleSheet, TextInput } from "react-native";
 import { tokens } from "@hale/tokens";
 import { TxEditSheet } from "./TxEditSheet";
 import type { CategoryDto, TransactionDto } from "@hale/contracts";
@@ -320,6 +320,23 @@ describe("TxEditSheet: categories from the server and «Всегда так» (�
     await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { category: "c_new", applyToSimilar: false }));
     await waitFor(() => expect(screen.queryByText("Новая категория")).toBeNull());
     expect(await screen.findByText("Всегда так для «Сільпо»?")).toBeTruthy();
+  });
+
+  // On the phone a keyboard that rises while the form is still sliding in leaves the form off the screen, under its
+  // own scrim, until the next tap — and that tap lands on the scrim and closes it. So the name is focused only once
+  // the form has slid in.
+  it("«Новая»: the name takes the keyboard only once the form has slid in", async () => {
+    const focus = jest.spyOn(TextInput.prototype, "focus");
+    try {
+      await renderWith(<TxEditSheet tx={silpo} onClose={noop} />, fakeApi({ categories: jest.fn(async () => LIST) }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Новая" }));
+      const field = await screen.findByLabelText("Название");
+      expect(field.props.autoFocus).toBeFalsy();
+      expect(focus).not.toHaveBeenCalled();
+      await waitFor(() => expect(focus).toHaveBeenCalledTimes(1));
+    } finally {
+      focus.mockRestore();
+    }
   });
 });
 

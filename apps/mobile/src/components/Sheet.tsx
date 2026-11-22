@@ -23,13 +23,24 @@ const { color, radius, space, touchMin, type } = tokens;
 const OPEN_MS = 280;
 const CLOSE_MS = 200;
 
-type Props = { title: string; subtitle?: string; onClose: () => void; children: ReactNode };
+type Props = {
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  /**
+   * The panel has slid in. A field that wants the keyboard at once focuses here, not with autoFocus: a keyboard that
+   * rises while the panel still slides re-lays the sheet out, and on the phone the panel stays off the screen, under
+   * its own scrim, until the next tap.
+   */
+  onOpened?: () => void;
+  children: ReactNode;
+};
 
 /**
  * A bottom sheet: glass over a scrim that fades in place, so only the panel moves. Closed with a
  * button, by tapping outside or by swiping it down.
  */
-export function Sheet({ title, subtitle, onClose, children }: Props) {
+export function Sheet({ title, subtitle, onClose, onOpened, children }: Props) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const shown = useRef(new Animated.Value(0)).current;
@@ -37,9 +48,11 @@ export function Sheet({ title, subtitle, onClose, children }: Props) {
   const scrollTop = useRef(0);
   const closing = useRef(false);
   const still = useRef(false);
+  const opened = useRef(onOpened);
+  opened.current = onOpened;
 
   const animate = useCallback(
-    (toValue: number, ms: number, done?: () => void) =>
+    (toValue: number, ms: number, done?: (result: { finished: boolean }) => void) =>
       Animated.timing(shown, {
         toValue,
         duration: still.current ? 0 : ms,
@@ -52,7 +65,9 @@ export function Sheet({ title, subtitle, onClose, children }: Props) {
   useEffect(() => {
     void AccessibilityInfo.isReduceMotionEnabled().then((reduced) => {
       still.current = reduced === true;
-      animate(1, OPEN_MS);
+      animate(1, OPEN_MS, ({ finished }) => {
+        if (finished && !closing.current) opened.current?.();
+      });
     });
   }, [animate]);
 
