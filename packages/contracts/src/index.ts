@@ -505,6 +505,11 @@ export interface TodayDto {
   streak: number;
   /** The money day by day until the next income. Absent from a server older than the app. */
   runway?: RunwayDto;
+  /**
+   * Task Д4: whether the person has taxes — an income pays the fop tax, or a tax payment entered earlier is still unpaid.
+   * False hides «Налоги» on «План». Absent from an older server: taxes are shown, as before.
+   */
+  taxes?: boolean;
 }
 
 /** Own money without the tax reserve and debts, at the start of each day, if every day spends its limit. */

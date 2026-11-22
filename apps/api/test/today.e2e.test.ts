@@ -481,6 +481,13 @@ describe("loan tracking", () => {
 });
 
 describe("tax reserve and own money", () => {
+  // The person here is a fop: an income pays the fop tax (Д4). It has no schedule, so it dates no income and receives no money.
+  beforeEach(async () => {
+    await ds.query(
+      `INSERT INTO expected_incomes (name, pays_fop_tax, amount, currency, schedule, window_start_day, window_end_day) VALUES ('ФОП', true, 0, 'UAH', 'none', 1, 31)`,
+    );
+  });
+
   it("subtracts a quarterly estimate, unpaid scheduled tax and takes off unlinked tax payments", async () => {
     await account("black", 1_000_000);
     const fop = await account("fop", 500_000);
@@ -2933,5 +2940,55 @@ describe("near zero free money the limit does not jump (Б47 (3))", () => {
     at("2026-11-03T10:00:00Z");
     await today();
     expect(await calendarDay("2026-11-02")).toMatchObject({ date: "2026-11-02", shortageStart: true });
+  });
+});
+
+describe("taxes are optional (Д4)", () => {
+  const plan = () => app.get(PlanService);
+  const taxRows = () => ds.query(`SELECT name, amount::int AS amount FROM scheduled_payments WHERE kind='tax' ORDER BY id`);
+  /** Money on the fop account this quarter and a quarterly ESV, with no income that pays the fop tax. */
+  const setup = async () => {
+    await ds.query(`UPDATE settings SET esv_quarter=570702`);
+    await account("black", 1_000_000);
+    const fop = await account("fop", 500_000);
+    await income("usdc", "2026-11-12");
+    await tx(fop, 1_000_000, "income", { date: "2026-10-20" });
+  };
+
+  it("with no income paying the fop tax, nothing is held back, no estimate is written and taxes are off", async () => {
+    await setup();
+    const day = await today();
+    expect(day.state.free).toBe(1_500_000);
+    expect(day.taxes).toBe(false);
+    at("2027-01-01T10:00:00Z");
+    expect(await plan().ensureTaxEstimate()).toBe(false);
+    await plan().dailyTaxEstimateJob();
+    expect(await taxRows()).toEqual([]);
+  });
+
+  it("a tax payment entered before stays reserved and shown until it is paid", async () => {
+    await setup();
+    await payment("War levy", 223_932, "2026-11-20", "tax");
+    const day = await today();
+    expect(day.state.free).toBe(1_500_000 - 223_932);
+    expect(day.taxes).toBe(true);
+    const id = (await ds.query(`SELECT id FROM scheduled_payments WHERE kind='tax'`))[0].id as number;
+    await api.post(`/plan/payments/${id}/mark-paid`).expect(201);
+    expect((await today()).taxes).toBe(false);
+    expect(await taxRows()).toHaveLength(1);
+  });
+
+  it("an income marked as paying the fop tax turns the reserve and the estimate on", async () => {
+    await setup();
+    await api
+      .post("/plan/expected-incomes", { name: "ФОП", amount: 6_000_000, currency: "UAH", schedule: "monthly", window_start_day: 25, window_end_day: 28, pays_fop_tax: true })
+      .expect(201);
+    const day = await today();
+    // 6% of 1,000,000 and the ESV accrued over 33 of the quarter's 92 days.
+    expect(day.state.free).toBe(1_500_000 - 60_000 - Math.round((570_702 * 33) / 92));
+    expect(day.taxes).toBe(true);
+    at("2027-01-01T10:00:00Z");
+    expect(await plan().ensureTaxEstimate()).toBe(true);
+    expect(await taxRows()).toEqual([{ name: "Налог за 4 кв. 2026 (оценка)", amount: 60_000 + 570_702 }]);
   });
 });

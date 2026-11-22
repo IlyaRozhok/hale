@@ -22,7 +22,7 @@ import { SetAsideSheet } from "../components/SetAsideSheet";
 import { TaxSheet } from "../components/TaxPayments";
 import { formatDollars, formatMoney, formatOriginal } from "../format";
 import { placeName, placeOpens, setAsideDetail } from "../ownMoney";
-import { goalsLine, incomesLine, installmentsLine, paymentsLine, taxLine } from "../planSummary";
+import { goalsLine, incomesLine, installmentsLine, paymentsLine, taxesShown, taxLine } from "../planSummary";
 
 const { color, radius, space, touchMin, type } = tokens;
 
@@ -75,6 +75,11 @@ export function Plan() {
       opens === "binance" ? () => setOpen("binance") : opens === "account" || opens === "manual" ? () => openAccount({ item, amount: detail }) : () => undefined;
     return { key: `${item.source ?? item.kind}:${item.id ?? i}`, label: placeName(item), detail, onPress };
   };
+  // Not before «Сегодня» is known, or a person without taxes would see «Налоги» come and go (Д4).
+  const taxRows: PlanRow[] =
+    !today.isPending && taxesShown(today.data?.taxes, payments.data)
+      ? [{ label: "Налоги", detail: payments.data ? taxLine(payments.data) : undefined, onPress: () => setOpen("tax") }]
+      : [];
   const cashRow: PlanRow = { label: "Наличные", detail: cash.data ? (cash.data.started ? formatMoney(cash.data.balance) : "не начат") : undefined, onPress: () => setOpen("cash") };
   const binanceRow: PlanRow = { label: "Binance", detail: balances.data ? (binance ? formatDollars(binance.amount) : "не задан") : undefined, onPress: () => setOpen("binance") };
 
@@ -133,7 +138,7 @@ export function Plan() {
         rows={[
           { label: "Платежи", detail: payments.data ? paymentsLine(payments.data) : undefined, onPress: () => setOpen("payments") },
           { label: "Рассрочки", detail: payments.data ? installmentsLine(payments.data, today.data?.usdRate) : undefined, onPress: () => setOpen("installments") },
-          { label: "Налоги", detail: payments.data ? taxLine(payments.data) : undefined, onPress: () => setOpen("tax") },
+          ...taxRows,
           { label: "Займы", detail: stillOpen === undefined ? undefined : stillOpen > 0 ? `открыто ${formatMoney(stillOpen)}` : "открытых нет", onPress: () => setOpen("loans") },
         ]}
       />

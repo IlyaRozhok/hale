@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeDaily } from "./daily";
-import { taxReserve } from "./tax.js";
+import { taxesOn, taxReserve } from "./tax.js";
 
 const base = {
   fopIncomeQuarter: 0,
@@ -11,6 +11,7 @@ const base = {
   paidAgainstCurrentQuarter: 0,
   unpaidScheduled: 0,
   currentQuarterHasRows: false,
+  paysFopTax: true,
 };
 
 describe("taxReserve", () => {
@@ -47,5 +48,18 @@ describe("taxReserve", () => {
       }).free;
     };
     expect(run(5_000_000, 794_634)).toBe(run(5_000_000 - 794_634, 0));
+  });
+  it("accrues nothing when no income pays the fop tax, but keeps tax rows already entered (Д4)", () => {
+    const input = { ...base, fopIncomeQuarter: 1_000_000, esvQuarter: 570_702, dayOfQuarter: 92, paysFopTax: false };
+    expect(taxReserve(input)).toBe(0);
+    expect(taxReserve({ ...input, unpaidScheduled: 500_000 })).toBe(500_000);
+  });
+});
+
+describe("taxesOn", () => {
+  it("is on when an income pays the fop tax, or a tax payment is still unpaid (Д4)", () => {
+    expect(taxesOn({ paysFopTax: true, unpaidTaxRows: 0 })).toBe(true);
+    expect(taxesOn({ paysFopTax: false, unpaidTaxRows: 1 })).toBe(true);
+    expect(taxesOn({ paysFopTax: false, unpaidTaxRows: 0 })).toBe(false);
   });
 });

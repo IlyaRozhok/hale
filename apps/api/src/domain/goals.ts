@@ -13,11 +13,13 @@ export interface LeftForGoalsInput {
   /** Installments due in this calendar month, paid or not. */
   installments: Minor;
   lifestyleCap: Minor;
+  /** Some income pays the fop tax (task Д4); without one there is no ESV either. */
+  paysFopTax: boolean;
 }
 
 /** What remains each month for goals under a lifestyle cap, never below zero (design §5.2). */
 export function leftForGoalsMonthly(i: LeftForGoalsInput): Minor {
   const tax = Math.round((i.fopIncome * i.taxRateBp) / 10_000);
-  const esv = Math.round(i.esvQuarter / 3);
+  const esv = i.paysFopTax ? Math.round(i.esvQuarter / 3) : 0;
   return Math.max(0, i.income - tax - esv - i.recurring - i.installments - i.lifestyleCap);
 }

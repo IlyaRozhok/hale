@@ -47,6 +47,27 @@ describe("Plan, calm groups", () => {
     expect(screen.queryByText("в том числе наличные")).toBeNull();
   });
 
+  it("has no «Налоги» and no word «ФОП» when the server says there are no taxes (Д4)", async () => {
+    await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => ({ ...todayWithItems(), taxes: false })) }));
+    const more = await screen.findByRole("button", { name: /^Ещё: .*рассрочки/ });
+    expect(String(more.props.accessibilityLabel)).not.toMatch(/налог/i);
+    await fireEvent.press(more);
+    expect(await screen.findByRole("button", { name: "Рассрочки" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Налоги" })).toBeNull();
+    expect(screen.queryByText(/налог/i)).toBeNull();
+    expect(screen.queryByText(/ФОП/)).toBeNull();
+  });
+
+  it("keeps «Налоги» with an unpaid tax payment, even when the server says there are no taxes (Д4)", async () => {
+    await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => ({ ...todayFixture(), taxes: false })), payments: jest.fn(async () => [taxFixture()]) }));
+    expect(await screen.findByRole("button", { name: "Налоги" })).toBeTruthy();
+  });
+
+  it("shows «Налоги» when the server has taxes on, or does not say (Д4)", async () => {
+    await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => ({ ...todayFixture(), taxes: true })) }));
+    expect(String((await screen.findByRole("button", { name: /^Ещё: .*рассрочки/ })).props.accessibilityLabel)).toMatch(/налоги/i);
+  });
+
   it("a part with something in it stays in view", async () => {
     await renderWith(<Plan />, fakeApi({ payments: jest.fn(async () => [taxFixture()]) }));
     expect(await screen.findByRole("button", { name: "Налоги" })).toBeTruthy();

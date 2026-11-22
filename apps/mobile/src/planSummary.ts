@@ -118,6 +118,14 @@ export function taxLine(payments: readonly ScheduledPaymentDto[]): string {
   return `${formatMoney(rows.reduce((s, p) => s + p.amount, 0))}, ближайший ${shortDate(rows[0]!.due_on)}`;
 }
 
+/**
+ * Task Д4: «Налоги» is on «План» unless the server says the person has no taxes (no income pays the fop tax) and no
+ * tax payment here is still unpaid. An older server does not say, and then it is shown, as before.
+ */
+export function taxesShown(taxes: boolean | undefined, payments: readonly ScheduledPaymentDto[] | undefined): boolean {
+  return taxes !== false || (payments !== undefined && unpaid(payments, "tax").length > 0);
+}
+
 export function goalsLine(goals: readonly GoalDto[]): string {
   if (goals.length === 0) return NONE;
   const sum = (pick: (g: GoalDto) => number) => goals.reduce((s, g) => s + pick(g), 0);

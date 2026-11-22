@@ -1,5 +1,11 @@
 import type { EntityManager } from "typeorm";
 
+/** Task Д4: some income pays the fop tax. Without one nothing accrues and no estimate is written. */
+export async function paysFopTax(m: EntityManager): Promise<boolean> {
+  const [{ on }] = (await m.query(`SELECT EXISTS (SELECT 1 FROM expected_incomes WHERE pays_fop_tax) AS on`)) as [{ on: boolean }];
+  return on;
+}
+
 /**
  * What a quarter's tax accrual is built from: income on the FOP account, and tax payments that no
  * scheduled tax row claims, by `transaction_id` or `payment_links` (those belong to the quarter they

@@ -1,10 +1,13 @@
 import request from "supertest";
 import { DataSource } from "typeorm";
+import { createDataSource, migrations } from "../src/db/data-source";
+import { IncomeSources1796860800000 } from "../src/db/migrations/0039-income-sources";
 import { PlanService } from "../src/plan/plan.service";
 import { Clock } from "../src/time/clock";
 import { TodayService } from "../src/today/today.service";
 import { createTestApp, TEST_PASSWORD } from "./app";
 import { fillOwnerAccounts } from "./owner-accounts";
+import { createTestDatabase } from "./db";
 
 // The owner's accounts (owner-accounts.ts) with incomes shaped like his (Д3а): the fop income with its October money on
 // the fop account (so the quarter's tax accrues) and its November month still waiting, and a USDC income received in
@@ -43,6 +46,21 @@ export async function fillOwnerIncomes(q: Query): Promise<void> {
      VALUES ('in-white', $1, '2026-11-05T10:00:00Z', '2026-11-05', 'x', 5000000, 5000000, 'person_in', '{}')`,
     [await account("white")],
   );
+}
+
+/** A new database with the owner's incomes filled at 0038 and every migration since run over them, 0039 included. */
+export async function createOwnerIncomesDatabase(): Promise<string> {
+  const url = await createTestDatabase();
+  const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(IncomeSources1796860800000)) });
+  await before.initialize();
+  await before.runMigrations();
+  await fillOwnerIncomes((sql, args) => before.query(sql, args));
+  await before.destroy();
+  const ds = createDataSource(url);
+  await ds.initialize();
+  await ds.runMigrations();
+  await ds.destroy();
+  return url;
 }
 
 /** The moment the comparison is read at: a Kyiv day inside the USDC window, before the fop window. */
