@@ -12,10 +12,11 @@ export interface Pace {
   incomeOn: string;
   /**
    * A calm step between the limit and the pace: about `daily` a day the same free money lasts until `lastsUntil`,
-   * later than `runOutOn` and still before the income. Present only when the limit itself lasts until the income,
-   * so that «around the limit — until the income» is true too.
+   * later than `runOutOn` and still before the income. `untilIncome` (task А24а2) is what a day may take from tomorrow
+   * to last until the income: the free money without what is left of today's limit, over the days after today
+   * before the income, rounded down to ₴100. Always below `daily`.
    */
-  hint?: { daily: Minor; lastsUntil: string };
+  hint?: { daily: Minor; lastsUntil: string; untilIncome: Minor };
 }
 
 /**
@@ -41,14 +42,23 @@ export function pace(i: {
   if (runOutOn === null || runOutOn >= incomeOn) return null;
   const result: Pace = { avgDaily: i.avgDailySpend, runOutOn, incomeOn };
 
-  // The days to cover are those before the income day, as in the limit itself (computeDaily's `daysLeft`). From now on
-  // the limit needs what is left of today's (nothing once it is spent past) and a whole limit for each later day.
+  // The days to cover are those before the income day, as in the limit itself (computeDaily's `daysLeft`). Today
+  // keeps what is left of its limit (nothing once it is spent past); the rest of the free money is spread over the
+  // later days. Rounded down, so that «about this much — until the income» stays true. With the income tomorrow there
+  // is no later day: no hint.
   const laterDays = daysBetween(i.today, incomeOn) - 1;
-  const limitLasts = i.dailyLimit > 0 && Math.max(0, i.dailyLimit - i.spentToday) + i.dailyLimit * laterDays <= i.free;
-  const daily = Math.floor((i.avgDailySpend + i.dailyLimit) / 2 / HINT_STEP) * HINT_STEP;
-  if (limitLasts && daily > i.dailyLimit && daily < i.avgDailySpend) {
+  if (laterDays < 1) return result;
+  const restOfToday = Math.max(0, i.dailyLimit - i.spentToday);
+  const untilIncome = roundDown(Math.max(0, i.free - restOfToday) / laterDays);
+  const daily = roundDown((i.avgDailySpend + i.dailyLimit) / 2);
+  if (untilIncome > 0 && daily > untilIncome && daily < i.avgDailySpend) {
     const lastsUntil = runOutDate({ free: i.free, avgDailySpend: daily, today: i.today })!;
-    if (lastsUntil > runOutOn && lastsUntil < incomeOn) result.hint = { daily, lastsUntil };
+    if (lastsUntil > runOutOn && lastsUntil < incomeOn) result.hint = { daily, lastsUntil, untilIncome };
   }
   return result;
+}
+
+/** Down to a whole ₴100. */
+function roundDown(kopecks: number): Minor {
+  return Math.floor(kopecks / HINT_STEP) * HINT_STEP;
 }

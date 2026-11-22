@@ -2458,12 +2458,13 @@ describe("questions, upcoming and run-out", () => {
       const r = await today();
       expect(r.state.free).toBe(5_300_000);
       expect(r.state.dailyLimit).toBe(230_434);
-      // 53,000 / 4,600 = 11 whole days; (4,600 + 2,304) / 2 → ₴3,400, 15 whole days.
+      // 53,000 / 4,600 = 11 whole days; (4,600 + 2,304) / 2 → ₴3,400, 15 whole days;
+      // from tomorrow (53,000 − 2,304.34) / 22 = 2,304.35 → ₴2,300 a day until the income.
       expect(r.pace).toEqual({
         avgDaily: 460_000,
         runOutOn: "2026-11-13",
         incomeOn: "2026-11-25",
-        hint: { daily: 340_000, lastsUntil: "2026-11-17" },
+        hint: { daily: 340_000, lastsUntil: "2026-11-17", untilIncome: 230_000 },
       });
       expect(r.pace.runOutOn).toBe(r.runOutOn);
     });
@@ -2471,37 +2472,35 @@ describe("questions, upcoming and run-out", () => {
     it("keeps the hint after a spend today under the limit", async () => {
       await fastWeek();
       const card = (await ds.query(`SELECT id FROM accounts`))[0].id as number;
-      expect((await today()).pace.hint).toEqual({ daily: 340_000, lastsUntil: "2026-11-17" });
+      expect((await today()).pace.hint).toEqual({ daily: 340_000, lastsUntil: "2026-11-17", untilIncome: 230_000 });
       await tx(card, -15_000, "spend", { date: "2026-11-02" });
       await setBalance(card, 5_285_000);
       const r = await today();
-      // The day's limit stays fixed; from now it needs 2,154.34 today + 22 × 2,304.34, which fits in ₴52,850.
+      // The day's limit stays fixed; (52,850 − 2,154.34 left of today's limit) / 22 = 2,304.35 → ₴2,300.
       expect(r.state.dailyLimit).toBe(230_434);
       expect(r.pace).toEqual({
         avgDaily: 460_000,
         runOutOn: "2026-11-13",
         incomeOn: "2026-11-25",
-        hint: { daily: 340_000, lastsUntil: "2026-11-17" },
+        hint: { daily: 340_000, lastsUntil: "2026-11-17", untilIncome: 230_000 },
       });
     });
 
-    it("after a spend today over the limit, keeps the hint only while a limit a day lasts from tomorrow", async () => {
+    it("keeps the hint after a spend today over the limit, with what lasts from tomorrow", async () => {
       await fastWeek();
       const card = (await ds.query(`SELECT id FROM accounts`))[0].id as number;
       await today();
       await tx(card, -300_000, "spend", { date: "2026-11-02" });
       await setBalance(card, 5_000_000);
-      // 22 × 2,304.34 = ₴50,695 does not fit in ₴50,000: «around the limit — until the income» would not be true.
-      const short = await today();
-      expect(short.pace).toMatchObject({ runOutOn: "2026-11-12", incomeOn: "2026-11-25" });
-      expect(short.pace.hint).toBeUndefined();
-
-      // A ₴2,000 limit (the lifestyle cap): 22 × 2,000 = ₴44,000 fits.
-      await ds.query(`UPDATE settings SET lifestyle_cap=6000000`);
-      await ds.query(`DELETE FROM daily_snapshots`);
       const r = await today();
-      expect(r.state.dailyLimit).toBe(200_000);
-      expect(r.pace.hint).toEqual({ daily: 330_000, lastsUntil: "2026-11-17" });
+      expect(r.state.dailyLimit).toBe(230_434);
+      // 50,000 / 4,600 = 10 whole days; at ₴3,400, 14; nothing is left of today's limit: 50,000 / 22 = 2,272.73 → ₴2,200.
+      expect(r.pace).toEqual({
+        avgDaily: 460_000,
+        runOutOn: "2026-11-12",
+        incomeOn: "2026-11-25",
+        hint: { daily: 340_000, lastsUntil: "2026-11-16", untilIncome: 220_000 },
+      });
     });
 
     it("leaves the limit as it was", async () => {
