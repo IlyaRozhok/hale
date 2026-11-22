@@ -12,21 +12,11 @@ type Item = Subscriptions["items"][number];
 /** «1 подписка», «3 подписки», «6 подписок». */
 export const subscriptionsText = (n: number): string => `${n} ${["подписка", "подписки", "подписок"][pluralIndex(n)]}`;
 
-/** «месяц», «2 месяца», «5 месяцев»: how long a subscription has not been charged. */
-const monthsText = (n: number): string => (n === 1 ? "месяц" : `${n} ${["месяц", "месяца", "месяцев"][pluralIndex(n)]}`);
-
 export const isActive = (i: Item): boolean => i.missed === 0;
 
-/** The one quiet note under the row on «Итоги»: the first raised one, else the first not charged for a while, else none. */
-export function subscriptionsNote(items: Item[]): string | null {
-  const raised = items.find((i) => isActive(i) && i.raisedBy > 0);
-  if (raised) return `${raised.name} подорожала на ${formatMoney(raised.raisedBy)}`;
-  const missed = items.find((i) => !isActive(i));
-  if (missed) return `${missed.name} не списывалась ${monthsText(missed.missed)}`;
-  return null;
-}
-
-export const monthlyText = (s: Subscriptions): string => `${formatMoney(s.monthly)} в месяц`;
+/** «₴1,886 в месяц · 6 подписок»: the total a month and how many are still charged. */
+export const subscriptionsSummary = (s: Subscriptions): string =>
+  `${formatMoney(s.monthly)} в месяц · ${subscriptionsText(s.items.filter(isActive).length)}`;
 
 /**
  * The subscriptions found (task В4, variant Б): the ones still charged with their latest sums, then apart the ones
@@ -34,12 +24,29 @@ export const monthlyText = (s: Subscriptions): string => `${formatMoney(s.monthl
  * Opened from the phrase of the day's observation (В7), it ends with a quiet «Не показывать такое» (`onDismiss`).
  */
 export function SubscriptionsSheet({ subscriptions, onClose, onDismiss }: { subscriptions: Subscriptions; onClose: () => void; onDismiss?: () => void }) {
+  return (
+    <Sheet title="Подписки" subtitle={subscriptionsSummary(subscriptions)} onClose={onClose}>
+      <SubscriptionsList subscriptions={subscriptions} />
+      {onDismiss && (
+        <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.dismiss}>
+          <Text style={styles.dismissText}>Не показывать такое</Text>
+        </Pressable>
+      )}
+    </Sheet>
+  );
+}
+
+/**
+ * The list itself: in the sheet, and on «Итоги» under «Подписки» (the screen's variant А). The ones still charged,
+ * then apart the ones not charged for a while, then how they were found. The rows lead nowhere yet.
+ */
+export function SubscriptionsList({ subscriptions }: { subscriptions: Subscriptions }) {
   const active = subscriptions.items.filter(isActive);
   const missed = subscriptions.items.filter((i) => !isActive(i));
   return (
-    <Sheet title="Подписки" subtitle={`${monthlyText(subscriptions)} · ${subscriptionsText(active.length)}`} onClose={onClose}>
+    <>
       {active.length > 0 && (
-        <View style={styles.card}>
+        <View testID="subscriptions-active-card" style={styles.card}>
           {active.map((i, n) => (
             <ItemRow
               key={`${i.key}-${i.lastDate}`}
@@ -54,7 +61,7 @@ export function SubscriptionsSheet({ subscriptions, onClose, onDismiss }: { subs
       {missed.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.eyebrow}>Давно не списывались</Text>
-          <View style={styles.card}>
+          <View testID="subscriptions-missed-card" style={styles.card}>
             {missed.map((i, n) => (
               <ItemRow
                 key={`${i.key}-${i.lastDate}`}
@@ -69,12 +76,7 @@ export function SubscriptionsSheet({ subscriptions, onClose, onDismiss }: { subs
         </View>
       )}
       <Text style={styles.footer}>Нашли по повторам: тот же магазин, близкая сумма, примерно раз в месяц.</Text>
-      {onDismiss && (
-        <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.dismiss}>
-          <Text style={styles.dismissText}>Не показывать такое</Text>
-        </Pressable>
-      )}
-    </Sheet>
+    </>
   );
 }
 

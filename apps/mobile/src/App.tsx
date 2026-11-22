@@ -48,7 +48,7 @@ function TodayTab({ navigation }: { navigation: NavigationProp<ParamListBase> })
 
 function InsightsTab({ navigation }: { navigation: NavigationProp<ParamListBase> }) {
   // A category's spending over the shown days of its month, as the filters of «Операции» put it.
-  // «Из них на желаемое» (В6): the purchases of «желаемое» over the same days.
+  // «Желаемое» (В6): the purchases of «желаемое» over the same days.
   return (
     <Insights
       onOpenCategory={(category, from, to) => navigation.navigate("Activity", { category, from, to, at: Date.now() })}

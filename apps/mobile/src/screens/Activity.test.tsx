@@ -508,7 +508,7 @@ describe("Activity filters", () => {
     });
   });
 
-  describe("arriving from «Из них на желаемое» of «Итоги» (В6)", () => {
+  describe("arriving from the row «Желаемое» of «Итоги» (В6)", () => {
     type Params = { day?: string; category?: string; want?: boolean; from?: string; to?: string; at: number };
     let arrive: (p: Omit<Params, "at">) => Promise<void>;
     function Arriving() {
