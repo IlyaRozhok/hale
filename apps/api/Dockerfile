@@ -4,6 +4,8 @@ ENV CI=true
 RUN corepack enable
 WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# pnpm checks every patch named in pnpm-workspace.yaml exists, even for packages this filter does not install.
+COPY patches patches/
 COPY apps/api/package.json apps/api/
 COPY packages/contracts/package.json packages/contracts/
 RUN pnpm install --frozen-lockfile --filter @hale/api...
