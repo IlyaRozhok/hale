@@ -20,6 +20,7 @@ For agents, in English. Each item cost someone time once. When you hit a new one
 
 ## Tests
 
+- **`jest.spyOn(TextInput.prototype, "focus")` returns the preset's shared `jest.fn`** with calls from earlier tests in the file still on it: call `mockClear()` right after spying. A test that passes alone and fails after a sibling under load is the sign. To test what happens when a sheet finishes opening, use `holdSheetOpenings()` from `apps/mobile/src/testing.tsx` instead of waiting: in jest the open animation ends in ~16 ms (22 November 2026, #187).
 - **Tests with sheets.** A sheet closes with a 200 ms animation and only then disappears. In tests the list under the sheet can be pressed while it is closing (on the phone the scrim blocks that), and the same sheet reopened for another row lives out the old animation and closes. So after «Закрыть» first wait until the sheet is gone (`waitFor(... toBeNull())`), and only then press on. Without this a test passes on a fast machine and fails in CI (11 November 2026: two tests, fixed).
 
 - **A loading state that shows the same text as the loaded one.** On «Итоги» the subtitle («Ноябрь, 1–16») is visible while the month still loads; a test that waits for it and then asserts rows is flaky. Wait for text only the loaded data produces (an amount, a row) before asserting (16 November 2026, В2).
@@ -50,6 +51,9 @@ For agents, in English. Each item cost someone time once. When you hit a new one
 
 ## Simulator and stand
 
+- **Keyboard bugs in sheets reproduce only with the on-screen keyboard.** With the simulator's default hardware keyboard a field focusing during a sheet's slide-in looks fine; turn the on-screen keyboard on with the simulator tool's `set_keyboard` `show` while a field has focus (it may report "stays hidden" until one does). Typing or a hardware paste can switch it off again; turn it back to `hide` afterwards (22 November 2026, #187).
+- **The simulator tool's `text` pastes through the clipboard and garbles Cyrillic;** use Latin letters or digits. `press_key select_all` is refused with a non-U.S. layout: clear a field with `delete` and `count` (22 November 2026).
+- **`expo run:ios` runs `pod install` itself,** so it also needs `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` (22 November 2026, #190). A new native module (e.g. `react-native-bottom-tabs`) needs `pnpm install`, a fresh `pod install` and a new dev client in the simulator and a new Release build on the iPhone.
 - **Stopping Metro.** `pkill -f "expo start"` does not find the stand's Metro (the process is named differently). Use `lsof -ti tcp:8082 -sTCP:LISTEN | xargs kill`.
 - **Taps arrive late sometimes.** After a tap wait 2 s and only then take a screenshot, otherwise the next tap opens the wrong sheet and the screenshot shows the screen from before the tap. The floating developer-menu button sits on top of «Закрыть» in sheets.
 - **The simulator tool types in the current layout, and it is Russian:** Latin letters arrive as Cyrillic (`voxiuqfaiw` becomes `мщчшгйафшц`). Use digits only for the test password, or paste it (see `scripts/sim/README.md`). The tool loses short taps: use a duration of at least 0.2 s. Its `touch_path` and `swipe` are no good for checking gestures in sheets: a real gesture needs `app_drag` through control of the Simulator window.
