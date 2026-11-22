@@ -2437,6 +2437,64 @@ describe("questions, upcoming and run-out", () => {
     expect(r.upcoming).toEqual([{ id: expect.any(String), name: "Rent", amount: 100_000, dueOn: "2026-11-06", kind: "obligation", currency: "UAH", paid: 0 }]);
     // free = 900,000 / avg 10,000 per day = 90 days after today
     expect(r.runOutOn).toBe("2027-01-31");
+    // The money lasts well past the income: no pace line (А24).
+    expect(r.pace).toBeUndefined();
+  });
+
+  describe("the pace when the money runs out before the income (А24)", () => {
+    /** ₴53,000 left, income on 25 November (23 days), and ₴4,600 spent each of the last 7 days. */
+    const week = async (card: number, daily: number) => {
+      for (let d = 26; d <= 31; d++) await tx(card, -daily, "spend", { date: `2026-10-${d}` });
+      await tx(card, -daily, "spend", { date: "2026-11-01" });
+    };
+    const fastWeek = async () => {
+      const card = await account("black", 5_300_000);
+      await income("fop", "2026-11-25");
+      await week(card, 460_000);
+    };
+
+    it("names the usual day, the day the money runs out, the income and a calm middle step", async () => {
+      await fastWeek();
+      const r = await today();
+      expect(r.state.free).toBe(5_300_000);
+      expect(r.state.dailyLimit).toBe(230_434);
+      // 53,000 / 4,600 = 11 whole days; (4,600 + 2,304) / 2 → ₴3,400, 15 whole days.
+      expect(r.pace).toEqual({
+        avgDaily: 460_000,
+        runOutOn: "2026-11-13",
+        incomeOn: "2026-11-25",
+        hint: { daily: 340_000, lastsUntil: "2026-11-17" },
+      });
+      expect(r.pace.runOutOn).toBe(r.runOutOn);
+    });
+
+    it("leaves the limit as it was", async () => {
+      const card = await account("black", 5_300_000);
+      await income("fop", "2026-11-25");
+      await week(card, 10_000);
+      const calm = await today();
+      await ds.query(`DELETE FROM transactions`);
+      await ds.query(`DELETE FROM daily_snapshots`);
+      await week(card, 460_000);
+      const fast = await today();
+      expect(calm.pace).toBeUndefined();
+      expect(fast.pace).toBeDefined();
+      expect(fast.state.dailyLimit).toBe(calm.state.dailyLimit);
+    });
+
+    it("is absent without a known income date", async () => {
+      await fastWeek();
+      await ds.query(`DELETE FROM income_events`);
+      const r = await today();
+      expect(r.runOutOn).toBe("2026-11-13");
+      expect(r.pace).toBeUndefined();
+    });
+
+    it("is absent when nothing was spent", async () => {
+      await account("black", 5_300_000);
+      await income("fop", "2026-11-25");
+      expect((await today()).pace).toBeUndefined();
+    });
   });
 });
 
