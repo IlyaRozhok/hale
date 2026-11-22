@@ -44,26 +44,48 @@ function InsightsTab({ navigation }: { navigation: NavigationProp<ParamListBase>
 const Nothing = () => null;
 
 /**
- * The bottom menu is the system one (UITabBarController): on iOS 26 a glass capsule of four tabs with names,
+ * The bottom menu is the system one (UITabBarController): on iOS 26 a glass capsule of four tabs, icons only,
  * and «+» beside it as a separate glass circle (the tab of the search role). «+» does not switch tabs:
  * it opens «Добавить» over the current screen (Д5). The screens leave LAYOUT.tabBar under their content for it.
+ *
+ * The names stay as the tabs' accessibility labels, for VoiceOver.
+ *
+ * A tab switches at once, with no animation. iOS 26 cross-fades the tabs, slowly, and our screens are transparent
+ * over one shared background, so both showed through each other for the whole fade. `disablePageAnimations`
+ * alone comes too late for that fade; patches/react-native-bottom-tabs@1.5.0.patch makes it work natively.
+ * The tabs are mounted at launch (`lazy: false`): otherwise the first visit to a tab showed an empty screen for
+ * a moment while it mounted.
  */
 export function MainTabs() {
   const [adding, setAdding] = useState(false);
   return (
     <NavigationContainer theme={theme}>
-      <Tabs.Navigator tabBarActiveTintColor={color.fg.default} screenOptions={{ sceneStyle: styles.scene }}>
+      <Tabs.Navigator
+        tabBarActiveTintColor={color.fg.default}
+        labeled={false}
+        disablePageAnimations
+        screenOptions={{ sceneStyle: styles.scene, lazy: false }}
+      >
+        {/* SF Symbols in outline, filled while their tab is the current one. */}
         <Tabs.Screen
           name="Today"
           component={TodayTab}
           options={{ title: "Сегодня", tabBarIcon: ({ focused }) => ({ sfSymbol: focused ? "house.fill" : "house" }) }}
         />
-        <Tabs.Screen name="Activity" component={Activity} options={{ title: "Операции", tabBarIcon: () => ({ sfSymbol: "list.bullet" }) }} />
-        <Tabs.Screen name="Plan" component={Plan} options={{ title: "План", tabBarIcon: () => ({ sfSymbol: "target" }) }} />
+        <Tabs.Screen
+          name="Activity"
+          component={Activity}
+          options={{ title: "Операции", tabBarIcon: ({ focused }) => ({ sfSymbol: focused ? "list.bullet.rectangle.fill" : "list.bullet.rectangle" }) }}
+        />
+        <Tabs.Screen
+          name="Plan"
+          component={Plan}
+          options={{ title: "План", tabBarIcon: ({ focused }) => ({ sfSymbol: focused ? "wallet.bifold.fill" : "wallet.bifold" }) }}
+        />
         <Tabs.Screen
           name="Insights"
           component={InsightsTab}
-          options={{ title: "Итоги", tabBarIcon: ({ focused }) => ({ sfSymbol: focused ? "chart.bar.fill" : "chart.bar" }) }}
+          options={{ title: "Итоги", tabBarIcon: ({ focused }) => ({ sfSymbol: focused ? "chart.pie.fill" : "chart.pie" }) }}
         />
         <Tabs.Screen
           name="Add"

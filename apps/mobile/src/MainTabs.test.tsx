@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { tokens } from "@hale/tokens";
 import { MainTabs } from "./MainTabs";
 import { fakeApi, renderWith } from "./testing";
@@ -37,15 +37,45 @@ const cash = () => fakeApi({ cash: jest.fn(async () => ({ started: true, start: 
 const tab = (name: string) => screen.getByRole("tab", { name });
 
 describe("MainTabs: the native tab bar", () => {
-  it("has four named tabs with SF Symbols and «Добавить» apart, in the search place", async () => {
+  it("has four tabs and «Добавить» apart, in the search place, named for VoiceOver only", async () => {
     await renderWith(<MainTabs />, cash());
-    for (const name of ["Сегодня", "Операции", "План", "Итоги", "Добавить"]) expect(tab(name)).toBeTruthy();
+    for (const name of ["Сегодня", "Операции", "План", "Итоги", "Добавить"]) {
+      expect(tab(name)).toBeTruthy();
+      // Icons only: the name is the tab's accessibility label, not text in the bar.
+      expect(screen.queryByText(name)).toBeNull();
+    }
     expect(tab("Сегодня").props.accessibilityState.selected).toBe(true);
-    expect(screen.getByTestId("tab-symbol-house.fill")).toBeTruthy();
-    for (const symbol of ["list.bullet", "target", "chart.bar"]) expect(screen.getByTestId(`tab-symbol-${symbol}`)).toBeTruthy();
     // iOS 26 draws the search role as its own glass circle after the tabs.
     expect(screen.getByTestId("tab-role-Add").props.accessibilityHint).toBe("search");
-    expect(screen.getByTestId("tab-symbol-plus")).toBeTruthy();
+  });
+
+  it("draws an outline symbol for a tab and the filled one for the current tab", async () => {
+    await renderWith(<MainTabs />, cash());
+    const symbols = { Сегодня: "house", Операции: "list.bullet.rectangle", План: "wallet.bifold", Итоги: "chart.pie" } as const;
+    for (const current of Object.keys(symbols)) {
+      await fireEvent.press(tab(current));
+      await waitFor(() => expect(tab(current).props.accessibilityState.selected).toBe(true));
+      for (const [name, symbol] of Object.entries(symbols)) {
+        const shown = name === current ? `${symbol}.fill` : symbol;
+        expect(within(tab(name)).getByTestId(`tab-symbol-${shown}`)).toBeTruthy();
+      }
+    }
+    expect(within(tab("Добавить")).getByTestId("tab-symbol-plus")).toBeTruthy();
+  });
+
+  it("switches tabs at once: the page animation is off, so two screens never fade through each other", async () => {
+    await renderWith(<MainTabs />, cash());
+    // The bar reports the flag; on iOS 26 the patch of react-native-bottom-tabs makes it an instant transition.
+    expect(screen.getByTestId("tab-bar").props.accessibilityValue).toEqual({ text: "no-page-animations" });
+  });
+
+  it("mounts every tab at launch, so a first visit does not show an empty screen while it mounts", async () => {
+    await renderWith(<MainTabs />, cash());
+    expect(screen.getByText("экран Сегодня")).toBeTruthy();
+    for (const other of ["экран План", "экран Итоги", "экран Операции "]) {
+      expect(screen.getByText(other, { includeHiddenElements: true })).toBeTruthy();
+      expect(screen.queryByText(other)).toBeNull();
+    }
   });
 
   it("tints the current tab white from the tokens, not the system blue", async () => {
@@ -53,16 +83,14 @@ describe("MainTabs: the native tab bar", () => {
     expect(screen.getByTestId("tab-bar").props.accessibilityHint).toBe(tokens.color.fg.default);
   });
 
-  it("switches tabs, and the current one gets the filled symbol", async () => {
+  it("switches tabs", async () => {
     await renderWith(<MainTabs />, cash());
     expect(screen.getByText("экран Сегодня")).toBeTruthy();
     await fireEvent.press(tab("План"));
     expect(await screen.findByText("экран План")).toBeTruthy();
     expect(tab("План").props.accessibilityState.selected).toBe(true);
-    expect(screen.getByTestId("tab-symbol-house")).toBeTruthy();
     await fireEvent.press(tab("Итоги"));
     expect(await screen.findByText("экран Итоги")).toBeTruthy();
-    expect(screen.getByTestId("tab-symbol-chart.bar.fill")).toBeTruthy();
   });
 
   it("«Добавить» opens the add sheet over the current tab and does not leave it (Д5)", async () => {
