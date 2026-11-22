@@ -40,7 +40,7 @@ const isTransferToSomeone = (t: TransactionDto) => t.amount < 0 && (t.recipientL
  * What a move to the operations may carry: `day` asks for that one day's spending (the limit calendar);
  * `category` with `from`..`to` for that category's spending over those days («Итоги», task В2); with `observation`
  * they came from the phrase of the day's observation (task В7), which is said again above the list; `want` with
- * `from`..`to` for the purchases of «желаемое» over those days («Из них на желаемое» of «Итоги», task В6). `at`
+ * `from`..`to` for the purchases of «желаемое» over those days (the row «Желаемое» of «Итоги», task В6). `at`
  * differs on every arrival, so the same one twice in a row is applied twice.
  */
 export type ActivityParams = { day?: string; category?: string; want?: boolean; from?: string; to?: string; at?: number; observation?: boolean } | undefined;

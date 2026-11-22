@@ -29,6 +29,10 @@ const PATHS = {
   circle: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0",
   route: "M3 19a2 2 0 1 0 4 0a2 2 0 0 0-4 0M19 7a2 2 0 1 0 0-4a2 2 0 0 0 0 4M11 19h5.5a3.5 3.5 0 0 0 0-7h-8a3.5 3.5 0 0 1 0-7h4.5",
   chevron: "M9 6l6 6l-6 6",
+  // The rows of «Итоги» (its iOS-style variant А): a place, «Желаемое», the payments outside the limit.
+  pin: "M9 11a3 3 0 1 0 6 0a3 3 0 0 0-6 0M17.657 16.657l-4.243 4.243a2 2 0 0 1-2.827 0l-4.244-4.243a8 8 0 1 1 11.314 0z",
+  card: "M3 8a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3h-12a3 3 0 0 1-3-3zM3 10h18M7 15h.01M11 15h2",
+  calendar: "M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-12a2 2 0 0 1-2-2zM16 3v4M8 3v4M4 11h16",
   // The actions of «Добавить» (task Д5).
   arrowDown: "M12 5v14M18 13l-6 6M6 13l6 6",
   arrowUp: "M12 5v14M18 11l-6-6M6 11l6-6",
