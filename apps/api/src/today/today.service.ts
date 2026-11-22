@@ -952,7 +952,7 @@ export class TodayService {
     const badCases: TodayDto["badCases"] = [];
     const runOutOn = runOutDate({ free: state.free, avgDailySpend: f.avgDailySpend, today: f.date });
     // Task А24: the pace line, from the same free money and pace as `runOutOn`; the limit is only read.
-    const paceNow = pace({ today: f.date, free: state.free, avgDailySpend: f.avgDailySpend, dailyLimit: state.dailyLimit, nextIncomeOn: f.input.nextIncomeOn });
+    const paceNow = pace({ today: f.date, free: state.free, avgDailySpend: f.avgDailySpend, dailyLimit: state.dailyLimit, spentToday: f.spentToday, nextIncomeOn: f.input.nextIncomeOn });
     for (const l of f.loans) {
       const fact = `Займ ${fmt(l.amount)} от ${fmtDay(l.received_on)}${l.remaining < l.amount ? `, осталось ${fmt(l.remaining)}` : ""}`;
       const repayLoan = { id: l.id, remaining: l.remaining, receivedOn: l.received_on };

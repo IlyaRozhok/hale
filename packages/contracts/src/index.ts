@@ -504,8 +504,8 @@ export interface TodayDto {
   /** Days within the limit in a row, back from yesterday. */
   streak: number;
   /**
-   * Task А24: present only when at the current pace the free money runs out before the next known income; absent
-   * otherwise, and from an older server.
+   * Task А24: present only when at the current pace, above the limit, the free money runs out before the next known
+   * income; absent otherwise (also when the usual day is within the limit), and from an older server.
    */
   pace?: PaceDto;
   /** The money day by day until the next income. Absent from a server older than the app. */
@@ -531,7 +531,8 @@ export interface PaceDto {
   /**
    * A calm middle step: spending about `daily` a day (between the limit and `avgDaily`, a whole ₴100), the same free
    * money lasts until `lastsUntil`, later than `runOutOn` and before `incomeOn`. Absent when there is no such step, or
-   * when the limit itself would not last until the income.
+   * when from now on the limit itself would not last until the income (what is left of today's limit plus a whole
+   * limit for each later day, against the free money now).
    */
   hint?: { daily: number; lastsUntil: string };
 }

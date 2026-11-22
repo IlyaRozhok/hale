@@ -3,7 +3,7 @@ import { pace } from "./pace.js";
 import { runOutDate } from "./run-out.js";
 
 // Made-up figures: ₴53,000 free on 22 November, income on 15 December (23 days), limit ₴2,300.
-const base = { today: "2026-11-22", free: 5_300_000, dailyLimit: 230_000, nextIncomeOn: "2026-12-15" };
+const base = { today: "2026-11-22", free: 5_300_000, dailyLimit: 230_000, spentToday: 0, nextIncomeOn: "2026-12-15" };
 
 describe("pace", () => {
   it("is there when the money runs out at the current pace before the income", () => {
@@ -41,6 +41,12 @@ describe("pace", () => {
   it("is absent without free money: the shortage mode has its own words", () => {
     expect(pace({ ...base, free: 0, avgDailySpend: 460_000 })).toBeNull();
     expect(pace({ ...base, free: -100_000, avgDailySpend: 460_000 })).toBeNull();
+  });
+
+  it("is absent when the usual day is within a limit the food floor lifted", () => {
+    // ₴5,000 over 23 days is ₴217 a day; the limit is the ₴450 floor, and ₴400 a day runs out early but within it.
+    expect(pace({ ...base, free: 500_000, dailyLimit: 45_000, avgDailySpend: 40_000 })).toBeNull();
+    expect(pace({ ...base, free: 500_000, dailyLimit: 45_000, avgDailySpend: 45_000 })).toBeNull();
   });
 
   it("is absent on the income day itself", () => {
@@ -81,6 +87,25 @@ describe("pace", () => {
       const p = pace({ ...base, free: 500_000, dailyLimit: 45_000, avgDailySpend: 100_000 });
       expect(p).not.toBeNull();
       expect(p!.hint).toBeUndefined();
+    });
+
+    it("stays once something is spent today under the limit: the limit is set against what it still needs", () => {
+      // ₴150 spent today, ₴52,850 left; from now the limit needs 2,150 today + 22 × 2,300 = ₴52,750.
+      // (A whole 23 × 2,300 = ₴52,900 would no longer fit, though the sentence is still true.)
+      expect(pace({ ...base, free: 5_285_000, spentToday: 15_000, avgDailySpend: 460_000 })?.hint).toEqual({
+        daily: 340_000,
+        lastsUntil: "2026-12-07",
+      });
+    });
+
+    it("after today went over the limit, stays only while a limit a day still lasts from tomorrow", () => {
+      // ₴3,000 spent today, ₴50,000 left; nothing is left of today's limit and 22 × 2,300 = ₴50,600 is needed: short.
+      expect(pace({ ...base, free: 5_000_000, spentToday: 300_000, avgDailySpend: 460_000 })?.hint).toBeUndefined();
+      // With a ₴2,200 limit 22 × 2,200 = ₴48,400 fits in ₴50,000.
+      expect(pace({ ...base, free: 5_000_000, dailyLimit: 220_000, spentToday: 300_000, avgDailySpend: 460_000 })?.hint).toEqual({
+        daily: 340_000,
+        lastsUntil: "2026-12-06",
+      });
     });
 
     it("keeps whole kopecks", () => {

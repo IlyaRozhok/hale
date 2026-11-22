@@ -2468,6 +2468,42 @@ describe("questions, upcoming and run-out", () => {
       expect(r.pace.runOutOn).toBe(r.runOutOn);
     });
 
+    it("keeps the hint after a spend today under the limit", async () => {
+      await fastWeek();
+      const card = (await ds.query(`SELECT id FROM accounts`))[0].id as number;
+      expect((await today()).pace.hint).toEqual({ daily: 340_000, lastsUntil: "2026-11-17" });
+      await tx(card, -15_000, "spend", { date: "2026-11-02" });
+      await setBalance(card, 5_285_000);
+      const r = await today();
+      // The day's limit stays fixed; from now it needs 2,154.34 today + 22 × 2,304.34, which fits in ₴52,850.
+      expect(r.state.dailyLimit).toBe(230_434);
+      expect(r.pace).toEqual({
+        avgDaily: 460_000,
+        runOutOn: "2026-11-13",
+        incomeOn: "2026-11-25",
+        hint: { daily: 340_000, lastsUntil: "2026-11-17" },
+      });
+    });
+
+    it("after a spend today over the limit, keeps the hint only while a limit a day lasts from tomorrow", async () => {
+      await fastWeek();
+      const card = (await ds.query(`SELECT id FROM accounts`))[0].id as number;
+      await today();
+      await tx(card, -300_000, "spend", { date: "2026-11-02" });
+      await setBalance(card, 5_000_000);
+      // 22 × 2,304.34 = ₴50,695 does not fit in ₴50,000: «around the limit — until the income» would not be true.
+      const short = await today();
+      expect(short.pace).toMatchObject({ runOutOn: "2026-11-12", incomeOn: "2026-11-25" });
+      expect(short.pace.hint).toBeUndefined();
+
+      // A ₴2,000 limit (the lifestyle cap): 22 × 2,000 = ₴44,000 fits.
+      await ds.query(`UPDATE settings SET lifestyle_cap=6000000`);
+      await ds.query(`DELETE FROM daily_snapshots`);
+      const r = await today();
+      expect(r.state.dailyLimit).toBe(200_000);
+      expect(r.pace.hint).toEqual({ daily: 330_000, lastsUntil: "2026-11-17" });
+    });
+
     it("leaves the limit as it was", async () => {
       const card = await account("black", 5_300_000);
       await income("fop", "2026-11-25");
