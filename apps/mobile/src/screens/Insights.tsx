@@ -188,9 +188,10 @@ function Month({ data, past, list, tab, onTab, onOpenCategory, onOpenWanted }: M
                 <ListRow
                   testID="wanted-row"
                   icon="card"
-                  title="Нужное и желаемое"
-                  amount={`${formatMoney(data.spent - wanted)} · ${formatMoney(wanted)}`}
-                  accessibilityLabel={`Нужное и желаемое: нужное ${formatMoney(data.spent - wanted)}, желаемое ${formatMoney(wanted)}`}
+                  title="Желаемое"
+                  // Only the server's own figure: «нужное» is not sent, and spent − wanted would not be it exactly.
+                  amount={formatMoney(wanted)}
+                  accessibilityLabel={`Желаемое: ${formatMoney(wanted)}`}
                   first
                   onPress={() => onOpenWanted?.(from, data.through)}
                 />

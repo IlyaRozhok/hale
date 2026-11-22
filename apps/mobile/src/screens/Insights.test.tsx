@@ -312,7 +312,7 @@ describe("Insights", () => {
       expect(tab("Места").props.accessibilityState.selected).toBe(true);
       expect(screen.queryAllByTestId("insights-row")).toHaveLength(0);
       expect(placeRows()).toHaveLength(5);
-      expect(screen.queryByText("Нужное и желаемое")).toBeNull();
+      expect(screen.queryByText("Желаемое")).toBeNull();
       expect(screen.queryByText("Платежи вне лимита")).toBeNull();
 
       await fireEvent.press(tab("Подписки"));
@@ -323,7 +323,7 @@ describe("Insights", () => {
       await fireEvent.press(tab("Категории"));
       expect(rows()).toHaveLength(9);
       expect(screen.getByText("Платежи вне лимита")).toBeTruthy();
-      expect(screen.getByText("Нужное и желаемое")).toBeTruthy();
+      expect(screen.getByText("Желаемое")).toBeTruthy();
     });
 
     it("the chosen segment stands out without colour: a raised fill, no blue, no red", async () => {
@@ -575,20 +575,22 @@ describe("Insights", () => {
     });
   });
 
-  describe("«Нужное и желаемое» (В6)", () => {
-    const NAME = "Нужное и желаемое: нужное ₴14,620, желаемое ₴3,600";
+  describe("«Желаемое» (В6)", () => {
+    const NAME = "Желаемое: ₴3,600";
 
-    it("a row in the second list: the rest of the month's sum and «желаемое», with a chevron", async () => {
+    it("a row in the second list with only the server's «желаемое» and a chevron; no derived «нужное»", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ wanted: 360_000, previousWanted: 300_000, otherPayments: 1_870_500 })) }));
       const row = await screen.findByRole("button", { name: NAME });
-      expect(screen.getByText("Нужное и желаемое")).toBeTruthy();
-      expect(screen.getByText("₴14,620 · ₴3,600")).toBeTruthy();
+      expect(screen.getByText("Желаемое")).toBeTruthy();
+      expect(screen.getByText("₴3,600")).toBeTruthy();
+      expect(screen.queryByText(/Нужное/)).toBeNull();
+      expect(screen.queryByText(/₴14,620/)).toBeNull();
       // «Потрачено» stays as it was, and the old line under it is gone.
       expect(screen.getByText("₴18,220")).toBeTruthy();
       expect(screen.queryByText(/Из них на желаемое/)).toBeNull();
       const t = texts();
-      expect(t.indexOf("Нужное и желаемое")).toBeGreaterThan(t.indexOf("Связь"));
-      expect(t.indexOf("Нужное и желаемое")).toBeLessThan(t.indexOf("Платежи вне лимита"));
+      expect(t.indexOf("Желаемое")).toBeGreaterThan(t.indexOf("Связь"));
+      expect(t.indexOf("Желаемое")).toBeLessThan(t.indexOf("Платежи вне лимита"));
       // Nine categories and this row carry a chevron.
       expect(screen.getAllByTestId("row-chevron")).toHaveLength(10);
       expect((StyleSheet.flatten(row.props.style) as { minHeight?: number }).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
@@ -604,24 +606,24 @@ describe("Insights", () => {
     it("no row from an older server's answer without the field", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture()) }));
       await screen.findByText("₴18,220");
-      expect(screen.queryByText(/желаемое/)).toBeNull();
+      expect(screen.queryByText(/желаемое/i)).toBeNull();
     });
 
     it("no row when nothing went on «желаемое»", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ wanted: 0 })) }));
       await screen.findByText("₴18,220");
-      expect(screen.queryByText(/желаемое/)).toBeNull();
+      expect(screen.queryByText(/желаемое/i)).toBeNull();
     });
 
     it("no row when «желаемое» is more than all that was spent (refunds on «нужное»)", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ spent: 100_000, wanted: 150_000 })) }));
       await screen.findByText("₴1,000");
-      expect(screen.queryByText(/желаемое/)).toBeNull();
+      expect(screen.queryByText(/желаемое/i)).toBeNull();
     });
 
     it("the row shows when «желаемое» is all that was spent", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ spent: 100_000, wanted: 100_000 })) }));
-      expect(await screen.findByText("₴0 · ₴1,000")).toBeTruthy();
+      expect(await screen.findByRole("button", { name: "Желаемое: ₴1,000" })).toBeTruthy();
     });
   });
 });
