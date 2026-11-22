@@ -91,7 +91,8 @@ const LOAN_TEXT =
   /(кредит\s+до\s+завтра|кредит\s+готівкою|розстрочка\s+на\s+картку|рассрочка\s+на\s+карту|moneyveo|miloan|creditkasa|швидко\s?гроші|sgroshi|easycash|gocrd|gopcr|pgid_commission|pt_slc)/i;
 const INSTALLMENT_PAYMENT =
   /^(щомісячний платіж|платіж розстрочки|повне погашення|погашення наступного платежу)/i;
-const STORE_INSTALLMENT = /^платіж\s+\S/i;
+/** A store's installment («Платіж <магазин>») comes with the transfer MCC 4829; «Итоги» keeps it a place (Б56). */
+export const STORE_INSTALLMENT = /^платіж\s+\S/i;
 const INTEREST = /^списання відсотків/i;
 const PENALTY = /^штраф за порушення погашення/i;
 const MIGRATION = /в рамках міграції рахунку/i;
@@ -105,7 +106,7 @@ export const FROM_PREFIX = /^від:/i;
 /** A business's refund of an order, as the sender writes it in the transfer comment (Б13). */
 const ORDER_REFUND_COMMENT = /^повернення\s+коштів/iu;
 /** Only a sole trader or a company: a friend returning a debt must not become a purchase refund. */
-const BUSINESS_SENDER = /^(фоп|тов)\s/iu;
+export const BUSINESS_SENDER = /^(фоп|тов)\s/iu;
 
 /** Money taken out as cash, by the bank text or the MCC. */
 export const isWithdrawal = (tx: Pick<ClassifyInput, "amount" | "description" | "mcc">): boolean =>

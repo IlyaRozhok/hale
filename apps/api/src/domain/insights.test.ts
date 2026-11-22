@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PLACES_TOP, type PlaceRow, buildInsights, buildOtherPayments, buildPlaces, insightsWindow, placesLookbackFrom, previousMonth } from "./insights";
+import { PLACES_TOP, type PlaceRow, buildInsights, buildOtherPayments, buildPlaces, insightsWindow, isPaidToPerson, placesLookbackFrom, previousMonth } from "./insights";
 
 describe("previousMonth", () => {
   it("steps back across the year", () => {
@@ -161,6 +161,43 @@ describe("buildPlaces (В3)", () => {
       { key: "k1", name: "Aroma Kava", spent: 224_000, visits: 14, isNew: true },
     ]);
     expect(buildPlaces([], "2026-01-01", "2026-11")).toEqual([]);
+  });
+});
+
+describe("isPaidToPerson (Б56)", () => {
+  const row = (over: Partial<Parameters<typeof isPaidToPerson>[0]> = {}) => ({
+    mcc: 4829,
+    typeSource: "owner",
+    description: "Переказ на картку",
+    counterName: "Марта Л.",
+    ...over,
+  });
+
+  it("is a money transfer the owner made a purchase, by hand or by a rule", () => {
+    expect(isPaidToPerson(row())).toBe(true);
+    expect(isPaidToPerson(row({ mcc: 6012 }))).toBe(true);
+    expect(isPaidToPerson(row({ counterName: null, description: "Марта Л." }))).toBe(true);
+    expect(isPaidToPerson(row({ counterName: "", description: "*1234" }))).toBe(true);
+  });
+
+  it("is not a card purchase, whoever typed it", () => {
+    expect(isPaidToPerson(row({ mcc: 5814 }))).toBe(false);
+    expect(isPaidToPerson(row({ mcc: null }))).toBe(false);
+  });
+
+  it("is not a transfer the bank's own recognition made a purchase: a store installment, a refund", () => {
+    expect(isPaidToPerson(row({ typeSource: "rule", counterName: null, description: "Платіж Comfy" }))).toBe(false);
+    expect(isPaidToPerson(row({ typeSource: "auto" }))).toBe(false);
+    expect(isPaidToPerson(row({ typeSource: null }))).toBe(false);
+  });
+
+  it("is not a business: a sole trader or a company, nor a store installment the owner recategorised", () => {
+    expect(isPaidToPerson(row({ counterName: "ФОП Коваль Т." }))).toBe(false);
+    expect(isPaidToPerson(row({ counterName: " тов \"Мережа\"" }))).toBe(false);
+    expect(isPaidToPerson(row({ counterName: null, description: "ТОВ Мережа" }))).toBe(false);
+    expect(isPaidToPerson(row({ counterName: null, description: "Платіж Comfy" }))).toBe(false);
+    // A name that only begins like one is still a person.
+    expect(isPaidToPerson(row({ counterName: "Товстенко О." }))).toBe(true);
   });
 });
 

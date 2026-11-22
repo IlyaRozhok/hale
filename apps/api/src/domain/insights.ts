@@ -2,6 +2,8 @@
 // Pure: the stretches of dates and the answer built from rows the service has already summed in the database.
 // What counts as spending is not decided here: the rows come from the limit's one definition (domain/ledger.ts),
 // so the categories of a stretch add up to exactly what «Сегодня» calls spent over the same days.
+import { BUSINESS_SENDER, STORE_INSTALLMENT } from "./classify";
+import { TRANSFER_MCCS } from "./merchants";
 import type { Minor } from "./money";
 
 /** A month ('YYYY-MM') counted from its 1st to `to`, and the stretch of the month before it is compared with. */
@@ -119,9 +121,52 @@ export function buildOtherPayments(rows: readonly OtherPaymentsRow[]): { otherPa
 // --- Places of the month (task В3) -------------------------------------------------------------------------------
 // A place is the counterparty of a bank purchase that counts against the limit (type 'spend'), named by the one
 // counterparty key the app already uses (transactions/counter-key.ts: «Применить к похожим», recipients, the
-// questions on «Сегодня»). Person transfers are people, not places; entries in the cash wallet carry only the owner's
+// questions on «Сегодня»). Person transfers are people, not places, typed 'spend' or not (Б56, below); entries in the cash wallet carry only the owner's
 // note, not a bank's merchant; withdrawals are not purchases. A refund lowers its place's sum, as it lowers its
 // category's, when the bank names it as the purchase; it is not a visit.
+
+//
+// Б56: a person stays a person when the owner made a transfer to them a purchase (the answer «Оплата услуги или
+// покупка», a rule by recipient, or a type changed by hand): it still counts in the limit and its category, but it is
+// not a place, nor a subscription. The signal is the bank's: the row came with a money-transfer MCC, so it was no card
+// payment at a till or online, and only the owner, not the bank's recognition, made it a purchase. The recognition's
+// own purchases with that MCC (a store installment, a refund) are typed 'rule' or 'auto' and stay places. Two kinds of
+// counterparty the classifier already tells apart stay places even when the owner typed them: a business (a sole
+// trader, a company, as BUSINESS_SENDER) paid by account number, and a store installment the owner recategorised.
+
+/** The fields of a row that tell a transfer to a person from a purchase at a place. */
+export interface PaidToPersonInput {
+  mcc: number | null;
+  /** transactions.type_source: 'owner' for a type or category given by the owner or by one of the owner's rules. */
+  typeSource: string | null;
+  description: string;
+  counterName: string | null;
+}
+
+/** A transfer to a person that the owner made a purchase (Б56): not a place, whatever its type. */
+export function isPaidToPerson(r: PaidToPersonInput): boolean {
+  if (r.mcc === null || !TRANSFER_MCCS.has(r.mcc) || r.typeSource !== "owner") return false;
+  const name = r.counterName?.trim() || r.description.trim();
+  return !BUSINESS_SENDER.test(name) && !STORE_INSTALLMENT.test(r.description.trim());
+}
+
+/**
+ * A word as a bank writes it: in capitals, capitalised, in lower case. The database can neither fold the case of
+ * Cyrillic nor put it in a character class when its encoding or locale is not a Unicode one (the tests' database is
+ * not), so the SQL lists whole words; a word in mixed case («ФоП») is the one thing the SQL misses and the regex finds.
+ */
+const bankCases = (word: string): string[] => [word.toUpperCase(), word[0]!.toUpperCase() + word.slice(1), word];
+
+/** SQL over `t` (transactions): isPaidToPerson, built from the same constants. Never null, so NOT of it is safe. */
+export function paidToPersonSql(t = "t"): string {
+  const name = `btrim(COALESCE(NULLIF(btrim(${t}.counter_name), ''), ${t}.description))`;
+  const business = [...bankCases("фоп"), ...bankCases("тов")].join("|");
+  return (
+    `COALESCE(${t}.mcc IN (${[...TRANSFER_MCCS].join(",")}) AND ${t}.type_source = 'owner'` +
+    ` AND ${name} !~ '^(${business})\\s'` +
+    ` AND btrim(${t}.description) !~ '^(${bankCases("платіж").join("|")})\\s+\\S', false)`
+  );
+}
 
 /** How many places «Итоги» names: a short list that fits one card, the largest first. */
 export const PLACES_TOP = 5;
