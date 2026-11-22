@@ -12,8 +12,9 @@ jest.mock("./components/RunwayLine", () => {
 
 // The tab bar is UIKit's (react-native-bottom-tabs). In tests it is a row of tabs that reports a press the way the
 // native one does (onIndexChange, also for a tab that prevents selection). As in the library, a scene is mounted
-// on its first visit and stays mounted, hidden from accessibility, while another tab is current. Names are drawn
-// only when the bar is labeled.
+// on its first visit (or at once when it is not lazy) and stays mounted, hidden from accessibility, while another
+// tab is current. Names are drawn
+// only when the bar is labeled; whether pages animate is reported on the bar.
 type MockTabRoute = { key: string };
 type MockTabViewProps = {
   navigationState: { index: number; routes: MockTabRoute[] };
@@ -22,13 +23,15 @@ type MockTabViewProps = {
   getLabelText: (p: { route: MockTabRoute }) => string | undefined;
   getIcon: (p: { route: MockTabRoute; focused: boolean }) => { sfSymbol?: string } | null | undefined;
   getRole: (p: { route: MockTabRoute }) => string | undefined;
+  getLazy: (p: { route: MockTabRoute }) => boolean | undefined;
   tabBarActiveTintColor?: string;
   labeled?: boolean;
+  disablePageAnimations?: boolean;
 };
 jest.mock("react-native-bottom-tabs", () => {
   const { useState } = jest.requireActual("react");
   const { Pressable, Text, View } = jest.requireActual("react-native");
-  const TabView = ({ navigationState, renderScene, onIndexChange, getLabelText, getIcon, getRole, tabBarActiveTintColor, labeled = true }: MockTabViewProps) => {
+  const TabView = ({ navigationState, renderScene, onIndexChange, getLabelText, getIcon, getRole, getLazy, tabBarActiveTintColor, labeled = true, disablePageAnimations = false }: MockTabViewProps) => {
     const current = navigationState.routes[navigationState.index];
     const [visited, setVisited] = useState([] as string[]);
     if (current && !visited.includes(current.key)) setVisited([...visited, current.key]);
@@ -36,7 +39,7 @@ jest.mock("react-native-bottom-tabs", () => {
     return (
       <View style={{ flex: 1 }}>
         {navigationState.routes
-          .filter((route) => route.key === current?.key || visited.includes(route.key))
+          .filter((route) => route.key === current?.key || visited.includes(route.key) || getLazy({ route }) === false)
           .map((route) => {
             const focused = route.key === current?.key;
             return (
@@ -45,7 +48,7 @@ jest.mock("react-native-bottom-tabs", () => {
               </View>
             );
           })}
-        <View testID="tab-bar" accessibilityHint={tabBarActiveTintColor}>
+        <View testID="tab-bar" accessibilityHint={tabBarActiveTintColor} accessibilityValue={{ text: disablePageAnimations ? "no-page-animations" : "page-animations" }}>
           {navigationState.routes.map((route, i) => {
             const focused = i === navigationState.index;
             const label = getLabelText({ route }) ?? route.key;

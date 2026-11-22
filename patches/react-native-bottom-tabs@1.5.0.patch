@@ -1,0 +1,79 @@
+diff --git a/ios/TabItemEventModifier.swift b/ios/TabItemEventModifier.swift
+index 674e602d5b959b1c12362efdd3d7800e6917aa4f..ec19ef6082ec5678d485dee3a677da1c5d6bdc2a 100644
+--- a/ios/TabItemEventModifier.swift
++++ b/ios/TabItemEventModifier.swift
+@@ -8,6 +8,18 @@ import UIKit
+ 
+ private final class TabBarDelegate: NSObject, UITabBarControllerDelegate {
+   var onClick: ((_ index: Int?, _ identifier: String?) -> Bool)?
++  // Hale patch (react-native-bottom-tabs 1.5.0; drop on upgrade if upstream fixes it): `disablePageAnimations`
++  // only turns UIView animations off after JS hears of the switch, too late for the cross-fade iOS 26 starts at
++  // the tap. With it set, the controller's own transition is replaced by one of zero duration.
++  var instantTransitions = false
++
++  func tabBarController(
++    _ tabBarController: UITabBarController,
++    animationControllerForTransitionFrom fromVC: UIViewController,
++    to toVC: UIViewController
++  ) -> UIViewControllerAnimatedTransitioning? {
++    instantTransitions ? InstantTabTransition() : nil
++  }
+ 
+   func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {
+     if #available(iOS 27.0, *) {
+@@ -73,8 +85,23 @@ private final class TabBarDelegate: NSObject, UITabBarControllerDelegate {
+   }
+ }
+ 
++/// Hale patch: shows the new tab at once, with no animation.
++private final class InstantTabTransition: NSObject, UIViewControllerAnimatedTransitioning {
++  func transitionDuration(using transitionContext: UIViewControllerContextTransitioning?) -> TimeInterval { 0 }
++
++  func animateTransition(using transitionContext: UIViewControllerContextTransitioning) {
++    if let toVC = transitionContext.viewController(forKey: .to) {
++      let toView = transitionContext.view(forKey: .to) ?? toVC.view!
++      toView.frame = transitionContext.finalFrame(for: toVC)
++      transitionContext.containerView.addSubview(toView)
++    }
++    transitionContext.completeTransition(!transitionContext.transitionWasCancelled)
++  }
++}
++
+ struct TabItemEventModifier: ViewModifier {
+   let onTabEvent: (_ index: Int?, _ identifier: String?, _ isLongPress: Bool) -> Bool
++  let instantTransitions: Bool
+   private let delegate = TabBarDelegate()
+ 
+   func body(content: Content) -> some View {
+@@ -88,6 +115,7 @@ struct TabItemEventModifier: ViewModifier {
+     delegate.onClick = { index, identifier in
+       onTabEvent(index, identifier, false)
+     }
++    delegate.instantTransitions = instantTransitions
+     tabController.delegate = delegate
+ 
+     // Don't register gesutre recognizer more than one time
+@@ -155,8 +183,8 @@ extension View {
+   /**
+    Event for tab items. Returns true if should prevent default (switching tabs).
+    */
+-  func onTabItemEvent(_ handler: @escaping (Int?, String?, Bool) -> Bool) -> some View {
+-    modifier(TabItemEventModifier(onTabEvent: handler))
++  func onTabItemEvent(instantTransitions: Bool = false, _ handler: @escaping (Int?, String?, Bool) -> Bool) -> some View {
++    modifier(TabItemEventModifier(onTabEvent: handler, instantTransitions: instantTransitions))
+   }
+ }
+ 
+diff --git a/ios/TabViewImpl.swift b/ios/TabViewImpl.swift
+index 6de510d0190ee9fc99b99a68f2e8f021c3776391..73fb1530961171438b11ab9874debec7484ee1b4 100644
+--- a/ios/TabViewImpl.swift
++++ b/ios/TabViewImpl.swift
+@@ -46,7 +46,7 @@ struct TabViewImpl: View {
+     tabContent
+       .tabBarMinimizeBehavior(props.minimizeBehavior)
+       #if !os(tvOS) && !os(macOS) && !os(visionOS)
+-        .onTabItemEvent { index, identifier, isLongPress in
++        .onTabItemEvent(instantTransitions: props.disablePageAnimations) { index, identifier, isLongPress in
+           let item = identifier.flatMap { props.filteredItems.findByKey($0) }
+             ?? index.flatMap { props.filteredItems[safe: $0] }
+           guard let key = item?.key else { return false }

@@ -1,4 +1,3 @@
-import { StyleSheet } from "react-native";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { tokens } from "@hale/tokens";
 import { MainTabs } from "./MainTabs";
@@ -64,17 +63,19 @@ describe("MainTabs: the native tab bar", () => {
     expect(within(tab("Добавить")).getByTestId("tab-symbol-plus")).toBeTruthy();
   });
 
-  it("hides the screen of the tab being left, so it never shows through the next one while iOS fades them", async () => {
+  it("switches tabs at once: the page animation is off, so two screens never fade through each other", async () => {
     await renderWith(<MainTabs />, cash());
-    const opacity = (name: string) => (StyleSheet.flatten(screen.getByTestId(`tab-scene-${name}`, { includeHiddenElements: true }).props.style) as { opacity?: number }).opacity;
-    expect(opacity("Today")).toBeUndefined();
-    await fireEvent.press(tab("План"));
-    expect(await screen.findByText("экран План")).toBeTruthy();
-    expect(opacity("Today")).toBe(0);
-    expect(opacity("Plan")).toBeUndefined();
-    await fireEvent.press(tab("Сегодня"));
-    await waitFor(() => expect(opacity("Plan")).toBe(0));
-    expect(opacity("Today")).toBeUndefined();
+    // The bar reports the flag; on iOS 26 the patch of react-native-bottom-tabs makes it an instant transition.
+    expect(screen.getByTestId("tab-bar").props.accessibilityValue).toEqual({ text: "no-page-animations" });
+  });
+
+  it("mounts every tab at launch, so a first visit does not show an empty screen while it mounts", async () => {
+    await renderWith(<MainTabs />, cash());
+    expect(screen.getByText("экран Сегодня")).toBeTruthy();
+    for (const other of ["экран План", "экран Итоги", "экран Операции "]) {
+      expect(screen.getByText(other, { includeHiddenElements: true })).toBeTruthy();
+      expect(screen.queryByText(other)).toBeNull();
+    }
   });
 
   it("tints the current tab white from the tokens, not the system blue", async () => {
