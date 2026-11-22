@@ -9,6 +9,7 @@ import {
   buildOtherPayments,
   buildPlaces,
   insightsWindow,
+  paidToPersonSql,
   placesLookbackFrom,
 } from "../domain/insights";
 import { outOfLimitPaymentSql } from "../domain/ledger";
@@ -21,9 +22,10 @@ import { IN_LIMIT } from "../transactions/day-totals";
 
 /**
  * A row at a place (task В3): from the limit, of type 'spend', off the cash wallet (whose entries carry the owner's
- * note, not a bank's merchant). Person transfers and withdrawals are not purchases.
+ * note, not a bank's merchant). Person transfers and withdrawals are not purchases, and neither is a transfer to a
+ * person the owner made a purchase (Б56): it stays out of the places and, with them, of the subscriptions (В4, В7).
  */
-const AT_PLACE = `${IN_LIMIT} AND t.type = 'spend' AND a.kind <> 'cash'`;
+const AT_PLACE = `${IN_LIMIT} AND t.type = 'spend' AND a.kind <> 'cash' AND NOT ${paidToPersonSql("t")}`;
 
 /**
  * Task В4: every purchase at a place between $1 and $2, each named as «Операции» names its place's latest row; what

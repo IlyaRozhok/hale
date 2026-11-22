@@ -4,6 +4,7 @@ import { DataSource as DS, type DataSource } from "typeorm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { insightsMonthDto } from "@hale/contracts";
 import { createMigratedDatabase, createTestApp, TEST_PASSWORD } from "./app";
+import { isPaidToPerson, paidToPersonSql } from "../src/domain/insights";
 import { spentSql } from "../src/domain/ledger";
 import { Clock, kyivDaySql } from "../src/time/clock";
 
@@ -311,6 +312,45 @@ describe("GET /insights/month", () => {
       ["Netflix", 24_900, "2026-10-05", 0, 0],
       ["Sport Life", 90_000, "2026-08-04", 0, 2],
     ]);
+  });
+
+  it("leaves a transfer to a person out of places and subscriptions when the owner made it a purchase; the limit still counts it (Б56)", async () => {
+    const black = (await ds.query(`SELECT id FROM accounts WHERE kind='black'`))[0].id as number;
+    const at = async (day: string, amount: number, mcc: number | null, typeSource: string | null, description: string, counterName: string | null) => {
+      seq++;
+      await ds.query(
+        `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, counter_name, mcc, amount, amount_uah, type, type_source, category, raw)
+         VALUES ($1,$2,$3,${kyivDaySql("$3::timestamptz")},$4,$5,$6,$7,$7,'spend',$8,'leisure','{}')`,
+        [`tx-${seq}`, black, `${day}T10:00:00Z`, description, counterName, mcc, amount, typeSource],
+      );
+    };
+    const before = (await get("/insights/month").expect(200)).body;
+    // Sent to a person every month by card transfer, marked a purchase by the owner (a rule by recipient, or by hand).
+    for (const d of ["2026-08-03", "2026-09-03", "2026-10-03", "2026-11-03"]) await at(d, -150_000, 4829, "owner", "Марта Л.", "Марта Л.");
+    await at("2026-11-04", -90_000, 4829, "owner", "Переказ на картку", "*1234");
+    // Still places: a company paid by account number every month, a store installment the bank's text names.
+    for (const d of ["2026-08-06", "2026-09-06", "2026-10-06", "2026-11-06"]) await at(d, -40_000, 4829, "owner", "Оплата за інтернет", "ТОВ Мережа");
+    await at("2026-11-07", -60_000, 4829, "rule", "Платіж Comfy", null);
+
+    const { body } = await get("/insights/month").expect(200);
+    expect(insightsMonthDto.safeParse(body).success).toBe(true);
+    const names = body.places.map((p: { name: string }) => p.name);
+    expect(names).toEqual(expect.arrayContaining(["Платіж Comfy", "ТОВ Мережа"]));
+    expect(names).not.toContain("Марта Л.");
+    expect(names).not.toContain("*1234");
+    expect(body.subscriptions.items.map((i: { name: string }) => i.name)).toEqual(["ТОВ Мережа"]);
+    // Only the places changed: the transfers count in the limit and in their category as before.
+    expect(body.spent - before.spent).toBe(150_000 + 90_000 + 40_000 + 60_000);
+    expect(body.spent).toBe(await limitSpent("2026-11-01", "2026-11-16"));
+    expect(body.categories.find((c: { category: string }) => c.category === "leisure")).toMatchObject({ spent: 150_000 + 90_000 + 40_000 + 60_000, count: 4 });
+
+    // The database says what the pure rule says, row by row.
+    const rows = (await ds.query(
+      `SELECT t.mcc, t.type_source AS "typeSource", t.description, t.counter_name AS "counterName", ${paidToPersonSql("t")} AS person
+         FROM transactions t WHERE t.category = 'leisure'`,
+    )) as { mcc: number | null; typeSource: string | null; description: string; counterName: string | null; person: boolean }[];
+    expect(rows.filter((r) => r.person)).toHaveLength(5);
+    for (const r of rows) expect([r.description, r.person]).toEqual([r.description, isPaidToPerson(r)]);
   });
 
   it("adds up to the limit's spending over the same days, for both stretches", async () => {
