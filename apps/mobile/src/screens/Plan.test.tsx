@@ -4,11 +4,12 @@ import type { OwnMoneyItemDto, TodayDto } from "@hale/contracts";
 import { Plan } from "./Plan";
 import { Today } from "./Today";
 import { balanceFixture, fakeApi, goalFixture, loanFixture, loanHistoryFixture, makeClient, openPlanPart, ownItemsFixture, pickDate, renderWith, taxFixture, todayFixture, todayWithItems } from "../testing";
-import { dateLabel, kyivDate, shiftDate } from "../format";
+import { dateLabel, formatMoney, kyivDate, shiftDate } from "../format";
 import { LAYOUT } from "../components/layout";
 import { LoansSheet } from "../components/LoansSheet";
 import { NetworkError } from "../api/client";
 import { TODAY_KEY } from "../api/queries";
+import { tokens } from "@hale/tokens";
 
 jest.mock("@react-native-community/slider", () => {
   const React = require("react");
@@ -42,6 +43,15 @@ describe("Plan, the iOS list (variant А)", () => {
     // The old groups and their fold are gone.
     for (const old of ["Деньги", "Приходит", "Уходит", "Копится"]) expect(screen.queryByText(old)).toBeNull();
     expect(screen.queryByRole("button", { name: /^Ещё/ })).toBeNull();
+  });
+
+  it("draws the large title and own money a touch brighter than the text, the caption in the quiet grey (variant «Б»)", async () => {
+    await renderWith(<Plan />, fakeApi());
+    const caption = await screen.findByText("Свои деньги");
+    expect(StyleSheet.flatten(screen.getByText("План").props.style).color).toBe(tokens.color.fg.strong);
+    expect(StyleSheet.flatten(caption.props.style).color).toBe(tokens.color.list.secondary);
+    const own = screen.getByText(formatMoney(todayFixture().accounts.own));
+    expect(StyleSheet.flatten(own.props.style).color).toBe(tokens.color.fg.strong);
   });
 
   it("has no line about what is left after the payments: the free money also holds back the tax reserve and loans", async () => {
@@ -143,8 +153,9 @@ describe("Plan, «До дохода» (variant А)", () => {
     expect(inOrder(/^(Квартплата|Рассрочка · техника|Работа)$/)).toEqual(["Квартплата", "Рассрочка · техника", "Работа"]);
     expect(screen.getByText("−₴8,000")).toBeTruthy();
     expect(screen.getByText("−₴2,400")).toBeTruthy();
-    expect(inOrder(/^(6|12|15)$/)).toEqual(["6", "12", "15"]);
-    expect(screen.getAllByText("дек")).toHaveLength(3);
+    // One line each, «6 дек», not the day stacked over its month.
+    expect(inOrder(/^\d+ дек$/)).toEqual(["6 дек", "12 дек", "15 дек"]);
+    expect(screen.queryAllByText("дек")).toHaveLength(0);
     expect(screen.getByText("Что после дохода — в разделах ниже.")).toBeTruthy();
     // No date on this screen as «06.12».
     expect(screen.queryAllByText(/\d\d\.\d\d/)).toHaveLength(0);

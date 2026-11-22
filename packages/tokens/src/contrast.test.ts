@@ -52,7 +52,42 @@ describe("silver tokens contrast (WCAG AA 4.5:1)", () => {
     expect(contrastRatio(color.fg.default, color.card.fill)).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(color.fg.muted, color.card.fill)).toBeGreaterThanOrEqual(4.5);
     expect(color.card.fill).not.toBe(color.surface.base);
-    expect(color.backdrop.glow).not.toBe(color.surface.base);
+  });
+});
+
+describe("soft graphite (owner's variant «Б»)", () => {
+  const lum = (hex: string) => contrastRatio(hex, "#000000");
+
+  it("the screen is a flat dark graphite, not black, and a card is one step lighter", () => {
+    expect(color.surface.base).toBe("#121417");
+    expect(color.card.fill).toBe("#1B1E22");
+    expect(lum(color.card.fill)).toBeGreaterThan(lum(color.surface.base));
+    expect("glow" in color.backdrop).toBe(false);
+  });
+  it("the line between rows is a faint white hairline", () => {
+    expect(color.card.edge).toBe("rgba(255, 255, 255, 0.05)");
+  });
+  it("text is softer than white: the big title a touch brighter than the rest", () => {
+    expect(color.fg.default).toBe("#E8EAED");
+    expect(color.fg.strong).toBe("#F2F3F5");
+    expect(color.money.neutral).toBe(color.fg.default);
+    expect(lum(color.fg.strong)).toBeGreaterThan(lum(color.fg.default));
+  });
+  it("a list's secondary text, values and icons read on the card and on the screen", () => {
+    expect(color.list).toEqual({ secondary: "#8B9098", value: "#A6ABB3", icon: "#A6ABB3", chevron: "#4A4E55" });
+    for (const bg of [color.card.fill, color.surface.base]) {
+      for (const c of [color.fg.strong, color.fg.default, color.list.secondary, color.list.value, color.money.income]) {
+        expect(contrastRatio(c, bg)).toBeGreaterThanOrEqual(4.5);
+      }
+      expect(contrastRatio(color.list.icon, bg)).toBeGreaterThanOrEqual(3);
+    }
+  });
+  it("the chevron is the quietest mark on a row, but still there", () => {
+    expect(lum(color.list.chevron)).toBeLessThan(lum(color.list.secondary));
+    expect(contrastRatio(color.list.chevron, color.card.fill)).toBeGreaterThanOrEqual(1.5);
+  });
+  it("a list card is rounder than before", () => {
+    expect(tokens.radius.card).toBe(22);
   });
   it("accent.fgOnAccent on accent.default", () => {
     expect(contrastRatio(color.accent.fgOnAccent, color.accent.default)).toBeGreaterThanOrEqual(4.5);
