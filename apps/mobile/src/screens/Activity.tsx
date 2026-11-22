@@ -16,6 +16,7 @@ import { Glass } from "../components/Glass";
 import { Icon } from "../components/Icon";
 import { LAYOUT } from "../components/layout";
 import { RecipientLabelSheet } from "../components/RecipientLabelSheet";
+import { Segmented } from "../components/Segmented";
 import { CashOperationSheet } from "../components/CashOperationSheet";
 import { TxEditSheet } from "../components/TxEditSheet";
 import { TxRow } from "../components/TxRow";
@@ -30,6 +31,8 @@ const TABS: { tab: Tab; label: string; empty: string }[] = [
   { tab: "income", label: "Доходы", empty: "Доходов пока нет." },
   { tab: "all", label: "Все", empty: "Операций пока нет." },
 ];
+
+const TAB_OPTIONS = TABS.map((t) => ({ key: t.tab, label: t.label }));
 
 const SEARCH_DELAY_MS = 300;
 
@@ -209,20 +212,7 @@ export function Activity({ now = () => new Date(), route }: Props) {
         </View>
       </View>
       {searching && <Field label="Поиск по операциям" value={text} onChangeText={setText} maxLength={100} autoFocus returnKeyType="search" />}
-      <View testID="kind-switch" style={styles.segment}>
-        {TABS.map((t) => (
-          <Pressable
-            key={t.tab}
-            accessibilityRole="button"
-            accessibilityLabel={t.label}
-            accessibilityState={{ selected: tab === t.tab }}
-            onPress={() => setTab(t.tab)}
-            style={[styles.segmentItem, tab === t.tab && styles.segmentOn]}
-          >
-            <Text style={[styles.segmentText, tab === t.tab && styles.segmentTextOn]}>{t.label}</Text>
-          </Pressable>
-        ))}
-      </View>
+      <Segmented testID="kind-switch" options={TAB_OPTIONS} value={tab} onChange={setTab} />
       {filtered && summary && (
         <Text style={styles.summary}>{`${summaryTitle}: ${formatSignedMoney(summary.total)} · ${operationsText(summary.count)}`}</Text>
       )}
@@ -357,11 +347,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   badgeText: { ...type.caption, fontWeight: "500", color: color.accent.fgOnSignal },
-  segment: { flexDirection: "row", padding: space.xs, borderRadius: radius.lg, backgroundColor: color.card.fill, borderWidth: StyleSheet.hairlineWidth, borderColor: color.card.edge },
-  segmentItem: { flex: 1, minHeight: touchMin - space.sm, alignItems: "center", justifyContent: "center", borderRadius: radius.md },
-  segmentOn: { backgroundColor: color.surface.overlay },
-  segmentText: { ...type.label, color: color.fg.muted },
-  segmentTextOn: { color: color.fg.default },
   root: { flex: 1, paddingHorizontal: space.xl, gap: space.md },
   list: { marginHorizontal: -space.xl },
   title: { ...type.title, color: color.fg.default },

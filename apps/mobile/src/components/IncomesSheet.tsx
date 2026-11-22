@@ -12,12 +12,14 @@ import { askDelete } from "./EntryRow";
 import { ErrorText } from "./ErrorText";
 import { Field } from "./Field";
 import { PrimaryButton } from "./PrimaryButton";
+import { Segmented } from "./Segmented";
 import { Sheet } from "./Sheet";
 import { SummaryRow } from "./SummaryRow";
 
 const { color, radius, space, touchMin, type } = tokens;
 
 const SOURCES = { fop: "ФОП", usdc: "USDC" } as const;
+const SOURCE_OPTIONS = (Object.keys(SOURCES) as (keyof typeof SOURCES)[]).map((s) => ({ key: s, label: SOURCES[s] }));
 const SCHEDULES: { value: IncomeSchedule; label: string }[] = [
   { value: "monthly", label: "Раз в месяц" },
   { value: "twice", label: "Два раза в месяц" },
@@ -302,20 +304,15 @@ function OldIncomeForm({ income, nextId, nextDate, onClose }: FormProps) {
   return (
     <Sheet title={income ? incomeTitle(income) : "Новый доход"} onClose={onClose}>
       {!income && (
-        <View style={styles.row}>
-          {(Object.keys(SOURCES) as (keyof typeof SOURCES)[]).map((s) => (
-            <Chip
-              key={s}
-              role="radio"
-              label={SOURCES[s]}
-              selected={source === s}
-              onPress={() => {
-                setSource(s);
-                setCurrency(s === "usdc" ? "USD" : "UAH");
-              }}
-            />
-          ))}
-        </View>
+        <Segmented
+          testID="income-source"
+          options={SOURCE_OPTIONS}
+          value={source}
+          onChange={(s) => {
+            setSource(s);
+            setCurrency(s === "usdc" ? "USD" : "UAH");
+          }}
+        />
       )}
       <Field label="Сумма дохода" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
       <CurrencyChoice value={currency} onChange={setCurrency} />

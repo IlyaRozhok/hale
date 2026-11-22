@@ -223,7 +223,7 @@ describe("CategoriesSheet (В5)", () => {
       { key: "refund", name: "Возвраты", icon: "arrowIn", system: true, want: null },
     ];
     const CAPTION = "Действует на все операции категории, кроме тех, где вы выбрали по-другому.";
-    const side = (name: "Нужное" | "Желаемое") => screen.getByRole("radio", { name });
+    const side = (name: "Нужное" | "Желаемое") => screen.getByRole("button", { name });
 
     it("shows the category's side with what it does, and saves a new one", async () => {
       const api = fakeApi({ categories: jest.fn(async () => SIDED), patchCategory: jest.fn(async () => ({ ...SIDED[1]!, want: false })) });
@@ -233,7 +233,7 @@ describe("CategoriesSheet (В5)", () => {
       expect(screen.getByText(CAPTION)).toBeTruthy();
       expect(side("Желаемое").props.accessibilityState.selected).toBe(true);
       expect(side("Нужное").props.accessibilityState.selected).toBe(false);
-      expect((StyleSheet.flatten(side("Нужное").props.style) as { minHeight?: number }).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+      expect((StyleSheet.flatten(screen.getByTestId("want-switch").props.style) as { height?: number }).height).toBeGreaterThanOrEqual(tokens.touchMin);
       // Between the name and the icons, as in the mockup.
       const texts = screen.getAllByText(/^(Название|Это скорее|Значок)$/).map((t) => String(t.props.children));
       expect(texts).toEqual(["Название", "Это скорее", "Значок"]);
@@ -246,7 +246,7 @@ describe("CategoriesSheet (В5)", () => {
       const api = fakeApi({ categories: jest.fn(async () => SIDED), patchCategory: jest.fn() });
       await renderWith(<CategoriesSheet onClose={noop} />, api);
       await fireEvent.press(await screen.findByRole("button", { name: "Продукты" }));
-      await fireEvent.press(await screen.findByRole("radio", { name: "Нужное" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Нужное" }));
       await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
       await waitFor(() => expect(screen.queryByText("Это скорее")).toBeNull());
       expect(api.patchCategory).not.toHaveBeenCalled();
@@ -271,7 +271,7 @@ describe("CategoriesSheet (В5)", () => {
       const api = fakeApi({ categories: jest.fn(async () => SIDED), createCategory: jest.fn(async () => created) });
       await renderWith(<CategoriesSheet onClose={noop} />, api);
       await fireEvent.press(await screen.findByRole("button", { name: "Новая категория" }));
-      expect((await screen.findByRole("radio", { name: "Нужное" })).props.accessibilityState.selected).toBe(true);
+      expect((await screen.findByRole("button", { name: "Нужное" })).props.accessibilityState.selected).toBe(true);
       await fireEvent.changeText(screen.getByLabelText("Название"), "Спорт");
       await fireEvent.press(side("Желаемое"));
       await fireEvent.press(screen.getByRole("button", { name: "Добавить" }));

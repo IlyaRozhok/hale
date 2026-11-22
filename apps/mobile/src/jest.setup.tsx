@@ -67,3 +67,52 @@ jest.mock("react-native-bottom-tabs", () => {
   };
   return { __esModule: true, default: TabView };
 });
+
+// The segmented control is UIKit's (UISegmentedControl). In tests it is a row of buttons named by their labels, as
+// VoiceOver reads the native segments. Like the native one it moves to a tapped segment by itself, reports only a
+// change (a tap on the chosen segment sends nothing), and takes `selectedIndex` only when that prop changes.
+type MockSegmentedProps = {
+  values?: string[];
+  selectedIndex?: number;
+  enabled?: boolean;
+  appearance?: string;
+  tintColor?: string;
+  testID?: string;
+  style?: unknown;
+  onChange?: (e: { nativeEvent: { value: string; selectedSegmentIndex: number } }) => void;
+  onValueChange?: (value: string) => void;
+};
+jest.mock("@react-native-segmented-control/segmented-control", () => {
+  const { useState } = jest.requireActual("react");
+  const { Pressable, Text, View } = jest.requireActual("react-native");
+  const SegmentedControl = ({ values = [], selectedIndex = -1, enabled = true, appearance, tintColor, testID, style, onChange, onValueChange }: MockSegmentedProps) => {
+    const [shown, setShown] = useState(selectedIndex);
+    const [prop, setProp] = useState(selectedIndex);
+    if (prop !== selectedIndex) {
+      setProp(selectedIndex);
+      setShown(selectedIndex);
+    }
+    return (
+      <View testID={testID} style={style} accessibilityHint={[appearance, tintColor].filter(Boolean).join(" ")}>
+        {values.map((v, i) => (
+          <Pressable
+            key={v}
+            accessibilityRole="button"
+            accessibilityLabel={v}
+            accessibilityState={{ selected: i === shown, disabled: !enabled }}
+            disabled={!enabled}
+            onPress={() => {
+              if (i === shown) return;
+              setShown(i);
+              onChange?.({ nativeEvent: { value: v, selectedSegmentIndex: i } });
+              onValueChange?.(v);
+            }}
+          >
+            <Text>{v}</Text>
+          </Pressable>
+        ))}
+      </View>
+    );
+  };
+  return { __esModule: true, default: SegmentedControl };
+});

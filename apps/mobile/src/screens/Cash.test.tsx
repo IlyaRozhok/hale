@@ -259,6 +259,8 @@ describe("an operation entered by hand, in Activity", () => {
     await fireEvent.press(await screen.findByText("Купил USDC"));
     expect((await screen.findByRole("button", { name: "Отдал в свои" })).props.accessibilityState.selected).toBe(true);
     for (const label of KIND_CHIPS) expect(screen.getByRole("button", { name: label })).toBeTruthy();
+    // Four kinds do not fit the native switch: they stay chips.
+    expect(screen.queryByTestId("cash-kind")).toBeNull();
     await press("Сохранить");
     await waitFor(() => expect(api.patchCashOperation).toHaveBeenCalledWith(12, { kind: "own_out", amount: 50_000, date: own.localDate, note: "Купил USDC" }));
   });

@@ -1,5 +1,6 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
-import { Alert } from "react-native";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
+import { Alert, StyleSheet } from "react-native";
+import { tokens } from "@hale/tokens";
 import type { ExpectedIncomeDto, OwnMoneyItemDto } from "@hale/contracts";
 import { IncomesSheet } from "./IncomesSheet";
 import { fakeApi, renderWith, todayWithItems } from "../testing";
@@ -133,7 +134,12 @@ describe("IncomesSheet, a list of named incomes (Д3б, variant А)", () => {
     await press("Новый доход");
     await fireEvent.changeText(screen.getByLabelText("Название"), "Заказчик А");
     await fireEvent.changeText(screen.getByLabelText("Сумма"), "1200");
-    await fireEvent.press(screen.getByRole("radio", { name: "$" }));
+    // The currency is the native switch beside the amount, a touch target per sign.
+    const currency = screen.getByTestId("currency-choice");
+    expect((StyleSheet.flatten(currency.props.style) as { width?: number }).width).toBe(2 * tokens.touchMin);
+    expect(within(currency).getByRole("button", { name: "₴" }).props.accessibilityState.selected).toBe(true);
+    await fireEvent.press(screen.getByRole("button", { name: "$" }));
+    expect(within(currency).getByRole("button", { name: "$" }).props.accessibilityState.selected).toBe(true);
     await fireEvent.press(screen.getByRole("radio", { name: "Без расписания" }));
     expect(screen.queryByLabelText("С какого числа")).toBeNull();
     expect(screen.queryByLabelText("Первый раз")).toBeNull();
@@ -189,7 +195,7 @@ describe("IncomesSheet with a server older than Д3а", () => {
     const fake = fakeApi({ expectedIncomes: jest.fn(async () => [old]) });
     await renderWith(<IncomesSheet onClose={noop} />, fake);
     await press("Новый доход");
-    await fireEvent.press(screen.getByRole("radio", { name: "USDC" }));
+    await fireEvent.press(within(screen.getByTestId("income-source")).getByRole("button", { name: "USDC" }));
     await fireEvent.changeText(screen.getByLabelText("Сумма дохода"), "800");
     await fireEvent.changeText(screen.getByLabelText("С какого числа"), "8");
     await fireEvent.changeText(screen.getByLabelText("По какое число"), "12");

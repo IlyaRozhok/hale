@@ -163,7 +163,7 @@ function Month({ data, past, list, tab, onTab, onOpenCategory, onOpenWanted }: M
         <Text style={styles.amount}>{formatMoney(data.spent)}</Text>
         <Text style={styles.note}>{comparison(data)}</Text>
       </View>
-      {options.length > 1 && <Segmented options={options} value={shown} onChange={onTab} />}
+      {options.length > 1 && <Segmented testID="insights-switch" options={options} value={shown} onChange={onTab} />}
       {shown === "places" && <PlacesCard places={places ?? undefined} />}
       {shown === "subscriptions" && subscriptions && (
         <View style={styles.stack}>

@@ -687,7 +687,7 @@ describe("Plan, obligatory payments", () => {
     await press("Новый платёж");
     await fireEvent.changeText(screen.getByLabelText("Название"), " Девушке ");
     await fireEvent.changeText(screen.getByLabelText("Сумма"), "800");
-    await fireEvent.press(screen.getByRole("radio", { name: "$" }));
+    await fireEvent.press(screen.getByRole("button", { name: "$" }));
     await fireEvent.changeText(screen.getByLabelText("Какого числа"), "26");
     await press("Сохранить платёж");
     await waitFor(() => expect(api.createRecurring).toHaveBeenCalledWith({ name: "Девушке", amount: 80_000, currency: "USD", day_of_month: 26 }));

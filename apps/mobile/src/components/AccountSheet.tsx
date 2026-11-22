@@ -6,13 +6,15 @@ import { useCreateAccount, useDeleteManualBalance, usePatchAccount, usePatchManu
 import { parseBalance } from "../format";
 import { balanceFieldLabel, NEW_ACCOUNT_CURRENCIES } from "../labels";
 import { accountPatchOf } from "../ownMoney";
-import { Chip } from "./Chip";
 import { ErrorText } from "./ErrorText";
 import { Field } from "./Field";
 import { PrimaryButton } from "./PrimaryButton";
+import { Segmented } from "./Segmented";
 import { Sheet } from "./Sheet";
 
 const { color, space, touchMin, type } = tokens;
+
+const CURRENCY_OPTIONS = NEW_ACCOUNT_CURRENCIES.map((c) => ({ key: c.code, label: c.label }));
 
 const SAVE_FAILED = "Не удалось сохранить. Попробуйте ещё раз.";
 const CHECK_INPUT = "Проверьте название и остаток.";
@@ -168,11 +170,7 @@ export function NewAccountSheet({ onClose }: { onClose: () => void }) {
       <Text style={styles.label}>Название</Text>
       <Field label="Название" value={name} onChangeText={setName} maxLength={100} />
       <Text style={styles.label}>Валюта</Text>
-      <View style={styles.chips}>
-        {NEW_ACCOUNT_CURRENCIES.map((c) => (
-          <Chip key={c.code} role="radio" label={c.label} selected={currency === c.code} onPress={() => setCurrency(c.code)} />
-        ))}
-      </View>
+      <Segmented testID="account-currency" options={CURRENCY_OPTIONS} value={currency} onChange={setCurrency} />
       <Text style={styles.label}>Остаток</Text>
       <Field label="Остаток" keyboardType="decimal-pad" value={balance} onChangeText={setBalance} />
       <Text style={styles.muted}>Остаток вы правите сами, когда захотите.</Text>
@@ -192,7 +190,6 @@ const styles = StyleSheet.create({
   balance: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.md },
   own: { gap: space.xs },
   switchRow: { minHeight: touchMin, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md },
-  chips: { flexDirection: "row", gap: space.sm },
   action: { minHeight: touchMin, justifyContent: "center", alignSelf: "center" },
   actionText: { ...type.label, color: color.fg.muted },
 });

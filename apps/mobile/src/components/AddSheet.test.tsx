@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { AddSheet } from "./AddSheet";
 import { fakeApi, renderWith, todayFixture } from "../testing";
 import { kyivDate } from "../format";
@@ -157,6 +157,10 @@ describe("AddSheet: one window for everything entered by hand (Д5)", () => {
     expect(await screen.findByRole("button", { name: "Отдал в свои" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Обменял USDC" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Трата" })).toBeNull();
+    // The two kinds are the native switch, «Отдал в свои» first and chosen.
+    const kinds = within(screen.getByTestId("cash-kind")).getAllByRole("button");
+    expect(kinds.map((k) => k.props.accessibilityLabel as string)).toEqual(["Отдал в свои", "Обменял USDC"]);
+    expect(kinds[0]!.props.accessibilityState.selected).toBe(true);
     await fireEvent.changeText(screen.getByLabelText("Сумма"), "500");
     await press("Сохранить");
     await waitFor(() => expect(api.addCashOperation).toHaveBeenCalledWith({ kind: "own_out", amount: 50_000, date: kyivDate() }));

@@ -10,6 +10,7 @@ import { ErrorText } from "./ErrorText";
 import { Field } from "./Field";
 import { Icon } from "./Icon";
 import { PrimaryButton } from "./PrimaryButton";
+import { Segmented } from "./Segmented";
 import { Sheet } from "./Sheet";
 
 const { color, radius, space, touchMin, type } = tokens;
@@ -180,50 +181,31 @@ export function CategoryFormSheet({ category, onClose, onCreated }: Props) {
 }
 
 /**
- * «Нужное» / «Желаемое» side by side (task В6): in a category's window and on one purchase. Silver only: neither
- * side is better than the other.
+ * «Нужное» / «Желаемое» side by side (task В6): in a category's window and on one purchase. The native segmented
+ * control with no tint of ours: neither side is better than the other.
  */
 export function WantSwitch({ value, disabled = false, onChange }: { value: boolean; disabled?: boolean; onChange: (want: boolean) => void }) {
   return (
-    <View accessibilityRole="radiogroup" style={styles.segment}>
-      {[false, true].map((side) => {
-        const on = value === side;
-        return (
-          <Pressable
-            key={String(side)}
-            accessibilityRole="radio"
-            accessibilityLabel={wantLabel(side)}
-            accessibilityState={{ selected: on, disabled }}
-            disabled={disabled}
-            onPress={() => onChange(side)}
-            style={[styles.segmentItem, on && styles.segmentOn]}
-          >
-            <Text style={[styles.segmentText, on && styles.segmentTextOn]}>{wantLabel(side)}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
+    <Segmented
+      testID="want-switch"
+      options={WANT_OPTIONS}
+      value={value ? "want" : "need"}
+      disabled={disabled}
+      onChange={(side) => onChange(side === "want")}
+    />
   );
 }
+
+const WANT_OPTIONS = [
+  { key: "need", label: wantLabel(false) },
+  { key: "want", label: wantLabel(true) },
+] as const;
 
 const CELL = touchMin;
 
 const styles = StyleSheet.create({
   heading: { ...type.label, color: color.fg.muted },
   caption: { ...type.caption, color: color.fg.muted },
-  segment: {
-    flexDirection: "row",
-    padding: space.xs,
-    gap: space.xs,
-    borderRadius: radius.full,
-    backgroundColor: color.card.fill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.card.edge,
-  },
-  segmentItem: { flex: 1, minHeight: touchMin, alignItems: "center", justifyContent: "center", borderRadius: radius.full },
-  segmentOn: { backgroundColor: color.accent.default },
-  segmentText: { ...type.label, color: color.fg.muted },
-  segmentTextOn: { color: color.accent.fgOnAccent },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
   cell: {
     width: CELL,

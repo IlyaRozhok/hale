@@ -357,7 +357,7 @@ describe("TxEditSheet: «Эта покупка» — нужное или жел�
     { key: "uncategorized", name: "Без категории", icon: "circle", system: true, want: null },
   ];
   const cafe = txFixture({ id: 7, counterName: "Сільпо", type: "spend", category: "cafe", want: true, wantOverride: null });
-  const side = (name: "Нужное" | "Желаемое") => screen.getByRole("radio", { name });
+  const side = (name: "Нужное" | "Желаемое") => screen.getByRole("button", { name });
   /** The server keeps the side it was sent; null gives the row back to its category's. */
   const keeping = (base: TransactionDto, categoryWant: boolean) =>
     jest.fn(async (_id: number, patch: TransactionEdit) => {
@@ -374,15 +374,15 @@ describe("TxEditSheet: «Эта покупка» — нужное или жел�
     // Between the categories and the type.
     const texts = screen.getAllByText(/^(Категория|Эта покупка|Тип)$/).map((t) => String(t.props.children));
     expect(texts).toEqual(["Категория", "Эта покупка", "Тип"]);
-    const flatStyle = StyleSheet.flatten(side("Нужное").props.style) as { minHeight?: number };
-    expect(flatStyle.minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+    const flatStyle = StyleSheet.flatten(screen.getByTestId("want-switch").props.style) as { height?: number };
+    expect(flatStyle.height).toBeGreaterThanOrEqual(tokens.touchMin);
   });
 
   it("the other side is saved at once, alone, and asks nothing about the similar ones", async () => {
     const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction: keeping(cafe, true) });
     const onClose = jest.fn();
     await renderWith(<TxEditSheet tx={cafe} onClose={onClose} />, api);
-    await fireEvent.press(await screen.findByRole("radio", { name: "Нужное" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Нужное" }));
     await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { want: false }));
     await waitFor(() => expect(side("Нужное").props.accessibilityState.selected).toBe(true));
     expect(screen.getByText("Для «Кафе» обычно — желаемое")).toBeTruthy();
@@ -395,7 +395,7 @@ describe("TxEditSheet: «Эта покупка» — нужное или жел�
     const moved = { ...cafe, want: false, wantOverride: false };
     const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction: keeping(moved, true) });
     await renderWith(<TxEditSheet tx={moved} onClose={noop} />, api);
-    expect((await screen.findByRole("radio", { name: "Нужное" })).props.accessibilityState.selected).toBe(true);
+    expect((await screen.findByRole("button", { name: "Нужное" })).props.accessibilityState.selected).toBe(true);
     await fireEvent.press(side("Желаемое"));
     await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { want: null }));
     await waitFor(() => expect(side("Желаемое").props.accessibilityState.selected).toBe(true));
@@ -404,14 +404,14 @@ describe("TxEditSheet: «Эта покупка» — нужное или жел�
   it("the side it is already on sends nothing", async () => {
     const api = fakeApi({ categories: jest.fn(async () => LIST) });
     await renderWith(<TxEditSheet tx={cafe} onClose={noop} />, api);
-    await fireEvent.press(await screen.findByRole("radio", { name: "Желаемое" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Желаемое" }));
     expect(api.editTransaction).not.toHaveBeenCalled();
   });
 
   it("a failed save says so and keeps the side it was on", async () => {
     const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction: jest.fn(async () => Promise.reject(new Error("422"))) });
     await renderWith(<TxEditSheet tx={cafe} onClose={noop} />, api);
-    await fireEvent.press(await screen.findByRole("radio", { name: "Нужное" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Нужное" }));
     expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
     expect(side("Желаемое").props.accessibilityState.selected).toBe(true);
   });
