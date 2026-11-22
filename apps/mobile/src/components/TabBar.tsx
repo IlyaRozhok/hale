@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
-import { CashOperationSheet } from "./CashOperationSheet";
+import { AddSheet } from "./AddSheet";
 import { Glass } from "./Glass";
 import { Icon, type IconName } from "./Icon";
 
@@ -57,7 +57,7 @@ export function TabBar({ state, navigation }: Pick<BottomTabBarProps, "state" | 
           <Icon name="plus" color={color.fg.default} />
         </Glass>
       </Pressable>
-      {adding && <CashOperationSheet onClose={() => setAdding(false)} />}
+      {adding && <AddSheet onClose={() => setAdding(false)} />}
     </View>
   );
 }

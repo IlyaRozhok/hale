@@ -57,10 +57,12 @@ describe("TabBar", () => {
     expect(StyleSheet.flatten(screen.getByRole("button", { name: "Добавить операцию" }).props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
   });
 
-  it("a round button beside the menu adds an operation from any screen", async () => {
+  it("a round button beside the menu opens «Добавить» from any screen (Д5)", async () => {
     await renderWith(setup(2).ui, fakeApi({ cash: jest.fn(async () => ({ started: true, start: "2026-11-01", balance: 250_000 })) }));
-    expect(screen.queryByLabelText("Сумма")).toBeNull();
+    expect(screen.queryByText("Добавить")).toBeNull();
     await fireEvent.press(screen.getByRole("button", { name: "Добавить операцию" }));
+    expect(await screen.findByText("Добавить")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Трата" }));
     expect(await screen.findByLabelText("Сумма")).toBeTruthy();
   });
 });
