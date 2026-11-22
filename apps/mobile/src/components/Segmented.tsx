@@ -1,5 +1,5 @@
 import { type ComponentType, useState } from "react";
-import { StyleSheet } from "react-native";
+import { type StyleProp, StyleSheet, type ViewStyle } from "react-native";
 import NativeSegmentedControl, { type SegmentedControlProps } from "@react-native-segmented-control/segmented-control";
 import { tokens } from "@hale/tokens";
 
@@ -14,6 +14,8 @@ type Props<K extends string> = {
   /** While true the control does not take taps (a save in flight). */
   disabled?: boolean;
   testID?: string;
+  /** A width where the control does not span its row (the currency beside an amount). */
+  style?: StyleProp<ViewStyle>;
 };
 
 /**
@@ -23,9 +25,10 @@ type Props<K extends string> = {
  * The native control moves to a tapped segment by itself. The parent may not follow (a save that fails): the tapped
  * segment is kept here until `value` changes or the control is enabled again, and then `value` is shown — otherwise
  * the same index would never be sent again and the control would stay on a side the screen does not hold.
+ * A value that is none of the segments shows none chosen (UISegmentedControlNoSegment).
  */
-export function Segmented<K extends string>({ options, value, onChange, disabled = false, testID }: Props<K>) {
-  const index = Math.max(0, options.findIndex((o) => o.key === value));
+export function Segmented<K extends string>({ options, value, onChange, disabled = false, testID, style }: Props<K>) {
+  const index = options.findIndex((o) => o.key === value);
   // The segment last tapped, while the parent has not answered it by a new value.
   const [tap, setTap] = useState<number | null>(null);
   const [was, setWas] = useState({ index, disabled });
@@ -49,7 +52,7 @@ export function Segmented<K extends string>({ options, value, onChange, disabled
         setTap(i);
         onChange(option.key);
       }}
-      style={styles.control}
+      style={[styles.control, style]}
     />
   );
 }

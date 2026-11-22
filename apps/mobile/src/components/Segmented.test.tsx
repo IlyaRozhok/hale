@@ -55,9 +55,16 @@ describe("Segmented", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("an unknown value shows the first segment", async () => {
+  it("a value that is none of the segments shows none chosen, as the chips did", async () => {
     await render(<Segmented options={OPTIONS} value={"z" as Key} onChange={jest.fn()} />);
-    expect(selected("Первое")).toBe(true);
+    expect(screen.getAllByRole("button").map((b) => b.props.accessibilityState.selected)).toEqual([false, false, false]);
+  });
+
+  it("takes a width from the screen and keeps the touch minimum height", async () => {
+    await render(<Segmented testID="seg" options={OPTIONS} value="a" onChange={jest.fn()} style={{ width: 132 }} />);
+    const s = StyleSheet.flatten(screen.getByTestId("seg").props.style) as { width?: number; height?: number };
+    expect(s.width).toBe(132);
+    expect(s.height).toBeGreaterThanOrEqual(tokens.touchMin);
   });
 
   it("a value the parent sets back after a tap is shown (a move from another screen resets the kind)", async () => {

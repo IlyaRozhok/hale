@@ -12,6 +12,7 @@ import { DateField } from "./DateField";
 import { ErrorText } from "./ErrorText";
 import { Field } from "./Field";
 import { PrimaryButton } from "./PrimaryButton";
+import { Segmented } from "./Segmented";
 import { Sheet } from "./Sheet";
 
 const { color, radius, space, touchMin, type } = tokens;
@@ -154,7 +155,12 @@ export function CashOperationSheet({ tx, mode, onClose }: Props) {
 
   return (
     <Sheet title={tx ? "Наличные" : MODES[mode].title} subtitle={tx ? "Изменить или удалить" : undefined} onClose={onClose}>
-      {!correction && kinds.length > 1 && (
+      {/* Two kinds («Перевёл между своими») fit the native switch; all four, when an operation is edited, do not:
+          «Отдал в свои» and «Обменял USDC» would be cut short in a quarter of the row, so they stay chips. */}
+      {!correction && kinds.length === 2 && (
+        <Segmented testID="cash-kind" options={kinds.map((k) => ({ key: k.kind, label: k.label }))} value={kind} onChange={setKind} />
+      )}
+      {!correction && kinds.length > 2 && (
         <View style={styles.chips}>
           {kinds.map((k) => (
             <Chip key={k.kind} label={k.label} selected={kind === k.kind} onPress={() => setKind(k.kind)} />
