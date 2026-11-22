@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { useRef, useState } from "react";
+import { Alert, Pressable, StyleSheet, Text, type TextInputInstance, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import { CATEGORY_ICONS, type CategoryDto, type CategoryIcon } from "@hale/contracts";
 import { ApiError } from "../api/client";
@@ -72,6 +72,8 @@ export function CategoryFormSheet({ category, onClose, onCreated }: Props) {
   const sided = category ? !system && typeof category.want === "boolean" : (list ?? []).some((c) => c.want !== undefined);
   const [want, setWant] = useState(category?.want ?? false);
   const [message, setMessage] = useState<string | null>(null);
+  // A new category's name takes the keyboard once the sheet has slid in (see Sheet's onOpened).
+  const nameField = useRef<TextInputInstance>(null);
   const countOf = useCategoryCount();
   const [counting, setCounting] = useState(false);
   const busy = create.isPending || patch.isPending || remove.isPending || counting;
@@ -133,11 +135,12 @@ export function CategoryFormSheet({ category, onClose, onCreated }: Props) {
       title={category ? category.name : "Новая категория"}
       subtitle={system ? "Служебная категория: можно сменить только значок" : undefined}
       onClose={onClose}
+      onOpened={category ? undefined : () => nameField.current?.focus()}
     >
       {!system && (
         <>
           <Text style={styles.heading}>Название</Text>
-          <Field label="Название" value={name} onChangeText={setName} maxLength={NAME_MAX} autoFocus={!category} />
+          <Field ref={nameField} label="Название" value={name} onChangeText={setName} maxLength={NAME_MAX} />
         </>
       )}
       {sided && (
