@@ -28,6 +28,7 @@ describe("adding a cash operation from the menu", () => {
     const api = fakeApi(started());
     await renderWith(menu, api);
     await press("Добавить операцию");
+    await press("Трата");
     await fireEvent.changeText(await screen.findByLabelText("Сумма"), "300,50");
     await press("Кафе и рестораны");
     await press("Сохранить");
@@ -51,21 +52,24 @@ describe("adding a cash operation from the menu", () => {
     const api = fakeApi(started());
     await renderWith(menu, api);
     await press("Добавить операцию");
+    await press("Трата");
     await press("Сохранить");
     expect(await screen.findByText("Введите сумму и выберите категорию.")).toBeTruthy();
     expect(api.addCashOperation).not.toHaveBeenCalled();
   });
 
-  it("starts the wallet first when it is not started", async () => {
+  it("starts the wallet with the first purchase when it is not started (Д5)", async () => {
     const api = fakeApi(notStarted());
     await renderWith(menu, api);
     await press("Добавить операцию");
-    expect(await screen.findByText(/Сколько наличных у вас сейчас/)).toBeTruthy();
-    await fireEvent.changeText(screen.getByLabelText("Наличные сейчас"), "2500");
-    api.cash.mockResolvedValue({ started: true, start: kyivDate(), balance: 250_000 });
-    await press("Начать учёт");
-    await waitFor(() => expect(api.startCash).toHaveBeenCalledWith({ amount: 250_000 }));
-    expect(await screen.findByLabelText("Сумма")).toBeTruthy();
+    await press("Трата");
+    await fireEvent.changeText(await screen.findByLabelText("Наличные после этой траты"), "2500");
+    await fireEvent.changeText(screen.getByLabelText("Сумма"), "300");
+    await press("Кафе и рестораны");
+    await press("Сохранить");
+    await waitFor(() => expect(api.addCashOperation).toHaveBeenCalledWith({ kind: "spend", amount: 30_000, category: "cafe", date: kyivDate() }));
+    // ₴2,500 is what is left after the purchase: the wallet starts at ₴2,800.
+    expect(api.startCash).toHaveBeenCalledWith({ amount: 280_000 });
   });
 });
 
@@ -81,6 +85,7 @@ describe("USDC exchanged for cash (Б22)", () => {
     const { client } = await renderWith(menu, api);
     const refetched = jest.spyOn(client, "invalidateQueries");
     await press("Добавить операцию");
+    await press("Перевёл между своими");
     await press("Обменял USDC");
     expect(screen.queryByLabelText("Сумма")).toBeNull();
     expect(screen.getByText("Binance уменьшится на отданные USDC, наличных станет больше. Это перевод между своими, не доход.")).toBeTruthy();
@@ -99,6 +104,7 @@ describe("USDC exchanged for cash (Б22)", () => {
     const api = fakeApi(started());
     await renderWith(menu, api);
     await press("Добавить операцию");
+    await press("Перевёл между своими");
     await press("Обменял USDC");
     await fireEvent.changeText(screen.getByLabelText("Получил наличными, ₴"), "65430");
     await press("Сохранить");
@@ -331,6 +337,7 @@ describe("a cash purchase's categories (В5)", () => {
     const api = fakeApi({ ...started(), categories });
     await renderWith(menu, api);
     await press("Добавить операцию");
+    await press("Трата");
     await fireEvent.changeText(await screen.findByLabelText("Сумма"), "120");
     await press("Кот");
     expect(screen.queryByRole("button", { name: "Возвраты" })).toBeNull();

@@ -29,6 +29,10 @@ const PATHS = {
   circle: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0-18 0",
   route: "M3 19a2 2 0 1 0 4 0a2 2 0 0 0-4 0M19 7a2 2 0 1 0 0-4a2 2 0 0 0 0 4M11 19h5.5a3.5 3.5 0 0 0 0-7h-8a3.5 3.5 0 0 1 0-7h4.5",
   chevron: "M9 6l6 6l-6 6",
+  // The actions of «Добавить» (task Д5).
+  arrowDown: "M12 5v14M18 13l-6 6M6 13l6 6",
+  arrowUp: "M12 5v14M18 11l-6-6M6 11l6-6",
+  check: "M5 12l5 5l10-10",
   up: "M6 15l6-6l6 6",
   down: "M6 9l6 6l6-6",
   filter: "M14 6a2 2 0 1 0 4 0a2 2 0 1 0-4 0M4 6h10M18 6h2M6 12a2 2 0 1 0 4 0a2 2 0 1 0-4 0M4 12h2M10 12h10M15 18a2 2 0 1 0 4 0a2 2 0 1 0-4 0M4 18h11M19 18h1",
