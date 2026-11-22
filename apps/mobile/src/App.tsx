@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppState, StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { DarkTheme, NavigationContainer, type NavigationProp, type ParamListBase } from "@react-navigation/native";
-import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { QueryClient, focusManager } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { tokens } from "@hale/tokens";
@@ -13,49 +11,16 @@ import { ApiProvider } from "./api/context";
 import { createStorePersister, shouldPersist } from "./api/persist";
 import { CACHE_KEY, TOKEN_KEY, keychain } from "./api/secureStore";
 import { Login } from "./screens/Login";
-import { Activity } from "./screens/Activity";
-import { Insights } from "./screens/Insights";
-import { Plan } from "./screens/Plan";
-import { TabBar } from "./components/TabBar";
+import { MainTabs } from "./MainTabs";
 import { Background } from "./components/Background";
 import { createPushDeps } from "./pushNative";
 import { registerPush } from "./push";
 import { useApi } from "./api/context";
-import { Today } from "./screens/Today";
 import { SessionProvider } from "./session";
 
 const { color } = tokens;
 const DAY = 24 * 60 * 60 * 1000;
 const DEVICE_NAME = "iPhone";
-
-const theme = {
-  ...DarkTheme,
-  colors: { ...DarkTheme.colors, background: "transparent", card: color.surface.inset, text: color.fg.default, primary: color.fg.default, border: color.surface.inset },
-};
-
-const Tabs = createBottomTabNavigator();
-
-function TodayTab({ navigation }: { navigation: NavigationProp<ParamListBase> }) {
-  // `at` changes with every arrival, so the same day opened twice in a row is applied twice.
-  return (
-    <Today
-      onOpenActivity={(day) => navigation.navigate("Activity", day ? { day, at: Date.now() } : undefined)}
-      // The observation's category over its days, and that it came from the observation (В7).
-      onOpenObservation={(category, from, to) => navigation.navigate("Activity", { category, from, to, observation: true, at: Date.now() })}
-    />
-  );
-}
-
-function InsightsTab({ navigation }: { navigation: NavigationProp<ParamListBase> }) {
-  // A category's spending over the shown days of its month, as the filters of «Операции» put it.
-  // «Желаемое» (В6): the purchases of «желаемое» over the same days.
-  return (
-    <Insights
-      onOpenCategory={(category, from, to) => navigation.navigate("Activity", { category, from, to, at: Date.now() })}
-      onOpenWanted={(from, to) => navigation.navigate("Activity", { want: true, from, to, at: Date.now() })}
-    />
-  );
-}
 
 function Main() {
   const api = useApi();
@@ -64,16 +29,7 @@ function Main() {
     void registerPush(createPushDeps(api, keychain));
   }, [api]);
 
-  return (
-    <NavigationContainer theme={theme}>
-      <Tabs.Navigator tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false, sceneStyle: styles.scene }}>
-        <Tabs.Screen name="Today" component={TodayTab} options={{ title: "Сегодня" }} />
-        <Tabs.Screen name="Activity" component={Activity} options={{ title: "Операции" }} />
-        <Tabs.Screen name="Plan" component={Plan} options={{ title: "План" }} />
-        <Tabs.Screen name="Insights" component={InsightsTab} options={{ title: "Итоги" }} />
-      </Tabs.Navigator>
-    </NavigationContainer>
-  );
+  return <MainTabs />;
 }
 
 export default function App() {
@@ -141,6 +97,5 @@ export default function App() {
 
 const styles = StyleSheet.create({
   blank: { flex: 1 },
-  scene: { backgroundColor: "transparent" },
   backdrop: { ...(StyleSheet.absoluteFill as object), backgroundColor: color.surface.base },
 });

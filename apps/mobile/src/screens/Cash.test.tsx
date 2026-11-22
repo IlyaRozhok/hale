@@ -3,7 +3,7 @@ import { Alert } from "react-native";
 import { Activity } from "./Activity";
 import { Plan } from "./Plan";
 import { Today } from "./Today";
-import { TabBar } from "../components/TabBar";
+import { MainTabs } from "../MainTabs";
 import { fakeApi, renderWith, todayFixture, txFixture } from "../testing";
 import { kyivDate } from "../format";
 import { ApiError } from "../api/client";
@@ -20,14 +20,15 @@ const started = () => ({ cash: jest.fn(async () => ({ started: true, start: "202
 const notStarted = () => ({ cash: jest.fn(async () => ({ started: false, start: null, balance: 0 })) });
 const manual = txFixture({ id: 5, manual: true, accountKind: "cash", description: "Рынок", amount: -30_000, amountUah: -30_000, category: "groceries", localDate: kyivDate() });
 
-/** The menu with its round "+" button, as on every screen. */
-const menu = <TabBar state={{ index: 0, routes: [{ key: "Today-k", name: "Today" }] } as never} navigation={{ emit: jest.fn(() => ({ defaultPrevented: false })), navigate: jest.fn() } as never} />;
+/** The tabs with «+» («Добавить»), as on every screen. */
+const menu = <MainTabs />;
+const openAdd = async () => fireEvent.press(await screen.findByRole("tab", { name: "Добавить" }));
 
 describe("adding a cash operation from the menu", () => {
   it("a purchase: amount, category, save", async () => {
     const api = fakeApi(started());
     await renderWith(menu, api);
-    await press("Добавить операцию");
+    await openAdd();
     await press("Трата");
     await fireEvent.changeText(await screen.findByLabelText("Сумма"), "300,50");
     await press("Кафе и рестораны");
@@ -39,7 +40,7 @@ describe("adding a cash operation from the menu", () => {
   it("other kinds need no category and keep a note", async () => {
     const api = fakeApi(started());
     await renderWith(menu, api);
-    await press("Добавить операцию");
+    await openAdd();
     await press("Получил");
     expect(screen.queryByRole("button", { name: "Кафе и рестораны" })).toBeNull();
     await fireEvent.changeText(await screen.findByLabelText("Сумма"), "1000");
@@ -51,7 +52,7 @@ describe("adding a cash operation from the menu", () => {
   it("asks for an amount and a category before saving", async () => {
     const api = fakeApi(started());
     await renderWith(menu, api);
-    await press("Добавить операцию");
+    await openAdd();
     await press("Трата");
     await press("Сохранить");
     expect(await screen.findByText("Введите сумму и выберите категорию.")).toBeTruthy();
@@ -61,7 +62,7 @@ describe("adding a cash operation from the menu", () => {
   it("starts the wallet with the first purchase when it is not started (Д5)", async () => {
     const api = fakeApi(notStarted());
     await renderWith(menu, api);
-    await press("Добавить операцию");
+    await openAdd();
     await press("Трата");
     await fireEvent.changeText(await screen.findByLabelText("Наличные после этой траты"), "2500");
     await fireEvent.changeText(screen.getByLabelText("Сумма"), "300");
@@ -84,7 +85,7 @@ describe("USDC exchanged for cash (Б22)", () => {
     const api = fakeApi(started());
     const { client } = await renderWith(menu, api);
     const refetched = jest.spyOn(client, "invalidateQueries");
-    await press("Добавить операцию");
+    await openAdd();
     await press("Перевёл между своими");
     await press("Обменял USDC");
     expect(screen.queryByLabelText("Сумма")).toBeNull();
@@ -103,7 +104,7 @@ describe("USDC exchanged for cash (Б22)", () => {
   it("asks for both amounts before saving", async () => {
     const api = fakeApi(started());
     await renderWith(menu, api);
-    await press("Добавить операцию");
+    await openAdd();
     await press("Перевёл между своими");
     await press("Обменял USDC");
     await fireEvent.changeText(screen.getByLabelText("Получил наличными, ₴"), "65430");
@@ -336,7 +337,7 @@ describe("a cash purchase's categories (В5)", () => {
     ]);
     const api = fakeApi({ ...started(), categories });
     await renderWith(menu, api);
-    await press("Добавить операцию");
+    await openAdd();
     await press("Трата");
     await fireEvent.changeText(await screen.findByLabelText("Сумма"), "120");
     await press("Кот");
