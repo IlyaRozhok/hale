@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatMoney } from "./format";
 import type { OwnMoneyItemDto } from "@hale/contracts";
-import { accountPatchOf, placeName, placeOpens, setAsideDetail, wholeShares } from "./ownMoney";
+import { accountPatchOf, placeName, placeNote, placeOpens, setAsideDetail, setAsideTotal, wholeShares } from "./ownMoney";
 
 const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
 /** The total as the screen shows it, in whole hryvnias. */
@@ -93,5 +93,25 @@ describe("places of money as rows (task Д2б)", () => {
     expect(setAsideDetail({ ...deposit, currency: "EUR", amount: 50_000, own: 2_400_000 })).toBe("€500.00");
     // A bank account is shown in hryvnias, as it counts.
     expect(setAsideDetail({ ...card, own: 210_000, countsAsOwn: false })).toBe("₴2,100");
+  });
+});
+
+describe("the total of «Отложено» (variant А)", () => {
+  it("adds up the set-aside places in hryvnias, and is nothing when there are none or an older server does not say", () => {
+    const sol: OwnMoneyItemDto = { kind: "manual", name: "SOL", own: 4_145_625, currency: "USD", amount: 100_500, id: 9, source: "manual", countsAsOwn: false };
+    const deposit: OwnMoneyItemDto = { kind: "manual", name: "Депозит", own: 5_000_000, currency: "UAH", amount: 5_000_000, id: 10, source: "manual", countsAsOwn: false };
+    expect(setAsideTotal([sol, deposit])).toBe("₴91,456");
+    expect(setAsideTotal([])).toBeUndefined();
+    expect(setAsideTotal(undefined)).toBeUndefined();
+  });
+});
+
+describe("the note under a place (variant А)", () => {
+  it("says what a card in credit stands for, or a hand-kept balance in its own currency", () => {
+    expect(placeNote({ kind: "black", name: "Чёрная карта", own: -3_000_000, creditLimit: 3_000_000 })).toBe("кредитный лимит потрачен весь");
+    expect(placeNote({ kind: "black", name: "Чёрная карта", own: -2_000_000, creditLimit: 3_000_000 })).toBe("потрачено из кредитного лимита ₴30,000");
+    expect(placeNote({ kind: "binance", name: "Binance", own: 579_900, currency: "USD", amount: 12_600 })).toBe("$126");
+    expect(placeNote({ kind: "manual", name: "Конверт", own: 100_000, currency: "UAH", amount: 100_000 })).toBeNull();
+    expect(placeNote({ kind: "white", name: "Белая карта", own: 100_000 })).toBeNull();
   });
 });

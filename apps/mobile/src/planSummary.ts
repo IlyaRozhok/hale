@@ -1,12 +1,10 @@
 // What the Plan screen's lines say, from the same rows its windows list. No native imports: runs in node tests.
-import type { ExpectedIncomeDto, GoalDto, IncomeAccount, IncomeEventDto, OwnMoneyItemDto, ScheduledPaymentDto } from "@hale/contracts";
+import type { ExpectedIncomeDto, IncomeAccount, IncomeEventDto, OwnMoneyItemDto, RecurringDto, ScheduledPaymentDto } from "@hale/contracts";
 import { formatDollars, formatMoney, shortDate } from "./format";
 import { placeName } from "./ownMoney";
 
 /** An amount in its own currency, whole units: the lines are a summary. */
 export const moneyIn = (minor: number, currency: string): string => (currency === "USD" ? formatDollars(minor) : formatMoney(minor));
-
-const NONE = "нет";
 
 const unpaid = (payments: readonly ScheduledPaymentDto[], kind: ScheduledPaymentDto["kind"]) =>
   payments.filter((p) => p.kind === kind && p.paid_at === null).sort((a, b) => a.due_on.localeCompare(b.due_on));
@@ -15,13 +13,6 @@ export function nextEvent(events: readonly IncomeEventDto[], expectedId?: number
   return events
     .filter((e) => e.status !== "received" && (expectedId === undefined || e.expected_income_id === expectedId))
     .sort((a, b) => a.expected_on.localeCompare(b.expected_on))[0];
-}
-
-export function incomesLine(expected: readonly ExpectedIncomeDto[], events: readonly IncomeEventDto[]): string {
-  const event = nextEvent(events);
-  const income = event && expected.find((x) => x.id === event.expected_income_id);
-  if (!event || !income) return "не указаны";
-  return `следующий ${shortDate(event.expected_on)}, ${moneyIn(income.amount, income.currency)}`;
 }
 
 /** When an income comes (Д3б): its window or day, both days of a twice-monthly one, or no schedule. An older server: its window. */
@@ -71,11 +62,6 @@ export function nextIncomeLine(expected: readonly ExpectedIncomeDto[], events: r
 /** A server since Д3а names every income; an older one does not, and takes only the old fields. No incomes: a newer server is assumed. */
 export const hasNamedIncomes = (incomes: readonly ExpectedIncomeDto[]): boolean => incomes.every((i) => i.name !== undefined);
 
-export function paymentsLine(payments: readonly ScheduledPaymentDto[]): string {
-  const first = unpaid(payments, "obligation")[0];
-  return first ? `ближайший ${shortDate(first.due_on)}, ${moneyIn(first.amount, first.currency)}` : NONE;
-}
-
 export interface InstallmentGroup {
   name: string;
   amount: number;
@@ -101,24 +87,6 @@ export function installmentGroups(payments: readonly ScheduledPaymentDto[]): Ins
 }
 
 /**
- * What is left of all series, in hryvnias. The rate comes with "Сегодня" and may not be here yet:
- * a dollar series then has no honest sum, so there is no line (undefined) rather than a wrong one.
- */
-export function installmentsLine(payments: readonly ScheduledPaymentDto[], usdRate: number | undefined): string | undefined {
-  const groups = installmentGroups(payments);
-  if (groups.length === 0) return NONE;
-  const rate = usdRate !== undefined && usdRate > 0 ? usdRate : undefined;
-  if (rate === undefined && groups.some((g) => g.currency === "USD")) return undefined;
-  return `осталось ${formatMoney(groups.reduce((s, g) => s + (g.currency === "USD" ? g.total * (rate ?? 0) : g.total), 0))}`;
-}
-
-export function taxLine(payments: readonly ScheduledPaymentDto[]): string {
-  const rows = unpaid(payments, "tax");
-  if (rows.length === 0) return NONE;
-  return `${formatMoney(rows.reduce((s, p) => s + p.amount, 0))}, ближайший ${shortDate(rows[0]!.due_on)}`;
-}
-
-/**
  * Task Д4: «Налоги» is on «План» unless the server says the person has no taxes (no income pays the fop tax) and no
  * tax payment here is still unpaid. An older server does not say, and then it is shown, as before.
  */
@@ -126,8 +94,21 @@ export function taxesShown(taxes: boolean | undefined, payments: readonly Schedu
   return taxes !== false || (payments !== undefined && unpaid(payments, "tax").length > 0);
 }
 
-export function goalsLine(goals: readonly GoalDto[]): string {
-  if (goals.length === 0) return NONE;
-  const sum = (pick: (g: GoalDto) => number) => goals.reduce((s, g) => s + pick(g), 0);
-  return `${formatDollars(sum((g) => g.saved_cents))} из ${formatDollars(sum((g) => g.target_cents))}`;
+/** «Платежи» on «План»: the monthly obligations and the one-off ones still to pay, as its window lists them. */
+export function paymentsCount(recurring: readonly RecurringDto[], payments: readonly ScheduledPaymentDto[]): number {
+  const monthly = recurring.filter((r) => r.active && r.kind === "obligation").length;
+  return monthly + payments.filter((p) => p.kind === "obligation" && p.recurring_id === null && p.paid_at === null).length;
+}
+
+/** «Налоги» on «План»: the tax payments still to pay. */
+export const unpaidTaxCount = (payments: readonly ScheduledPaymentDto[]): number => unpaid(payments, "tax").length;
+
+/** The expected income whose payment not yet received falls on `day` (the runway's income day), if one is known. */
+export function incomeOnDay(expected: readonly ExpectedIncomeDto[], events: readonly IncomeEventDto[], day: string): ExpectedIncomeDto | undefined {
+  for (const e of events) {
+    if (e.status === "received" || e.expected_on !== day) continue;
+    const income = expected.find((x) => x.id === e.expected_income_id);
+    if (income) return income;
+  }
+  return undefined;
 }

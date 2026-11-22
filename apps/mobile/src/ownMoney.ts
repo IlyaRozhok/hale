@@ -39,6 +39,23 @@ export function setAsideDetail(item: OwnMoneyItemDto): string {
   return item.currency === "USD" ? formatDollars(item.amount) : formatOriginal(item.amount, item.currency);
 }
 
+/** The total on the «Отложено» row: the set-aside places in hryvnias; nothing when there are none or the server does not say. */
+export function setAsideTotal(setAside: readonly OwnMoneyItemDto[] | undefined): string | undefined {
+  if (!setAside || setAside.length === 0) return undefined;
+  return formatMoney(setAside.reduce((s, i) => s + i.own, 0));
+}
+
+/** A quiet line under a place: what a card in credit stands for, or a hand-kept balance in its own currency. */
+export function placeNote(item: OwnMoneyItemDto): string | null {
+  if (item.own < 0 && item.creditLimit) {
+    return item.own <= -item.creditLimit ? "кредитный лимит потрачен весь" : `потрачено из кредитного лимита ${formatMoney(item.creditLimit)}`;
+  }
+  if (item.amount !== undefined && item.currency && item.currency !== "UAH") {
+    return item.currency === "USD" ? formatDollars(item.amount) : formatOriginal(item.amount, item.currency);
+  }
+  return null;
+}
+
 /** Whole hryvnias of a total the way `formatMoney` shows it: half away from zero. */
 const wholeOf = (kopecks: number): number => Math.sign(kopecks) * Math.round(Math.abs(kopecks) / 100);
 
