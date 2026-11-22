@@ -3,7 +3,7 @@ import { StyleSheet, TextInput } from "react-native";
 import { tokens } from "@hale/tokens";
 import { TxEditSheet } from "./TxEditSheet";
 import type { CategoryDto, TransactionDto } from "@hale/contracts";
-import { fakeApi, renderWith, txFixture } from "../testing";
+import { fakeApi, holdSheetOpenings, renderWith, txFixture } from "../testing";
 import type { TransactionEdit } from "../api/client";
 
 const noop = () => undefined;
@@ -327,14 +327,19 @@ describe("TxEditSheet: categories from the server and «Всегда так» (�
   // the form has slid in.
   it("«Новая»: the name takes the keyboard only once the form has slid in", async () => {
     const focus = jest.spyOn(TextInput.prototype, "focus");
+    const openings = holdSheetOpenings();
     try {
       await renderWith(<TxEditSheet tx={silpo} onClose={noop} />, fakeApi({ categories: jest.fn(async () => LIST) }));
+      await openings.finish();
       await fireEvent.press(await screen.findByRole("button", { name: "Новая" }));
       const field = await screen.findByLabelText("Название");
       expect(field.props.autoFocus).toBeFalsy();
+      // Still sliding in: no keyboard yet.
       expect(focus).not.toHaveBeenCalled();
-      await waitFor(() => expect(focus).toHaveBeenCalledTimes(1));
+      await openings.finish();
+      expect(focus).toHaveBeenCalledTimes(1);
     } finally {
+      openings.restore();
       focus.mockRestore();
     }
   });
