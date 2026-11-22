@@ -150,13 +150,22 @@ describe("Plan, «До дохода» (variant А)", () => {
     expect(screen.queryAllByText(/\d\d\.\d\d/)).toHaveLength(0);
   });
 
+  it("reads each row as one whole: the date, what happens and its amount", async () => {
+    await renderWith(<Plan />, fakeApi({ ...withIncome(), today: jest.fn(async () => todayFixture({ runway: runway() })) }));
+    await screen.findByText("+$2,700");
+    expect(screen.getByLabelText("6 декабря, Квартплата, −₴8,000")).toBeTruthy();
+    expect(screen.getByLabelText("12 декабря, Рассрочка · техника, −₴2,400")).toBeTruthy();
+    expect(screen.getByLabelText("15 декабря, Работа, +$2,700")).toBeTruthy();
+  });
+
   it("calls the income «Доход» and shows no amount when no expected income falls on that day", async () => {
     await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => todayFixture({ runway: runway() })) }));
     expect(await screen.findByText("Доход")).toBeTruthy();
     expect(screen.queryByText(/^\+/)).toBeNull();
+    expect(screen.getByLabelText("15 декабря, Доход")).toBeTruthy();
   });
 
-  it("is not there without a runway (an older server), without an income date, or with nothing until the income", async () => {
+  it("is not there without a runway (an older server) or without an income date; with no payments it still shows the income", async () => {
     const { unmount } = await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => todayFixture({ runway: undefined })) }));
     await screen.findByText("Счета");
     expect(screen.queryByText("До дохода")).toBeNull();
@@ -261,6 +270,23 @@ describe("Plan, money place by place (task Б25)", () => {
     expect((await screen.findByRole("button", { name: "Binance" })).props.accessibilityHint).toBe("не задан");
     expect((await screen.findByRole("button", { name: "Наличные" })).props.accessibilityHint).toBe("не начат");
     expect(screen.getAllByText("₴5,000")).toHaveLength(2);
+  });
+
+  it("on a server without «Отложено» keeps a started wallet and Binance at zero as rows of «Счета» that open their windows", async () => {
+    const items: OwnMoneyItemDto[] = [
+      { kind: "white", name: "Белая карта", own: 500_000 },
+      { kind: "cash", name: "Наличные", own: 0 },
+      { kind: "binance", name: "Binance", own: 0, currency: "USD", amount: 0 },
+    ];
+    await renderWith(<Plan />, fakeApi({ ...withItems(items), cash: jest.fn(async () => ({ started: true, start: "2026-11-01", balance: 0 })) }));
+    expect((await screen.findByRole("button", { name: "Наличные" })).props.accessibilityHint).toBe("₴0");
+    expect(screen.getByRole("button", { name: "Binance" }).props.accessibilityHint).toBe("₴0, $0");
+    await fireEvent.press(screen.getByRole("button", { name: "Наличные" }));
+    expect(await screen.findByText("Пересчитайте наличные и введите, сколько на самом деле.")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
+    await waitFor(() => expect(screen.queryByText("Пересчитайте наличные и введите, сколько на самом деле.")).toBeNull());
+    await fireEvent.press(screen.getByRole("button", { name: "Binance" }));
+    expect(await screen.findByText("Баланс Binance")).toBeTruthy();
   });
 });
 

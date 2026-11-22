@@ -1,7 +1,7 @@
 import { Children, isValidElement, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
-import { dayMonth } from "../format";
+import { dayMonth, dayMonthLong } from "../format";
 import { Icon, type IconName } from "./Icon";
 
 const { color, radius, space, touchMin, type } = tokens;
@@ -82,8 +82,10 @@ export function ListRow({ icon, label, subtitle, value, quiet, onPress }: RowPro
 /** A row of «До дохода»: the day in bold over its short month, what happens, and its amount; money in is sage. */
 export function DateRow({ date, label, value, income }: { date: string; label: string; value?: string; income?: boolean }) {
   const { day, month } = dayMonth(date);
+  // Read as one whole, with the month in full: «6 декабря, Квартплата, −₴8,000».
+  const spoken = [dayMonthLong(date), label, ...(value ? [value] : [])].join(", ");
   return (
-    <View style={styles.row}>
+    <View accessible accessibilityLabel={spoken} style={styles.row}>
       <View style={styles.date}>
         <Text style={styles.day}>{day}</Text>
         <Text style={styles.month}>{month}</Text>

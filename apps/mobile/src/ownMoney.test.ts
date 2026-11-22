@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatMoney } from "./format";
 import type { OwnMoneyItemDto } from "@hale/contracts";
-import { accountPatchOf, placeName, placeNote, placeOpens, setAsideDetail, wholeShares } from "./ownMoney";
+import { accountPatchOf, placeName, placeNote, placeOpens, setAsideDetail, setAsideTotal, wholeShares } from "./ownMoney";
 
 const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
 /** The total as the screen shows it, in whole hryvnias. */
@@ -93,6 +93,16 @@ describe("places of money as rows (task Д2б)", () => {
     expect(setAsideDetail({ ...deposit, currency: "EUR", amount: 50_000, own: 2_400_000 })).toBe("€500.00");
     // A bank account is shown in hryvnias, as it counts.
     expect(setAsideDetail({ ...card, own: 210_000, countsAsOwn: false })).toBe("₴2,100");
+  });
+});
+
+describe("the total of «Отложено» (variant А)", () => {
+  it("adds up the set-aside places in hryvnias, and is nothing when there are none or an older server does not say", () => {
+    const sol: OwnMoneyItemDto = { kind: "manual", name: "SOL", own: 4_145_625, currency: "USD", amount: 100_500, id: 9, source: "manual", countsAsOwn: false };
+    const deposit: OwnMoneyItemDto = { kind: "manual", name: "Депозит", own: 5_000_000, currency: "UAH", amount: 5_000_000, id: 10, source: "manual", countsAsOwn: false };
+    expect(setAsideTotal([sol, deposit])).toBe("₴91,456");
+    expect(setAsideTotal([])).toBeUndefined();
+    expect(setAsideTotal(undefined)).toBeUndefined();
   });
 });
 

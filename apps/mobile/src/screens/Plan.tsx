@@ -21,7 +21,7 @@ import { DateRow, ListRow, PlanSection } from "../components/PlanList";
 import { SetAsideSheet } from "../components/SetAsideSheet";
 import { TaxSheet } from "../components/TaxPayments";
 import { formatDollars, formatMoney, formatOriginal } from "../format";
-import { placeName, placeNote, placeOpens, setAsideDetail, wholeShares } from "../ownMoney";
+import { placeName, placeNote, placeOpens, setAsideDetail, setAsideTotal, wholeShares } from "../ownMoney";
 import { incomeOnDay, installmentGroups, moneyIn, paymentsCount, taxesShown, unpaidTaxCount } from "../planSummary";
 
 const { color, space, touchMin, type } = tokens;
@@ -92,7 +92,7 @@ export function Plan() {
   const keyOf = (item: OwnMoneyItemDto, i: number) => `${item.source ?? item.kind}:${item.id ?? i}`;
 
   // Places with money, those in credit last, rounded together so they add up to own money to the hryvnia. A place with
-  // nothing on it moves into «Отложено».
+  // nothing on it moves into «Отложено» (on a server that lists it; otherwise it stays in «Счета»).
   const withMoney = items ? [...items.filter((i) => i.own > 0), ...items.filter((i) => i.own < 0)] : [];
   const empty = items?.filter((i) => i.own === 0) ?? [];
   const whole = data ? wholeShares(data.accounts.own, withMoney.map((i) => i.own)) : [];
@@ -116,7 +116,8 @@ export function Plan() {
     accounts.push(<ListRow key="credit" icon="card" label="Кредитные" value={formatMoney(data.accounts.credit)} />);
   }
   if (older) {
-    accounts.push(cashRow, binanceRow);
+    // No «Отложено» list from this server: a place at zero (a started wallet at ₴0, Binance at $0) stays a row here.
+    accounts.push(...empty.map((item, i) => placeRow(item, formatMoney(0), `empty:${keyOf(item, i)}`)), cashRow, binanceRow);
     asideRows = setAsideBalances.map((b) => <ListRow key={`b${b.id}`} icon="lock" label={b.name} value={balanceDetail(b)} onPress={() => openBalance(b)} />);
   } else if (setAside) {
     asideRows = [
@@ -126,7 +127,7 @@ export function Plan() {
       binanceRow,
     ];
   }
-  const asideTotal = setAside && setAside.length > 0 ? formatMoney(setAside.reduce((s, i) => s + i.own, 0)) : undefined;
+  const asideTotal = setAsideTotal(setAside);
   const addAside = older
     ? { label: "Добавить в отложенное", onPress: () => openBalance("new") }
     : { label: "Добавить счёт", onPress: () => openAccount("new") };
