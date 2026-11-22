@@ -46,7 +46,7 @@ export function SubscriptionsList({ subscriptions }: { subscriptions: Subscripti
   return (
     <>
       {active.length > 0 && (
-        <View testID="subscriptions-card" style={styles.card}>
+        <View testID="subscriptions-active-card" style={styles.card}>
           {active.map((i, n) => (
             <ItemRow
               key={`${i.key}-${i.lastDate}`}
@@ -61,7 +61,7 @@ export function SubscriptionsList({ subscriptions }: { subscriptions: Subscripti
       {missed.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.eyebrow}>Давно не списывались</Text>
-          <View testID="subscriptions-card" style={styles.card}>
+          <View testID="subscriptions-missed-card" style={styles.card}>
             {missed.map((i, n) => (
               <ItemRow
                 key={`${i.key}-${i.lastDate}`}

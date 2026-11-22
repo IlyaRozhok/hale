@@ -89,6 +89,16 @@ describe("Insights", () => {
     expect(t.indexOf("₴18,220")).toBeGreaterThan(t.indexOf("Ноябрь, 1–16"));
   });
 
+  it("each month arrow is a full touch target, 44 by 44", async () => {
+    await renderWith(<Insights now={now} />, fakeApi());
+    await screen.findByText("₴18,220");
+    for (const name of ["Предыдущий месяц", "Следующий месяц"]) {
+      const s = StyleSheet.flatten(screen.getByRole("button", { name }).props.style) as { minWidth?: number; minHeight?: number };
+      expect(s.minWidth).toBeGreaterThanOrEqual(tokens.touchMin);
+      expect(s.minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+    }
+  });
+
   it("lists every category in the server's order, with no fold", async () => {
     await renderWith(<Insights now={now} />, fakeApi());
     await screen.findByText("₴18,220");
@@ -284,7 +294,9 @@ describe("Insights", () => {
     expect(await screen.findByText("потрачено · в декабре за те же дни ₴18,040")).toBeTruthy();
     expect(screen.getByText("Январь, 1–5")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Предыдущий месяц" }));
-    expect(await screen.findByText("Декабрь 2026")).toBeTruthy();
+    // December's own data, not the subtitle the loading state shows too.
+    expect(await screen.findByText("потрачено · в ноябре ₴18,040")).toBeTruthy();
+    expect(screen.getByText("Декабрь 2026")).toBeTruthy();
     expect(insights).toHaveBeenLastCalledWith("2026-12");
   });
 
@@ -497,8 +509,10 @@ describe("Insights", () => {
 
     it("a solid card, not glass, with no red", async () => {
       await open(subscriptions);
-      const card = StyleSheet.flatten(screen.getAllByTestId("subscriptions-card")[0]!.props.style) as { backgroundColor?: string };
-      expect(card.backgroundColor).toBe(tokens.color.card.fill);
+      for (const id of ["subscriptions-active-card", "subscriptions-missed-card"]) {
+        const card = StyleSheet.flatten(screen.getByTestId(id).props.style) as { backgroundColor?: string };
+        expect(card.backgroundColor).toBe(tokens.color.card.fill);
+      }
       for (const t of screen.getAllByText(/./)) {
         const c = (StyleSheet.flatten(t.props.style) as { color?: string }).color;
         expect([tokens.color.status.danger, tokens.color.money.expense]).not.toContain(c);

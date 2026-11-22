@@ -257,7 +257,8 @@ const styles = StyleSheet.create({
   title: { ...type.display, color: color.fg.default, paddingHorizontal: space.xs },
   // The arrows hug the month's name, as in «Экранное время».
   monthLine: { flexDirection: "row", alignItems: "center", marginTop: -space.md },
-  arrow: { minWidth: touchMin - space.md, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
+  // A full touch target; negative margins pull the glyph close to the month's name (and the first one to the edge).
+  arrow: { minWidth: touchMin, minHeight: touchMin, marginHorizontal: -space.sm, alignItems: "center", justifyContent: "center" },
   arrowText: { ...type.body, color: color.fg.muted },
   off: { opacity: 0.3 },
   subtitle: { ...type.body, color: color.fg.muted },
