@@ -192,6 +192,7 @@ describe("the loans list in Plan", () => {
       });
       await renderWith(<LoansSheet onClose={noop} />, api);
       await screen.findByText("Старый");
+      await fireEvent.press(screen.getByRole("button", { name: /^Погашенные/ }));
       expect(screen.getByText("Погашенный")).toBeTruthy();
       expect(screen.queryByRole("button", { name: /^Вернуть до/ })).toBeNull();
     });
@@ -200,6 +201,61 @@ describe("the loans list in Plan", () => {
       await show(fakeApi({ loanHistory: jest.fn(async () => loanHistoryFixture({ open: [loanFixture()] })) }));
       expect(screen.getByRole("button", { name: "Погасил: Друг" })).toBeTruthy();
       expect(screen.queryByRole("button", { name: /^Вернуть до/ })).toBeNull();
+    });
+  });
+
+  describe("repaid loans fold into one quiet row (Б57)", () => {
+    const repaid = (n: number) =>
+      Array.from({ length: n }, (_, i) =>
+        loanFixture({ id: 100 + i, title: `Кредит ${i + 1}`, manual: false, remaining: 0, repaidOn: "2026-10-20", repaidAmount: 500_000, receivedOn: "2026-10-10" }),
+      );
+
+    it("shows the open loans and only a count of the repaid ones, until it is pressed", async () => {
+      const api = fakeApi({ loanHistory: jest.fn(async () => loanHistoryFixture({ open: [loanFixture()], repaid: repaid(82) })) });
+      await show(api);
+      expect(screen.getByText("Открытые")).toBeTruthy();
+      expect(screen.queryByText("Кредит 1")).toBeNull();
+      expect(screen.queryByText("Кредит 82")).toBeNull();
+      const fold = screen.getByRole("button", { name: /^Погашенные/ });
+      expect(screen.getByText("Погашенные · 82")).toBeTruthy();
+      await fireEvent.press(fold);
+      expect(screen.getByText("Кредит 1")).toBeTruthy();
+      expect(screen.getByText("Кредит 82")).toBeTruthy();
+      expect(screen.getByText("Погашенные")).toBeTruthy();
+      expect(screen.queryByText("Погашенные · 82")).toBeNull();
+      // The open loan stays where it was, above the repaid ones.
+      const texts = screen.getAllByText(/./).map((t) => t.props.children);
+      expect(texts.indexOf("Друг")).toBeLessThan(texts.indexOf("Кредит 1"));
+    });
+
+    it("says calmly that nothing is open, and keeps the repaid ones folded", async () => {
+      const api = fakeApi({ loanHistory: jest.fn(async () => loanHistoryFixture({ repaid: repaid(3) })) });
+      await renderWith(<LoansSheet onClose={noop} />, api);
+      expect(await screen.findByText("Открытых займов нет.")).toBeTruthy();
+      expect(screen.getByText("Погашенные · 3")).toBeTruthy();
+      expect(screen.queryByText("Кредит 1")).toBeNull();
+      expect(screen.queryByText("Займов пока нет.")).toBeNull();
+    });
+
+    it("does not say nothing is open when there are open loans, nor when there are none at all", async () => {
+      await show(fakeApi({ loanHistory: jest.fn(async () => loanHistoryFixture({ open: [loanFixture()] })) }));
+      expect(screen.queryByText("Открытых займов нет.")).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Погашенные/ })).toBeNull();
+    });
+
+    it("a repaid loan from the unfolded list can still be deleted, after asking", async () => {
+      const api = fakeApi({
+        loanHistory: jest.fn(async () =>
+          loanHistoryFixture({ open: [loanFixture()], repaid: [loanFixture({ id: 9, title: "Лишний", removable: true, remaining: 0, repaidOn: "2026-10-20" })] }),
+        ),
+      });
+      await show(api);
+      expect(screen.queryByRole("button", { name: "Удалить: Лишний" })).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: /^Погашенные/ }));
+      await fireEvent.press(screen.getByRole("button", { name: "Удалить: Лишний" }));
+      expect(alert.mock.calls.at(-1)![0]).toBe("Удалить ошибочную запись?");
+      await act(async () => pressAlert(alert, "Удалить"));
+      await waitFor(() => expect(api.deleteLoan).toHaveBeenCalledWith(9));
     });
   });
 });

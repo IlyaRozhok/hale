@@ -38,6 +38,8 @@ export function LoansSheet({ onClose }: { onClose: () => void }) {
   const repayOld = useRepayOldLoans();
   const [repaying, setRepaying] = useState<LoanRowDto | null>(null);
   const [adding, setAdding] = useState(false);
+  // Repaid loans can run to dozens (Б57): they wait under one quiet row, like «Ещё» in Plan, and unfold on a press.
+  const [repaidShown, setRepaidShown] = useState(false);
   const data = history.data;
   const total = data ? data.open.length + data.old.length + data.repaid.length : 0;
 
@@ -113,6 +115,7 @@ export function LoansSheet({ onClose }: { onClose: () => void }) {
             <Stat label="Открыто сейчас" value={data.stats.stillOpen} />
           </View>
           {section("Открытые", data.open, undefined, undefined, true)}
+          {data.open.length === 0 && <Text style={styles.detail}>Открытых займов нет.</Text>}
           {section(
             "До начала учёта",
             data.old,
@@ -121,7 +124,18 @@ export function LoansSheet({ onClose }: { onClose: () => void }) {
               <Text style={styles.actionText}>Все уже погашены</Text>
             </Pressable>,
           )}
-          {section("Погашенные", data.repaid)}
+          {repaidShown
+            ? section("Погашенные", data.repaid)
+            : data.repaid.length > 0 && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Погашенные, ${data.repaid.length}`}
+                  onPress={() => setRepaidShown(true)}
+                  style={styles.quiet}
+                >
+                  <Text style={styles.more}>{`Погашенные · ${data.repaid.length}`}</Text>
+                </Pressable>
+              )}
         </>
       )}
       <PrimaryButton label="Новый займ" onPress={() => setAdding(true)} />
@@ -190,6 +204,7 @@ const styles = StyleSheet.create({
   actionText: { ...type.label, color: color.fg.default },
   deleteText: { ...type.label, color: color.fg.muted },
   quiet: { minHeight: touchMin, justifyContent: "center" },
+  more: { ...type.caption, color: color.fg.subtle },
   retry: {
     minHeight: touchMin,
     alignItems: "center",
