@@ -28,10 +28,13 @@ export const CASH_MCCS: ReadonlySet<number> = new Set([6010, 6011]);
 
 /** Chains whose MCC is unreliable or missing; checked before the MCC table. */
 export const MERCHANTS: readonly { pattern: RegExp; category: Category }[] = [
+  // Б55: food delivery from a taxi brand, before the taxi: «Bolt Food» and «Uber Eats» contain «bolt» and «uber».
+  // The name wins over the MCC too, so a delivery that comes with a taxi MCC (4121) is still a cafe.
+  { pattern: /\b(bolt\s+food|uber\s+eats)\b/i, category: "cafe" },
   { pattern: /\b(uklon|bolt|uber|taxi|таксі)\b/i, category: "transport" },
   { pattern: /(нова пошта|nova poshta|укрпошта|ukrposhta)/i, category: "shopping" },
   { pattern: /(сільпо|silpo|(?<![\p{L}])атб(?![\p{L}])|\batb\b|varus|варус|novus|новус|ekomarket|ашан|auchan)/iu, category: "groceries" },
-  { pattern: /(glovo|wolt|bolt food|mcdonald|kfc|sushiya|aroma kava)/i, category: "cafe" },
+  { pattern: /(glovo|wolt|mcdonald|kfc|sushiya|aroma kava)/i, category: "cafe" },
   { pattern: /(lifecell|vodafone|київстар|kyivstar|tenet|datagroup|volia)/i, category: "telecom" },
   { pattern: /(netflix|spotify|youtube|apple\.com|google|icloud|megogo|nvidia|openai|anthropic|github|notion)/i, category: "subscriptions" },
   { pattern: /(аптека|apteka|подорожник|фармація)/i, category: "health" },

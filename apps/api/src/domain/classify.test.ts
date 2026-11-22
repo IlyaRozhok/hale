@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classify, findOwnPairs, hasThirdParty, isWeakRuleValue, ruleMatches, type ClassifyContext, type ClassifyInput } from "./classify";
+import { CLASSIFIER_VERSION, classify, findOwnPairs, hasThirdParty, isWeakRuleValue, ruleMatches, type ClassifyContext, type ClassifyInput } from "./classify";
 
 const ctx = (over: Partial<ClassifyContext> = {}): ClassifyContext => ({
   ownIbans: new Set(["UA00OWN0001"]),
@@ -310,6 +310,39 @@ describe("purchases and refunds", () => {
 
   it("known chains get a category from merchants", () => {
     expect(classify(tx({ description: "Uklon", mcc: 4121 }), ctx()).category).toBe("transport");
+  });
+
+  describe("food delivery from a taxi brand (Б55)", () => {
+    const cat = (description: string, mcc: number | null) => classify(tx({ description, mcc }), ctx()).category;
+
+    it("Bolt Food and Uber Eats are cafe, whatever the MCC", () => {
+      for (const d of ["Bolt Food", "BOLT FOOD", "bolt food", "Bolt  Food", "Uber Eats", "UBER EATS"]) {
+        expect(cat(d, 5814)).toBe("cafe");
+        // The name wins over a taxi MCC the delivery may come with.
+        expect(cat(d, 4121)).toBe("cafe");
+        expect(cat(d, null)).toBe("cafe");
+      }
+    });
+
+    it("the taxi stays transport", () => {
+      for (const d of ["Bolt", "BOLT", "Bolt.eu", "Uber", "UBER", "Uber Trip"]) expect(cat(d, 4121)).toBe("transport");
+    });
+
+    it("a refund of a Bolt Food order goes back to cafe", () => {
+      expect(classify(tx({ description: "Скасування. Bolt Food", amount: 9_000, mcc: 5814 }), ctx())).toMatchObject({
+        type: "spend",
+        category: "cafe",
+      });
+    });
+
+    it("the owner's rule still wins over the chain", () => {
+      const c = ctx({ rules: [{ matchKind: "merchant", matchValue: "Bolt Food", type: "spend", category: "groceries" }] });
+      expect(classify(tx({ description: "Bolt Food", mcc: 5814 }), c)).toMatchObject({ category: "groceries", source: "owner" });
+    });
+
+    it("raises the classifier version, so rows stored as transport are checked again", () => {
+      expect(CLASSIFIER_VERSION).toBeGreaterThanOrEqual(3);
+    });
   });
 
   it("unknown merchant without mcc is uncategorized", () => {
