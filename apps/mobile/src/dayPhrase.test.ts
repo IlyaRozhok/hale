@@ -77,6 +77,45 @@ describe("dayPhrase", () => {
     });
   });
 
+  describe("a step closer to the limit (А24)", () => {
+    const dayBefore = (over: Partial<CalendarDayDto> = {}): CalendarDayDto => ({ date: "2026-11-09", limit: 200_000, spent: 380_000, status: "far_over", ...over });
+    const overYesterday = yesterday({ spent: 260_000, status: "over" });
+
+    it("says yesterday came closer to the limit than the day before, and opens the calendar", () => {
+      expect(dayPhrase(input({ yesterday: overYesterday, dayBefore: dayBefore() }))).toEqual({
+        text: "Вчера — ближе к лимиту, чем позавчера.",
+        action: { kind: "calendar" },
+      });
+    });
+
+    it("counts each day against its own limit", () => {
+      // The day before ₴700 over a ₴1,500 limit, yesterday ₴600 over a ₴2,000 limit: closer, though yesterday spent more.
+      expect(dayPhrase(input({ yesterday: overYesterday, dayBefore: dayBefore({ limit: 150_000, spent: 220_000, status: "over" }) }))!.text).toBe(
+        "Вчера — ближе к лимиту, чем позавчера.",
+      );
+    });
+
+    it("is not said when it is not true: the same or further over, or the day before within the limit", () => {
+      const said = "Вчера — ближе к лимиту, чем позавчера.";
+      expect(dayPhrase(input({ yesterday: overYesterday, dayBefore: dayBefore({ spent: 260_000 }) }))!.text).not.toBe(said);
+      expect(dayPhrase(input({ yesterday: overYesterday, dayBefore: dayBefore({ spent: 230_000, status: "over" }) }))!.text).not.toBe(said);
+      expect(dayPhrase(input({ yesterday: overYesterday, dayBefore: dayBefore({ spent: 150_000, status: "within" }) }))!.text).not.toBe(said);
+    });
+
+    it("needs both days judged, and the right day before", () => {
+      const old = "Вчера вышло на ₴600 больше лимита. Сегодня новый день.";
+      expect(dayPhrase(input({ yesterday: overYesterday, dayBefore: dayBefore({ limit: null, status: "no_limit" }) }))!.text).toBe(old);
+      expect(dayPhrase(input({ yesterday: overYesterday, dayBefore: dayBefore({ limit: null, status: "no_limit", shortageStart: true }) }))!.text).toBe(old);
+      expect(dayPhrase(input({ yesterday: overYesterday, dayBefore: dayBefore({ date: "2026-11-08" }) }))!.text).toBe(old);
+      expect(dayPhrase(input({ yesterday: overYesterday, dayBefore: null }))!.text).toBe(old);
+      expect(dayPhrase(input({ yesterday: overYesterday }))!.text).toBe(old);
+    });
+
+    it("a yesterday within the limit keeps its own words", () => {
+      expect(dayPhrase(input({ yesterday: yesterday(), dayBefore: dayBefore() }))!.text).toBe("Вчера осталось ₴340.");
+    });
+  });
+
   it("a day with no limit says nothing, and neither does a quiet day with no history", () => {
     expect(dayPhrase(input({ yesterday: yesterday({ limit: null, status: "no_limit" }) }))).toBeNull();
     // Pins the server contract, no new code: the day the shortage came on arrives without a limit, so it is not said to be over anything.

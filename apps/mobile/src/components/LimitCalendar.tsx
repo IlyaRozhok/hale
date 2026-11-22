@@ -17,24 +17,25 @@ const DOT = 5;
 
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
+// Task А24, variant А: any day over the limit is one quiet grey mark, however far over; red is kept for today's
+// overspend on the limit card only.
 const WORDS: Record<CalendarDayDto["status"], string> = {
   within: "в лимите",
-  over: "сверх лимита",
-  far_over: "сильно сверх лимита",
+  over: "выше лимита",
+  far_over: "выше лимита",
   no_limit: "лимита не было",
   today: "сегодня",
 };
 
 const DOTS: Partial<Record<CalendarDayDto["status"], string>> = {
   within: color.calendar.within,
-  over: color.calendar.over,
-  far_over: color.calendar.farOver,
+  over: color.fg.subtle,
+  far_over: color.fg.subtle,
 };
 
 const LEGEND = [
   { fill: color.calendar.within, text: WORDS.within },
-  { fill: color.calendar.over, text: WORDS.over },
-  { fill: color.calendar.farOver, text: "больше 150%" },
+  { fill: color.fg.subtle, text: WORDS.over },
 ];
 
 const dayName = (d: CalendarDayDto) => dateLabel(d.date).replace(/ \d{4}$/, "");
@@ -119,7 +120,7 @@ export function LimitCalendar({ today, streak, onClose, onOpenDay }: Props) {
       <View style={styles.legend}>
         {LEGEND.map((l) => (
           <View key={l.text} style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: l.fill }]} />
+            <View testID="calendar-legend-dot" style={[styles.legendDot, { backgroundColor: l.fill }]} />
             <Text style={styles.legendText}>{l.text}</Text>
           </View>
         ))}
