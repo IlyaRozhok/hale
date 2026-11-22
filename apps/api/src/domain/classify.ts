@@ -17,8 +17,9 @@ export type { Category } from "./merchants";
  * 1: the rules as of Б38 (money in from the owner, his name only in the bank's counterparty field).
  * 2: no rule changed; migration 0032 (Б50) gave old exchanges from a currency account the bank's exact hryvnias,
  *    and the own-pair rule reads amount_uah, so those exchanges can now pair with their hryvnia leg.
+ * 3: Б55, «Bolt Food» and «Uber Eats» are cafe, not the taxi's transport.
  */
-export const CLASSIFIER_VERSION = 2;
+export const CLASSIFIER_VERSION = 3;
 
 export type TxType =
   | "income"

@@ -386,4 +386,19 @@ describe("after the classification rules change (Б49)", () => {
     expect(await get(old)).toMatchObject({ type: "own_transfer", category: "own" });
     expect(await get(mine)).toEqual({ type: "income", category: "income", type_source: "owner" });
   });
+
+  it("moves an old Bolt Food purchase from transport to cafe, not the one the owner set (Б55)", async () => {
+    const runner = new JobRunner(ds, { now: () => Date.now() });
+    const svc = new ReclassifyService(ds, runner, { ownNames: [], ownIbans: [], ownJars: [] });
+    svc.onModuleInit();
+    const facts = { amount: -32_000, mcc: 4121, description: "Bolt Food", type: "spend", category: "transport" };
+    const old = await insertTx(black, { ...facts, type_source: "auto" });
+    const mine = await insertTx(black, { ...facts, type_source: "owner" });
+    const taxi = await insertTx(black, { ...facts, description: "Bolt", type_source: "auto" });
+    await svc.onApplicationBootstrap();
+    expect(await runner.runOnce()).toBe(true);
+    expect(await get(old)).toMatchObject({ type: "spend", category: "cafe" });
+    expect(await get(mine)).toEqual({ type: "spend", category: "transport", type_source: "owner" });
+    expect(await get(taxi)).toMatchObject({ type: "spend", category: "transport" });
+  });
 });
