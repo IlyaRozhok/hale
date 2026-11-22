@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
     gap: space.md,
     paddingHorizontal: space.lg,
     borderRadius: radius.lg,
-    backgroundColor: color.surface.inset,
+    backgroundColor: color.field.fill,
   },
   label: { ...type.body, color: color.fg.subtle },
   value: { ...type.body, color: color.fg.default },

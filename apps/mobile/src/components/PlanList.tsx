@@ -131,6 +131,7 @@ const styles = StyleSheet.create({
   amount: { ...type.body, color: color.fg.default, fontVariant: ["tabular-nums"] },
   count: { ...type.body, color: color.list.secondary, fontVariant: ["tabular-nums"] },
   income: { color: color.money.income },
-  date: { width: 56 },
+  // At least 56pt so dates line up at the default size; larger text widens the column instead of cutting the date.
+  date: { minWidth: 56 },
   dateText: { ...type.body, color: color.list.secondary, fontVariant: ["tabular-nums"] },
 });

@@ -86,6 +86,17 @@ describe("soft graphite (owner's variant «Б»)", () => {
     expect(lum(color.list.chevron)).toBeLessThan(lum(color.list.secondary));
     expect(contrastRatio(color.list.chevron, color.card.fill)).toBeGreaterThanOrEqual(1.5);
   });
+  it("an input's fill stands out on the screen and inside a card, and is never darker than the card", () => {
+    expect(lum(color.field.fill)).toBeGreaterThan(lum(color.card.fill));
+    expect(contrastRatio(color.field.fill, color.surface.base)).toBeGreaterThanOrEqual(1.3);
+    expect(contrastRatio(color.field.fill, color.card.fill)).toBeGreaterThanOrEqual(1.2);
+    expect(contrastRatio(color.fg.default, color.field.fill)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(color.fg.subtle, color.field.fill)).toBeGreaterThanOrEqual(4.5);
+  });
+  it("a loading bar shows on a card and on the screen", () => {
+    expect(contrastRatio(color.skeleton, color.card.fill)).toBeGreaterThanOrEqual(1.2);
+    expect(contrastRatio(color.skeleton, color.surface.base)).toBeGreaterThanOrEqual(1.3);
+  });
   it("a list card is rounder than before", () => {
     expect(tokens.radius.card).toBe(22);
   });

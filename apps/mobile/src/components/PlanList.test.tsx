@@ -53,7 +53,7 @@ describe("PlanList, soft graphite (variant «Б»)", () => {
     for (const row of screen.getAllByTestId("plan-row")) expect(flat(row).borderTopWidth ?? 0).toBe(0);
   });
 
-  it("writes the date of «До дохода» on one line, «6 дек», in a fixed column of tabular figures", async () => {
+  it("writes the date of «До дохода» on one line, «6 дек», in a column at least 56pt wide, tabular figures", async () => {
     await render(
       <ListRows>
         <DateRow key="a" date="2026-12-06" label="Квартплата" value="−₴8,000" />
@@ -62,7 +62,9 @@ describe("PlanList, soft graphite (variant «Б»)", () => {
     );
     const date = screen.getByText("6 дек");
     expect(flat(date)).toMatchObject({ color: color.list.secondary, fontVariant: ["tabular-nums"] });
-    expect(flat(screen.getByTestId("date-column-2026-12-06")).width).toBe(56);
+    // At least 56pt so the column lines up at the default size, and free to grow with larger text.
+    expect(flat(screen.getByTestId("date-column-2026-12-06"))).toMatchObject({ minWidth: 56 });
+    expect(flat(screen.getByTestId("date-column-2026-12-06")).width).toBeUndefined();
     expect(screen.queryByText("6")).toBeNull();
     expect(screen.queryByText("дек")).toBeNull();
     expect(flat(screen.getByText("+₴60,000")).color).toBe(color.money.income);

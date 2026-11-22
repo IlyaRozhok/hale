@@ -42,6 +42,10 @@ export const color = {
    * `edge` is the faint hairline between rows.
    */
   card: { fill: p.graphite[850], edge: whiteAlpha(0.05) },
+  /** An input's fill: one step above the card, so a field shows both on the screen and inside a card. */
+  field: { fill: p.graphite[700] },
+  /** Loading bars: visible on a card and on the screen. */
+  skeleton: p.graphite[700],
   /** Inside a list card: the quiet line under a name and the headers, the value on the right, the glyph, the chevron. */
   list: { secondary: p.fog[400], value: p.fog[300], icon: p.fog[300], chevron: p.fog[600] },
   /** The limit strip: silver, with a small spark at its end that says how the day stands. */

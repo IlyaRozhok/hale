@@ -4,7 +4,7 @@ import { tokens } from "@hale/tokens";
 
 const { color, radius, space, touchMin, type } = tokens;
 
-/** A labelled single-line input on an inset fill. The label is the accessibility label and the placeholder. */
+/** A labelled single-line input on its own fill. The label is the accessibility label and the placeholder. */
 export function Field({ label, ...rest }: TextInputProps & { label: string; ref?: Ref<TextInputInstance> }) {
   return (
     <TextInput
@@ -23,7 +23,7 @@ const styles = StyleSheet.create({
     minHeight: touchMin,
     paddingHorizontal: space.lg,
     borderRadius: radius.lg,
-    backgroundColor: color.surface.inset,
+    backgroundColor: color.field.fill,
     color: color.fg.default,
     ...type.body,
   },
