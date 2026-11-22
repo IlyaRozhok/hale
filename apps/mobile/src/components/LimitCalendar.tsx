@@ -17,8 +17,7 @@ const DOT = 5;
 
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
-// Task А24, variant А: any day over the limit is one quiet grey mark, however far over; red is kept for today's
-// overspend on the limit card only.
+// Task А24, variant А: any day over the limit is one quiet grey mark, however far over; the calendar has no red.
 const WORDS: Record<CalendarDayDto["status"], string> = {
   within: "в лимите",
   over: "выше лимита",

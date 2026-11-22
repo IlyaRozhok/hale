@@ -13,8 +13,11 @@ const day = (iso: string) => {
   return `${d} ${month}`;
 };
 
-/** The sand line under the limit on «Сегодня» (task А24). */
-export const paceLineText = (p: PaceDto): string => `В таком темпе хватит до ${day(p.runOutOn)} — доход ${day(p.incomeOn)}`;
+/** The sand line under the limit on «Сегодня» (task А24); a run-out day of today is said as «только на сегодня». */
+export const paceLineText = (p: PaceDto, today: string): string =>
+  p.runOutOn <= today
+    ? `В таком темпе денег хватит только на сегодня — доход ${day(p.incomeOn)}`
+    : `В таком темпе хватит до ${day(p.runOutOn)} — доход ${day(p.incomeOn)}`;
 
 /** A whole ₴100, rounded down. */
 const HUNDRED = 10_000;
@@ -25,21 +28,22 @@ const HUNDRED = 10_000;
  * decision). With nothing left to name only the first sentence stays.
  */
 export function paceHintText(hint: NonNullable<PaceDto["hint"]>, dailyLimit: number): string {
-  const toIncome = Math.min(hint.untilIncome, Math.floor(dailyLimit / HUNDRED) * HUNDRED);
-  if (toIncome <= 0) return `Если тратить около ${formatMoney(hint.daily)} в день — хватит до ${day(hint.lastsUntil)}.`;
+  // A server from before А24а2 sends no `untilIncome`: then only the first sentence.
+  const toIncome = typeof hint.untilIncome === "number" ? Math.min(hint.untilIncome, Math.floor(dailyLimit / HUNDRED) * HUNDRED) : 0;
+  if (!(toIncome > 0)) return `Если тратить около ${formatMoney(hint.daily)} в день — хватит до ${day(hint.lastsUntil)}.`;
   return `Если тратить около ${formatMoney(hint.daily)} в день — хватит до ${day(hint.lastsUntil)}. Около ${formatMoney(toIncome)} — до самого дохода.`;
 }
 
-type Props = { pace: PaceDto; dailyLimit: number; onClose: () => void };
+type Props = { pace: PaceDto; dailyLimit: number; today: string; onClose: () => void };
 
 /** «Темп трат» (task А24, variant А): the usual day against the limit and where each leads, with no judgement. */
-export function PaceSheet({ pace, dailyLimit, onClose }: Props) {
+export function PaceSheet({ pace, dailyLimit, today, onClose }: Props) {
   return (
     <Sheet title="Темп трат" onClose={onClose}>
       <View style={styles.card}>
         <Row name="Обычно в день" value={formatMoney(pace.avgDaily)} first />
         <Row name="Лимит" value={formatMoney(dailyLimit)} />
-        <Row name="Хватит до" value={day(pace.runOutOn)} warning />
+        {pace.runOutOn <= today ? <Row name="Хватит" value="только на сегодня" warning /> : <Row name="Хватит до" value={day(pace.runOutOn)} warning />}
         <Row name="Доход" value={day(pace.incomeOn)} />
       </View>
       <View style={[styles.card, styles.hintCard]}>

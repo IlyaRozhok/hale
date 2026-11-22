@@ -15,7 +15,7 @@ const pace = (over: Partial<PaceDto> = {}): PaceDto => ({
 
 describe("the pace sheet (А24)", () => {
   it("names the usual day, the limit, the day the money lasts to and the income", async () => {
-    await renderWith(<PaceSheet pace={pace()} dailyLimit={230_000} onClose={() => undefined} />, fakeApi());
+    await renderWith(<PaceSheet pace={pace()} dailyLimit={230_000} today="2026-11-22" onClose={() => undefined} />, fakeApi());
     expect(await screen.findByText("Темп трат")).toBeTruthy();
     expect(screen.getByText("Обычно в день")).toBeTruthy();
     expect(screen.getByText("₴4,600")).toBeTruthy();
@@ -27,7 +27,7 @@ describe("the pace sheet (А24)", () => {
   });
 
   it("the day the money lasts to is sand, a warning; nothing in the sheet is red", async () => {
-    await renderWith(<PaceSheet pace={pace()} dailyLimit={230_000} onClose={() => undefined} />, fakeApi());
+    await renderWith(<PaceSheet pace={pace()} dailyLimit={230_000} today="2026-11-22" onClose={() => undefined} />, fakeApi());
     const lasts = await screen.findByText("3 дек");
     expect(StyleSheet.flatten(lasts.props.style).color).toBe(tokens.color.limit.low);
     for (const t of screen.getAllByText(/./)) {
@@ -37,13 +37,13 @@ describe("the pace sheet (А24)", () => {
   });
 
   it("with a hint, one calm step and the amount that lasts to the income, then the note", async () => {
-    await renderWith(<PaceSheet pace={pace()} dailyLimit={230_000} onClose={() => undefined} />, fakeApi());
+    await renderWith(<PaceSheet pace={pace()} dailyLimit={230_000} today="2026-11-22" onClose={() => undefined} />, fakeApi());
     expect(await screen.findByText("Если тратить около ₴3,800 в день — хватит до 5 дек. Около ₴2,200 — до самого дохода.")).toBeTruthy();
     expect(screen.getByText("Обычный день — среднее за последние 7 дней. Лимит от этого не меняется.")).toBeTruthy();
   });
 
   it("without a hint, only the rows and the note", async () => {
-    await renderWith(<PaceSheet pace={pace({ hint: undefined })} dailyLimit={230_000} onClose={() => undefined} />, fakeApi());
+    await renderWith(<PaceSheet pace={pace({ hint: undefined })} dailyLimit={230_000} today="2026-11-22" onClose={() => undefined} />, fakeApi());
     await screen.findByText("Темп трат");
     expect(screen.queryByText(/^Если тратить/)).toBeNull();
     expect(screen.getByText("Обычный день — среднее за последние 7 дней. Лимит от этого не меняется.")).toBeTruthy();
@@ -51,7 +51,7 @@ describe("the pace sheet (А24)", () => {
 
   it("«Понятно» closes it", async () => {
     const onClose = jest.fn();
-    await renderWith(<PaceSheet pace={pace()} dailyLimit={230_000} onClose={onClose} />, fakeApi());
+    await renderWith(<PaceSheet pace={pace()} dailyLimit={230_000} today="2026-11-22" onClose={onClose} />, fakeApi());
     await fireEvent.press(await screen.findByRole("button", { name: "Понятно" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -71,9 +71,31 @@ describe("the pace sheet (А24)", () => {
     it("a limit below ₴100 leaves only the first sentence", () => {
       expect(paceHintText(hint, 9_000)).toBe("Если тратить около ₴3,800 в день — хватит до 5 дек.");
     });
+
+    it("a server without the amount to the income (before А24а2) leaves only the first sentence", () => {
+      const old = { daily: 380_000, lastsUntil: "2026-12-05" } as unknown as NonNullable<PaceDto["hint"]>;
+      expect(paceHintText(old, 230_000)).toBe("Если тратить около ₴3,800 в день — хватит до 5 дек.");
+    });
   });
 
   it("the line under the limit names both days", () => {
-    expect(paceLineText(pace())).toBe("В таком темпе хватит до 3 дек — доход 15 дек");
+    expect(paceLineText(pace(), "2026-11-22")).toBe("В таком темпе хватит до 3 дек — доход 15 дек");
+  });
+
+  describe("when the money lasts only today", () => {
+    const todayOnly = pace({ runOutOn: "2026-11-22", hint: undefined });
+
+    it("the line says so in one sentence", () => {
+      expect(paceLineText(todayOnly, "2026-11-22")).toBe("В таком темпе денег хватит только на сегодня — доход 15 дек");
+    });
+
+    it("the sheet's sand row says «только на сегодня» instead of a date", async () => {
+      await renderWith(<PaceSheet pace={todayOnly} dailyLimit={230_000} today="2026-11-22" onClose={() => undefined} />, fakeApi());
+      const row = await screen.findByText("только на сегодня");
+      expect(StyleSheet.flatten(row.props.style).color).toBe(tokens.color.limit.low);
+      expect(screen.getByText("Хватит")).toBeTruthy();
+      expect(screen.queryByText("Хватит до")).toBeNull();
+      expect(screen.queryByText("22 ноя")).toBeNull();
+    });
   });
 });

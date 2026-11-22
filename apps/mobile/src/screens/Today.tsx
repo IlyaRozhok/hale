@@ -162,10 +162,9 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
   const questions = data.questions.filter((q) => !answered.has(q.id) && !(q.kind === "income_date" && eventIdOf(q.id) === null));
   // Loans live in Plan: the server still lists each open one here, and Today leaves them out.
   const notes = data.badCases.filter((b) => !b.id.startsWith("loan:"));
-  // Task А24: the sand line about the pace, unless a note on this screen already names the day the money runs out.
-  const paceLine = data.pace && !notes.some((b) => b.text.includes("При текущем темпе")) ? paceLineText(data.pace) : null;
-  // Red only for today's overspend (А24, variant А), and not on the day the shortage came on: that day is not judged.
-  const overBy = over && !state.shortageStart && Math.round(-state.leftToday / 100) > 0 ? `на ${formatMoney(-state.leftToday)} больше` : null;
+  // Task А24: the sand line about the pace. The note that the minus went over the bridge plan already names the day
+  // the money runs out, so with it on the screen the line is left out (loan notes are not shown here).
+  const paceLine = data.pace && !notes.some((b) => b.id.startsWith("bridge_over_plan:")) ? paceLineText(data.pace, data.date) : null;
   const noLimitNote = state.mode === "bridge" ? "Лимит появится, когда вы подтвердите план." : "До следующего дохода свободных денег нет.";
 
   const answer = (id: string, run: () => Promise<unknown>) => {
@@ -248,15 +247,7 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
                   <LimitBar level={level} state={dayState} />
                 </View>
                 <Text style={[styles.subtle, styles.spentLine]}>
-                  {nextLimitNote ??
-                    (overBy ? (
-                      <>
-                        {`потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)} · `}
-                        <Text style={styles.overBy}>{overBy}</Text>
-                      </>
-                    ) : (
-                      `потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}${state.leftToday <= 0 ? ` · завтра снова ${formatMoney(state.dailyLimit)}` : ""}`
-                    ))}
+                  {nextLimitNote ?? `потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}${state.leftToday <= 0 ? ` · завтра снова ${formatMoney(state.dailyLimit)}` : ""}`}
                 </Text>
               </>
             )}
@@ -264,7 +255,7 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
         </Pressable>
 
         {paceLine && data.pace && (
-          <Pressable accessibilityRole="button" accessibilityLabel={paceLine} onPress={() => setSheet("pace")} style={styles.paceRow}>
+          <Pressable accessibilityRole="button" accessibilityLabel={paceLine} accessibilityHint="Открывает темп трат" onPress={() => setSheet("pace")} style={styles.paceRow}>
             <Text style={styles.paceText}>{paceLine}</Text>
             <Icon name="chevron" color={color.limit.low} size={16} />
           </Pressable>
@@ -302,7 +293,7 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
 
       {/* A loan to return opens the same list as in Plan (task Б7). */}
       {sheet === "loans" && <LoansSheet onClose={closeSheet} />}
-      {sheet === "pace" && data.pace && <PaceSheet pace={data.pace} dailyLimit={state.dailyLimit} onClose={closeSheet} />}
+      {sheet === "pace" && data.pace && <PaceSheet pace={data.pace} dailyLimit={state.dailyLimit} today={data.date} onClose={closeSheet} />}
       {sheet === "calendar" && (
         <LimitCalendar
           today={data.date}
@@ -423,7 +414,6 @@ const styles = StyleSheet.create({
   phrase: { ...type.body, color: color.fg.default },
   paceRow: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: space.xs },
   paceText: { ...type.body, color: color.limit.low, flex: 1 },
-  overBy: { color: color.status.danger },
   runway: { marginTop: space.sm },
   badge: {
     position: "absolute",
