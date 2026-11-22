@@ -35,6 +35,7 @@ import { Icon } from "../components/Icon";
 import { LAYOUT } from "../components/layout";
 import { LimitCalendar } from "../components/LimitCalendar";
 import { LoansSheet } from "../components/LoansSheet";
+import { PaceSheet, paceLineText } from "../components/PaceSheet";
 import { QuestionCard, eventIdOf } from "../components/QuestionCard";
 import { RecipientLabelSheet } from "../components/RecipientLabelSheet";
 import { Runway } from "../components/Runway";
@@ -90,7 +91,7 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
   const cancelBridge = useCancelBridge();
   const pull = usePullRefresh(today.refetch);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
-  const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | "loans" | "subscriptions" | null>(null);
+  const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | "loans" | "subscriptions" | "pace" | null>(null);
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
   const [arriving, setArriving] = useState<{ id: string; eventId: number; expectedAmount: number } | null>(null);
   const [paying, setPaying] = useState<TodayDto["upcoming"][number] | null>(null);
@@ -107,6 +108,10 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
   // How yesterday went, for the phrase of the day. It waits for today's date and may never come: then the phrase is about something else.
   const dayBefore = data ? shiftDate(data.date, -1) : null;
   const calendar = useCalendar(dayBefore?.slice(0, 7) ?? "", dayBefore !== null);
+  // The day before yesterday (А24), for «Вчера — ближе к лимиту, чем позавчера.». Mostly the same month and so the
+  // same cached query; on the 2nd it is the previous month's last day, and that month is loaded too.
+  const twoDaysAgo = data ? shiftDate(data.date, -2) : null;
+  const calendarBefore = useCalendar(twoDaysAgo?.slice(0, 7) ?? "", twoDaysAgo !== null);
   // Today's observation (В7): said in the phrase only on a day with nothing more pressing. An older server has none.
   const observation = useObservation();
   const categories = useCategoryList();
@@ -157,6 +162,9 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
   const questions = data.questions.filter((q) => !answered.has(q.id) && !(q.kind === "income_date" && eventIdOf(q.id) === null));
   // Loans live in Plan: the server still lists each open one here, and Today leaves them out.
   const notes = data.badCases.filter((b) => !b.id.startsWith("loan:"));
+  // Task А24: the sand line about the pace. The note that the minus went over the bridge plan already names the day
+  // the money runs out, so with it on the screen the line is left out (loan notes are not shown here).
+  const paceLine = data.pace && !notes.some((b) => b.id.startsWith("bridge_over_plan:")) ? paceLineText(data.pace, data.date) : null;
   const noLimitNote = state.mode === "bridge" ? "Лимит появится, когда вы подтвердите план." : "До следующего дохода свободных денег нет.";
 
   const answer = (id: string, run: () => Promise<unknown>) => {
@@ -178,6 +186,7 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
     upcoming: data.upcoming,
     loansDue: data.loansDue,
     yesterday: calendar.data?.days.find((d) => d.date === dayBefore) ?? null,
+    dayBefore: calendarBefore.data?.days.find((d) => d.date === twoDaysAgo) ?? null,
     streak: data.streak ?? 0,
     observation: observation.data,
     categories,
@@ -245,6 +254,12 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
           </Glass>
         </Pressable>
 
+        {paceLine && data.pace && (
+          <Pressable accessibilityRole="button" accessibilityLabel={paceLine} accessibilityHint="Открывает темп трат" onPress={() => setSheet("pace")} style={styles.paceRow}>
+            <Text style={styles.paceText}>{paceLine}</Text>
+            <Icon name="chevron" color={color.limit.low} size={16} />
+          </Pressable>
+        )}
         {phrase && (
           <Pressable accessibilityRole="button" onPress={() => act(phrase.action)} style={styles.phraseRow}>
             <Text style={styles.phrase}>{phrase.text}</Text>
@@ -278,6 +293,7 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
 
       {/* A loan to return opens the same list as in Plan (task Б7). */}
       {sheet === "loans" && <LoansSheet onClose={closeSheet} />}
+      {sheet === "pace" && data.pace && <PaceSheet pace={data.pace} dailyLimit={state.dailyLimit} today={data.date} onClose={closeSheet} />}
       {sheet === "calendar" && (
         <LimitCalendar
           today={data.date}
@@ -396,6 +412,8 @@ const styles = StyleSheet.create({
   spentLine: { marginTop: space.xs },
   phraseRow: { minHeight: touchMin, justifyContent: "center", paddingHorizontal: space.xs },
   phrase: { ...type.body, color: color.fg.default },
+  paceRow: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: space.xs },
+  paceText: { ...type.body, color: color.limit.low, flex: 1 },
   runway: { marginTop: space.sm },
   badge: {
     position: "absolute",

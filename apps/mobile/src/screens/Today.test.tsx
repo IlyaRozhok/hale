@@ -318,7 +318,11 @@ describe("Today, normal mode", () => {
       const heading = await screen.findByText("Сегодня можно");
       expect(StyleSheet.flatten(heading.props.style).color).not.toBe(tokens.color.status.danger);
       expect(screen.getByText("₴0")).toBeTruthy();
-      expect(screen.getByText("потрачено ₴1,551 из ₴950 · завтра снова ₴950")).toBeTruthy();
+      // Owner, 9 and 22 November: no red words on an overspent day, only the strip's spark; no overspend amount.
+      const line = screen.getByText("потрачено ₴1,551 из ₴950 · завтра снова ₴950");
+      expect(StyleSheet.flatten(line.props.style).color).toBe(tokens.color.fg.subtle);
+      expect(screen.queryByText(/на ₴601|больше$/)).toBeNull();
+      expect(levelOf()).toBe("bar:over:0");
       expect(screen.queryByText(/больше лимита|Сверх/)).toBeNull();
       expect(screen.queryByText(/^\+/)).toBeNull();
       expect(screen.queryByText(/−/)).toBeNull();
@@ -394,6 +398,7 @@ describe("Today, normal mode", () => {
         it("over the new limit there is still no red that day", async () => {
           await renderWith(<Today onOpenActivity={noop} />, newLimit({ leftToday: -31000, level: 0 }));
           expect(await screen.findByText("потрачено ₴760 из ₴450 · завтра снова ₴450")).toBeTruthy();
+          expect(screen.queryByText(/больше$/)).toBeNull();
           expect(screen.getByText("₴0")).toBeTruthy();
           expect(levelOf()).toBe("bar:low:0");
           expect(screen.queryByText(/действует с завтра/)).toBeNull();
@@ -552,14 +557,14 @@ describe("Today, normal mode", () => {
 
     const dot = (date: string) => screen.queryByTestId(`calendar-dot-${date}`);
 
-    it("marks a day with a small dot of its status colour, and says the status in words too", async () => {
+    it("marks a day within the limit with its colour, and any day over it with one quiet grey dot (А24)", async () => {
       await openIt();
       expect(StyleSheet.flatten(dot("2026-11-01")!.props.style).backgroundColor).toBe(tokens.color.calendar.within);
-      expect(StyleSheet.flatten(dot("2026-11-02")!.props.style).backgroundColor).toBe(tokens.color.calendar.over);
-      expect(StyleSheet.flatten(dot("2026-11-03")!.props.style).backgroundColor).toBe(tokens.color.calendar.farOver);
+      expect(StyleSheet.flatten(dot("2026-11-02")!.props.style).backgroundColor).toBe(tokens.color.fg.subtle);
+      expect(StyleSheet.flatten(dot("2026-11-03")!.props.style).backgroundColor).toBe(tokens.color.fg.subtle);
       expect(screen.getByRole("button", { name: "1 ноября: в лимите" })).toBeTruthy();
-      expect(screen.getByRole("button", { name: "2 ноября: сверх лимита" })).toBeTruthy();
-      expect(screen.getByRole("button", { name: "3 ноября: сильно сверх лимита" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "2 ноября: выше лимита" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "3 ноября: выше лимита" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "4 ноября: лимита не было" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "5 ноября: сегодня" })).toBeTruthy();
     });
@@ -578,7 +583,7 @@ describe("Today, normal mode", () => {
         expect(dot("2026-11-02")).toBeNull();
         const day = screen.getByRole("button", { name: "2 ноября: изменился лимит" });
         expect(StyleSheet.flatten(within(day).getByText("2").props.style).color).toBe(tokens.color.fg.subtle);
-        expect(StyleSheet.flatten(dot("2026-11-03")!.props.style).backgroundColor).toBe(tokens.color.calendar.farOver);
+        expect(StyleSheet.flatten(dot("2026-11-03")!.props.style).backgroundColor).toBe(tokens.color.fg.subtle);
       });
 
       it("tapped, tells what was spent and why the day is not rated", async () => {
@@ -587,6 +592,18 @@ describe("Today, normal mode", () => {
         expect(screen.getByText("2 ноября: потрачено ₴11,000. В этот день изменился лимит, день без оценки.")).toBeTruthy();
         expect(screen.queryByText(/лимита не было/)).toBeNull();
       });
+    });
+
+    it("has no red anywhere, and a legend of two: within and over the limit (А24)", async () => {
+      await openIt();
+      expect(screen.getByText("в лимите")).toBeTruthy();
+      expect(screen.getByText("выше лимита")).toBeTruthy();
+      expect(screen.queryByText(/сверх|150%/)).toBeNull();
+      const red = [tokens.color.calendar.farOver, tokens.color.calendar.over, tokens.color.status.danger, tokens.color.limit.over];
+      const marks = [...screen.getAllByTestId(/^calendar-dot-/), ...screen.getAllByTestId("calendar-legend-dot")];
+      expect(marks.length).toBe(5);
+      for (const m of marks) expect(red).not.toContain(StyleSheet.flatten(m.props.style).backgroundColor);
+      for (const t of screen.getAllByText(/./)) expect(red).not.toContain(StyleSheet.flatten(t.props.style)?.color);
     });
 
     it("puts no dot on a day without a limit or on today", async () => {
@@ -607,7 +624,7 @@ describe("Today, normal mode", () => {
       await openIt();
       expect(ring("2026-11-05")).toMatchObject({ borderWidth: 1, borderColor: tokens.color.fg.subtle });
       expect(ring("2026-11-02").borderWidth).toBeUndefined();
-      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: сверх лимита" }));
+      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: выше лимита" }));
       expect(ring("2026-11-02")).toMatchObject({ borderWidth: 1, borderColor: tokens.color.fg.default });
       expect(ring("2026-11-05").borderColor).toBe(tokens.color.fg.subtle);
       await fireEvent.press(screen.getByRole("button", { name: "5 ноября: сегодня" }));
@@ -638,7 +655,7 @@ describe("Today, normal mode", () => {
 
     it("tells a day's figures when it is tapped", async () => {
       await openIt();
-      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: сверх лимита" }));
+      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: выше лимита" }));
       expect(screen.getByText("2 ноября: потрачено ₴1,200 из ₴1,000")).toBeTruthy();
       await fireEvent.press(screen.getByRole("button", { name: "4 ноября: лимита не было" }));
       expect(screen.getByText("4 ноября: потрачено ₴50, лимита не было")).toBeTruthy();
@@ -647,7 +664,7 @@ describe("Today, normal mode", () => {
     it("offers a day's operations only once a day is picked, for any day", async () => {
       await openIt();
       expect(screen.queryByRole("button", { name: "Операции дня" })).toBeNull();
-      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: сверх лимита" }));
+      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: выше лимита" }));
       const link = screen.getByRole("button", { name: "Операции дня" });
       expect(StyleSheet.flatten(link.props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
       await fireEvent.press(screen.getByRole("button", { name: "4 ноября: лимита не было" }));
@@ -665,7 +682,7 @@ describe("Today, normal mode", () => {
       const api = fakeApi({ today: jest.fn(async () => todayFixture({ date: "2026-11-05", streak: 2 })), ...november() });
       await renderWith(<Today onOpenActivity={onOpenActivity} />, api);
       await openCalendar();
-      await fireEvent.press(await screen.findByRole("button", { name: "2 ноября: сверх лимита" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "2 ноября: выше лимита" }));
       await fireEvent.press(screen.getByRole("button", { name: "Операции дня" }));
       expect(onOpenActivity).toHaveBeenCalledTimes(1);
       expect(onOpenActivity).toHaveBeenCalledWith("2026-11-02");
@@ -715,6 +732,118 @@ describe("Today, normal mode", () => {
     for (const b of buttons) {
       expect(StyleSheet.flatten(b.props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
     }
+  });
+});
+
+describe("Today, the pace and a calm day (А24)", () => {
+  const pace = { avgDaily: 460_000, runOutOn: "2026-11-20", incomeOn: "2026-12-01", hint: { daily: 380_000, lastsUntil: "2026-11-24", untilIncome: 260_000 } };
+  const line = "В таком темпе хватит до 20 ноя — доход 1 дек";
+  const fastDay = (over: Parameters<typeof todayFixture>[0] = {}) =>
+    todayFixture({ state: { ...todayFixture().state, dailyLimit: 230_000, leftToday: -82_000, level: 0 }, pace, upcoming: [], ...over });
+
+  it("under the limit, one sand line says how far the money lasts at this pace", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay()) }));
+    const text = await screen.findByText(line);
+    expect(StyleSheet.flatten(text.props.style).color).toBe(tokens.color.limit.low);
+    expect(screen.getByRole("button", { name: line })).toBeTruthy();
+  });
+
+  it("the line stands right under the limit card, before the phrase of the day", async () => {
+    const calendar = jest.fn(async (month: string) =>
+      calendarFixture({ month, days: month === "2026-11" ? [{ date: "2026-11-01", limit: 230_000, spent: 300_000, status: "over" as const }] : [] }),
+    );
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay()), calendar }));
+    await screen.findByText("Вчера вышло на ₴700 больше лимита. Сегодня новый день.");
+    const texts = screen.getAllByText(/./).map((t) => t.props.children);
+    const at = (t: string) => texts.findIndex((c) => c === t);
+    expect(at("Сегодня можно")).toBeLessThan(at(line));
+    expect(at(line)).toBeLessThan(at("Вчера вышло на ₴700 больше лимита. Сегодня новый день."));
+  });
+
+  it("a tap opens «Темп трат», with the hint capped at the person's own limit; «Понятно» closes it", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay()) }));
+    await fireEvent.press(await screen.findByRole("button", { name: line }));
+    expect(await screen.findByText("Темп трат")).toBeTruthy();
+    expect(screen.getByText("₴4,600")).toBeTruthy();
+    expect(screen.getByText("Если тратить около ₴3,800 в день — хватит до 24 ноя. Около ₴2,300 — до самого дохода.")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Понятно" }));
+    await waitFor(() => expect(screen.queryByText("Темп трат")).toBeNull());
+  });
+
+  it("an older server, or money that lasts: no line", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ pace: undefined })) }));
+    await screen.findByText("Сегодня можно");
+    expect(screen.queryByText(/В таком темпе/)).toBeNull();
+  });
+
+  it("is not said twice: the note that the minus went over the bridge plan leaves the line out, whatever its words", async () => {
+    for (const text of ["Минус вышел за план моста на ₴100. При текущем темпе деньги закончатся 20.11.", "Минус вышел за план моста на ₴100. Свободных денег уже нет."]) {
+      const overPlan = { id: "bridge_over_plan:1", text };
+      const { unmount } = await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ badCases: [overPlan] })) }));
+      expect(await screen.findByText(overPlan.text)).toBeTruthy();
+      expect(screen.queryByText(/В таком темпе/)).toBeNull();
+      await unmount();
+    }
+  });
+
+  it("another note does not hide the line", async () => {
+    const other = { id: "other:1", text: "При текущем темпе — просто слова в другой заметке." };
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ badCases: [other] })) }));
+    expect(await screen.findByText(line)).toBeTruthy();
+  });
+
+  it("the line tells assistive tech what it opens", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay()) }));
+    expect((await screen.findByRole("button", { name: line })).props.accessibilityHint).toBe("Открывает темп трат");
+  });
+
+  it("money that lasts only today is said in one sentence, and the sheet says the same", async () => {
+    const todayOnly = { ...pace, runOutOn: "2026-11-02", hint: undefined };
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ pace: todayOnly })) }));
+    const only = "В таком темпе денег хватит только на сегодня — доход 1 дек";
+    await fireEvent.press(await screen.findByRole("button", { name: only }));
+    expect(await screen.findByText("только на сегодня")).toBeTruthy();
+  });
+
+  it("a loan's run-out words are not on this screen, so the line stays", async () => {
+    const bankLoan = { id: "loan:1", text: "Займ ₴5,000 от 01.11. При текущем темпе деньги закончатся 20.11.", repayLoan: { id: 1, remaining: 500_000 } };
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ badCases: [bankLoan] })) }));
+    expect(await screen.findByText(line)).toBeTruthy();
+    expect(screen.queryByText(/При текущем темпе/)).toBeNull();
+  });
+
+  describe("a step closer to the limit", () => {
+    const step = "Вчера — ближе к лимиту, чем позавчера.";
+    const days = (month: string, list: { date: string; spent: number }[]) =>
+      list.filter((d) => d.date.startsWith(month)).map((d) => ({ date: d.date, limit: 230_000, spent: d.spent, status: "far_over" as const }));
+
+    it("is said instead of yesterday's overspend when yesterday came closer", async () => {
+      const calendar = jest.fn(async (month: string) =>
+        calendarFixture({ month, today: "2026-11-05", days: days(month, [{ date: "2026-11-03", spent: 460_000 }, { date: "2026-11-04", spent: 360_000 }]) }),
+      );
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ date: "2026-11-05" })), calendar }));
+      await fireEvent.press(await screen.findByText(step));
+      expect(await screen.findByText("Ноябрь 2026")).toBeTruthy();
+    });
+
+    it("on the 2nd looks for the day before yesterday in the previous month", async () => {
+      const calendar = jest.fn(async (month: string) =>
+        calendarFixture({ month, today: "2026-11-02", days: days(month, [{ date: "2026-10-31", spent: 460_000 }, { date: "2026-11-01", spent: 360_000 }]) }),
+      );
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ date: "2026-11-02" })), calendar }));
+      expect(await screen.findByText(step)).toBeTruthy();
+      expect(calendar).toHaveBeenCalledWith("2026-10");
+      expect(calendar).toHaveBeenCalledWith("2026-11");
+    });
+
+    it("is not said when yesterday went further over", async () => {
+      const calendar = jest.fn(async (month: string) =>
+        calendarFixture({ month, today: "2026-11-05", days: days(month, [{ date: "2026-11-03", spent: 300_000 }, { date: "2026-11-04", spent: 360_000 }]) }),
+      );
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ date: "2026-11-05" })), calendar }));
+      expect(await screen.findByText("Вчера вышло на ₴1,300 больше лимита. Сегодня новый день.")).toBeTruthy();
+      expect(screen.queryByText(step)).toBeNull();
+    });
   });
 });
 

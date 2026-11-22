@@ -26,6 +26,8 @@ export interface PhraseInput {
   /** Loans whose return date is today or past; absent from an older server. */
   loansDue?: NonNullable<TodayDto["loansDue"]>;
   yesterday: CalendarDayDto | null;
+  /** The day before yesterday (task А24), for a step closer to the limit; absent when it is not loaded. */
+  dayBefore?: CalendarDayDto | null;
   streak: number;
   /** Today's observation from the server (task В7); absent from an older server. */
   observation?: ObservationDto | null;
@@ -102,6 +104,9 @@ export function dayPhrase(i: PhraseInput): Phrase | null {
   const y = i.yesterday;
   if (!y || y.limit === null || y.date !== shiftDate(i.today, -1)) return null;
   const left = y.limit - y.spent;
+  if (left < 0 && closerThanDayBefore(y, i.dayBefore ?? null, i.today)) {
+    return { text: "Вчера — ближе к лимиту, чем позавчера.", action: { kind: "calendar" } };
+  }
   if (left < 0) return { text: `Вчера вышло на ${formatMoney(-left)} больше лимита. Сегодня новый день.`, action: { kind: "calendar" } };
   const first = left === 0 ? "Вчера ровно в лимит." : `Вчера осталось ${formatMoney(left)}.`;
   const grew = i.dailyLimit - y.limit;
@@ -112,4 +117,16 @@ export function dayPhrase(i: PhraseInput): Phrase | null {
         ? ` Уже ${i.streak} ${["день", "дня", "дней"][pluralIndex(i.streak)]} в лимите.`
         : "";
   return { text: first + second, action: { kind: "calendar" } };
+}
+
+/** A day the server judged against a limit: not a day without one, and not the day the shortage mode came on. */
+const judged = (d: CalendarDayDto) => d.status !== "no_limit" && d.limit !== null && !d.shortageStart;
+
+/**
+ * Task А24: yesterday went over its limit by less than the day before went over its own. Each day is set against
+ * its own limit, so a day before within the limit is never «further».
+ */
+function closerThanDayBefore(y: CalendarDayDto, d: CalendarDayDto | null, today: string): boolean {
+  if (!d || d.date !== shiftDate(today, -2) || !judged(y) || !judged(d)) return false;
+  return y.spent - y.limit! < d.spent - d.limit!;
 }
