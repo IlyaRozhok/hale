@@ -177,7 +177,10 @@ describe("CategoriesSheet (В5)", () => {
 
   // A keyboard rising while the form still slides in left the form off the screen on the phone until the next tap.
   it("a new category's name takes the keyboard only once the form has slid in; a category's own form takes none", async () => {
+    // The mock's focus is one jest.fn shared by every input, and it keeps the calls of earlier tests: a form an
+    // earlier test opened may have taken focus.
     const focus = jest.spyOn(TextInput.prototype, "focus");
+    focus.mockClear();
     const openings = holdSheetOpenings();
     try {
       await renderWith(<CategoriesSheet onClose={noop} />, fakeApi({ categories: jest.fn(async () => LIST) }));

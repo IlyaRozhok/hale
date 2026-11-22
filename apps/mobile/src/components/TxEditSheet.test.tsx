@@ -326,7 +326,10 @@ describe("TxEditSheet: categories from the server and «Всегда так» (�
   // own scrim, until the next tap — and that tap lands on the scrim and closes it. So the name is focused only once
   // the form has slid in.
   it("«Новая»: the name takes the keyboard only once the form has slid in", async () => {
+    // The mock's focus is one jest.fn shared by every input, and it keeps the calls of earlier tests: a form an
+    // earlier test opened may have taken focus.
     const focus = jest.spyOn(TextInput.prototype, "focus");
+    focus.mockClear();
     const openings = holdSheetOpenings();
     try {
       await renderWith(<TxEditSheet tx={silpo} onClose={noop} />, fakeApi({ categories: jest.fn(async () => LIST) }));
