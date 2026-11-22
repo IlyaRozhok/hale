@@ -346,6 +346,9 @@ describe("Plan, loans", () => {
     expect(screen.getByText("Открытые")).toBeTruthy();
     expect(screen.getByText("Друг")).toBeTruthy();
     expect(screen.getByText("До начала учёта")).toBeTruthy();
+    // Repaid loans wait folded under a count (Б57).
+    expect(screen.queryByText("Кредит До завтра")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Погашенные, 1" }));
     expect(screen.getByText("Погашенные")).toBeTruthy();
     expect(screen.getByText("₴5,000 от 10.10, погашен 20.10, ещё ₴200 на обслуживание")).toBeTruthy();
   });
@@ -377,6 +380,7 @@ describe("Plan, loans", () => {
     const buttons = alert.mock.calls[0]![2]!;
     await act(async () => buttons.find((b) => b.text === "Да, погашены")!.onPress!());
     await waitFor(() => expect(api.repayOldLoans).toHaveBeenCalledTimes(1));
+    await fireEvent.press(await screen.findByRole("button", { name: "Погашенные, 1" }));
     expect(await screen.findByText("₴5,000 от 01.11, погашен, дата неизвестна")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Все уже погашены" })).toBeNull();
     alert.mockRestore();
