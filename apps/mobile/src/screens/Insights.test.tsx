@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { Pressable, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { CategoryDto, InsightsMonthDto } from "@hale/contracts";
@@ -64,7 +64,9 @@ const october = (): InsightsMonthDto =>
     categories: [{ category: "groceries", spent: 3_100_000, previousSpent: 2_950_000, count: 30 }],
   });
 
-const tab = (name: string) => screen.getByRole("tab", { name });
+// The native segmented control; its segments are buttons, as VoiceOver reads them (the mock in jest.setup).
+const tab = (name: string) => screen.getByRole("button", { name });
+const segments = () => within(screen.getByTestId("insights-switch")).getAllByRole("button").map((t) => t.props.accessibilityLabel as string);
 const texts = () => screen.getAllByText(/./).map((t) => t.props.children as unknown);
 
 describe("Insights", () => {
@@ -158,7 +160,7 @@ describe("Insights", () => {
     expect(screen.queryByTestId("bar-now-refund")).toBeNull();
     expect(screen.queryByTestId("bar-now-cafe")).toBeNull();
     for (const t of screen.getAllByText(/./)) {
-      const c = (StyleSheet.flatten(t.props.style) as { color?: string }).color;
+      const c = ((StyleSheet.flatten(t.props.style) ?? {}) as { color?: string }).color;
       expect([tokens.color.status.danger, tokens.color.money.expense]).not.toContain(c);
     }
   });
@@ -208,13 +210,13 @@ describe("Insights", () => {
     expect(await screen.findByText("Трат пока нет.")).toBeTruthy();
     expect(screen.getByText("потрачено")).toBeTruthy();
     // Nothing to switch between.
-    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.queryByTestId("insights-switch")).toBeNull();
   });
 
   it("an older server without «Итоги»: one calm line instead of the screen", async () => {
     await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => null) }));
     expect(await screen.findByText("Итоги появятся после обновления сервера.")).toBeTruthy();
-    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.queryByTestId("insights-switch")).toBeNull();
     expect(screen.queryByRole("button", { name: "Предыдущий месяц" })).toBeNull();
   });
 
@@ -306,7 +308,7 @@ describe("Insights", () => {
     it("three segments, «Категории» chosen by default", async () => {
       await renderWith(<Insights now={now} />, full());
       await screen.findByText("₴18,220");
-      expect(screen.getAllByRole("tab").map((t) => t.props.accessibilityLabel as string)).toEqual(["Категории", "Места", "Подписки"]);
+      expect(segments()).toEqual(["Категории", "Места", "Подписки"]);
       expect(tab("Категории").props.accessibilityState.selected).toBe(true);
       expect(tab("Места").props.accessibilityState.selected).toBe(false);
       expect(rows()).toHaveLength(9);
@@ -338,25 +340,23 @@ describe("Insights", () => {
       expect(screen.getByText("Желаемое")).toBeTruthy();
     });
 
-    it("the chosen segment stands out without colour: a raised fill, no blue, no red", async () => {
+    it("the chosen segment stands out without colour: the native control, dark, with no tint (no blue, no red)", async () => {
       await renderWith(<Insights now={now} />, full());
       await screen.findByText("₴18,220");
-      const on = StyleSheet.flatten(tab("Категории").props.style) as { backgroundColor?: string };
-      const off = StyleSheet.flatten(tab("Места").props.style) as { backgroundColor?: string };
-      expect(on.backgroundColor).toBe(tokens.color.surface.overlay);
-      expect(off.backgroundColor).toBeUndefined();
+      // The mock reports the appearance and any tint the screen sets.
+      expect(screen.getByTestId("insights-switch").props.accessibilityHint).toBe("dark");
     });
 
     it("a segment with nothing in it is not offered", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ places })) }));
       await screen.findByText("₴18,220");
-      expect(screen.getAllByRole("tab").map((t) => t.props.accessibilityLabel as string)).toEqual(["Категории", "Места"]);
+      expect(segments()).toEqual(["Категории", "Места"]);
     });
 
     it("an older server with neither places nor subscriptions: no switch, only the categories", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture()) }));
       await screen.findByText("₴18,220");
-      expect(screen.queryByRole("tab")).toBeNull();
+      expect(screen.queryByTestId("insights-switch")).toBeNull();
       expect(rows()).toHaveLength(9);
     });
 
@@ -419,7 +419,7 @@ describe("Insights", () => {
       expect((StyleSheet.flatten(tags[0]!.props.style) as { color?: string }).color).toBe(tokens.color.fg.muted);
       expect(placeRows().filter((r) => r.includes("новое"))).toEqual(["Сушия, новое, 21 раз: ₴1,380"]);
       for (const t of screen.getAllByText(/./)) {
-        const c = (StyleSheet.flatten(t.props.style) as { color?: string }).color;
+        const c = ((StyleSheet.flatten(t.props.style) ?? {}) as { color?: string }).color;
         expect([tokens.color.status.danger, tokens.color.money.expense]).not.toContain(c);
       }
     });
@@ -448,7 +448,7 @@ describe("Insights", () => {
     it("no segment from an older server's answer without the field, nor when there were no places", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ places: [], subscriptions })) }));
       await screen.findByText("₴18,220");
-      expect(screen.queryByRole("tab", { name: "Места" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Места" })).toBeNull();
       expect(screen.queryByTestId("places-card")).toBeNull();
     });
 
@@ -514,7 +514,7 @@ describe("Insights", () => {
         expect(card.backgroundColor).toBe(tokens.color.card.fill);
       }
       for (const t of screen.getAllByText(/./)) {
-        const c = (StyleSheet.flatten(t.props.style) as { color?: string }).color;
+        const c = ((StyleSheet.flatten(t.props.style) ?? {}) as { color?: string }).color;
         expect([tokens.color.status.danger, tokens.color.money.expense]).not.toContain(c);
       }
     });
@@ -522,20 +522,20 @@ describe("Insights", () => {
     it("no segment from an older server's answer without the field", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ places })) }));
       await screen.findByText("₴18,220");
-      expect(screen.queryByRole("tab", { name: "Подписки" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Подписки" })).toBeNull();
     });
 
     it("no segment when none were found", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ places, subscriptions: { monthly: 0, items: [] } })) }));
       await screen.findByText("₴18,220");
-      expect(screen.queryByRole("tab", { name: "Подписки" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Подписки" })).toBeNull();
     });
 
     it("no segment when every one found has stopped being charged", async () => {
       const gone = { monthly: 0, items: [sub("Megogo", 19_900, { missed: 2 })] };
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ places, subscriptions: gone })) }));
       await screen.findByText("₴18,220");
-      expect(screen.queryByRole("tab", { name: "Подписки" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Подписки" })).toBeNull();
       expect(screen.queryByText(/Megogo/)).toBeNull();
     });
   });

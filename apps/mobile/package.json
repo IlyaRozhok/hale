@@ -14,6 +14,7 @@
     "@hale/contracts": "workspace:*",
     "@hale/tokens": "workspace:*",
     "@react-native-community/slider": "5.2.1",
+    "@react-native-segmented-control/segmented-control": "2.5.7",
     "@react-navigation/native": "^7.5.1",
     "@shopify/react-native-skia": "2.14.0",
     "@tanstack/react-query": "^5.105.1",
