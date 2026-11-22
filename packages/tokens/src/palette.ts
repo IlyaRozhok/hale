@@ -22,14 +22,23 @@ export const palette = {
   sand: "#D6B26E",
   ember: "#E07A7A",
   wine: "#3A2224",
-  /** The soft light at the top of the background. */
-  dusk: "#24272D",
-  dusk2: "#111317",
   graphite: {
     500: "#54585F",
     700: "#2C2F34",
     800: "#1E2024",
+    /** The list card of the soft graphite (variant «Б»): one step above the screen. */
+    850: "#1B1E22",
     900: "#17191D",
+    /** The screen of the soft graphite: flat, not black. */
+    950: "#121417",
+  },
+  /** Soft greys for text on graphite: a little less white, so it glares less at night. */
+  fog: {
+    50: "#F2F3F5",
+    100: "#E8EAED",
+    300: "#A6ABB3",
+    400: "#8B9098",
+    600: "#4A4E55",
   },
 } as const;
 

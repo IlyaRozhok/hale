@@ -3,13 +3,16 @@ import { palette as p, blackAlpha, sandAlpha, whiteAlpha } from "./palette";
 /** Semantic Silver tokens. Surfaces are opaque; what is translucent is the scrim and the glass. */
 export const color = {
   fg: {
-    default: p.white,
+    default: p.fog[100],
+    /** The big title of a screen and its main figure. */
+    strong: p.fog[50],
     muted: p.silver[300],
     subtle: p.silver[400],
     inverse: p.black,
   },
   surface: {
-    base: p.black,
+    /** The screen: a flat dark graphite with no light on it (variant «Б»). */
+    base: p.graphite[950],
     inset: p.graphite[900],
     raised: p.graphite[800],
     overlay: p.graphite[700],
@@ -29,10 +32,22 @@ export const color = {
   },
   /** How a day went against the limit: a small dot under its number. Red only for far over. */
   calendar: { within: p.sage, over: p.sand, farOver: p.crimson },
-  /** The app's backdrop of metal folds: `peak` caps its thin crests, `sheet` the wide light that survives the glass's blur. */
-  backdrop: { peak: p.silver[400], sheet: p.graphite[500], glow: p.dusk, mid: p.dusk2 },
-  /** Solid cards on the dark background: there is nothing behind them for glass to blur. */
-  card: { fill: p.graphite[900], edge: p.graphite[800] },
+  /**
+   * The brightest things glass may sit over: `peak` a thin bright crest, `sheet` a wide light. The screen itself is now
+   * flat graphite (variant «Б»); these stay as the worst case the glass's contrast is checked against.
+   */
+  backdrop: { peak: p.silver[400], sheet: p.graphite[500] },
+  /**
+   * Solid cards on the dark background: there is nothing behind them for glass to blur. No line around them;
+   * `edge` is the faint hairline between rows.
+   */
+  card: { fill: p.graphite[850], edge: whiteAlpha(0.05) },
+  /** An input's fill: one step above the card, so a field shows both on the screen and inside a card. */
+  field: { fill: p.graphite[700] },
+  /** Loading bars: visible on a card and on the screen. */
+  skeleton: p.graphite[700],
+  /** Inside a list card: the quiet line under a name and the headers, the value on the right, the glyph, the chevron. */
+  list: { secondary: p.fog[400], value: p.fog[300], icon: p.fog[300], chevron: p.fog[600] },
   /** The limit strip: silver, with a small spark at its end that says how the day stands. */
   limit: { ok: p.sage, low: p.sand, over: p.ember, overDeep: p.wine, strip: p.silver[100] },
   /** The runway graph: a forecast line with a soft fill fading to nothing, sand once it is below zero. */
@@ -65,7 +80,7 @@ export const color = {
   money: {
     income: p.sage,
     expense: p.coral,
-    neutral: p.white,
+    neutral: p.fog[100],
     bonus: p.silver[100],
   },
   data: {
@@ -79,7 +94,8 @@ export const color = {
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
 
-export const radius = { sm: 6, md: 10, lg: 14, xl: 20, full: 9999 } as const;
+/** `card`: the rounder corner of a list card (variant «Б»). */
+export const radius = { sm: 6, md: 10, lg: 14, xl: 20, card: 22, full: 9999 } as const;
 
 export const type = {
   caption: { fontSize: 12, lineHeight: 16, fontWeight: "400" },

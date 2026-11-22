@@ -14,10 +14,11 @@ const flat = (id: string) => StyleSheet.flatten(screen.getByTestId(id).props.sty
 describe("Glass", () => {
   beforeEach(() => jest.mocked(isLiquidGlassAvailable).mockReturnValue(true));
 
-  it("a card is solid with a hairline edge: on the dark background there is nothing for glass to blur", async () => {
+  it("a card is solid, one step above the screen, round and with no line around it: there is nothing for glass to blur", async () => {
     await render(<Glass testID="card"><Text>Текст</Text></Glass>);
     expect(screen.queryByTestId("native-glass")).toBeNull();
-    expect(flat("card")).toMatchObject({ backgroundColor: tokens.color.card.fill, borderColor: tokens.color.card.edge });
+    expect(flat("card")).toMatchObject({ backgroundColor: tokens.color.card.fill, borderRadius: tokens.radius.card });
+    expect(flat("card").borderWidth ?? 0).toBe(0);
     jest.mocked(isLiquidGlassAvailable).mockReturnValue(false);
     await render(<Glass testID="card2"><Text>Текст</Text></Glass>);
     expect(flat("card2").backgroundColor).toBe(tokens.color.card.fill);
@@ -34,7 +35,7 @@ describe("Glass", () => {
     expect(screen.getByTestId("native-glass").props.tintColor).toBe(tokens.color.glass.surface.tint);
     jest.mocked(isLiquidGlassAvailable).mockReturnValue(false);
     await render(<Glass kind="card" testID="plain"><Text>Текст</Text></Glass>);
-    expect(flat("plain")).toMatchObject({ backgroundColor: tokens.color.card.fill, borderColor: tokens.color.card.edge });
+    expect(flat("plain")).toMatchObject({ backgroundColor: tokens.color.card.fill, borderRadius: tokens.radius.card });
   });
 
   it("the menu is the most see-through", async () => {

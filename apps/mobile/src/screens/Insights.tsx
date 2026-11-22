@@ -254,7 +254,7 @@ const styles = StyleSheet.create({
   top: { minHeight: touchMin, flexDirection: "row", justifyContent: "flex-end" },
   edit: { minHeight: touchMin, minWidth: touchMin, justifyContent: "center", alignItems: "flex-end", paddingHorizontal: space.xs },
   editText: { ...type.body, color: color.fg.default },
-  title: { ...type.display, color: color.fg.default, paddingHorizontal: space.xs },
+  title: { ...type.display, color: color.fg.strong, paddingHorizontal: space.xs },
   // The arrows hug the month's name, as in «Экранное время».
   monthLine: { flexDirection: "row", alignItems: "center", marginTop: -space.md },
   // A full touch target; negative margins pull the glyph close to the month's name (and the first one to the edge).
@@ -263,7 +263,7 @@ const styles = StyleSheet.create({
   off: { opacity: 0.3 },
   subtitle: { ...type.body, color: color.fg.muted },
   hero: { paddingHorizontal: space.xs },
-  amount: { ...type.amount, color: color.fg.default, fontVariant: ["tabular-nums"] },
+  amount: { ...type.amount, color: color.fg.strong, fontVariant: ["tabular-nums"] },
   note: { ...type.label, fontWeight: "400", color: color.fg.muted, fontVariant: ["tabular-nums"] },
   summary: { ...type.label, color: color.fg.muted, fontVariant: ["tabular-nums"], paddingHorizontal: space.xs },
   quiet: { ...type.body, color: color.fg.muted, paddingHorizontal: space.xs },

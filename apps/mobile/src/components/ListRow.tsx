@@ -7,7 +7,7 @@ const { color, radius, space, touchMin, type } = tokens;
 
 type Props = {
   testID?: string;
-  /** testID of the icon's square, for tests that check which icon a row has. */
+  /** testID of the icon, for tests that check which icon a row has. */
   iconTestID?: string;
   icon: IconName;
   title: string;
@@ -23,31 +23,33 @@ type Props = {
 };
 
 /**
- * One row of an inset list in the iOS manner («Итоги», variant А): an icon in a small rounded square, the name with
- * what goes under it, the amount on the right, and a chevron when the row leads somewhere.
+ * One row of an inset list in the iOS manner («Итоги»): the icon as a bare glyph, the name with what goes under it,
+ * the amount on the right, and a chevron when the row leads somewhere. The hairline above it starts at the text.
  */
 export function ListRow({ testID, iconTestID, icon, title, tag, below, amount, accessibilityLabel, first, onPress }: Props) {
   const body = (
     <>
-      <View testID={iconTestID} style={styles.square}>
-        <Icon name={icon} color={color.fg.muted} size={18} />
+      <View testID={iconTestID} style={styles.icon}>
+        <Icon name={icon} color={color.list.icon} size={18} />
       </View>
-      <View style={styles.middle}>
-        <View style={styles.titleLine}>
-          <Text style={styles.title} numberOfLines={1}>{title}</Text>
-          {tag}
+      <View testID="row-line" style={[styles.line, !first && styles.divided]}>
+        <View style={styles.middle}>
+          <View style={styles.titleLine}>
+            <Text style={styles.title} numberOfLines={1}>{title}</Text>
+            {tag}
+          </View>
+          {below}
         </View>
-        {below}
+        <Text style={styles.amount}>{amount}</Text>
+        {onPress && (
+          <View testID="row-chevron">
+            <Icon name="chevron" color={color.list.chevron} size={16} />
+          </View>
+        )}
       </View>
-      <Text style={styles.amount}>{amount}</Text>
-      {onPress && (
-        <View testID="row-chevron">
-          <Icon name="chevron" color={color.fg.subtle} size={16} />
-        </View>
-      )}
     </>
   );
-  const style = [styles.row, !first && styles.divided];
+  const style = styles.row;
   return onPress ? (
     <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={accessibilityLabel} onPress={onPress} style={style}>
       {body}
@@ -59,7 +61,7 @@ export function ListRow({ testID, iconTestID, icon, title, tag, below, amount, a
   );
 }
 
-/** The solid card the rows sit in: no glass (glass is only the limit card and floating things). */
+/** The solid card the rows sit in: no glass (glass is only the limit card and floating things), no line around it. */
 export function InsetList({ testID, children }: { testID?: string; children: ReactNode }) {
   return (
     <View testID={testID} style={styles.card}>
@@ -68,22 +70,17 @@ export function InsetList({ testID, children }: { testID?: string; children: Rea
   );
 }
 
-const SQUARE = 30;
+const ICON = 22;
 
 const styles = StyleSheet.create({
-  card: {
-    borderRadius: radius.xl,
-    paddingLeft: space.md,
-    paddingRight: space.sm,
-    backgroundColor: color.card.fill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.card.edge,
-  },
-  row: { minHeight: touchMin, paddingVertical: space.md, flexDirection: "row", alignItems: "center", gap: space.md },
+  // No line around the card; the hairlines between rows run to its right edge, so the rows keep the room on the right.
+  card: { borderRadius: radius.card, paddingLeft: space.lg, backgroundColor: color.card.fill, overflow: "hidden" },
+  row: { minHeight: touchMin, flexDirection: "row", alignItems: "stretch", gap: space.md },
+  icon: { width: ICON, alignItems: "center", justifyContent: "center" },
+  line: { flex: 1, flexDirection: "row", alignItems: "center", gap: space.md, paddingVertical: space.md, paddingRight: space.md },
   divided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: color.card.edge },
-  square: { width: SQUARE, height: SQUARE, borderRadius: radius.sm, backgroundColor: color.surface.raised, alignItems: "center", justifyContent: "center" },
   middle: { flex: 1, gap: space.xs },
   titleLine: { flexDirection: "row", alignItems: "center", gap: space.xs },
   title: { ...type.body, color: color.fg.default, flexShrink: 1 },
-  amount: { ...type.body, color: color.fg.default, fontVariant: ["tabular-nums"] },
+  amount: { ...type.body, color: color.list.value, fontVariant: ["tabular-nums"] },
 });

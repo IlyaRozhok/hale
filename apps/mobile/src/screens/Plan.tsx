@@ -230,8 +230,8 @@ const styles = StyleSheet.create({
   bar: { flexDirection: "row", justifyContent: "flex-end", marginBottom: -space.lg },
   gear: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
   // Large titles and the hero line up with the text inside the cards below them.
-  title: { ...type.display, color: color.fg.default, paddingHorizontal: space.xs },
+  title: { ...type.display, color: color.fg.strong, paddingHorizontal: space.xs },
   hero: { paddingHorizontal: space.xs, marginTop: -space.sm },
-  caption: { ...type.body, color: color.fg.muted },
-  own: { ...type.amount, color: color.fg.default, fontVariant: ["tabular-nums"] },
+  caption: { ...type.body, color: color.list.secondary },
+  own: { ...type.amount, color: color.fg.strong, fontVariant: ["tabular-nums"] },
 });
