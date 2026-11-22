@@ -26,7 +26,7 @@ const press = async (name: string) =>
   ["Доходы", "Платежи", "Рассрочки", "Налоги", "Займы", "Цели", "Наличные", "Binance"].includes(name)
     ? openPlanPart(name)
     : fireEvent.press(await screen.findByRole("button", { name }));
-/** One open loan, so that «Займы» is on the screen. */
+/** One open loan: «Займы» then shows a count. */
 const withOpenLoan = () => ({ loanHistory: jest.fn(async () => loanHistoryFixture({ stats: { borrowed: 500_000, repaid: 0, serviceCost: 0, stillOpen: 500_000 }, open: [loanFixture()] })) });
 /** The texts on the screen in their order, among those given. */
 const inOrder = (pattern: RegExp) => screen.getAllByText(pattern).map((t) => t.props.children);
@@ -71,7 +71,7 @@ describe("Plan, the iOS list (variant А)", () => {
     expect(screen.getByRole("button", { name: "Доходы" }).props.accessibilityHint).toBe("1");
     expect(screen.getByRole("button", { name: "Рассрочки" }).props.accessibilityHint).toBe("1");
     expect(screen.getByRole("button", { name: "Налоги" }).props.accessibilityHint).toBe("1");
-    expect((await screen.findByRole("button", { name: "Займы" })).props.accessibilityHint).toBe("1");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Займы" }).props.accessibilityHint).toBe("1"));
     expect(screen.getByRole("button", { name: "Цели" }).props.accessibilityHint).toBe("2");
     expect(inOrder(/^(Доходы|Платежи|Рассрочки|Налоги|Займы|Цели)$/)).toEqual(["Доходы", "Платежи", "Рассрочки", "Налоги", "Займы", "Цели"]);
     for (const old of [/ближайший/, /^осталось/, /^следующий/, /из \$/, /^открыто/]) expect(screen.queryByText(old)).toBeNull();
@@ -86,12 +86,17 @@ describe("Plan, the iOS list (variant А)", () => {
     expect(screen.queryByText("нет")).toBeNull();
   });
 
-  it("shows «Займы» only while a loan is open", async () => {
-    await renderWith(<Plan />, fakeApi());
+  it("keeps «Займы» with no open loan, with nothing on the right, and a loan can still be added from it", async () => {
+    const repaidOnly = loanHistoryFixture({ repaid: [loanFixture({ id: 9, remaining: 0, repaidOn: "2026-10-20", repaidAmount: 500_000 })] });
+    const api = fakeApi({ loanHistory: jest.fn(async () => repaidOnly) });
+    await renderWith(<Plan />, api);
     await screen.findByText("Счета");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Цели" })).toBeTruthy());
+    await waitFor(() => expect(api.loanHistory).toHaveBeenCalled());
     await act(async () => new Promise<void>((r) => setTimeout(r, 50)));
-    expect(screen.queryByRole("button", { name: "Займы" })).toBeNull();
+    const row = screen.getByRole("button", { name: "Займы" });
+    expect(row.props.accessibilityHint).toBeUndefined();
+    await fireEvent.press(row);
+    expect(await screen.findByRole("button", { name: "Новый займ" })).toBeTruthy();
   });
 
   it("has no «Налоги» and no word «ФОП» when the server says there are no taxes (Д4)", async () => {
@@ -468,7 +473,7 @@ describe("Plan, loans", () => {
 
   it("counts the open loans, the old ones included, on the right of «Займы»", async () => {
     await renderWith(<Plan />, fakeApi({ loanHistory: jest.fn(async () => history()) }));
-    expect((await screen.findByRole("button", { name: "Займы" })).props.accessibilityHint).toBe("2");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Займы" }).props.accessibilityHint).toBe("2"));
   });
 
   it("only a loan entered by hand can be deleted; only an unpaid one can be repaid", async () => {

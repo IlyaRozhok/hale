@@ -196,7 +196,8 @@ export function Plan() {
         />
         <ListRow key="installments" icon="repeat" label="Рассрочки" value={payments.data ? count(installmentGroups(payments.data).length) : undefined} quiet onPress={() => setOpen("installments")} />
         {taxes && <ListRow key="tax" icon="receipt" label="Налоги" value={payments.data ? count(unpaidTaxCount(payments.data)) : undefined} quiet onPress={() => setOpen("tax")} />}
-        {stillOpen !== undefined && stillOpen > 0 && <ListRow key="loans" icon="transfer" label="Займы" value={count(openLoans)} quiet onPress={() => setOpen("loans")} />}
+        {/* Always there: its window is also where a loan is added by hand. The count only while one is open. */}
+        <ListRow key="loans" icon="transfer" label="Займы" value={stillOpen !== undefined && stillOpen > 0 ? count(openLoans) : undefined} quiet onPress={() => setOpen("loans")} />
         <ListRow key="goals" icon="flag" label="Цели" value={count(goals.data?.length)} quiet onPress={() => setOpen("goals")} />
       </PlanSection>
       {open === "incomes" && <IncomesSheet onClose={close} />}
