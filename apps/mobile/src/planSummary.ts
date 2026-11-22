@@ -1,5 +1,5 @@
 // What the Plan screen's lines say, from the same rows its windows list. No native imports: runs in node tests.
-import type { ExpectedIncomeDto, GoalDto, IncomeAccount, IncomeEventDto, OwnMoneyItemDto, ScheduledPaymentDto } from "@hale/contracts";
+import type { ExpectedIncomeDto, GoalDto, IncomeAccount, IncomeEventDto, OwnMoneyItemDto, RecurringDto, ScheduledPaymentDto } from "@hale/contracts";
 import { formatDollars, formatMoney, shortDate } from "./format";
 import { placeName } from "./ownMoney";
 
@@ -124,6 +124,25 @@ export function taxLine(payments: readonly ScheduledPaymentDto[]): string {
  */
 export function taxesShown(taxes: boolean | undefined, payments: readonly ScheduledPaymentDto[] | undefined): boolean {
   return taxes !== false || (payments !== undefined && unpaid(payments, "tax").length > 0);
+}
+
+/** «Платежи» on «План»: the monthly obligations and the one-off ones still to pay, as its window lists them. */
+export function paymentsCount(recurring: readonly RecurringDto[], payments: readonly ScheduledPaymentDto[]): number {
+  const monthly = recurring.filter((r) => r.active && r.kind === "obligation").length;
+  return monthly + payments.filter((p) => p.kind === "obligation" && p.recurring_id === null && p.paid_at === null).length;
+}
+
+/** «Налоги» on «План»: the tax payments still to pay. */
+export const unpaidTaxCount = (payments: readonly ScheduledPaymentDto[]): number => unpaid(payments, "tax").length;
+
+/** The expected income whose payment not yet received falls on `day` (the runway's income day), if one is known. */
+export function incomeOnDay(expected: readonly ExpectedIncomeDto[], events: readonly IncomeEventDto[], day: string): ExpectedIncomeDto | undefined {
+  for (const e of events) {
+    if (e.status === "received" || e.expected_on !== day) continue;
+    const income = expected.find((x) => x.id === e.expected_income_id);
+    if (income) return income;
+  }
+  return undefined;
 }
 
 export function goalsLine(goals: readonly GoalDto[]): string {

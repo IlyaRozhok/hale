@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExpectedIncomeDto, OwnMoneyItemDto } from "@hale/contracts";
-import { goalsLine, hasNamedIncomes, incomeDetail, incomePlaces, incomesLine, incomeWhen, installmentGroups, installmentsLine, nextIncomeLine, paymentsLine, taxesShown, taxLine } from "./planSummary";
+import { goalsLine, hasNamedIncomes, incomeDetail, incomePlaces, incomeOnDay, incomesLine, incomeWhen, installmentGroups, installmentsLine, nextIncomeLine, paymentsCount, paymentsLine, taxesShown, taxLine, unpaidTaxCount } from "./planSummary";
 import { dateLabel, monthGrid, monthTitle } from "./format";
 
 const pay = (over: object) => ({ id: 1, kind: "obligation", name: "Квартира", amount: 100_000, currency: "UAH", due_on: "2026-11-26", paid_at: null, recurring_id: null, tax_quarter: null, is_estimate: false, ...over }) as never;
@@ -157,5 +157,36 @@ describe("goals line", () => {
   it("sums what is saved of the targets", () => {
     expect(goalsLine([{ id: 1, name: "a", saved_cents: 50_000, target_cents: 500_000, sort: 0 }, { id: 2, name: "b", saved_cents: 0, target_cents: 100_000, sort: 1 }])).toBe("$500 из $6,000");
     expect(goalsLine([])).toBe("нет");
+  });
+});
+
+describe("the counts on «План» (variant А)", () => {
+  const recurring = (over: object) => ({ id: 1, kind: "obligation", name: "Квартира", amount: 100_000, currency: "UAH", day_of_month: 26, active: true, ...over }) as never;
+
+  it("counts monthly payments and unpaid one-off ones, not the rows a monthly one made", () => {
+    const list = [pay({ id: 1, recurring_id: 3 }), pay({ id: 2 }), pay({ id: 3, paid_at: "x" }), pay({ id: 4, kind: "tax" }), pay({ id: 5, kind: "installment" })];
+    expect(paymentsCount([recurring({ id: 3 }), recurring({ id: 4, active: false }), recurring({ id: 5, kind: "installment" })], list)).toBe(2);
+    expect(paymentsCount([], [])).toBe(0);
+  });
+
+  it("counts unpaid tax payments only", () => {
+    expect(unpaidTaxCount([pay({ kind: "tax" }), pay({ kind: "tax", paid_at: "x" }), pay({})])).toBe(1);
+    expect(unpaidTaxCount([pay({ kind: "tax", paid_at: "x" })])).toBe(0);
+  });
+});
+
+describe("the income on its day", () => {
+  const expected = [
+    { id: 1, source: "usdc", amount: 270_000, currency: "USD", window_start_day: 5, window_end_day: 7, name: "Работа" },
+    { id: 2, source: "fop", amount: 1_000_000, currency: "UAH", window_start_day: 25, window_end_day: 25 },
+  ] as never[];
+  const event = (id: number, expected_income_id: number, expected_on: string, status = "expected") => ({ id, expected_income_id, period: expected_on.slice(0, 7), expected_on, status }) as never;
+
+  it("finds the expected income whose event not yet received falls on the day", () => {
+    const events = [event(1, 2, "2026-11-07", "received"), event(2, 1, "2026-11-07"), event(3, 2, "2026-11-25")];
+    expect(incomeOnDay(expected, events, "2026-11-07")).toMatchObject({ id: 1 });
+    expect(incomeOnDay(expected, events, "2026-11-25")).toMatchObject({ id: 2 });
+    expect(incomeOnDay(expected, events, "2026-11-08")).toBeUndefined();
+    expect(incomeOnDay(expected, [event(4, 9, "2026-11-07")], "2026-11-07")).toBeUndefined();
   });
 });

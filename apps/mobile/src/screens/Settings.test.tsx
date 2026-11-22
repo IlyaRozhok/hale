@@ -5,7 +5,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { SessionProvider } from "../session";
 import { Settings } from "./Settings";
 import { Plan } from "./Plan";
-import { fakeApi, makeClient, openPlanPart, renderWith, taxFixture, todayFixture } from "../testing";
+import { fakeApi, loanFixture, loanHistoryFixture, makeClient, openPlanPart, renderWith, taxFixture, todayFixture } from "../testing";
 import { NetworkError } from "../api/client";
 import { TODAY_KEY } from "../api/queries";
 
@@ -87,7 +87,9 @@ describe("Settings, preview accuracy", () => {
   });
 
   it("recalculates the preview after a loan or a tax payment is saved", async () => {
-    const api = fakeApi({ payments: jest.fn(async () => [taxFixture({ id: 2 })]) });
+    // An open loan, so that «Займы» is on «План» (variant А shows it only then).
+    const loanHistory = jest.fn(async () => loanHistoryFixture({ stats: { borrowed: 500_000, repaid: 0, serviceCost: 0, stillOpen: 500_000 }, open: [loanFixture()] }));
+    const api = fakeApi({ payments: jest.fn(async () => [taxFixture({ id: 2 })]), loanHistory });
     // Settings opens over the Plan screen, and both stay mounted while the sheet is up.
     await renderWith(
       <>

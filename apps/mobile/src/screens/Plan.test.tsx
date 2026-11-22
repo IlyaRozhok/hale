@@ -1,11 +1,12 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Alert, StyleSheet } from "react-native";
-import type { OwnMoneyItemDto } from "@hale/contracts";
+import type { OwnMoneyItemDto, TodayDto } from "@hale/contracts";
 import { Plan } from "./Plan";
 import { Today } from "./Today";
 import { balanceFixture, fakeApi, goalFixture, loanFixture, loanHistoryFixture, makeClient, openPlanPart, ownItemsFixture, pickDate, renderWith, taxFixture, todayFixture, todayWithItems } from "../testing";
 import { dateLabel, kyivDate, shiftDate } from "../format";
 import { LAYOUT } from "../components/layout";
+import { LoansSheet } from "../components/LoansSheet";
 import { NetworkError } from "../api/client";
 import { TODAY_KEY } from "../api/queries";
 
@@ -25,34 +26,78 @@ const press = async (name: string) =>
   ["Доходы", "Платежи", "Рассрочки", "Налоги", "Займы", "Цели", "Наличные", "Binance"].includes(name)
     ? openPlanPart(name)
     : fireEvent.press(await screen.findByRole("button", { name }));
+/** One open loan, so that «Займы» is on the screen. */
+const withOpenLoan = () => ({ loanHistory: jest.fn(async () => loanHistoryFixture({ stats: { borrowed: 500_000, repaid: 0, serviceCost: 0, stillOpen: 500_000 }, open: [loanFixture()] })) });
+/** The texts on the screen in their order, among those given. */
+const inOrder = (pattern: RegExp) => screen.getAllByText(pattern).map((t) => t.props.children);
 
-describe("Plan, calm groups", () => {
-  it("groups the plan into money, coming in, going out and saving up", async () => {
+describe("Plan, the iOS list (variant А)", () => {
+  it("has a large title, «Свои деньги» as the first figure, and the sections in their order", async () => {
     await renderWith(<Plan />, fakeApi());
-    for (const g of ["Деньги", "Приходит", "Уходит", "Копится"]) expect(await screen.findByText(g)).toBeTruthy();
+    expect(screen.getByText("План")).toBeTruthy();
+    expect(await screen.findByText("Свои деньги")).toBeTruthy();
+    expect(screen.getByText("₴10,325")).toBeTruthy();
+    await screen.findByText("Счета");
+    expect(inOrder(/^(До дохода|Счета|Разделы)$/)).toEqual(["До дохода", "Счета", "Разделы"]);
+    // The old groups and their fold are gone.
+    for (const old of ["Деньги", "Приходит", "Уходит", "Копится"]) expect(screen.queryByText(old)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Ещё/ })).toBeNull();
   });
 
-  it("folds empty parts into one quiet row per group, which unfolds them", async () => {
+  it("has no line about what is left after the payments: the free money also holds back the tax reserve and loans", async () => {
     await renderWith(<Plan />, fakeApi());
-    const more = await screen.findByRole("button", { name: /^Ещё: .*рассрочки/ });
-    expect(screen.queryByRole("button", { name: "Рассрочки" })).toBeNull();
-    await fireEvent.press(more);
-    expect(await screen.findByRole("button", { name: "Рассрочки" })).toBeTruthy();
+    await screen.findByText("Свои деньги");
+    expect(screen.queryByText(/^После платежей/)).toBeNull();
+    expect(screen.queryByText(/останется/)).toBeNull();
   });
 
-  it("names a folded brand as it is, and shows the cash once, as its own row", async () => {
-    await renderWith(<Plan />, fakeApi({ cash: jest.fn(async () => ({ started: true, start: "2026-11-01", balance: 100_000 })) }));
-    expect(await screen.findByRole("button", { name: /^Ещё: Binance/ })).toBeTruthy();
-    expect(await screen.findByRole("button", { name: "Наличные" })).toBeTruthy();
-    expect(screen.queryByText("в том числе наличные")).toBeNull();
+  it("puts every part in «Разделы» with a short count, and no amounts or dates under the rows", async () => {
+    const api = fakeApi({
+      expectedIncomes: jest.fn(async () => [{ id: 1, source: "fop" as const, amount: 1_000_000, currency: "UAH", window_start_day: 25, window_end_day: 25 }]),
+      incomeEvents: jest.fn(async () => [{ id: 5, expected_income_id: 1, period: "2026-11", expected_on: "2026-11-25", status: "expected" }]),
+      recurring: jest.fn(async () => [{ id: 3, kind: "obligation" as const, name: "Квартира", amount: 100_000, currency: "UAH", day_of_month: 26, active: true }]),
+      payments: jest.fn(async () => [
+        taxFixture({ id: 1, kind: "obligation", name: "Квартира", amount: 100_000, due_on: "2026-11-26", recurring_id: 3 }),
+        taxFixture({ id: 4, kind: "obligation", name: "Страховка", amount: 50_000, due_on: "2026-12-10" }),
+        taxFixture({ id: 2, kind: "installment", name: "Телефон", amount: 200_000, due_on: "2026-12-02" }),
+        taxFixture({ id: 6, kind: "installment", name: "Телефон", amount: 200_000, due_on: "2027-01-02" }),
+        taxFixture({ id: 3 }),
+      ]),
+      goals: jest.fn(async () => [goalFixture(), goalFixture({ id: 2, name: "Машина" })]),
+      ...withOpenLoan(),
+    });
+    await renderWith(<Plan />, api);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Платежи" }).props.accessibilityHint).toBe("2"));
+    expect(screen.getByRole("button", { name: "Доходы" }).props.accessibilityHint).toBe("1");
+    expect(screen.getByRole("button", { name: "Рассрочки" }).props.accessibilityHint).toBe("1");
+    expect(screen.getByRole("button", { name: "Налоги" }).props.accessibilityHint).toBe("1");
+    expect((await screen.findByRole("button", { name: "Займы" })).props.accessibilityHint).toBe("1");
+    expect(screen.getByRole("button", { name: "Цели" }).props.accessibilityHint).toBe("2");
+    expect(inOrder(/^(Доходы|Платежи|Рассрочки|Налоги|Займы|Цели)$/)).toEqual(["Доходы", "Платежи", "Рассрочки", "Налоги", "Займы", "Цели"]);
+    for (const old of [/ближайший/, /^осталось/, /^следующий/, /из \$/, /^открыто/]) expect(screen.queryByText(old)).toBeNull();
+    expect(screen.queryByPlaceholderText(/./)).toBeNull();
+  });
+
+  it("shows nothing on the right of an empty part rather than «нет»", async () => {
+    await renderWith(<Plan />, fakeApi({ payments: jest.fn(async () => [taxFixture({ paid_at: "2026-11-01T00:00:00Z" })]) }));
+    await screen.findByText("Счета");
+    expect(screen.getByRole("button", { name: "Налоги" }).props.accessibilityHint).toBeUndefined();
+    expect(screen.getByRole("button", { name: "Рассрочки" }).props.accessibilityHint).toBeUndefined();
+    expect(screen.queryByText("нет")).toBeNull();
+  });
+
+  it("shows «Займы» only while a loan is open", async () => {
+    await renderWith(<Plan />, fakeApi());
+    await screen.findByText("Счета");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Цели" })).toBeTruthy());
+    await act(async () => new Promise<void>((r) => setTimeout(r, 50)));
+    expect(screen.queryByRole("button", { name: "Займы" })).toBeNull();
   });
 
   it("has no «Налоги» and no word «ФОП» when the server says there are no taxes (Д4)", async () => {
     await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => ({ ...todayWithItems(), taxes: false })) }));
-    const more = await screen.findByRole("button", { name: /^Ещё: .*рассрочки/ });
-    expect(String(more.props.accessibilityLabel)).not.toMatch(/налог/i);
-    await fireEvent.press(more);
     expect(await screen.findByRole("button", { name: "Рассрочки" })).toBeTruthy();
+    await screen.findByText("Счета");
     expect(screen.queryByRole("button", { name: "Налоги" })).toBeNull();
     expect(screen.queryByText(/налог/i)).toBeNull();
     expect(screen.queryByText(/ФОП/)).toBeNull();
@@ -65,32 +110,61 @@ describe("Plan, calm groups", () => {
 
   it("shows «Налоги» when the server has taxes on, or does not say (Д4)", async () => {
     await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => ({ ...todayFixture(), taxes: true })) }));
-    expect(String((await screen.findByRole("button", { name: /^Ещё: .*рассрочки/ })).props.accessibilityLabel)).toMatch(/налоги/i);
-  });
-
-  it("a part with something in it stays in view", async () => {
-    await renderWith(<Plan />, fakeApi({ payments: jest.fn(async () => [taxFixture()]) }));
     expect(await screen.findByRole("button", { name: "Налоги" })).toBeTruthy();
   });
 });
 
-describe("Plan, a dollar installment before «Сегодня» has loaded", () => {
-  const laptop = taxFixture({ id: 2, kind: "installment", name: "Ноутбук", amount: 10_000, currency: "USD", due_on: "2026-12-02", tax_quarter: null });
+describe("Plan, «До дохода» (variant А)", () => {
+  const runway = (over: Partial<NonNullable<TodayDto["runway"]>> = {}): NonNullable<TodayDto["runway"]> => ({
+    endOn: "2026-12-15",
+    incomeOn: "2026-12-15",
+    reserve: 0,
+    zeroOn: null,
+    points: [],
+    events: [
+      { id: "2", date: "2026-12-12", name: "Рассрочка · техника", amount: 240_000 },
+      { id: "1", date: "2026-12-06", name: "Квартплата", amount: 800_000 },
+    ],
+    ...over,
+  });
+  const withIncome = () => ({
+    expectedIncomes: jest.fn(async () => [{ id: 1, source: "usdc" as const, amount: 270_000, currency: "USD", window_start_day: 15, window_end_day: 15, name: "Работа" }]),
+    incomeEvents: jest.fn(async () => [{ id: 5, expected_income_id: 1, period: "2026-12", expected_on: "2026-12-15", status: "expected" }]),
+  });
 
-  it("shows no sum until the rate is known, then the sum at the rate", async () => {
-    let arrive: (v: ReturnType<typeof todayFixture>) => void = noop;
-    const api = fakeApi({
-      today: jest.fn(() => new Promise<ReturnType<typeof todayFixture>>((resolve) => { arrive = resolve; })),
-      payments: jest.fn(async () => [laptop, taxFixture({ id: 1, kind: "obligation", name: "Квартира", amount: 100_000, due_on: "2026-11-26" })]),
-    });
-    await renderWith(<Plan />, api);
-    // The payments have arrived: their own line is there, and the rate is still not.
-    expect(await screen.findByText("ближайший 26.11, ₴1,000")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Рассрочки" })).toBeTruthy();
-    expect(screen.queryByText("осталось ₴0")).toBeNull();
-    expect(screen.queryByText(/^осталось/)).toBeNull();
-    await act(async () => arrive(todayFixture()));
-    expect(await screen.findByText("осталось ₴4,125")).toBeTruthy();
+  it("lists the unpaid payments by date and the income last, with dates as «6 дек»", async () => {
+    await renderWith(<Plan />, fakeApi({ ...withIncome(), today: jest.fn(async () => todayFixture({ runway: runway() })) }));
+    expect(await screen.findByText("+$2,700")).toBeTruthy();
+    expect(inOrder(/^(Квартплата|Рассрочка · техника|Работа)$/)).toEqual(["Квартплата", "Рассрочка · техника", "Работа"]);
+    expect(screen.getByText("−₴8,000")).toBeTruthy();
+    expect(screen.getByText("−₴2,400")).toBeTruthy();
+    expect(inOrder(/^(6|12|15)$/)).toEqual(["6", "12", "15"]);
+    expect(screen.getAllByText("дек")).toHaveLength(3);
+    expect(screen.getByText("Что после дохода — в разделах ниже.")).toBeTruthy();
+    // No date on this screen as «06.12».
+    expect(screen.queryAllByText(/\d\d\.\d\d/)).toHaveLength(0);
+  });
+
+  it("calls the income «Доход» and shows no amount when no expected income falls on that day", async () => {
+    await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => todayFixture({ runway: runway() })) }));
+    expect(await screen.findByText("Доход")).toBeTruthy();
+    expect(screen.queryByText(/^\+/)).toBeNull();
+  });
+
+  it("is not there without a runway (an older server), without an income date, or with nothing until the income", async () => {
+    const { unmount } = await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => todayFixture({ runway: undefined })) }));
+    await screen.findByText("Счета");
+    expect(screen.queryByText("До дохода")).toBeNull();
+    await unmount();
+    const second = await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => todayFixture({ runway: runway({ incomeOn: null }) })) }));
+    await screen.findByText("Счета");
+    expect(screen.queryByText("До дохода")).toBeNull();
+    expect(screen.queryByText("Квартплата")).toBeNull();
+    await second.unmount();
+    await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => todayFixture({ runway: runway({ events: [] }) })) }));
+    // Only the income: still a row of its own.
+    expect(await screen.findByText("До дохода")).toBeTruthy();
+    expect(screen.getByText("Доход")).toBeTruthy();
   });
 });
 
@@ -101,18 +175,16 @@ describe("Plan, money place by place (task Б25)", () => {
     manualBalances: jest.fn(async () => [balanceFixture({ amount: 12_600 })]),
   });
 
-  it("shows own money as one figure and, under it, the places that add up to it, with no separate lines", async () => {
+  it("shows own money as one figure and, in «Счета», the places that add up to it", async () => {
     await renderWith(<Plan />, fakeApi(withItems()));
     expect(await screen.findByText("₴20,362")).toBeTruthy();
-    expect(screen.getByText("свои деньги — сумма строк ниже")).toBeTruthy();
     // Places with money first, the card in credit last.
-    const order = screen.getAllByText(/^(Белая карта|Наличные|Binance|Чёрная карта)$/).map((t) => t.props.children);
-    expect(order).toEqual(["Белая карта", "Наличные", "Binance", "Чёрная карта"]);
+    expect(inOrder(/^(Белая карта|Наличные|Binance|Чёрная карта)$/)).toEqual(["Белая карта", "Наличные", "Binance", "Чёрная карта"]);
     expect(screen.getByText("₴14,313")).toBeTruthy();
     expect(screen.getByText("₴30,250")).toBeTruthy();
     expect(screen.getByText("₴5,799")).toBeTruthy();
     expect(screen.getByText("$126")).toBeTruthy();
-    for (const old of ["Свои", "Кредитные", "в том числе ФОП", "₴30,000"]) expect(screen.queryByText(old)).toBeNull();
+    for (const old of ["Свои", "Кредитные", "в том числе ФОП", "₴30,000", "свои деньги — сумма строк ниже"]) expect(screen.queryByText(old)).toBeNull();
     // Cash and Binance are in the list once, not again as rows of their own.
     expect(screen.getAllByRole("button", { name: "Наличные" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Binance" })).toHaveLength(1);
@@ -149,10 +221,11 @@ describe("Plan, money place by place (task Б25)", () => {
     expect(screen.getByText("−₴30,000")).toBeTruthy();
   });
 
-  it("shows no separate cash or Binance rows while «Сегодня» is loading", async () => {
+  it("shows no accounts while «Сегодня» is loading", async () => {
     await renderWith(<Plan />, fakeApi({ ...withItems(), today: jest.fn(() => new Promise<never>(() => undefined)) }));
-    await waitFor(() => expect(screen.getByText("Деньги")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Разделы")).toBeTruthy());
     await act(async () => new Promise<void>((r) => setTimeout(r, 50)));
+    expect(screen.queryByText("Счета")).toBeNull();
     expect(screen.queryByRole("button", { name: "Наличные" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Binance" })).toBeNull();
   });
@@ -178,15 +251,15 @@ describe("Plan, money place by place (task Б25)", () => {
     expect(await screen.findByText("Баланс Binance")).toBeTruthy();
   });
 
-  it("folds Binance into «Ещё» when it is not set, and keeps an unstarted wallet as today", async () => {
+  it("on a server without «Отложено» keeps an unset Binance and an unstarted wallet as rows of «Счета»", async () => {
     await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => todayWithItems([{ kind: "white", name: "Белая карта", own: 500_000 }])) }));
-    expect(await screen.findByRole("button", { name: /^Ещё: Binance/ })).toBeTruthy();
+    expect((await screen.findByRole("button", { name: "Binance" })).props.accessibilityHint).toBe("не задан");
     expect((await screen.findByRole("button", { name: "Наличные" })).props.accessibilityHint).toBe("не начат");
     expect(screen.getAllByText("₴5,000")).toHaveLength(2);
   });
 });
 
-describe("Plan, own and hand-kept accounts (Д2б, variant А)", () => {
+describe("Plan, own and set-aside accounts (Д2б, variant А)", () => {
   const items = (): OwnMoneyItemDto[] => [
     { kind: "white", name: "Белая карта", own: 1_431_300, id: 2, source: "account", countsAsOwn: true },
     { kind: "other", name: "Детская карта", own: 210_000, id: 5, source: "account", countsAsOwn: true },
@@ -199,29 +272,65 @@ describe("Plan, own and hand-kept accounts (Д2б, variant А)", () => {
     { kind: "manual", name: "SOL", own: 4_145_625, currency: "USD", amount: 100_500, id: 9, source: "manual", countsAsOwn: false },
     { kind: "manual", name: "Депозит Приват", own: 5_000_000, currency: "UAH", amount: 5_000_000, id: 10, source: "manual", countsAsOwn: false },
   ];
-  const newer = (aside: OwnMoneyItemDto[] = setAside()) => {
-    const today = todayWithItems(items());
+  const newer = (aside: OwnMoneyItemDto[] = setAside(), own: OwnMoneyItemDto[] = items()) => {
+    const today = todayWithItems(own);
     return {
       today: jest.fn(async () => ({ ...today, accounts: { ...today.accounts, setAside: aside } })),
       cash: jest.fn(async () => ({ started: true, start: "2026-11-01", balance: 3_025_000 })),
       manualBalances: jest.fn(async () => [balanceFixture({ amount: 12_600 })]),
     };
   };
+  const openAside = async () => {
+    await fireEvent.press(await screen.findByRole("button", { name: "Отложено" }));
+    await screen.findByText("Добавить счёт");
+  };
 
-  it("lists the set-aside places from «Сегодня» in «Отложено», with a quiet link to add an account under it", async () => {
+  it("shows «Отложено» as one row of «Счета», with its total, and no set-aside places or «Добавить счёт» on the screen", async () => {
     await renderWith(<Plan />, fakeApi(newer()));
-    expect((await screen.findByRole("button", { name: "SOL" })).props.accessibilityHint).toBe("$1,005");
-    expect(screen.getByRole("button", { name: "Депозит Приват" }).props.accessibilityHint).toBe("₴50,000");
-    const titles = screen.getAllByText(/^(Деньги|Отложено|Добавить счёт|Приходит)$/).map((t) => t.props.children);
-    expect(titles).toEqual(["Деньги", "Отложено", "Добавить счёт", "Приходит"]);
-    // The old «+ Добавить» and the folded «Отложено» part are gone.
+    const row = await screen.findByRole("button", { name: "Отложено" });
+    expect(row.props.accessibilityHint).toBe("₴91,456, не входит в свои деньги");
+    expect(screen.getByText("не входит в свои деньги")).toBeTruthy();
+    expect(screen.getByText("₴91,456")).toBeTruthy();
+    // The last row of «Счета».
+    expect(inOrder(/^(Белая карта|Чёрная карта|Отложено|Разделы)$/)).toEqual(["Белая карта", "Чёрная карта", "Отложено", "Разделы"]);
+    expect(screen.queryByText("SOL")).toBeNull();
+    expect(screen.queryByText("Депозит Приват")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Добавить счёт" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Добавить в отложенное" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Ещё: .*отложено/ })).toBeNull();
+  });
+
+  it("opens the set-aside places from «Отложено», with «Добавить счёт» inside", async () => {
+    await renderWith(<Plan />, fakeApi(newer()));
+    await openAside();
+    expect(screen.getByRole("button", { name: "SOL" }).props.accessibilityHint).toBe("$1,005");
+    expect(screen.getByRole("button", { name: "Депозит Приват" }).props.accessibilityHint).toBe("₴50,000");
+    expect(screen.getByRole("button", { name: "Добавить счёт" })).toBeTruthy();
+  });
+
+  it("moves a place with nothing on it out of «Счета» into «Отложено»", async () => {
+    const empty: OwnMoneyItemDto = { kind: "manual", name: "Конверт", own: 0, currency: "UAH", amount: 0, id: 11, source: "manual", countsAsOwn: true };
+    await renderWith(<Plan />, fakeApi(newer(setAside(), [...items(), empty])));
+    await screen.findByText("Белая карта");
+    expect(screen.queryByText("Конверт")).toBeNull();
+    await openAside();
+    expect(screen.getByRole("button", { name: "Конверт" }).props.accessibilityHint).toBe("₴0");
+    await fireEvent.press(screen.getByRole("button", { name: "Конверт" }));
+    expect((await screen.findByLabelText("Остаток, ₴")).props.value).toBe("0");
+  });
+
+  it("keeps an unset Binance and an unstarted wallet in «Отложено», not in «Счета»", async () => {
+    const own = items().filter((i) => i.kind !== "binance" && i.kind !== "cash");
+    await renderWith(<Plan />, fakeApi({ ...newer(setAside(), own), manualBalances: jest.fn(async () => []), cash: jest.fn(async () => ({ started: false, start: null, balance: 0 })) }));
+    await screen.findByText("Белая карта");
+    expect(screen.queryByRole("button", { name: "Binance" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Наличные" })).toBeNull();
+    await openAside();
+    expect(screen.getByRole("button", { name: "Binance" }).props.accessibilityHint).toBe("не задан");
+    expect(screen.getByRole("button", { name: "Наличные" }).props.accessibilityHint).toBe("не начат");
   });
 
   it("shows a switched-off card in debt among own money, and its window has the switch off", async () => {
-    const api = fakeApi(newer());
-    await renderWith(<Plan />, api);
+    await renderWith(<Plan />, fakeApi(newer()));
     await fireEvent.press(await screen.findByRole("button", { name: "Чёрная карта" }));
     expect(await screen.findByText("приходит из monobank")).toBeTruthy();
     expect(screen.getByLabelText("Входит в свои деньги").props.value).toBe(false);
@@ -242,9 +351,9 @@ describe("Plan, own and hand-kept accounts (Д2б, variant А)", () => {
   });
 
   it("opens a set-aside account kept by hand in the account window", async () => {
-    const api = fakeApi(newer());
-    await renderWith(<Plan />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Депозит Приват" }));
+    await renderWith(<Plan />, fakeApi(newer()));
+    await openAside();
+    await fireEvent.press(screen.getByRole("button", { name: "Депозит Приват" }));
     expect((await screen.findByLabelText("Остаток, ₴")).props.value).toBe("50000");
     expect(screen.getByLabelText("Входит в свои деньги").props.value).toBe(false);
   });
@@ -255,10 +364,11 @@ describe("Plan, own and hand-kept accounts (Д2б, variant А)", () => {
     expect(await screen.findByText("Баланс Binance")).toBeTruthy();
   });
 
-  it("adds an account from the link: set aside unless switched on, and refreshes «Сегодня»", async () => {
+  it("adds an account from «Отложено»: set aside unless switched on, and refreshes «Сегодня»", async () => {
     const api = fakeApi(newer());
     await renderWith(<Plan />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Добавить счёт" }));
+    await openAside();
+    await fireEvent.press(screen.getByRole("button", { name: "Добавить счёт" }));
     expect(await screen.findByText("Новый счёт")).toBeTruthy();
     await fireEvent.changeText(screen.getByLabelText("Название"), "Конверт");
     await fireEvent.changeText(screen.getByLabelText("Остаток"), "3000");
@@ -268,39 +378,42 @@ describe("Plan, own and hand-kept accounts (Д2б, variant А)", () => {
     await waitFor(() => expect(api.today.mock.calls.length).toBeGreaterThan(1));
   });
 
-  it("with nothing set aside there is no «Отложено» group, and the link to add an account stays", async () => {
+  it("with nothing set aside «Отложено» stays one row, with no total, and still adds an account", async () => {
     await renderWith(<Plan />, fakeApi(newer([])));
-    expect(await screen.findByRole("button", { name: "Добавить счёт" })).toBeTruthy();
-    expect(screen.queryByText("Отложено")).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Ещё: .*отложено/ })).toBeNull();
+    const row = await screen.findByRole("button", { name: "Отложено" });
+    expect(row.props.accessibilityHint).toBe("не входит в свои деньги");
+    await openAside();
+    expect(screen.getByRole("button", { name: "Добавить счёт" })).toBeTruthy();
   });
 
   it("shows a switched-off Binance once, in «Отложено», opening its own window", async () => {
     const binance: OwnMoneyItemDto = { kind: "binance", name: "Binance", own: 579_900, currency: "USD", amount: 12_600, id: 7, source: "manual", countsAsOwn: false };
-    const today = todayWithItems(items().filter((i) => i.kind !== "binance"));
-    await renderWith(<Plan />, fakeApi({ ...newer(), today: jest.fn(async () => ({ ...today, accounts: { ...today.accounts, setAside: [binance] } })) }));
-    expect((await screen.findByRole("button", { name: "Binance" })).props.accessibilityHint).toBe("$126");
+    await renderWith(<Plan />, fakeApi(newer([binance], items().filter((i) => i.kind !== "binance"))));
+    await screen.findByText("Белая карта");
+    expect(screen.queryByRole("button", { name: "Binance" })).toBeNull();
+    await openAside();
+    expect(screen.getByRole("button", { name: "Binance" }).props.accessibilityHint).toBe("$126");
     expect(screen.getAllByRole("button", { name: "Binance" })).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: /^Ещё: Binance/ })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Binance" }));
+    expect(await screen.findByText("Баланс Binance")).toBeTruthy();
   });
 
-  it("an older server's cards open nothing, and «Отложено» is as it was", async () => {
+  it("an older server's cards open nothing, and «Отложено» lists the set-aside balances as before", async () => {
     await renderWith(<Plan />, fakeApi({ manualBalances: jest.fn(async () => [balanceFixture()]), today: jest.fn(async () => todayWithItems()) }));
     expect(await screen.findByText("Белая карта")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Белая карта" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Чёрная карта" })).toBeNull();
-    expect(await screen.findByRole("button", { name: /^Ещё: .*отложено/ })).toBeTruthy();
+    await fireEvent.press(await screen.findByRole("button", { name: "Отложено" }));
+    expect(await screen.findByRole("button", { name: "Добавить в отложенное" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Добавить счёт" })).toBeNull();
   });
 });
 
 describe("Plan, money", () => {
-  it("shows own and credit money separately, with the title, when an older server sends no places", async () => {
+  it("shows own money in the figure and the credit money as a row, when an older server sends no places", async () => {
     await renderWith(<Plan />, fakeApi());
     expect(screen.getByText("План")).toBeTruthy();
-    expect(await screen.findByText("Свои")).toBeTruthy();
-    expect(screen.getByText("Деньги")).toBeTruthy();
-    expect(screen.getByText("₴10,325")).toBeTruthy();
+    expect(await screen.findByText("₴10,325")).toBeTruthy();
     expect(screen.getByText("Кредитные")).toBeTruthy();
     expect(screen.getByText("₴30,000")).toBeTruthy();
     expect(screen.queryByText("₴40,325")).toBeNull();
@@ -353,6 +466,11 @@ describe("Plan, loans", () => {
     expect(screen.getByText("₴5,000 от 10.10, погашен 20.10, ещё ₴200 на обслуживание")).toBeTruthy();
   });
 
+  it("counts the open loans, the old ones included, on the right of «Займы»", async () => {
+    await renderWith(<Plan />, fakeApi({ loanHistory: jest.fn(async () => history()) }));
+    expect((await screen.findByRole("button", { name: "Займы" })).props.accessibilityHint).toBe("2");
+  });
+
   it("only a loan entered by hand can be deleted; only an unpaid one can be repaid", async () => {
     await open(fakeApi({ loanHistory: jest.fn(async () => history()) }));
     await screen.findByText("Взято");
@@ -396,12 +514,11 @@ describe("Plan, loans", () => {
     await waitFor(() => expect(api.loanHistory.mock.calls.length).toBeGreaterThan(before));
   });
 
-  it("offers a retry when the history does not load, and says when there are no loans", async () => {
+  it("the list offers a retry when the history does not load, and says when there are no loans", async () => {
     const loanHistory = jest.fn(async (): Promise<ReturnType<typeof history>> => {
       throw new NetworkError();
     });
-    const api = fakeApi({ loanHistory });
-    await open(api);
+    await renderWith(<LoansSheet onClose={noop} />, fakeApi({ loanHistory }));
     loanHistory.mockImplementation(async () => loanHistoryFixture());
     await fireEvent.press(await screen.findByRole("button", { name: "Повторить" }));
     expect(await screen.findByText("Займов пока нет.")).toBeTruthy();
@@ -410,7 +527,7 @@ describe("Plan, loans", () => {
 });
 
 describe("Plan, settings", () => {
-  it("opens settings from the profile button and closes them", async () => {
+  it("opens settings from the gear in the corner and closes them", async () => {
     await renderWith(<Plan />, fakeApi());
     expect(screen.queryByText("Потолок трат")).toBeNull();
     await fireEvent.press(await screen.findByRole("button", { name: "Настройки" }));
@@ -432,30 +549,6 @@ describe("Plan, the screen", () => {
     let node = screen.getByText("План").parent;
     while (node && node.props.contentContainerStyle === undefined) node = node.parent;
     expect(StyleSheet.flatten(node!.props.contentContainerStyle).paddingBottom).toBeGreaterThanOrEqual(LAYOUT.tabBar);
-  });
-
-  it("shows the data first: summaries and no input fields", async () => {
-    const api = fakeApi({
-      expectedIncomes: jest.fn(async () => [{ id: 1, source: "fop" as const, amount: 1_000_000, currency: "UAH", window_start_day: 25, window_end_day: 25 }]),
-      incomeEvents: jest.fn(async () => [{ id: 5, expected_income_id: 1, period: "2026-11", expected_on: "2026-11-25", status: "expected" }]),
-      payments: jest.fn(async () => [
-        taxFixture({ id: 1, kind: "obligation", name: "Квартира", amount: 100_000, due_on: "2026-11-26" }),
-        taxFixture({ id: 2, kind: "installment", name: "Телефон", amount: 200_000, due_on: "2026-12-02" }),
-        taxFixture({ id: 3 }),
-      ]),
-      goals: jest.fn(async () => [goalFixture()]),
-      loanHistory: jest.fn(async () => loanHistoryFixture({ stats: { borrowed: 1, repaid: 0, serviceCost: 0, stillOpen: 300_000 } })),
-      manualBalances: jest.fn(async () => [balanceFixture()]),
-    });
-    await renderWith(<Plan />, api);
-    expect(await screen.findByText("следующий 25.11, ₴10,000")).toBeTruthy();
-    expect(await screen.findByText("ближайший 26.11, ₴1,000")).toBeTruthy();
-    expect(screen.getByText("осталось ₴2,000")).toBeTruthy();
-    expect(screen.getByText("₴12,000, ближайший 20.11")).toBeTruthy();
-    expect(await screen.findByText("открыто ₴3,000")).toBeTruthy();
-    expect(await screen.findByText("$500 из $5,000")).toBeTruthy();
-    expect(await screen.findByText("$2,700")).toBeTruthy();
-    expect(screen.queryByPlaceholderText(/./)).toBeNull();
   });
 });
 
@@ -699,7 +792,7 @@ describe("Plan, installments", () => {
 describe("Plan, calendar", () => {
   it("does not offer days outside the allowed range", async () => {
     const today = kyivDate();
-    const api = fakeApi();
+    const api = fakeApi(withOpenLoan());
     await renderWith(<Plan />, api);
     await press("Займы");
     await press("Новый займ");
@@ -871,33 +964,34 @@ describe("Plan, Binance balance", () => {
   });
 });
 
-describe("Plan, set aside", () => {
+describe("Plan, set aside (an older server)", () => {
   const solana = () => balanceFixture({ id: 9, name: "Solana", amount: 75_000, counts_as_own: false });
   const withSolana = () => ({ manualBalances: jest.fn(async () => [balanceFixture(), solana()]) });
+  const openAside = async () => {
+    await fireEvent.press(await screen.findByRole("button", { name: "Отложено" }));
+    await screen.findByRole("button", { name: "Добавить в отложенное" });
+  };
 
-  it("shows money set aside in its own group under «Деньги», in dollars, and keeps Binance in «Деньги»", async () => {
+  it("lists money set aside inside «Отложено», in dollars, and keeps Binance in «Счета»", async () => {
     await renderWith(<Plan />, fakeApi(withSolana()));
-    expect(await screen.findByText("Отложено")).toBeTruthy();
-    const row = await screen.findByRole("button", { name: "Solana" });
-    expect(row.props.accessibilityHint).toBe("$750");
-    expect(screen.getByRole("button", { name: "Binance" }).props.accessibilityHint).toBe("$2,700");
-    const titles = screen.getAllByText(/^(Деньги|Отложено|Приходит)$/).map((t) => t.props.children);
-    expect(titles).toEqual(["Деньги", "Отложено", "Приходит"]);
-    expect(screen.getByRole("button", { name: "Добавить в отложенное" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Binance" }).props.accessibilityHint).toBe("$2,700"));
+    expect(screen.queryByText("Solana")).toBeNull();
+    await openAside();
+    expect(screen.getByRole("button", { name: "Solana" }).props.accessibilityHint).toBe("$750");
   });
 
   it("an amount in another currency is shown in that currency", async () => {
     const deposit = balanceFixture({ id: 10, name: "Депозит", amount: 50_000, currency: "EUR", counts_as_own: false });
     await renderWith(<Plan />, fakeApi({ manualBalances: jest.fn(async () => [solana(), deposit]) }));
+    await openAside();
     expect((await screen.findByRole("button", { name: "Депозит" })).props.accessibilityHint).toBe("€500.00");
   });
 
-  it("with nothing set aside there is no group: one quiet part folded into «Ещё» under «Деньги»", async () => {
+  it("with nothing set aside «Отложено» still adds one", async () => {
     const api = fakeApi({ manualBalances: jest.fn(async () => [balanceFixture()]) });
     await renderWith(<Plan />, api);
-    expect(await screen.findByRole("button", { name: /^Ещё: .*отложено/ })).toBeTruthy();
-    expect(screen.queryByText("Отложено")).toBeNull();
-    await openPlanPart("Отложено");
+    await openAside();
+    await fireEvent.press(screen.getByRole("button", { name: "Добавить в отложенное" }));
     expect(await screen.findByLabelText("Сколько стоит сейчас, $")).toBeTruthy();
     await fireEvent.changeText(screen.getByLabelText("Название"), "Solana");
     await fireEvent.changeText(screen.getByLabelText("Сколько стоит сейчас, $"), "750");
@@ -905,10 +999,11 @@ describe("Plan, set aside", () => {
     await waitFor(() => expect(api.createManualBalance).toHaveBeenCalledWith({ name: "Solana", amount: 75_000, currency: "USD", counts_as_own: false }));
   });
 
-  it("adds another from the group, and refreshes the balances and Today after", async () => {
+  it("adds another from «Отложено», and refreshes the balances and Today after", async () => {
     const api = fakeApi(withSolana());
     await renderWith(<Plan />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Добавить в отложенное" }));
+    await openAside();
+    await fireEvent.press(screen.getByRole("button", { name: "Добавить в отложенное" }));
     await fireEvent.changeText(await screen.findByLabelText("Название"), "Депозит");
     await fireEvent.changeText(screen.getByLabelText("Сколько стоит сейчас, $"), "1 000");
     await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
@@ -920,7 +1015,8 @@ describe("Plan, set aside", () => {
   it("opens one to change its name and price", async () => {
     const api = fakeApi(withSolana());
     await renderWith(<Plan />, api);
-    await openPlanPart("Solana");
+    await openAside();
+    await fireEvent.press(screen.getByRole("button", { name: "Solana" }));
     expect((await screen.findByLabelText("Название")).props.value).toBe("Solana");
     await fireEvent.changeText(screen.getByLabelText("Сколько стоит сейчас, $"), "820");
     await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
@@ -934,7 +1030,7 @@ describe("Plan, tax payments", () => {
     jest.fn(async () => [
       taxFixture({ id: 1, name: "Налог за 2 кв.", amount: 900_000, due_on: "2026-08-20", paid_at: "2026-08-19T09:00:00.000Z" }),
       taxFixture({ id: 2 }),
-      taxFixture({ id: 3, kind: "obligation", name: "Квартплата" }),
+      taxFixture({ id: 3, kind: "obligation", name: "Интернет" }),
     ]);
 
   it("lists tax payments with sum, due date and a paid mark", async () => {
@@ -946,7 +1042,7 @@ describe("Plan, tax payments", () => {
     expect(screen.getByText("Налог за 2 кв.")).toBeTruthy();
     expect(screen.getByText("₴9,000")).toBeTruthy();
     expect(screen.getByText("Оплачен")).toBeTruthy();
-    expect(screen.queryByText("Квартплата")).toBeNull();
+    expect(screen.queryByText("Интернет")).toBeNull();
   });
 
   it("marks a payment as paid with one tap and reloads the list", async () => {
@@ -1007,6 +1103,7 @@ describe("Plan, manual loan", () => {
     const badCase = { id: "loan:1", text: "Взят займ ₴5,000 (02.11): столько не хватало." };
     let created = false;
     const api = fakeApi({
+      ...withOpenLoan(),
       today: jest.fn(async () => todayFixture({ badCases: created ? [badCase] : [] })),
       createLoan: jest.fn(async () => {
         created = true;
@@ -1039,7 +1136,7 @@ describe("Plan, manual loan", () => {
     const createLoan = jest.fn(async () => {
       throw new NetworkError();
     });
-    await renderWith(<Plan />, fakeApi({ createLoan }));
+    await renderWith(<Plan />, fakeApi({ ...withOpenLoan(), createLoan }));
     await press("Займы");
     await press("Новый займ");
     await fireEvent.changeText(await screen.findByLabelText("Сумма займа"), "0");

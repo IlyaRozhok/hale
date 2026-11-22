@@ -1,15 +1,15 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { ManualBalanceDto, OwnMoneyItemDto } from "@hale/contracts";
 import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePullRefresh } from "../usePullRefresh";
 import { tokens } from "@hale/tokens";
-import { useCash, useExpectedIncomes, useGoals, useIncomeEvents, useLoanHistory, useManualBalances, usePayments, useToday } from "../api/queries";
+import { useCash, useExpectedIncomes, useGoals, useIncomeEvents, useLoanHistory, useManualBalances, usePayments, useRecurring, useToday } from "../api/queries";
 import { AccountSheet, NewAccountSheet } from "../components/AccountSheet";
-import { AccountLines, OwnMoney } from "../components/AccountsList";
+import { AsideSheet } from "../components/AsideSheet";
 import { BinanceSheet } from "../components/BinanceBalance";
 import { CashSheet } from "../components/CashSheet";
-import { Icon } from "../components/Icon";
+import { Icon, type IconName } from "../components/Icon";
 import { Settings } from "./Settings";
 import { GoalsSheet } from "../components/GoalsSection";
 import { LAYOUT } from "../components/layout";
@@ -17,23 +17,35 @@ import { IncomesSheet } from "../components/IncomesSheet";
 import { InstallmentsSheet } from "../components/InstallmentsSheet";
 import { LoansSheet } from "../components/LoansSheet";
 import { PaymentsSheet } from "../components/PaymentsSheet";
-import { PlanGroup, type PlanRow } from "../components/PlanGroup";
+import { DateRow, ListRow, PlanSection } from "../components/PlanList";
 import { SetAsideSheet } from "../components/SetAsideSheet";
 import { TaxSheet } from "../components/TaxPayments";
 import { formatDollars, formatMoney, formatOriginal } from "../format";
-import { placeName, placeOpens, setAsideDetail } from "../ownMoney";
-import { goalsLine, incomesLine, installmentsLine, paymentsLine, taxesShown, taxLine } from "../planSummary";
+import { placeName, placeNote, placeOpens, setAsideDetail, wholeShares } from "../ownMoney";
+import { incomeOnDay, installmentGroups, moneyIn, paymentsCount, taxesShown, unpaidTaxCount } from "../planSummary";
 
-const { color, radius, space, touchMin, type } = tokens;
+const { color, space, touchMin, type } = tokens;
 
 /** A balance kept by hand in its own currency: whole dollars like the rest of the plan, others with cents. */
 function balanceDetail(b: ManualBalanceDto): string {
   return b.currency === "USD" ? formatDollars(b.amount) : formatOriginal(b.amount, b.currency);
 }
 
+/** A short count on the right of a part; nothing when there is nothing, rather than a word. */
+const count = (n: number | undefined): string | undefined => (n ? String(n) : undefined);
+
+function placeIcon(item: OwnMoneyItemDto): IconName {
+  if (item.kind === "cash") return "cash";
+  if (item.kind === "binance") return "coin";
+  return item.source === "manual" || item.kind === "manual" ? "lock" : "card";
+}
+
 type Part = "incomes" | "payments" | "installments" | "tax" | "loans" | "goals" | "binance" | "cash" | "settings";
 
-/** Where the money stands, then one line per part of the plan; the details and forms open in windows. */
+/**
+ * «План» as an iOS list (variant А, the owner's «Оба А» of 22 November): own money at the top, what happens before the
+ * income by date, the accounts with «Отложено» as one row, and the parts of the plan that open their windows.
+ */
 export function Plan() {
   const insets = useSafeAreaInsets();
   const today = useToday();
@@ -41,47 +53,104 @@ export function Plan() {
   const incomes = useExpectedIncomes();
   const events = useIncomeEvents();
   const payments = usePayments();
+  const recurring = useRecurring();
   const history = useLoanHistory();
   const goals = useGoals();
   const balances = useManualBalances();
   const cash = useCash();
   const [open, setOpen] = useState<Part | null>(null);
   const close = () => setOpen(null);
-  // A set-aside balance being opened, or "new" for adding one.
-  const [aside, openAside] = useState<ManualBalanceDto | "new" | null>(null);
+  // The «Отложено» window: the set-aside places, the empty ones, and adding one more.
+  const [asideOpen, setAsideOpen] = useState(false);
+  // A set-aside balance of an older server being opened, or "new" for adding one.
+  const [balance, openBalance] = useState<ManualBalanceDto | "new" | null>(null);
   // A place of money whose account window is open (Д2б), with its amount as its row shows it, or "new" for «Новый счёт».
   const [account, openAccount] = useState<{ item: OwnMoneyItemDto; amount: string } | "new" | null>(null);
 
+  const data = today.data;
   const binance = balances.data?.find((b) => b.name === "Binance");
   const stillOpen = history.data?.stats.stillOpen;
-  // Money set aside (a coin, a deposit) stays out of own money and the limit: its own group below «Деньги».
-  const setAsideBalances = balances.data?.filter((b) => !b.counts_as_own) ?? [];
-  // A newer server (Д2а) lists what is set aside itself, switched-off bank accounts included: then every place opens
-  // the account window and «Добавить счёт» adds one. With an older server the screen stays as it was.
-  const setAside = today.data?.accounts.setAside;
-  // Not before «Сегодня» is known, or the old group would show and then go away.
+  // A newer server (Д2а) lists what is set aside itself; with an older one the set-aside balances kept by hand stand
+  // in «Отложено» as they did, each opening its own window.
+  const setAside = data?.accounts.setAside;
+  // Not before «Сегодня» is known, or the rows would show and then move.
   const older = !today.isPending && setAside === undefined;
-  // With nothing set aside there is no group, only one quiet part folded into «Ещё» of «Деньги» (older server).
-  const noSetAside: PlanRow[] =
-    older && balances.data && setAsideBalances.length === 0 ? [{ label: "Отложено", detail: "нет", onPress: () => openAside("new") }] : [];
-  // A newer server lists own money place by place (task Б25): cash and Binance with money in them are
-  // places in that list, not rows of their own; an unstarted wallet or an unset Binance stays a row.
-  const items = today.data?.accounts.items;
+  const setAsideBalances = balances.data?.filter((b) => !b.counts_as_own) ?? [];
+  // A newer server lists own money place by place (task Б25): cash and Binance with money in them are places in that
+  // list, not rows of their own; an unstarted wallet or an unset Binance stays a row.
+  const items = data?.accounts.items;
   const placed = (kind: "cash" | "binance") => [...(items ?? []), ...(setAside ?? [])].some((i) => i.kind === kind);
-  const asideRow = (item: OwnMoneyItemDto, i: number): PlanRow => {
-    const detail = setAsideDetail(item);
+
+  const placeRow = (item: OwnMoneyItemDto, amount: string, key: string) => {
     const opens = placeOpens(item);
     const onPress =
-      opens === "binance" ? () => setOpen("binance") : opens === "account" || opens === "manual" ? () => openAccount({ item, amount: detail }) : () => undefined;
-    return { key: `${item.source ?? item.kind}:${item.id ?? i}`, label: placeName(item), detail, onPress };
+      opens === "cash" ? () => setOpen("cash") : opens === "binance" ? () => setOpen("binance") : opens === null ? undefined : () => openAccount({ item, amount });
+    // A set-aside balance in dollars already shows them as its amount: no second line saying the same.
+    const note = placeNote(item);
+    return <ListRow key={key} icon={placeIcon(item)} label={placeName(item)} subtitle={note === amount ? null : note} value={amount} onPress={onPress} />;
   };
+  const keyOf = (item: OwnMoneyItemDto, i: number) => `${item.source ?? item.kind}:${item.id ?? i}`;
+
+  // Places with money, those in credit last, rounded together so they add up to own money to the hryvnia. A place with
+  // nothing on it moves into «Отложено».
+  const withMoney = items ? [...items.filter((i) => i.own > 0), ...items.filter((i) => i.own < 0)] : [];
+  const empty = items?.filter((i) => i.own === 0) ?? [];
+  const whole = data ? wholeShares(data.accounts.own, withMoney.map((i) => i.own)) : [];
+
+  // Not before «Сегодня» is known, or they would show and then go into the list; on an error they stay.
+  const cashRow =
+    today.isPending || placed("cash") ? null : (
+      <ListRow key="cash" icon="cash" label="Наличные" value={cash.data ? (cash.data.started ? formatMoney(cash.data.balance) : "не начат") : undefined} onPress={() => setOpen("cash")} />
+    );
+  const binanceRow =
+    today.isPending || placed("binance") ? null : (
+      <ListRow key="binance" icon="coin" label="Binance" value={balances.data ? (binance ? formatDollars(binance.amount) : "не задан") : undefined} onPress={() => setOpen("binance")} />
+    );
+
+  let accounts: ReactNode[] = [];
+  let asideRows: ReactNode[] = [];
+  if (data && items) accounts = withMoney.map((item, i) => placeRow(item, formatMoney(whole[i]! * 100), keyOf(item, i)));
+  else if (data) {
+    // An older server without places: own money is the figure above, credit money a row of its own (a limit, not a balance).
+    if (data.accounts.fop !== 0) accounts.push(<ListRow key="fop" label="в том числе ФОП" value={formatMoney(data.accounts.fop)} />);
+    accounts.push(<ListRow key="credit" icon="card" label="Кредитные" value={formatMoney(data.accounts.credit)} />);
+  }
+  if (older) {
+    accounts.push(cashRow, binanceRow);
+    asideRows = setAsideBalances.map((b) => <ListRow key={`b${b.id}`} icon="lock" label={b.name} value={balanceDetail(b)} onPress={() => openBalance(b)} />);
+  } else if (setAside) {
+    asideRows = [
+      ...setAside.map((item, i) => placeRow(item, setAsideDetail(item), `aside:${keyOf(item, i)}`)),
+      ...empty.map((item, i) => placeRow(item, formatMoney(0), `empty:${keyOf(item, i)}`)),
+      cashRow,
+      binanceRow,
+    ];
+  }
+  const asideTotal = setAside && setAside.length > 0 ? formatMoney(setAside.reduce((s, i) => s + i.own, 0)) : undefined;
+  const addAside = older
+    ? { label: "Добавить в отложенное", onPress: () => openBalance("new") }
+    : { label: "Добавить счёт", onPress: () => openAccount("new") };
+
+  // «До дохода»: the unpaid payments the runway knows, by date, then the income on its day. Not without an income date.
+  const runway = data?.runway;
+  const incomeOn = runway?.incomeOn ?? null;
+  const income = incomeOn && incomes.data && events.data ? incomeOnDay(incomes.data, events.data, incomeOn) : undefined;
+  const beforeIncome = runway && incomeOn ? [...runway.events].sort((a, b) => a.date.localeCompare(b.date)) : [];
+
   // Not before «Сегодня» is known, or a person without taxes would see «Налоги» come and go (Д4).
-  const taxRows: PlanRow[] =
-    !today.isPending && taxesShown(today.data?.taxes, payments.data)
-      ? [{ label: "Налоги", detail: payments.data ? taxLine(payments.data) : undefined, onPress: () => setOpen("tax") }]
-      : [];
-  const cashRow: PlanRow = { label: "Наличные", detail: cash.data ? (cash.data.started ? formatMoney(cash.data.balance) : "не начат") : undefined, onPress: () => setOpen("cash") };
-  const binanceRow: PlanRow = { label: "Binance", detail: balances.data ? (binance ? formatDollars(binance.amount) : "не задан") : undefined, onPress: () => setOpen("binance") };
+  const taxes = !today.isPending && taxesShown(data?.taxes, payments.data);
+  const openLoans = history.data ? history.data.open.length + history.data.old.length : undefined;
+
+  // Windows opened from a row: inside «Отложено» when they were opened from it, so they show over it.
+  const windows = (
+    <>
+      {open === "binance" && <BinanceSheet onClose={close} />}
+      {open === "cash" && <CashSheet onClose={close} />}
+      {account === "new" && <NewAccountSheet onClose={() => openAccount(null)} />}
+      {account !== null && account !== "new" && <AccountSheet item={account.item} amount={account.amount} onClose={() => openAccount(null)} />}
+      {balance !== null && <SetAsideSheet balance={balance === "new" ? undefined : balance} onClose={() => openBalance(null)} />}
+    </>
+  );
 
   return (
     <ScrollView
@@ -89,71 +158,60 @@ export function Plan() {
       contentContainerStyle={[styles.content, { paddingBottom: LAYOUT.tabBar + insets.bottom }]}
       refreshControl={<RefreshControl {...pull} />}
     >
-      <View style={styles.head}>
-        <Text style={styles.title}>План</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="Настройки" onPress={() => setOpen("settings")} style={styles.profile}>
-          <Icon name="user" color={color.fg.muted} size={20} />
+      <View style={styles.bar}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Настройки" onPress={() => setOpen("settings")} style={styles.gear}>
+          <Icon name="settings" color={color.fg.muted} size={22} />
         </Pressable>
       </View>
-      <PlanGroup
-        title="Деньги"
-        rows={[
-          // Not before «Сегодня» is known, or they would show and then go into the list; on an error they stay.
-          ...(today.isPending || placed("cash") ? [] : [cashRow]),
-          ...(today.isPending || placed("binance") ? [] : [binanceRow]),
-          ...noSetAside,
-        ]}
-      >
-        {today.data && items ? (
-          <OwnMoney
-            own={today.data.accounts.own}
-            items={items}
-            onCash={() => setOpen("cash")}
-            onBinance={() => setOpen("binance")}
-            onAccount={(item, amount) => openAccount({ item, amount })}
-          />
-        ) : today.data ? (
-          <AccountLines accounts={today.data.accounts} />
-        ) : null}
-      </PlanGroup>
-      {setAside !== undefined && setAside.length > 0 && <PlanGroup title="Отложено" rows={setAside.map(asideRow)} />}
-      {setAside !== undefined && (
-        <Pressable accessibilityRole="button" accessibilityLabel="Добавить счёт" onPress={() => openAccount("new")} style={styles.add}>
-          <Text style={styles.addText}>Добавить счёт</Text>
-        </Pressable>
+      <Text style={styles.title}>План</Text>
+      {data && (
+        <View style={styles.hero}>
+          <Text style={styles.caption}>Свои деньги</Text>
+          <Text style={styles.own}>{formatMoney(data.accounts.own)}</Text>
+        </View>
       )}
-      {older && setAsideBalances.length > 0 && (
-        <PlanGroup
-          title="Отложено"
-          rows={setAsideBalances.map((b) => ({ key: String(b.id), label: b.name, detail: balanceDetail(b), onPress: () => openAside(b) }))}
-          action={{ text: "+ Добавить", a11y: "Добавить в отложенное", onPress: () => openAside("new") }}
+      {runway && incomeOn && (
+        <PlanSection title="До дохода" footer="Что после дохода — в разделах ниже.">
+          {beforeIncome.map((e) => (
+            <DateRow key={`e${e.id}:${e.date}`} date={e.date} label={e.name} value={formatMoney(-e.amount)} />
+          ))}
+          <DateRow key="income" date={incomeOn} label={income?.name ?? "Доход"} value={income ? `+${moneyIn(income.amount, income.currency)}` : undefined} income />
+        </PlanSection>
+      )}
+      {!today.isPending && (
+        <PlanSection title="Счета">
+          {accounts}
+          <ListRow key="aside" icon="lock" label="Отложено" subtitle="не входит в свои деньги" value={asideTotal} onPress={() => setAsideOpen(true)} />
+        </PlanSection>
+      )}
+      <PlanSection title="Разделы">
+        <ListRow key="incomes" icon="arrowDown" label="Доходы" value={count(incomes.data?.length)} quiet onPress={() => setOpen("incomes")} />
+        <ListRow
+          key="payments"
+          icon="calendar"
+          label="Платежи"
+          value={payments.data && recurring.data ? count(paymentsCount(recurring.data, payments.data)) : undefined}
+          quiet
+          onPress={() => setOpen("payments")}
         />
-      )}
-      <PlanGroup
-        title="Приходит"
-        rows={[{ label: "Доходы", detail: incomes.data && events.data ? incomesLine(incomes.data, events.data) : undefined, onPress: () => setOpen("incomes") }]}
-      />
-      <PlanGroup
-        title="Уходит"
-        rows={[
-          { label: "Платежи", detail: payments.data ? paymentsLine(payments.data) : undefined, onPress: () => setOpen("payments") },
-          { label: "Рассрочки", detail: payments.data ? installmentsLine(payments.data, today.data?.usdRate) : undefined, onPress: () => setOpen("installments") },
-          ...taxRows,
-          { label: "Займы", detail: stillOpen === undefined ? undefined : stillOpen > 0 ? `открыто ${formatMoney(stillOpen)}` : "открытых нет", onPress: () => setOpen("loans") },
-        ]}
-      />
-      <PlanGroup title="Копится" rows={[{ label: "Цели", detail: goals.data ? goalsLine(goals.data) : undefined, onPress: () => setOpen("goals") }]} />
+        <ListRow key="installments" icon="repeat" label="Рассрочки" value={payments.data ? count(installmentGroups(payments.data).length) : undefined} quiet onPress={() => setOpen("installments")} />
+        {taxes && <ListRow key="tax" icon="receipt" label="Налоги" value={payments.data ? count(unpaidTaxCount(payments.data)) : undefined} quiet onPress={() => setOpen("tax")} />}
+        {stillOpen !== undefined && stillOpen > 0 && <ListRow key="loans" icon="transfer" label="Займы" value={count(openLoans)} quiet onPress={() => setOpen("loans")} />}
+        <ListRow key="goals" icon="flag" label="Цели" value={count(goals.data?.length)} quiet onPress={() => setOpen("goals")} />
+      </PlanSection>
       {open === "incomes" && <IncomesSheet onClose={close} />}
       {open === "payments" && <PaymentsSheet onClose={close} />}
       {open === "installments" && <InstallmentsSheet onClose={close} />}
       {open === "tax" && <TaxSheet onClose={close} />}
       {open === "loans" && <LoansSheet onClose={close} />}
       {open === "goals" && <GoalsSheet onClose={close} />}
-      {open === "binance" && <BinanceSheet onClose={close} />}
-      {open === "cash" && <CashSheet onClose={close} />}
-      {account === "new" && <NewAccountSheet onClose={() => openAccount(null)} />}
-      {account !== null && account !== "new" && <AccountSheet item={account.item} amount={account.amount} onClose={() => openAccount(null)} />}
-      {aside !== null && <SetAsideSheet balance={aside === "new" ? undefined : aside} onClose={() => openAside(null)} />}
+      {asideOpen ? (
+        <AsideSheet rows={asideRows} add={addAside} onClose={() => setAsideOpen(false)}>
+          {windows}
+        </AsideSheet>
+      ) : (
+        windows
+      )}
       {open === "settings" && (
         <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={close}>
           <Settings onClose={close} />
@@ -165,12 +223,13 @@ export function Plan() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  content: { paddingHorizontal: space.xl, paddingTop: space.lg, gap: space.lg },
-  // Lines up with the text inside the panels below it.
-  title: { ...type.title, color: color.fg.default, paddingHorizontal: space.lg },
-  head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  // A quiet text link under «Отложено», as in the mockup, with no card of its own; it lines up with the text in the panels.
-  add: { minHeight: touchMin, justifyContent: "center", alignSelf: "flex-start", paddingHorizontal: space.lg, marginTop: -space.sm },
-  addText: { ...type.label, color: color.fg.muted },
-  profile: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: color.glass.row },
+  content: { paddingHorizontal: space.xl, paddingTop: space.sm, gap: space.lg },
+  // The gear sits alone in the top right corner, over the large title, as in iOS.
+  bar: { flexDirection: "row", justifyContent: "flex-end", marginBottom: -space.lg },
+  gear: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
+  // Large titles and the hero line up with the text inside the cards below them.
+  title: { ...type.display, color: color.fg.default, paddingHorizontal: space.xs },
+  hero: { paddingHorizontal: space.xs, marginTop: -space.sm },
+  caption: { ...type.body, color: color.fg.muted },
+  own: { ...type.amount, color: color.fg.default, fontVariant: ["tabular-nums"] },
 });
