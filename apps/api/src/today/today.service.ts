@@ -11,6 +11,7 @@ import { cashCountShortfallSql, countsAsOwnSql, ownPart, SET_ASIDE_BY_DEFAULT_KI
 import { runway } from "../domain/runway";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
 import { quarterLabel, quarterOf } from "../domain/quarter";
+import { pace } from "../domain/pace";
 import { runOutDate } from "../domain/run-out";
 import { taxesOn, taxReserve } from "../domain/tax";
 import { usdcMatchRows } from "../domain/usdc-match";
@@ -950,6 +951,8 @@ export class TodayService {
 
     const badCases: TodayDto["badCases"] = [];
     const runOutOn = runOutDate({ free: state.free, avgDailySpend: f.avgDailySpend, today: f.date });
+    // Task А24: the pace line, from the same free money and pace as `runOutOn`; the limit is only read.
+    const paceNow = pace({ today: f.date, free: state.free, avgDailySpend: f.avgDailySpend, dailyLimit: state.dailyLimit, spentToday: f.spentToday, nextIncomeOn: f.input.nextIncomeOn });
     for (const l of f.loans) {
       const fact = `Займ ${fmt(l.amount)} от ${fmtDay(l.received_on)}${l.remaining < l.amount ? `, осталось ${fmt(l.remaining)}` : ""}`;
       const repayLoan = { id: l.id, remaining: l.remaining, receivedOn: l.received_on };
@@ -996,6 +999,7 @@ export class TodayService {
       badCases,
       loansDue: f.loansDue,
       runOutOn,
+      ...(paceNow ? { pace: paceNow } : {}),
       syncedAt: f.syncedAt ? f.syncedAt.toISOString() : null,
       syncStale: !f.syncedAt || f.now.getTime() - f.syncedAt.getTime() > STALE_SYNC_MS,
       limitVisual: f.limitVisual,

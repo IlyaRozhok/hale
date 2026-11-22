@@ -503,6 +503,11 @@ export interface TodayDto {
   goals: { id: number; name: string; saved: number; target: number }[];
   /** Days within the limit in a row, back from yesterday. */
   streak: number;
+  /**
+   * Task А24: present only when at the current pace, above the limit, the free money runs out before the next known
+   * income; absent otherwise (also when the usual day is within the limit), and from an older server.
+   */
+  pace?: PaceDto;
   /** The money day by day until the next income. Absent from a server older than the app. */
   runway?: RunwayDto;
   /**
@@ -510,6 +515,26 @@ export interface TodayDto {
    * False hides «Налоги» on «План». Absent from an older server: taxes are shown, as before.
    */
   taxes?: boolean;
+}
+
+/**
+ * The pace of spending (task А24), in kopecks. The limit does not change with it; «around the limit — until the
+ * income» is the limit itself and is true whenever `hint` is present.
+ */
+export interface PaceDto {
+  /** The usual day: the average spent a day over the last 7 days, today left out. */
+  avgDaily: number;
+  /** The day the free money runs out at that pace: the same as `runOutOn`, always before `incomeOn`. */
+  runOutOn: string;
+  /** The next known income's day. */
+  incomeOn: string;
+  /**
+   * A calm middle step: spending about `daily` a day (between the limit and `avgDaily`, a whole ₴100), the same free
+   * money lasts until `lastsUntil`, later than `runOutOn` and before `incomeOn`. Absent when there is no such step, or
+   * when from now on the limit itself would not last until the income (what is left of today's limit plus a whole
+   * limit for each later day, against the free money now).
+   */
+  hint?: { daily: number; lastsUntil: string };
 }
 
 /** Own money without the tax reserve and debts, at the start of each day, if every day spends its limit. */
