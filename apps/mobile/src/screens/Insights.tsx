@@ -5,22 +5,23 @@ import { tokens } from "@hale/tokens";
 import type { InsightsMonthDto } from "@hale/contracts";
 import { useCategoryList, useInsights } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
-import { formatMoney, inMonth, kyivDate, monthTitle, pluralIndex } from "../format";
-import { categoryName, wantedText, type CategoryList } from "../labels";
+import { formatMoney, inMonth, kyivDate, monthTitle } from "../format";
+import { categoryName, type CategoryList } from "../labels";
+import { categoryIconOf } from "../categoryIcon";
 import { CategoriesSheet } from "../components/CategoriesSheet";
 import { ErrorText } from "../components/ErrorText";
 import { Glass } from "../components/Glass";
 import { LAYOUT } from "../components/layout";
+import { InsetList, ListRow } from "../components/ListRow";
 import { PlacesCard } from "../components/PlacesCard";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { SubscriptionsCard } from "../components/SubscriptionsCard";
+import { Segmented } from "../components/Segmented";
+import { isActive, SubscriptionsList, subscriptionsSummary } from "../components/SubscriptionsSheet";
 
 const { color, radius, space, touchMin, type } = tokens;
 
 type Category = InsightsMonthDto["categories"][number];
-
-/** Rows shown before the rest folds into one «Ещё» row. */
-const TOP = 5;
+type Tab = "categories" | "places" | "subscriptions";
 
 /** "2026-11" and a number of months later. */
 function shiftMonth(month: string, by: number): string {
@@ -48,8 +49,6 @@ function comparison(d: InsightsMonthDto): string {
   return `потрачено · в ${inMonth(monthNumber(before))}${whole ? "" : " за те же дни"} ${formatMoney(d.previousSpent)}`;
 }
 
-const categoriesText = (n: number): string => `${n} ${["категория", "категории", "категорий"][pluralIndex(n)]}`;
-
 type Props = {
   /** Test seam for the current moment. */
   now?: () => Date;
@@ -60,8 +59,9 @@ type Props = {
 };
 
 /**
- * «Итоги» (task В2): what the month's spending went on, category by category, each with a bright bar for this
- * month and a pale one for the same days of the month before. Earlier months are a step back with the arrows.
+ * «Итоги» (task В2), in the iOS manner of the mockup's variant А: a large title with «Править» in the corner, the
+ * month under it with its arrows, the month's sum, then a switch «Категории · Места · Подписки» over one list.
+ * Earlier months are a step back with the arrows.
  */
 export function Insights({ now = () => new Date(), onOpenCategory, onOpenWanted }: Props) {
   const insets = useSafeAreaInsets();
@@ -69,27 +69,15 @@ export function Insights({ now = () => new Date(), onOpenCategory, onOpenWanted 
   const thisMonth = today.slice(0, 7);
   // Months back from the current one; the current one is asked for without a month, as the server counts it.
   const [back, setBack] = useState(0);
-  const [unfolded, setUnfolded] = useState(false);
+  const [tab, setTab] = useState<Tab>("categories");
+  const [editing, setEditing] = useState(false);
   const asked = back === 0 ? undefined : shiftMonth(thisMonth, -back);
   const query = useInsights(asked);
+  const list = useCategoryList();
   const pull = usePullRefresh(query.refetch);
   const data = query.data;
-  const go = (by: number) => {
-    setUnfolded(false);
-    setBack(Math.max(0, back - by));
-  };
-
-  const head = (
-    <View style={styles.head}>
-      <Text style={styles.title}>Итоги</Text>
-      {data !== null && (
-        <View style={styles.arrows}>
-          <Arrow label="Предыдущий месяц" text="‹" onPress={() => go(-1)} />
-          <Arrow label="Следующий месяц" text="›" disabled={back === 0} onPress={() => go(1)} />
-        </View>
-      )}
-    </View>
-  );
+  const thisYear = today.slice(0, 4);
+  const go = (by: number) => setBack(Math.max(0, back - by));
 
   return (
     <ScrollView
@@ -97,23 +85,36 @@ export function Insights({ now = () => new Date(), onOpenCategory, onOpenWanted 
       contentContainerStyle={[styles.content, { paddingBottom: LAYOUT.tabBar + insets.bottom }]}
       refreshControl={<RefreshControl {...pull} />}
     >
-      {head}
+      {/* Task В5: the list of categories is changed from the corner, as in any iOS list; an older server keeps the built-in one. */}
+      <View style={styles.top}>
+        {list && data !== null && (
+          <Pressable accessibilityRole="button" accessibilityLabel="Править" onPress={() => setEditing(true)} style={styles.edit}>
+            <Text style={styles.editText}>Править</Text>
+          </Pressable>
+        )}
+      </View>
+      <Text style={styles.title}>Итоги</Text>
+      {data !== null && (
+        <View style={styles.monthLine}>
+          <Arrow label="Предыдущий месяц" text="‹" onPress={() => go(-1)} />
+          <Text style={styles.subtitle}>{data ? subtitle(data.month, data.through, thisYear) : subtitle(asked ?? thisMonth, asked ? null : today, thisYear)}</Text>
+          <Arrow label="Следующий месяц" text="›" disabled={back === 0} onPress={() => go(1)} />
+        </View>
+      )}
       {data === null ? (
         // An older server has no «Итоги» yet.
         <Text style={styles.quiet}>Итоги появятся после обновления сервера.</Text>
       ) : data ? (
-        <Month data={data} past={back > 0} thisYear={today.slice(0, 4)} unfolded={unfolded} onUnfold={() => setUnfolded(true)} onOpenCategory={onOpenCategory} onOpenWanted={onOpenWanted} />
+        <Month data={data} past={back > 0} list={list} tab={tab} onTab={setTab} onOpenCategory={onOpenCategory} onOpenWanted={onOpenWanted} />
       ) : query.isError ? (
         <Glass style={styles.stack}>
           <ErrorText>Не получилось загрузить итоги. Проверьте связь и попробуйте ещё раз.</ErrorText>
           <PrimaryButton label="Повторить" onPress={() => void query.refetch()} />
         </Glass>
       ) : (
-        <>
-          <Text style={styles.subtitle}>{subtitle(asked ?? thisMonth, asked ? null : today, today.slice(0, 4))}</Text>
-          <ActivityIndicator color={color.fg.muted} />
-        </>
+        <ActivityIndicator color={color.fg.muted} />
       )}
+      {editing && <CategoriesSheet onClose={() => setEditing(false)} />}
     </ScrollView>
   );
 }
@@ -121,9 +122,9 @@ export function Insights({ now = () => new Date(), onOpenCategory, onOpenWanted 
 type MonthProps = {
   data: InsightsMonthDto;
   past: boolean;
-  thisYear: string;
-  unfolded: boolean;
-  onUnfold: () => void;
+  list: CategoryList;
+  tab: Tab;
+  onTab: (tab: Tab) => void;
   onOpenCategory?: (category: string, from: string, to: string) => void;
   onOpenWanted?: (from: string, to: string) => void;
 };
@@ -135,102 +136,104 @@ type MonthProps = {
 const wantedShown = (d: InsightsMonthDto): number | null =>
   d.wanted !== undefined && d.wanted > 0 && d.wanted <= d.spent ? d.wanted : null;
 
-function Month({ data, past, thisYear, unfolded, onUnfold, onOpenCategory, onOpenWanted }: MonthProps) {
-  const list = useCategoryList();
-  const [editing, setEditing] = useState(false);
+function Month({ data, past, list, tab, onTab, onOpenCategory, onOpenWanted }: MonthProps) {
   // A category spent on only in the month before has nothing to show for this one.
   const rows = data.categories.filter((c) => c.count > 0 || c.spent !== 0);
-  // One leftover row is shown as it is: «Ещё 1 категория» would take the same room.
-  const folded = !unfolded && rows.length > TOP + 1;
-  const shown = folded ? rows.slice(0, TOP) : rows;
-  const rest = folded ? rows.slice(TOP) : [];
-  // Bars are measured against the largest figure on the screen, of either month; nothing below zero.
-  const largest = Math.max(0, ...rows.flatMap((c) => [c.spent, c.previousSpent]));
-  const open = (c: Category) => onOpenCategory?.(c.category, `${data.month}-01`, data.through);
+  // One bar per row: its share of this month's largest category; nothing below zero.
+  const largest = Math.max(0, ...rows.map((c) => c.spent));
+  const from = `${data.month}-01`;
+  const open = (c: Category) => onOpenCategory?.(c.category, from, data.through);
   const wanted = wantedShown(data);
+  // Task В2а: payments the limit leaves out (rent, taxes, debts). An older server does not send it.
+  const other = (data.otherPayments ?? 0) > 0 ? data.otherPayments! : null;
+  // Tasks В3 and В4: an older server sends neither; a segment with nothing in it is not offered.
+  const places = data.places && data.places.length > 0 ? data.places : null;
+  const subscriptions = data.subscriptions && data.subscriptions.items.some(isActive) ? data.subscriptions : null;
+  const options: { key: Tab; label: string }[] = [
+    { key: "categories", label: "Категории" },
+    ...(places ? [{ key: "places" as const, label: "Места" }] : []),
+    ...(subscriptions ? [{ key: "subscriptions" as const, label: "Подписки" }] : []),
+  ];
+  // A month without the chosen list shows the categories.
+  const shown = options.some((o) => o.key === tab) ? tab : "categories";
 
   return (
     <>
-      <Text style={styles.subtitle}>{subtitle(data.month, data.through, thisYear)}</Text>
-      <View>
+      <View style={styles.hero}>
         <Text style={styles.amount}>{formatMoney(data.spent)}</Text>
         <Text style={styles.note}>{comparison(data)}</Text>
       </View>
-      {wanted !== null && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={wantedText(wanted)}
-          onPress={() => onOpenWanted?.(`${data.month}-01`, data.through)}
-          style={styles.wanted}
-        >
-          <Text style={styles.wantedText}>{wantedText(wanted)}</Text>
-          <Text style={styles.moreSum}>›</Text>
-        </Pressable>
-      )}
-      {rows.length === 0 ? (
-        <Text style={styles.quiet}>{past ? "Трат не было." : "Трат пока нет."}</Text>
-      ) : (
-        <View style={styles.section}>
-          <Text style={styles.eyebrow}>Категории</Text>
-          <Glass style={styles.card}>
-            {shown.map((c, i) => (
-              <Row key={c.category} c={c} list={list} largest={largest} first={i === 0} onPress={() => open(c)} />
-            ))}
-            {folded && <More rest={rest} onPress={onUnfold} />}
-          </Glass>
-          {/* Task В5, variant А: a quiet link to the list itself; an older server keeps the built-in one, with nothing to change. */}
-          {list && (
-            <Pressable accessibilityRole="button" accessibilityLabel="Изменить категории" onPress={() => setEditing(true)} style={styles.link}>
-              <Text style={styles.linkText}>Изменить категории</Text>
-            </Pressable>
-          )}
+      {options.length > 1 && <Segmented options={options} value={shown} onChange={onTab} />}
+      {shown === "places" && <PlacesCard places={places ?? undefined} />}
+      {shown === "subscriptions" && subscriptions && (
+        <View style={styles.stack}>
+          <Text style={styles.summary}>{subscriptionsSummary(subscriptions)}</Text>
+          <SubscriptionsList subscriptions={subscriptions} />
         </View>
       )}
-      {editing && <CategoriesSheet onClose={() => setEditing(false)} />}
-      {/* Task В2а: payments the limit leaves out (rent, taxes, debts), one quiet line with no breakdown. An older server does not send it. */}
-      {(data.otherPayments ?? 0) > 0 && <Text style={styles.note}>{`Ещё платежи: ${formatMoney(data.otherPayments!)}`}</Text>}
-      {/* Task В3: the month's largest places, under the categories; an older server does not send them. */}
-      <PlacesCard places={data.places} />
-      {/* Task В4, variant Б: one row with the total a month, opening the list; an older server does not send it. */}
-      <SubscriptionsCard subscriptions={data.subscriptions} />
+      {shown === "categories" && (
+        <>
+          {rows.length === 0 ? (
+            <Text style={styles.quiet}>{past ? "Трат не было." : "Трат пока нет."}</Text>
+          ) : (
+            <InsetList>
+              {rows.map((c, i) => (
+                <CategoryRow key={c.category} c={c} list={list} largest={largest} first={i === 0} onPress={() => open(c)} />
+              ))}
+            </InsetList>
+          )}
+          {(wanted !== null || other !== null) && (
+            <InsetList>
+              {wanted !== null && (
+                <ListRow
+                  testID="wanted-row"
+                  icon="card"
+                  title="Нужное и желаемое"
+                  amount={`${formatMoney(data.spent - wanted)} · ${formatMoney(wanted)}`}
+                  accessibilityLabel={`Нужное и желаемое: нужное ${formatMoney(data.spent - wanted)}, желаемое ${formatMoney(wanted)}`}
+                  first
+                  onPress={() => onOpenWanted?.(from, data.through)}
+                />
+              )}
+              {/* Not a button: «Операции» has no filter for these payments yet. */}
+              {other !== null && (
+                <ListRow
+                  testID="other-payments-row"
+                  icon="calendar"
+                  title="Платежи вне лимита"
+                  amount={formatMoney(other)}
+                  accessibilityLabel={`Платежи вне лимита: ${formatMoney(other)}`}
+                  first={wanted === null}
+                />
+              )}
+            </InsetList>
+          )}
+        </>
+      )}
     </>
   );
 }
 
-function Row({ c, list, largest, first, onPress }: { c: Category; list: CategoryList; largest: number; first: boolean; onPress: () => void }) {
+function CategoryRow({ c, list, largest, first, onPress }: { c: Category; list: CategoryList; largest: number; first: boolean; onPress: () => void }) {
   const label = categoryName(c.category, list);
   const amount = formatMoney(c.spent);
-  const width = (v: number) => `${(v / largest) * 100}%` as const;
   return (
-    <Pressable testID="insights-row" accessibilityRole="button" accessibilityLabel={`${label}: ${amount}`} onPress={onPress} style={[styles.row, !first && styles.divided]}>
-      <View style={styles.line}>
-        <Text style={styles.name} numberOfLines={1}>{label}</Text>
-        <Text style={styles.sum}>{amount}</Text>
-      </View>
-      {/* The bars' room is kept when there is no bar, so the rows stay one height. */}
-      <View style={styles.bars}>
+    <ListRow
+      testID="insights-row"
+      iconTestID={`insights-icon-${c.category}`}
+      icon={categoryIconOf(c.category, list)}
+      title={label}
+      // The bar's room is kept when there is no bar, so the rows stay one height.
+      below={
         <View style={styles.barSlot}>
-          {c.spent > 0 && <View testID={`bar-now-${c.category}`} style={[styles.barNow, { width: width(c.spent) }]} />}
+          {c.spent > 0 && largest > 0 && <View testID={`bar-now-${c.category}`} style={[styles.bar, { width: `${(c.spent / largest) * 100}%` }]} />}
         </View>
-        <View style={styles.barSlotBefore}>
-          {c.previousSpent > 0 && <View testID={`bar-before-${c.category}`} style={[styles.barBefore, { width: width(c.previousSpent) }]} />}
-        </View>
-      </View>
-    </Pressable>
-  );
-}
-
-function More({ rest, onPress }: { rest: Category[]; onPress: () => void }) {
-  const text = `Ещё ${categoriesText(rest.length)}`;
-  const sum = formatMoney(rest.reduce((s, c) => s + c.spent, 0));
-  return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`${text}: ${sum}`} onPress={onPress} style={[styles.more, styles.divided]}>
-      <Text style={styles.name}>{text}</Text>
-      <View style={styles.moreRight}>
-        <Text style={styles.moreSum}>{sum}</Text>
-        <Text style={styles.moreSum}>›</Text>
-      </View>
-    </Pressable>
+      }
+      amount={amount}
+      accessibilityLabel={`${label}: ${amount}`}
+      first={first}
+      onPress={onPress}
+    />
   );
 }
 
@@ -243,42 +246,26 @@ function Arrow({ label, text, disabled = false, onPress }: { label: string; text
 }
 
 const BAR = 4;
-const BAR_BEFORE = 3;
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  content: { paddingHorizontal: space.xl, paddingTop: space.lg, gap: space.md },
-  // Lines up with the text inside the card below it.
-  head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingLeft: space.lg },
-  title: { ...type.title, color: color.fg.default },
-  arrows: { flexDirection: "row" },
-  arrow: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
-  arrowText: { ...type.title, color: color.fg.muted },
+  content: { paddingHorizontal: space.lg, paddingTop: space.xs, gap: space.md },
+  top: { minHeight: touchMin, flexDirection: "row", justifyContent: "flex-end" },
+  edit: { minHeight: touchMin, minWidth: touchMin, justifyContent: "center", alignItems: "flex-end", paddingHorizontal: space.xs },
+  editText: { ...type.body, color: color.fg.default },
+  title: { ...type.display, color: color.fg.default, paddingHorizontal: space.xs },
+  // The arrows hug the month's name, as in «Экранное время».
+  monthLine: { flexDirection: "row", alignItems: "center", marginTop: -space.md },
+  arrow: { minWidth: touchMin - space.md, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
+  arrowText: { ...type.body, color: color.fg.muted },
   off: { opacity: 0.3 },
-  subtitle: { ...type.caption, color: color.fg.muted, paddingHorizontal: space.lg, marginTop: -space.md },
-  amount: { ...type.display, color: color.fg.default, fontVariant: ["tabular-nums"], paddingHorizontal: space.lg },
-  note: { ...type.caption, color: color.fg.muted, fontVariant: ["tabular-nums"], paddingHorizontal: space.lg },
-  quiet: { ...type.body, color: color.fg.muted, paddingHorizontal: space.lg },
-  section: { gap: space.sm, marginTop: space.sm },
-  eyebrow: { ...type.label, color: color.fg.subtle, paddingHorizontal: space.lg },
-  card: { paddingVertical: 0 },
-  row: { minHeight: touchMin, paddingVertical: space.md, gap: space.sm },
-  divided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: color.card.edge },
-  line: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: space.md },
-  name: { ...type.body, color: color.fg.default, flexShrink: 1 },
-  sum: { ...type.body, color: color.fg.default, fontVariant: ["tabular-nums"] },
-  bars: { gap: BAR_BEFORE },
-  barSlot: { height: BAR },
-  barSlotBefore: { height: BAR_BEFORE },
-  barNow: { height: BAR, borderRadius: radius.full, backgroundColor: color.accent.signal },
-  barBefore: { height: BAR_BEFORE, borderRadius: radius.full, backgroundColor: color.data.track },
-  more: { minHeight: touchMin, paddingVertical: space.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md },
-  moreRight: { flexDirection: "row", gap: space.xs },
-  moreSum: { ...type.body, color: color.fg.muted, fontVariant: ["tabular-nums"] },
+  subtitle: { ...type.body, color: color.fg.muted },
+  hero: { paddingHorizontal: space.xs },
+  amount: { ...type.amount, color: color.fg.default, fontVariant: ["tabular-nums"] },
+  note: { ...type.label, fontWeight: "400", color: color.fg.muted, fontVariant: ["tabular-nums"] },
+  summary: { ...type.label, color: color.fg.muted, fontVariant: ["tabular-nums"], paddingHorizontal: space.xs },
+  quiet: { ...type.body, color: color.fg.muted, paddingHorizontal: space.xs },
   stack: { gap: space.md },
-  // One quiet row, text on the background: no card, no colour.
-  wanted: { minHeight: touchMin, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md, paddingHorizontal: space.lg, marginTop: -space.sm },
-  wantedText: { ...type.body, color: color.fg.default, fontVariant: ["tabular-nums"], flexShrink: 1 },
-  link: { minHeight: touchMin, justifyContent: "center", paddingHorizontal: space.lg },
-  linkText: { ...type.label, color: color.fg.muted },
+  barSlot: { height: BAR },
+  bar: { height: BAR, borderRadius: radius.full, backgroundColor: color.accent.signal },
 });

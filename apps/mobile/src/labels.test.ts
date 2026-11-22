@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { recipientLabelName, txType } from "@hale/contracts";
 import {
   accountChoices, accountLabel, alwaysCountText, balanceFieldLabel, NEW_ACCOUNT_CURRENCIES, answerChoices, answerText, categoryChoices, categoryLabel, categoryName, deleteCategoryText, FREQUENT_ANSWERS, LABEL_CHOICES, recipientLine, SPEND_CATEGORIES, TYPE_CHOICES, typeChips,
-  typeLabel, usualWantText, wantedText, wantLabel,
+  typeLabel, usualWantText, wantLabel,
 } from "./labels";
 
 describe("labels", () => {
@@ -177,9 +177,5 @@ describe("«нужное» и «желаемое» (В6)", () => {
   it("says a category's usual side as a whole phrase", () => {
     expect(usualWantText("Покупки", true)).toBe("Для «Покупки» обычно — желаемое");
     expect(usualWantText("Продукты", false)).toBe("Для «Продукты» обычно — нужное");
-  });
-
-  it("names the part of the month that went on «желаемое»", () => {
-    expect(wantedText(1_126_000)).toBe("Из них на желаемое ₴11,260");
   });
 });
