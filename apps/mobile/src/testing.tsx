@@ -1,7 +1,8 @@
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
+import { Animated } from "react-native";
 import type { CalendarDto, GoalDto, InsightsMonthDto, LoanHistoryDto, LoanRowDto, ManualBalanceDto, OwnMoneyItemDto, ScheduledPaymentDto, SettingsDto, TodayDto, TransactionDto } from "@hale/contracts";
 import { ApiProvider } from "./api/context";
 import type { Api } from "./api/client";
@@ -260,4 +261,29 @@ export async function renderWith(ui: ReactElement, api: Api, client: QueryClient
 /** Opens a part of Plan by its row, once the row is there: every part is a row of its own (variant А, no «Ещё»). */
 export async function openPlanPart(name: string | RegExp): Promise<void> {
   await fireEvent.press(await screen.findByRole("button", { name }));
+}
+
+/**
+ * Holds every sheet's slide-in (an animation to 1) until the test finishes it, so what happens "once the sheet has
+ * slid in" is checked at a moment the test chooses, not raced against a 16 ms animation. Closing runs as usual.
+ */
+export function holdSheetOpenings(): { finish: () => Promise<void>; restore: () => void } {
+  const real = Animated.timing;
+  const held: ((result: { finished: boolean }) => void)[] = [];
+  let finished = 0;
+  const spy = jest.spyOn(Animated, "timing").mockImplementation((value, config) => {
+    const animation = real(value, config);
+    if (config.toValue !== 1) return animation;
+    return { ...animation, start: (done?: (result: { finished: boolean }) => void) => void held.push(done ?? (() => undefined)) };
+  });
+  return {
+    /** Waits for a slide-in not finished yet, then finishes every one held so far. */
+    finish: async () => {
+      await waitFor(() => expect(held.length).toBeGreaterThan(finished));
+      await act(async () => {
+        while (finished < held.length) held[finished++]!({ finished: true });
+      });
+    },
+    restore: () => spy.mockRestore(),
+  };
 }
