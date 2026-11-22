@@ -63,12 +63,13 @@ describe("adding a cash operation from the menu", () => {
     await renderWith(menu, api);
     await press("Добавить операцию");
     await press("Трата");
-    await fireEvent.changeText(await screen.findByLabelText("Сколько наличных сейчас?"), "2500");
+    await fireEvent.changeText(await screen.findByLabelText("Наличные после этой траты"), "2500");
     await fireEvent.changeText(screen.getByLabelText("Сумма"), "300");
     await press("Кафе и рестораны");
     await press("Сохранить");
     await waitFor(() => expect(api.addCashOperation).toHaveBeenCalledWith({ kind: "spend", amount: 30_000, category: "cafe", date: kyivDate() }));
-    expect(api.startCash).toHaveBeenCalledWith({ amount: 250_000 });
+    // ₴2,500 is what is left after the purchase: the wallet starts at ₴2,800.
+    expect(api.startCash).toHaveBeenCalledWith({ amount: 280_000 });
   });
 });
 

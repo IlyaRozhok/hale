@@ -49,22 +49,61 @@ describe("AddSheet: one window for everything entered by hand (Д5)", () => {
       await waitFor(() => expect(onClose).toHaveBeenCalled());
     });
 
-    it("the first time, asks once how much cash there is, then starts the wallet and saves the purchase", async () => {
+    it("the first time, asks once how much cash there is after this purchase: the wallet starts with it plus the purchase", async () => {
       const api = fakeApi(notStarted());
       await renderWith(<AddSheet onClose={noop} />, api);
       await press("Трата");
       expect(await screen.findByText("Сколько наличных сейчас?")).toBeTruthy();
-      expect(screen.getByText("Спросим один раз.")).toBeTruthy();
+      expect(screen.getByText("Уже без этой траты. Спросим один раз.")).toBeTruthy();
+      expect(screen.getByText("С сегодняшнего дня снятие в банкомате не тратит лимит: его тратят покупки за наличные.")).toBeTruthy();
       // The wallet starts today, so the purchase is today's.
       expect(screen.queryByRole("button", { name: /^Дата:/ })).toBeNull();
-      await fireEvent.changeText(screen.getByLabelText("Сколько наличных сейчас?"), "3500");
+      await fireEvent.changeText(screen.getByLabelText("Наличные после этой траты"), "3260");
       await fireEvent.changeText(screen.getByLabelText("Сумма"), "240");
       await press("Кафе и рестораны");
       await press("Сохранить");
       await waitFor(() => expect(api.addCashOperation).toHaveBeenCalledWith({ kind: "spend", amount: 24_000, category: "cafe", date: kyivDate() }));
+      // 3,260 after the purchase: started at 3,500, minus the 240 spent, the wallet ends at the answer.
       expect(api.startCash).toHaveBeenCalledWith({ amount: 350_000 });
       expect(api.startCash.mock.invocationCallOrder[0]).toBeLessThan(api.addCashOperation.mock.invocationCallOrder[0]!);
     });
+
+    it("a start refused because the wallet is already started reads the wallet again, and a second try only saves", async () => {
+      const api = fakeApi(notStarted());
+      api.startCash.mockImplementationOnce(async () => {
+        api.cash.mockResolvedValue({ started: true, start: kyivDate(), balance: 100_000 });
+        throw new Error("409");
+      });
+      await renderWith(<AddSheet onClose={noop} />, api);
+      await press("Трата");
+      await fireEvent.changeText(await screen.findByLabelText("Наличные после этой траты"), "3260");
+      await fireEvent.changeText(screen.getByLabelText("Сумма"), "240");
+      await press("Кафе и рестораны");
+      await press("Сохранить");
+      expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
+      await waitFor(() => expect(screen.queryByText("Сколько наличных сейчас?")).toBeNull());
+      await press("Сохранить");
+      await waitFor(() => expect(api.addCashOperation).toHaveBeenCalledWith({ kind: "spend", amount: 24_000, category: "cafe", date: kyivDate() }));
+      expect(api.startCash).toHaveBeenCalledTimes(1);
+    });
+
+    for (const action of ["Получил", "Перевёл между своими"]) {
+      it(`«${action}» without a wallet starts it as a step of its own, never with the operation`, async () => {
+        const api = fakeApi(notStarted());
+        await renderWith(<AddSheet onClose={noop} />, api);
+        await press(action);
+        expect(await screen.findByText(/Сколько наличных у вас сейчас/)).toBeTruthy();
+        expect(screen.queryByText("Уже без этой траты. Спросим один раз.")).toBeNull();
+        expect(screen.queryByLabelText("Наличные после этой траты")).toBeNull();
+        expect(screen.queryByLabelText("Сумма")).toBeNull();
+        await fireEvent.changeText(screen.getByLabelText("Наличные сейчас"), "5000");
+        api.cash.mockResolvedValue({ started: true, start: kyivDate(), balance: 500_000 });
+        await press("Начать учёт");
+        await waitFor(() => expect(api.startCash).toHaveBeenCalledWith({ amount: 500_000 }));
+        expect(await screen.findByLabelText("Сумма")).toBeTruthy();
+        expect(api.addCashOperation).not.toHaveBeenCalled();
+      });
+    }
 
     it("the first time, needs the cash in the pocket too, 0 allowed", async () => {
       const api = fakeApi(notStarted());
@@ -87,7 +126,7 @@ describe("AddSheet: one window for everything entered by hand (Д5)", () => {
       });
       await renderWith(<AddSheet onClose={noop} />, api);
       await press("Трата");
-      await fireEvent.changeText(await screen.findByLabelText("Сколько наличных сейчас?"), "3500");
+      await fireEvent.changeText(await screen.findByLabelText("Наличные после этой траты"), "3260");
       await fireEvent.changeText(screen.getByLabelText("Сумма"), "240");
       await press("Кафе и рестораны");
       await press("Сохранить");

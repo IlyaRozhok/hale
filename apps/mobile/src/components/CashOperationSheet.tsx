@@ -6,6 +6,7 @@ import { exchangeRate } from "@hale/contracts/exchange";
 import { useAddCashOperation, useCash, useCategoryList, useDeleteCashOperation, usePatchCashOperation, useStartCash } from "../api/queries";
 import { formatDollars, formatMoney, kyivDate, parseBalance, parseHryvnias } from "../format";
 import { categoryChoices } from "../labels";
+import { CashStartForm } from "./CashStartForm";
 import { Chip } from "./Chip";
 import { DateField } from "./DateField";
 import { ErrorText } from "./ErrorText";
@@ -47,9 +48,11 @@ const exchangeEffect = (cents: number, kopecks: number) =>
 
 /**
  * A cash operation: kind, amount, category for a purchase, date and a note. A new one comes from an action of
- * «Добавить» (task Д5); while the wallet is not started, the form asks once how much cash there is now, and
- * saving starts the wallet today (`POST /cash/start`) before it saves the operation. A purchase is spent only
- * from cash here: the server keeps no spending from a manual account.
+ * «Добавить» (task Д5). While the wallet is not started, a purchase asks once how much cash there is now, after
+ * this purchase (the owner's decision): saving starts the wallet today (`POST /cash/start`) with that answer plus
+ * the purchase, then saves the purchase, so the wallet ends at the answer. Other kinds start the wallet first, as
+ * a step of its own, never combined with the operation. A purchase is spent only from cash here: the server keeps
+ * no spending from a manual account.
  */
 export function CashOperationSheet({ tx, mode, onClose }: Props) {
   const cash = useCash();
@@ -69,8 +72,9 @@ export function CashOperationSheet({ tx, mode, onClose }: Props) {
   const [note, setNote] = useState(tx?.description ?? "");
   const [message, setMessage] = useState<string | null>(null);
   const busy = start.isPending || add.isPending || patch.isPending || remove.isPending;
-  // Asked once: only while the server says the wallet is not started.
-  const firstTime = !tx && cash.data?.started === false;
+  // Asked once, in a purchase only, while the server says the wallet is not started.
+  const notStarted = !tx && cash.data?.started === false;
+  const firstTime = notStarted && mode === "spend";
   const kinds = tx ? KINDS : KINDS.filter((k) => MODES[mode].kinds.includes(k.kind));
   const failed = () => setMessage("Не удалось сохранить. Попробуйте ещё раз.");
 
@@ -111,8 +115,14 @@ export function CashOperationSheet({ tx, mode, onClose }: Props) {
       return;
     }
     const addIt = () => add.mutate({ ...base, ...(note.trim() ? { note: note.trim() } : {}) }, { onSuccess: onClose, onError: failed });
-    // The wallet starts first; if the operation then fails, the wallet stays started and a second try only saves it.
-    if (firstTime) start.mutate({ amount: inPocket! }, { onSuccess: addIt, onError: failed });
+    // The answer is the cash after this purchase, so the wallet starts with it plus the purchase. If the purchase
+    // then fails, the wallet stays started and a second try only saves it. A failed start (a 409: started
+    // elsewhere) reads the wallet again, so the next try does not start it twice.
+    const startFailed = () => {
+      failed();
+      void cash.refetch();
+    };
+    if (firstTime) start.mutate({ amount: inPocket! + kopecks }, { onSuccess: addIt, onError: startFailed });
     else addIt();
   };
 
@@ -130,6 +140,14 @@ export function CashOperationSheet({ tx, mode, onClose }: Props) {
         <Pressable accessibilityRole="button" accessibilityLabel="Удалить" disabled={busy} onPress={confirmDelete} style={styles.delete}>
           <Text style={styles.deleteText}>Удалить</Text>
         </Pressable>
+      </Sheet>
+    );
+  }
+
+  if (notStarted && !firstTime) {
+    return (
+      <Sheet title={MODES[mode!].title} onClose={onClose}>
+        <CashStartForm />
       </Sheet>
     );
   }
@@ -154,8 +172,9 @@ export function CashOperationSheet({ tx, mode, onClose }: Props) {
       {firstTime && (
         <View style={styles.start}>
           <Text style={styles.startTitle}>Сколько наличных сейчас?</Text>
-          <Field label="Сколько наличных сейчас?" placeholder="₴0" value={pocket} onChangeText={setPocket} keyboardType="decimal-pad" />
-          <Text style={styles.caption}>Спросим один раз.</Text>
+          <Field label="Наличные после этой траты" placeholder="₴0" value={pocket} onChangeText={setPocket} keyboardType="decimal-pad" />
+          <Text style={styles.caption}>Уже без этой траты. Спросим один раз.</Text>
+          <Text style={styles.caption}>С сегодняшнего дня снятие в банкомате не тратит лимит: его тратят покупки за наличные.</Text>
         </View>
       )}
       {kind === "exchange" ? (
