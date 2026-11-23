@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 import type { ObservationRef, TodayDto } from "@hale/contracts";
@@ -45,6 +45,7 @@ import { SubscriptionsSheet } from "../components/SubscriptionsSheet";
 import { TodaySkeleton } from "../components/TodaySkeleton";
 import { UsdcArrivedSheet } from "../components/UsdcArrivedSheet";
 import { usePullRefresh } from "../usePullRefresh";
+import { Settings } from "./Settings";
 import { ApiError } from "../api/client";
 
 const { color, radius, space, touchMin, type } = tokens;
@@ -106,6 +107,8 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
   const [labeling, setLabeling] = useState<{ id: string; counterKey: string; name: string } | null>(null);
   const [arriving, setArriving] = useState<{ id: string; eventId: number; expectedAmount: number } | null>(null);
   const [paying, setPaying] = useState<TodayDto["upcoming"][number] | null>(null);
+  // Task ЯМ7 (the owner's «Все А»): settings open from the profile button in the header, not from «План».
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const hide = (id: string, on: boolean) =>
     setAnswered((prev) => {
@@ -151,10 +154,23 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
     }
   }, [listOpen]);
 
+  const profile = (
+    <Pressable accessibilityRole="button" accessibilityLabel="Настройки" onPress={() => setSettingsOpen(true)} style={styles.profile}>
+      <Icon name="user" color={color.fg.muted} size={20} />
+    </Pressable>
+  );
+  const settings = settingsOpen && (
+    <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setSettingsOpen(false)}>
+      <Settings onClose={() => setSettingsOpen(false)} />
+    </Modal>
+  );
+
   if (!data) {
     return (
       <View style={styles.root}>
         <View style={[styles.content, { paddingTop: top }]}>
+          {/* Settings, and «Выйти» with them, stay reachable when the data does not load. */}
+          {today.isError && <View style={[styles.header, styles.headerEnd]}>{profile}</View>}
           {today.isError ? (
             <Glass style={styles.stack}>
               <ErrorText>Не получилось загрузить данные. Проверьте связь и попробуйте ещё раз.</ErrorText>
@@ -166,6 +182,7 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
             <TodaySkeleton />
           )}
         </View>
+        {settings}
       </View>
     );
   }
@@ -249,6 +266,9 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
   };
   // Tasks Я2, ЯМ1: once nothing is left the line says only tomorrow's limit (the owner's mockup); what was spent is in the calendar.
   const spentLine = state.leftToday <= 0 ? `завтра снова ${formatMoney(state.dailyLimit)}` : `потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}`;
+  // Task ЯМ7: what touching the card does, then the streak when there is one.
+  const streak = data.streak ?? 0;
+  const calendarHint = streak > 0 ? `Открывает календарь. ${streakLabel(streak)}` : "Открывает календарь";
   const limitLabel = hasLimit && nextLimitNote
     ? `${heading} ${formatMoney(over ? 0 : shownLeft)}. ${nextLimitNote}`
     : hasLimit && state.leftToday <= 0
@@ -267,23 +287,26 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
       >
         <View style={styles.header}>
           <Text style={styles.date}>{longDate(data.date)}</Text>
-          {/* Task Я9: with nothing to answer the bell keeps its place (the header does not jump) but is not a button. */}
-          {questions.length > 0 ? (
-            <Pressable accessibilityRole="button" accessibilityLabel={`Вопросы: ${questions.length}`} onPress={() => setSheet("questions")} style={styles.profile}>
-              <Icon name="bell" color={color.fg.muted} size={20} />
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{questions.length}</Text>
+          <View style={styles.headerButtons}>
+            {/* Task Я9: with nothing to answer the bell keeps its place (the header does not jump) but is not a button. */}
+            {questions.length > 0 ? (
+              <Pressable accessibilityRole="button" accessibilityLabel={`Вопросы: ${questions.length}`} onPress={() => setSheet("questions")} style={styles.profile}>
+                <Icon name="bell" color={color.fg.muted} size={20} />
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{questions.length}</Text>
+                </View>
+              </Pressable>
+            ) : (
+              <View accessible accessibilityLabel="Вопросов нет" style={styles.profile}>
+                <Icon name="bell" color={color.fg.muted} size={20} />
               </View>
-            </Pressable>
-          ) : (
-            <View accessible accessibilityLabel="Вопросов нет" style={styles.profile}>
-              <Icon name="bell" color={color.fg.muted} size={20} />
-            </View>
-          )}
+            )}
+            {profile}
+          </View>
         </View>
         <StaleBanner lines={freshnessLines(data, offlineSince, now())} />
         {/* The whole card is the way into the limit calendar. */}
-        <Pressable accessibilityRole="button" accessibilityLabel={limitLabel} accessibilityHint={streakLabel(data.streak ?? 0)} onPress={() => setSheet("calendar")} style={styles.heroPress}>
+        <Pressable accessibilityRole="button" accessibilityLabel={limitLabel} accessibilityHint={calendarHint} onPress={() => setSheet("calendar")} style={styles.heroPress}>
           <Glass kind="card" style={styles.hero}>
             <Text style={styles.eyebrow}>{heading}</Text>
             <Text style={styles.amount}>{over ? formatMoney(0) : formatMoney(shownLeft)}</Text>
@@ -294,9 +317,13 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
                 <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
                   <LimitBar level={level} state={dayState} />
                 </View>
-                <Text style={[styles.subtle, styles.spentLine]}>
-                  {nextLimitNote ?? spentLine}
-                </Text>
+                {/* Task ЯМ7: a quiet chevron says the card opens something; the line wraps, the chevron stays centred at the right. */}
+                <View testID="limit-line" style={styles.spentLine}>
+                  <Text style={[styles.subtle, styles.spentText]}>{nextLimitNote ?? spentLine}</Text>
+                  <View testID="limit-chevron" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                    <Icon name="chevron" color={color.list.chevron} size={14} />
+                  </View>
+                </View>
               </>
             )}
           </Glass>
@@ -467,6 +494,7 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
         />
       )}
       {paying && <PaymentPaidSheet payment={paying} today={data.date} onClose={() => setPaying(null)} />}
+      {settings}
     </View>
   );
 }
@@ -494,12 +522,15 @@ function MarkShown({ date, which, mark }: { date: string; which: ObservationRef;
 const styles = StyleSheet.create({
   root: { flex: 1 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md },
+  headerEnd: { justifyContent: "flex-end" },
+  headerButtons: { flexDirection: "row", alignItems: "center", gap: space.sm },
   date: { ...type.label, color: color.fg.default, flexShrink: 1 },
   profile: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: color.glass.row },
   heroPress: { minHeight: touchMin },
   hero: { overflow: "hidden", borderRadius: radius.xl, paddingHorizontal: space.lg, paddingTop: space.lg, paddingBottom: space.lg, gap: 2 },
   bar: { marginTop: space.md },
-  spentLine: { marginTop: space.xs },
+  spentLine: { marginTop: space.xs, flexDirection: "row", alignItems: "center", gap: space.sm },
+  spentText: { flex: 1 },
   phraseRow: { minHeight: touchMin, justifyContent: "center", paddingHorizontal: space.xs },
   phrase: { ...type.body, color: color.fg.default },
   untilCard: { borderRadius: radius.card, backgroundColor: color.card.fill, paddingHorizontal: space.md, paddingVertical: space.lg, gap: space.md },

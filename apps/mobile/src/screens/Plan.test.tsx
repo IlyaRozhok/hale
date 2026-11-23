@@ -625,19 +625,11 @@ describe("Plan, loans", () => {
 });
 
 describe("Plan, settings", () => {
-  it("opens settings from the gear in the corner and closes them", async () => {
+  it("has no settings gear: settings open from «Сегодня» (ЯМ7)", async () => {
     await renderWith(<Plan />, fakeApi());
-    expect(screen.queryByText("Сколько тратить в месяц")).toBeNull();
-    await fireEvent.press(await screen.findByRole("button", { name: "Настройки" }));
-    expect(await screen.findByText("Сколько тратить в месяц")).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
-    await waitFor(() => expect(screen.queryByText("Сколько тратить в месяц")).toBeNull());
-  });
-
-  it("settings stay reachable when the data does not load", async () => {
-    const api = fakeApi({ today: jest.fn(async () => { throw new Error("offline"); }) });
-    await renderWith(<Plan />, api);
-    expect(await screen.findByRole("button", { name: "Настройки" })).toBeTruthy();
+    await screen.findByText("Свои деньги");
+    expect(screen.queryByRole("button", { name: "Настройки" })).toBeNull();
+    expect(screen.queryByLabelText("Настройки")).toBeNull();
   });
 });
 

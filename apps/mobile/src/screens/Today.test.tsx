@@ -313,12 +313,6 @@ describe("Today, normal mode", () => {
     expect(screen.queryByRole("button", { name: "Добавить цель" })).toBeNull();
   });
 
-  it("has no settings button: settings live in Plan", async () => {
-    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
-    await screen.findByText("Сегодня можно");
-    expect(screen.queryByRole("button", { name: "Настройки" })).toBeNull();
-  });
-
   it("states an overspent day calmly, in the ordinary colour", async () => {
     const state = { ...todayFixture().state, leftToday: -12000, level: 0 };
     await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })) }));
@@ -590,12 +584,12 @@ describe("Today, normal mode", () => {
 
     it("names the streak in the right word form", async () => {
       await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ streak: 5 })) }));
-      expect((await screen.findByRole("button", { name: /^Сегодня можно/ })).props.accessibilityHint).toBe("Серия: 5 дней в лимите");
+      expect((await screen.findByRole("button", { name: /^Сегодня можно/ })).props.accessibilityHint).toBe("Открывает календарь. Серия: 5 дней в лимите");
     });
 
-    it("offers the calendar by name while there is no streak", async () => {
+    it("says the card opens the calendar while there is no streak (ЯМ7)", async () => {
       await renderWith(<Today onOpenActivity={noop} />, fakeApi());
-      expect((await screen.findByRole("button", { name: /^Сегодня можно/ })).props.accessibilityHint).toBe("Календарь лимитов");
+      expect((await screen.findByRole("button", { name: /^Сегодня можно/ })).props.accessibilityHint).toBe("Открывает календарь");
     });
 
     const dot = (date: string) => screen.queryByTestId(`calendar-dot-${date}`);
@@ -1769,5 +1763,87 @@ describe("Today, loading and offline", () => {
     await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => stale) }));
     expect(await screen.findByText(/Синхронизации с банком ещё не было/)).toBeTruthy();
     expect(screen.getByText("₴720")).toBeTruthy();
+  });
+});
+
+describe("Today, settings and the calendar chevron (ЯМ7)", () => {
+  const withState = (over: Partial<DailyStateDto>) => {
+    const fixture = todayFixture();
+    return fakeApi({ today: jest.fn(async () => ({ ...fixture, state: { ...fixture.state, ...over } })) });
+  };
+  const chevron = () => screen.getByTestId("limit-chevron", HIDDEN);
+
+  it("opens settings from the profile button next to the bell and closes them", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+    await screen.findByText("Сегодня можно");
+    expect(screen.queryByText("Сколько тратить в месяц")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Настройки" }));
+    expect(await screen.findByText("Сколько тратить в месяц")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Выйти" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
+    await waitFor(() => expect(screen.queryByText("Сколько тратить в месяц")).toBeNull());
+  });
+
+  it("puts the profile button beside the bell, in the bell's quiet round style", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+    await screen.findByText("Сегодня можно");
+    const bell = StyleSheet.flatten(screen.getByLabelText("Вопросов нет").props.style);
+    const profile = StyleSheet.flatten(screen.getByRole("button", { name: "Настройки" }).props.style);
+    expect(profile).toEqual(bell);
+    expect(profile.borderRadius).toBe(tokens.radius.full);
+    expect(profile.minWidth).toBe(tokens.touchMin);
+  });
+
+  it("keeps the profile button when there are questions to answer", async () => {
+    const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ questions })) }));
+    expect(await screen.findByRole("button", { name: "Вопросы: 1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Настройки" })).toBeTruthy();
+  });
+
+  it("settings stay reachable when the data does not load", async () => {
+    const api = fakeApi({ today: jest.fn(async () => { throw new NetworkError(); }) });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await screen.findByText(/Не получилось загрузить данные/);
+    await fireEvent.press(screen.getByRole("button", { name: "Настройки" }));
+    expect(await screen.findByText("Сколько тратить в месяц")).toBeTruthy();
+  });
+
+  it("puts a quiet chevron at the right of the line under the bar, hidden from VoiceOver", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+    const line = await screen.findByText("потрачено ₴280 из ₴1,000");
+    const row = screen.getByTestId("limit-line", HIDDEN);
+    // The row centres the chevron against the line; the line takes what is left and wraps, the chevron keeps its size.
+    expect(StyleSheet.flatten(row.props.style)).toMatchObject({ flexDirection: "row", alignItems: "center" });
+    expect(StyleSheet.flatten(line.props.style)).toMatchObject({ flex: 1 });
+    expect(within(row).getByText("потрачено ₴280 из ₴1,000")).toBeTruthy();
+    expect(within(row).getByTestId("limit-chevron", HIDDEN)).toBeTruthy();
+    expect(chevron().props.accessibilityElementsHidden).toBe(true);
+    expect(chevron().props.importantForAccessibility).toBe("no-hide-descendants");
+    // No new words on the card.
+    expect(screen.queryByText(/календар/i)).toBeNull();
+  });
+
+  it("keeps the chevron beside «завтра снова»", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 95000, leftToday: -60100, level: 0 }));
+    await screen.findByText("завтра снова ₴950");
+    expect(within(screen.getByTestId("limit-line", HIDDEN)).getByText("завтра снова ₴950")).toBeTruthy();
+    expect(chevron()).toBeTruthy();
+  });
+
+  it("keeps the chevron beside the long note about the new limit", async () => {
+    await renderWith(
+      <Today onOpenActivity={noop} />,
+      withState({ ...bridgeState(), level: 0, dailyLimit: 100000, leftToday: -1000000, shortageStart: { nextLimit: 45000 } }),
+    );
+    await screen.findByText("Новый лимит ₴450 действует с завтра");
+    expect(within(screen.getByTestId("limit-line", HIDDEN)).getByText("Новый лимит ₴450 действует с завтра")).toBeTruthy();
+    expect(chevron()).toBeTruthy();
+  });
+
+  it("has no chevron with no limit: there is no line under a bar", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 0, leftToday: 0, level: 0 }));
+    await screen.findByText("Сегодня можно");
+    expect(screen.queryByTestId("limit-chevron", HIDDEN)).toBeNull();
   });
 });
