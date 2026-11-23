@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, T
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 import type { InsightsMonthDto } from "@hale/contracts";
-import { useCategoryList, useInsights } from "../api/queries";
+import { useCategoryList, useInsights, useTransactionFilters } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
 import { formatMoney, inMonth, kyivDate, monthTitle } from "../format";
 import { categoryName, type CategoryList } from "../labels";
@@ -16,7 +16,7 @@ import { InsetList, ListRow } from "../components/ListRow";
 import { PlacesCard } from "../components/PlacesCard";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { Segmented } from "../components/Segmented";
-import { isActive, SubscriptionsList, subscriptionsSummary } from "../components/SubscriptionsSheet";
+import { isActive, type OpenPlace, SubscriptionsList, subscriptionsSummary } from "../components/SubscriptionsSheet";
 
 const { color, radius, space, touchMin, type } = tokens;
 
@@ -56,6 +56,10 @@ type Props = {
   onOpenCategory?: (category: string, from: string, to: string) => void;
   /** Leads to the purchases of «желаемое» over the same days (task В6). */
   onOpenWanted?: (from: string, to: string) => void;
+  /** Leads to the payments outside the limit over the same days (task Я8). */
+  onOpenOther?: (from: string, to: string) => void;
+  /** Leads to every operation of a subscription's place (task Я8). */
+  onOpenPlace?: OpenPlace;
 };
 
 /**
@@ -63,7 +67,7 @@ type Props = {
  * month under it with its arrows, the month's sum, then a switch «Категории · Места · Подписки» over one list.
  * Earlier months are a step back with the arrows.
  */
-export function Insights({ now = () => new Date(), onOpenCategory, onOpenWanted }: Props) {
+export function Insights({ now = () => new Date(), onOpenCategory, onOpenWanted, onOpenOther, onOpenPlace }: Props) {
   const insets = useSafeAreaInsets();
   const today = kyivDate(now());
   const thisMonth = today.slice(0, 7);
@@ -74,6 +78,9 @@ export function Insights({ now = () => new Date(), onOpenCategory, onOpenWanted 
   const asked = back === 0 ? undefined : shiftMonth(thisMonth, -back);
   const query = useInsights(asked);
   const list = useCategoryList();
+  // Task Я8: a way to these filters of «Операции» only once a page of them has said the server takes them; an older
+  // server refuses them. «Операции» are mounted at launch, so their first page has usually said it by now.
+  const filters = useTransactionFilters();
   const pull = usePullRefresh(query.refetch);
   const data = query.data;
   const thisYear = today.slice(0, 4);
@@ -105,7 +112,17 @@ export function Insights({ now = () => new Date(), onOpenCategory, onOpenWanted 
         // An older server has no «Итоги» yet.
         <Text style={styles.quiet}>Итоги появятся после обновления сервера.</Text>
       ) : data ? (
-        <Month data={data} past={back > 0} list={list} tab={tab} onTab={setTab} onOpenCategory={onOpenCategory} onOpenWanted={onOpenWanted} />
+        <Month
+          data={data}
+          past={back > 0}
+          list={list}
+          tab={tab}
+          onTab={setTab}
+          onOpenCategory={onOpenCategory}
+          onOpenWanted={onOpenWanted}
+          onOpenOther={filters.includes("other") ? onOpenOther : undefined}
+          onOpenPlace={filters.includes("place") ? onOpenPlace : undefined}
+        />
       ) : query.isError ? (
         <Glass style={styles.stack}>
           <ErrorText>Не получилось загрузить итоги. Проверьте связь и попробуйте ещё раз.</ErrorText>
@@ -127,6 +144,8 @@ type MonthProps = {
   onTab: (tab: Tab) => void;
   onOpenCategory?: (category: string, from: string, to: string) => void;
   onOpenWanted?: (from: string, to: string) => void;
+  onOpenOther?: (from: string, to: string) => void;
+  onOpenPlace?: OpenPlace;
 };
 
 /**
@@ -136,7 +155,7 @@ type MonthProps = {
 const wantedShown = (d: InsightsMonthDto): number | null =>
   d.wanted !== undefined && d.wanted > 0 && d.wanted <= d.spent ? d.wanted : null;
 
-function Month({ data, past, list, tab, onTab, onOpenCategory, onOpenWanted }: MonthProps) {
+function Month({ data, past, list, tab, onTab, onOpenCategory, onOpenWanted, onOpenOther, onOpenPlace }: MonthProps) {
   // A category spent on only in the month before has nothing to show for this one.
   const rows = data.categories.filter((c) => c.count > 0 || c.spent !== 0);
   // One bar per row: its share of this month's largest category; nothing below zero.
@@ -168,7 +187,7 @@ function Month({ data, past, list, tab, onTab, onOpenCategory, onOpenWanted }: M
       {shown === "subscriptions" && subscriptions && (
         <View style={styles.stack}>
           <Text style={styles.summary}>{subscriptionsSummary(subscriptions)}</Text>
-          <SubscriptionsList subscriptions={subscriptions} />
+          <SubscriptionsList subscriptions={subscriptions} onOpenPlace={onOpenPlace} />
         </View>
       )}
       {shown === "categories" && (
@@ -196,7 +215,7 @@ function Month({ data, past, list, tab, onTab, onOpenCategory, onOpenWanted }: M
                   onPress={() => onOpenWanted?.(from, data.through)}
                 />
               )}
-              {/* Not a button: «Операции» has no filter for these payments yet. */}
+              {/* A button only when the server takes the filter for these payments (Я8); an older one refuses it. */}
               {other !== null && (
                 <ListRow
                   testID="other-payments-row"
@@ -205,6 +224,7 @@ function Month({ data, past, list, tab, onTab, onOpenCategory, onOpenWanted }: M
                   amount={formatMoney(other)}
                   accessibilityLabel={`Платежи вне лимита: ${formatMoney(other)}`}
                   first={wanted === null}
+                  onPress={onOpenOther ? () => onOpenOther(from, data.through) : undefined}
                 />
               )}
             </InsetList>

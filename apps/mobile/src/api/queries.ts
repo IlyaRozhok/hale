@@ -4,13 +4,19 @@ import type { CategoryDto, CategoryInput, CategoryPatch, ObservationDto, Observa
 import type { CategoryList } from "../labels";
 import type { CashOperationInput, CashOperationPatch, CashStartInput, ExpectedIncomeInput, ExpectedIncomePatch, InstallmentInput, InstallmentPatch, LoanInput, LoanPatch, LoanRepayInput, RecipientLabelName, RecurringInput, RecurringPatch, ScheduledPaymentInput, ScheduledPaymentPatch, SettingsDto, SettingsPatch, TodayDto } from "@hale/contracts";
 import type { CashCardAnswer, CashDepositAnswerName, GoalInput, GoalPatch, TxTypeDto } from "@hale/contracts";
-import type { AccountPatch, ManualBalanceInput } from "@hale/contracts";
+import type { AccountPatch, ManualBalanceInput, TransactionFilterName } from "@hale/contracts";
 import { ApiError, type ManualBalancePatch, type TransactionEdit, type TransactionsFilter } from "./client";
 import { useApi } from "./context";
 
 export const TODAY_KEY = ["today"] as const;
 export const GOALS_KEY = ["goals"] as const;
 export const TRANSACTIONS_KEY = ["transactions"] as const;
+/**
+ * The filters of «Операции» the server named on the last first page it sent (task Я8): an older one refuses them, so
+ * nothing asks for them, and nothing offers a way to them, until a page has named them. Kept apart from the lists, so
+ * «Итоги» know it too and refreshing the lists does not drop it.
+ */
+export const TRANSACTION_FILTERS_KEY = ["transaction-filters"] as const;
 export const SETTINGS_KEY = ["settings"] as const;
 export const PAYMENTS_KEY = ["payments"] as const;
 export const CAP_PREVIEW_KEY = ["cap-preview"] as const;
@@ -192,12 +198,30 @@ export function useSetIncomeDate() {
 /** Pages of operations by cursor, optionally only the ones waiting for an answer. */
 export function useTransactions(filter: TransactionsFilter) {
   const api = useApi();
+  const client = useQueryClient();
   return useInfiniteQuery({
     queryKey: [...TRANSACTIONS_KEY, filter],
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) => api.transactions({ cursor: pageParam, ...filter }),
+    queryFn: async ({ pageParam }) => {
+      const page = await api.transactions({ cursor: pageParam, ...filter });
+      // Only a first page says it; an older server says nothing, which is none.
+      if (pageParam === undefined) client.setQueryData<TransactionFilterName[]>(TRANSACTION_FILTERS_KEY, page.filters ?? []);
+      return page;
+    },
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
+}
+
+/** The filters of «Операции» the server is known to take (task Я8); none until a first page has said. Never asks itself. */
+export function useTransactionFilters(): TransactionFilterName[] {
+  const client = useQueryClient();
+  const { data } = useQuery({
+    queryKey: TRANSACTION_FILTERS_KEY,
+    queryFn: () => client.getQueryData<TransactionFilterName[]>(TRANSACTION_FILTERS_KEY) ?? [],
+    enabled: false,
+    staleTime: Infinity,
+  });
+  return data ?? [];
 }
 
 export function useEditTransaction() {

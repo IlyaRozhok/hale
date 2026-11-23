@@ -187,6 +187,12 @@ export type TransactionsFilter = {
   want?: true;
   /** Only this kind of account (task Д1). Sent only when the server named the kinds: an older one refuses it. */
   account?: AccountFilterKind;
+  /**
+   * Task Я8: only the payments outside the limit («Платежи вне лимита» of «Итоги»), or only one place (a counterparty
+   * key). Sent only when the server named them in `filters`: an older one refuses them.
+   */
+  other?: true;
+  place?: string;
   /** Kyiv days, both inclusive. */
   from?: string;
   to?: string;
@@ -273,12 +279,14 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
     createGoal: (input) => request("POST", "/plan/goals", input),
     patchGoal: (id, patch) => request("PATCH", `/plan/goals/${id}`, patch),
     deleteGoal: async (id) => void (await request("DELETE", `/plan/goals/${id}`)),
-    transactions: ({ cursor, needsLabel, group, q: search, account, category, want, from, to }) => {
+    transactions: ({ cursor, needsLabel, group, q: search, account, category, want, other, place, from, to }) => {
       const q = [
         group !== undefined && `group=${group}`,
         account !== undefined && `account=${account}`,
         category !== undefined && `category=${encodeURIComponent(category)}`,
         want === true && "want=true",
+        other === true && "other=true",
+        place !== undefined && `place=${encodeURIComponent(place)}`,
         from !== undefined && `from=${from}`,
         to !== undefined && `to=${to}`,
         search !== undefined && `q=${encodeURIComponent(search)}`,

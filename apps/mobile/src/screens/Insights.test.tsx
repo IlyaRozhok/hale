@@ -3,9 +3,9 @@ import { Pressable, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { CategoryDto, InsightsMonthDto } from "@hale/contracts";
 import { Insights } from "./Insights";
-import { fakeApi, insightsFixture, renderWith } from "../testing";
+import { fakeApi, insightsFixture, makeClient, renderWith } from "../testing";
 import { ApiError } from "../api/client";
-import { useEditTransaction } from "../api/queries";
+import { TRANSACTION_FILTERS_KEY, useEditTransaction } from "../api/queries";
 import { visitsText } from "../components/PlacesCard";
 
 const now = () => new Date("2026-11-16T10:00:00Z");
@@ -68,6 +68,12 @@ const october = (): InsightsMonthDto =>
 const tab = (name: string) => screen.getByRole("button", { name });
 const segments = () => within(screen.getByTestId("insights-switch")).getAllByRole("button").map((t) => t.props.accessibilityLabel as string);
 const texts = () => screen.getAllByText(/./).map((t) => t.props.children as unknown);
+/** A client that has seen a page of «Операции» from a server naming the filters of Я8. */
+const knowing = (filters: string[] = ["other", "place"]) => {
+  const client = makeClient();
+  client.setQueryData(TRANSACTION_FILTERS_KEY, filters);
+  return client;
+};
 
 describe("Insights", () => {
   it("shows the month's spending against the same days of the month before", async () => {
@@ -166,8 +172,8 @@ describe("Insights", () => {
   });
 
   describe("payments outside the limit (В2а)", () => {
-    it("a row «Платежи вне лимита» in a second list under the categories; not a button, no chevron", async () => {
-      await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ otherPayments: 1_870_500 })) }));
+    it("a row «Платежи вне лимита» in a second list under the categories; not a button while the server has no such filter", async () => {
+      await renderWith(<Insights now={now} onOpenOther={jest.fn()} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ otherPayments: 1_870_500 })) }));
       const row = await screen.findByTestId("other-payments-row");
       expect(screen.getByText("Платежи вне лимита")).toBeTruthy();
       expect(screen.getByText("₴18,705")).toBeTruthy();
@@ -181,6 +187,29 @@ describe("Insights", () => {
       // Still one chevron per category, none on this row.
       expect(screen.getAllByTestId("row-chevron")).toHaveLength(9);
       expect(screen.queryByText(/Ещё платежи/)).toBeNull();
+    });
+
+    it("a button with a chevron once the server takes the filter (Я8): leads to these payments over the month's days", async () => {
+      const onOpenOther = jest.fn();
+      await renderWith(
+        <Insights now={now} onOpenOther={onOpenOther} />,
+        fakeApi({ insights: jest.fn(async () => insightsFixture({ otherPayments: 1_870_500 })) }),
+        knowing(),
+      );
+      const row = await screen.findByRole("button", { name: "Платежи вне лимита: ₴18,705" });
+      expect(screen.getAllByTestId("row-chevron")).toHaveLength(10);
+      await fireEvent.press(row);
+      expect(onOpenOther).toHaveBeenCalledWith("2026-11-01", "2026-11-16");
+    });
+
+    it("not a button when the server names only the place filter", async () => {
+      await renderWith(
+        <Insights now={now} onOpenOther={jest.fn()} />,
+        fakeApi({ insights: jest.fn(async () => insightsFixture({ otherPayments: 1_870_500 })) }),
+        knowing(["place"]),
+      );
+      await screen.findByTestId("other-payments-row");
+      expect(screen.queryByRole("button", { name: /Платежи/ })).toBeNull();
     });
 
     it("no row when there were no such payments", async () => {
@@ -493,13 +522,49 @@ describe("Insights", () => {
       expect(screen.queryByRole("button", { name: "Закрыть" })).toBeNull();
     });
 
-    it("rows are not buttons and have no chevron for now", async () => {
-      await open(subscriptions);
+    it("rows are not buttons and have no chevron while the server has no place filter", async () => {
+      await renderWith(<Insights now={now} onOpenPlace={jest.fn()} />, withSubs(subscriptions));
+      await screen.findByText("₴18,220");
+      await fireEvent.press(tab("Подписки"));
       for (const r of [...screen.getAllByTestId("subscription-row"), ...screen.getAllByTestId("subscription-missed-row")]) {
         expect(r.props.accessibilityRole).toBeUndefined();
         expect(r.props.onPress).toBeUndefined();
       }
       expect(screen.queryAllByTestId("row-chevron")).toHaveLength(0);
+    });
+
+    it("once the server takes the place filter, a row is a button to that place's operations (Я8)", async () => {
+      const onOpenPlace = jest.fn();
+      await renderWith(<Insights now={now} onOpenPlace={onOpenPlace} />, withSubs(subscriptions), knowing());
+      await screen.findByText("₴18,220");
+      await fireEvent.press(tab("Подписки"));
+      const rows = [...screen.getAllByTestId("subscription-row"), ...screen.getAllByTestId("subscription-missed-row")];
+      for (const r of rows) expect(r.props.accessibilityRole).toBe("button");
+      expect(screen.getAllByTestId("row-chevron")).toHaveLength(7);
+      await fireEvent.press(screen.getByRole("button", { name: "Netflix: ₴349, подорожала на ₴50 в ноябре" }));
+      expect(onOpenPlace).toHaveBeenCalledWith("00000000000000b2", "Netflix");
+      await fireEvent.press(screen.getByRole("button", { name: "Megogo: ₴199, последний раз 4 авг" }));
+      expect(onOpenPlace).toHaveBeenLastCalledWith("00000000000000b2", "Megogo");
+    });
+
+    it("several subscriptions under one name differ by their last charge (Я8)", async () => {
+      const apple = {
+        monthly: 63_700,
+        items: [
+          sub("Apple", 49_900, { key: "00000000000000a1", lastDate: "2026-11-12" }),
+          sub("Apple", 9_900, { key: "00000000000000a1", lastDate: "2026-11-03" }),
+          sub("Apple", 3_900, { key: "00000000000000a1", lastDate: "2026-11-08" }),
+          sub("Spotify", 19_900),
+        ],
+      };
+      await open(apple);
+      expect(screen.getAllByTestId("subscription-row").map((r) => r.props.accessibilityLabel as string)).toEqual([
+        "Apple: ₴499, последнее списание 12 ноя",
+        "Apple: ₴99, последнее списание 3 ноя",
+        "Apple: ₴39, последнее списание 8 ноя",
+        "Spotify: ₴199",
+      ]);
+      expect(screen.getByText("последнее списание 12 ноя")).toBeTruthy();
     });
 
     it("no «Не показывать такое» here: that is the observation's", async () => {

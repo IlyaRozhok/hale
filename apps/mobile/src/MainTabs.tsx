@@ -31,11 +31,14 @@ function TodayTab({ navigation }: { navigation: NavigationProp<ParamListBase> })
 
 function InsightsTab({ navigation }: { navigation: NavigationProp<ParamListBase> }) {
   // A category's spending over the shown days of its month, as the filters of «Операции» put it.
-  // «Желаемое» (В6): the purchases of «желаемое» over the same days.
+  // «Желаемое» (В6): the purchases of «желаемое» over the same days. «Платежи вне лимита» (Я8): those payments over
+  // the same days; a subscription (Я8): every operation of its place, named as «Итоги» name it.
   return (
     <Insights
       onOpenCategory={(category, from, to) => navigation.navigate("Activity", { category, from, to, at: Date.now() })}
       onOpenWanted={(from, to) => navigation.navigate("Activity", { want: true, from, to, at: Date.now() })}
+      onOpenOther={(from, to) => navigation.navigate("Activity", { other: true, from, to, at: Date.now() })}
+      onOpenPlace={(place, placeName) => navigation.navigate("Activity", { place, placeName, at: Date.now() })}
     />
   );
 }

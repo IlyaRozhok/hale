@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { useState } from "react";
 import { StyleSheet } from "react-native";
-import type { AccountFilterKind } from "@hale/contracts";
+import type { AccountFilterKind, TransactionFilterName } from "@hale/contracts";
 import { tokens } from "@hale/tokens";
 import { Activity } from "./Activity";
 import { fakeApi, pickDate, renderWith, txFixture } from "../testing";
@@ -699,6 +699,115 @@ describe("Activity filters", () => {
         expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "income", from: "2026-11-01", to: "2026-11-16" }),
       );
       expect(await screen.findByRole("button", { name: "Фильтры: 1" })).toBeTruthy();
+    });
+  });
+
+  describe("arriving from «Платежи вне лимита» or a subscription of «Итоги» (Я8)", () => {
+    type Params = { day?: string; other?: boolean; place?: string; placeName?: string; from?: string; to?: string; at: number };
+    let arrive: (p: Omit<Params, "at">) => Promise<void>;
+    function Arriving() {
+      const [params, setParams] = useState<Params>();
+      arrive = (next) => act(async () => setParams((p) => ({ ...next, at: (p?.at ?? 0) + 1 })));
+      return <Activity now={now} route={{ params }} />;
+    }
+    // A server that takes the new filters names them on the first page; an older one does not, and refuses them.
+    const newPage = (summary: { total: number; count: number } | null, filters?: TransactionFilterName[]) =>
+      jest.fn(async () => ({ items: [txFixture()], nextCursor: null, dayTotals: {}, summary, ...(filters ? { filters } : {}) }));
+    const other = { cursor: undefined, group: "spend", other: true, from: "2026-11-01", to: "2026-11-16" };
+    const apple = { cursor: undefined, group: "spend", place: "00000000000000b2" };
+
+    it("shows the payments outside the limit over the month's days, named in the summary and counted on the button", async () => {
+      const transactions = newPage({ total: -1870500, count: 3 }, ["other", "place"]);
+      await renderWith(<Arriving />, fakeApi({ transactions }));
+      await screen.findByRole("button", { name: "Фильтры" });
+      await arrive({ other: true, from: "2026-11-01", to: "2026-11-16" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(other));
+      expect(await screen.findByRole("button", { name: "Фильтры: 2" })).toBeTruthy();
+      expect(await screen.findByText("Платежи вне лимита · 1–16 ноя: −₴18,705 · 3 операции")).toBeTruthy();
+    });
+
+    it("the summary's «×» and «Сбросить» take it off", async () => {
+      const transactions = newPage({ total: -1870500, count: 3 }, ["other", "place"]);
+      await renderWith(<Arriving />, fakeApi({ transactions }));
+      await screen.findByRole("button", { name: "Фильтры" });
+      await arrive({ other: true, from: "2026-11-01", to: "2026-11-16" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(other));
+      await fireEvent.press(await screen.findByRole("button", { name: "Сбросить фильтры" }));
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" }));
+      expect(await screen.findByRole("button", { name: "Фильтры" })).toBeTruthy();
+      expect(screen.queryByText(/Платежи вне лимита/)).toBeNull();
+
+      await arrive({ other: true, from: "2026-11-01", to: "2026-11-16" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(other));
+      await fireEvent.press(await screen.findByRole("button", { name: "Фильтры: 2" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Сбросить" }));
+      await windowGone();
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" }));
+      expect(screen.queryByText(/Платежи вне лимита/)).toBeNull();
+    });
+
+    it("«Показать» with another period keeps it; income is not narrowed by it", async () => {
+      const transactions = newPage({ total: -500000, count: 1 }, ["other", "place"]);
+      await renderWith(<Arriving />, fakeApi({ transactions }));
+      await screen.findByRole("button", { name: "Фильтры" });
+      await arrive({ other: true, from: "2026-11-01", to: "2026-11-16" });
+      await fireEvent.press(await screen.findByRole("button", { name: "Фильтры: 2" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Неделя" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Показать" }));
+      await windowGone();
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ ...other, from: "2026-11-03", to: "2026-11-09" }));
+      expect(await screen.findByText("Платежи вне лимита · 3–9 ноя: −₴5,000 · 1 операция")).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Доходы" }));
+      await waitFor(() =>
+        expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "income", from: "2026-11-03", to: "2026-11-09" }),
+      );
+      expect(await screen.findByRole("button", { name: "Фильтры: 1" })).toBeTruthy();
+    });
+
+    it("shows every operation of a subscription's place, named in the summary", async () => {
+      const transactions = newPage({ total: -129700, count: 3 }, ["other", "place"]);
+      await renderWith(<Arriving />, fakeApi({ transactions }));
+      await screen.findByRole("button", { name: "Фильтры" });
+      await arrive({ place: "00000000000000b2", placeName: "Apple" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(apple));
+      expect(await screen.findByRole("button", { name: "Фильтры: 1" })).toBeTruthy();
+      expect(await screen.findByText("Apple: −₴1,297 · 3 операции")).toBeTruthy();
+
+      // Under «Все» too: a place narrows every tab.
+      await fireEvent.press(screen.getByRole("button", { name: "Все" }));
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ ...apple, group: "all" }));
+
+      await fireEvent.press(await screen.findByRole("button", { name: "Сбросить фильтры" }));
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "all" }));
+      expect(screen.queryByText(/Apple/)).toBeNull();
+    });
+
+    it("a day of the calendar arriving later takes the place off", async () => {
+      const transactions = newPage({ total: -129700, count: 3 }, ["other", "place"]);
+      await renderWith(<Arriving />, fakeApi({ transactions }));
+      await screen.findByRole("button", { name: "Фильтры" });
+      await arrive({ place: "00000000000000b2", placeName: "Apple" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(apple));
+      await arrive({ day: "2026-11-02" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", from: "2026-11-02", to: "2026-11-02" }));
+      expect(await screen.findByRole("button", { name: "Фильтры: 1" })).toBeTruthy();
+    });
+
+    it("an older server is never asked for them: the period alone, with no error", async () => {
+      const transactions = newPage({ total: -2500, count: 2 });
+      await renderWith(<Arriving />, fakeApi({ transactions }));
+      await screen.findByRole("button", { name: "Фильтры" });
+      await arrive({ other: true, from: "2026-11-01", to: "2026-11-16" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", from: "2026-11-01", to: "2026-11-16" }));
+      expect(await screen.findByText("1–16 ноя: −₴25 · 2 операции")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Фильтры: 1" })).toBeTruthy();
+      await arrive({ place: "00000000000000b2", placeName: "Apple" });
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" }));
+      expect(screen.queryByText(/Apple|Платежи вне лимита|Не получилось/)).toBeNull();
+      for (const [filter] of transactions.mock.calls as unknown as [Record<string, unknown>][]) {
+        expect(filter).not.toHaveProperty("other");
+        expect(filter).not.toHaveProperty("place");
+      }
     });
   });
 

@@ -196,6 +196,20 @@ describe("api client", () => {
     expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toBe(`https://api.example.test/transactions?group=spend&q=${encodeURIComponent("кафе & co")}`);
   });
 
+  it("asks for the payments outside the limit and for one place only when told to (Я8)", async () => {
+    const fetchImpl = vi.fn(async () => json({ items: [], nextCursor: null, dayTotals: {} }));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await api.transactions({ group: "spend", other: true, from: "2026-11-01", to: "2026-11-16" });
+    await api.transactions({ group: "spend", place: "00000000000000b2" });
+    await api.transactions({ group: "spend" });
+    const urls = (fetchImpl.mock.calls as unknown as [string][]).map(([u]) => u.replace("https://api.example.test", ""));
+    expect(urls).toEqual([
+      "/transactions?group=spend&other=true&from=2026-11-01&to=2026-11-16",
+      "/transactions?group=spend&place=00000000000000b2",
+      "/transactions?group=spend",
+    ]);
+  });
+
   it("creates, patches and deletes goals under /plan/goals", async () => {
     const fetchImpl = vi.fn(async () => json({}));
     const { api } = setup(fetchImpl as unknown as typeof fetch);
