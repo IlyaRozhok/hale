@@ -181,7 +181,7 @@ export function CategoryFormSheet({ category, onClose, onCreated }: Props) {
 }
 
 /**
- * «Нужное» / «Желаемое» side by side (task В6): in a category's window and on one purchase. The native segmented
+ * «Нужное» / «Для себя» side by side (task В6): in a category's window and on one purchase. The native segmented
  * control with no tint of ours: neither side is better than the other.
  */
 export function WantSwitch({ value, disabled = false, onChange }: { value: boolean; disabled?: boolean; onChange: (want: boolean) => void }) {

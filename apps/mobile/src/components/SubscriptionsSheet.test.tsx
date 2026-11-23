@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import type { InsightsMonthDto } from "@hale/contracts";
-import { SubscriptionsSheet, subscriptionsText } from "./SubscriptionsSheet";
+import { SubscriptionsSheet, subscriptionsText, swipeRest } from "./SubscriptionsSheet";
 import { fakeApi, renderWith } from "../testing";
 
 type Subscriptions = NonNullable<InsightsMonthDto["subscriptions"]>;
@@ -147,5 +147,29 @@ describe("the subscriptions sheet (В4)", () => {
     await renderWith(<SubscriptionsSheet subscriptions={subscriptions} onClose={() => undefined} onDismiss={onDismiss} />, fakeApi());
     await fireEvent.press(await screen.findByRole("button", { name: "Не показывать такое" }));
     expect(onDismiss).toHaveBeenCalled();
+  });
+
+  it("the sheet of «Сегодня» has no swipe «Не подписка» (ЯМ6 is on «Итоги» only)", async () => {
+    await renderWith(<SubscriptionsSheet subscriptions={subscriptions} onClose={() => undefined} />, fakeApi());
+    await screen.findByText("Подписки");
+    expect(screen.queryAllByTestId("subscription-swipe")).toHaveLength(0);
+    expect(screen.queryAllByText("Не подписка", { includeHiddenElements: true })).toHaveLength(0);
+  });
+});
+
+describe("swipeRest: where a row swiped left comes to rest (ЯМ6)", () => {
+  it("goes back from a short swipe, stays open on the button past half of it, marks at once past most of the row", () => {
+    expect(swipeRest(0, 358)).toBe("closed");
+    expect(swipeRest(-59, 358)).toBe("closed");
+    expect(swipeRest(-60, 358)).toBe("open");
+    expect(swipeRest(-200, 358)).toBe("open");
+    expect(swipeRest(-215, 358)).toBe("full");
+    expect(swipeRest(-358, 358)).toBe("full");
+  });
+
+  it("a narrow row needs the button and a little more for a full swipe; an unmeasured one never marks at once", () => {
+    expect(swipeRest(-183, 200)).toBe("open");
+    expect(swipeRest(-184, 200)).toBe("full");
+    expect(swipeRest(-1_000, 0)).toBe("open");
   });
 });

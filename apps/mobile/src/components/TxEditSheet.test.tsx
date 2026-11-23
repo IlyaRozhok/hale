@@ -529,7 +529,7 @@ describe("TxEditSheet: «Эта покупка» — нужное или жел�
     { key: "uncategorized", name: "Без категории", icon: "circle", system: true, want: null },
   ];
   const cafe = txFixture({ id: 7, counterName: "Сільпо", type: "spend", category: "cafe", want: true, wantOverride: null });
-  const side = (name: "Нужное" | "Желаемое") => screen.getByRole("button", { name });
+  const side = (name: "Нужное" | "Для себя") => screen.getByRole("button", { name });
   /** The server keeps the side it was sent; null gives the row back to its category's. */
   const keeping = (base: TransactionDto, categoryWant: boolean) =>
     jest.fn(async (_id: number, patch: TransactionEdit) => {
@@ -540,9 +540,9 @@ describe("TxEditSheet: «Эта покупка» — нужное или жел�
   it("shows the side this purchase is on, with its category's usual one under it", async () => {
     await renderWith(<TxEditSheet tx={cafe} onClose={noop} />, fakeApi({ categories: jest.fn(async () => LIST) }));
     expect(await screen.findByText("Эта покупка")).toBeTruthy();
-    expect(side("Желаемое").props.accessibilityState.selected).toBe(true);
+    expect(side("Для себя").props.accessibilityState.selected).toBe(true);
     expect(side("Нужное").props.accessibilityState.selected).toBe(false);
-    expect(screen.getByText("Для «Кафе» обычно — желаемое")).toBeTruthy();
+    expect(screen.getByText("Для «Кафе» обычно — для себя")).toBeTruthy();
     // Between the categories and the type.
     const texts = screen.getAllByText(/^(Категория|Эта покупка|Ещё: тип операции)$/).map((t) => String(t.props.children));
     expect(texts).toEqual(["Категория", "Эта покупка", TYPE_ROW]);
@@ -557,7 +557,7 @@ describe("TxEditSheet: «Эта покупка» — нужное или жел�
     await fireEvent.press(await screen.findByRole("button", { name: "Нужное" }));
     await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { want: false }));
     await waitFor(() => expect(side("Нужное").props.accessibilityState.selected).toBe(true));
-    expect(screen.getByText("Для «Кафе» обычно — желаемое")).toBeTruthy();
+    expect(screen.getByText("Для «Кафе» обычно — для себя")).toBeTruthy();
     expect(screen.queryByText(/Всегда так/)).toBeNull();
     expect(api.similarCount).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
@@ -568,15 +568,15 @@ describe("TxEditSheet: «Эта покупка» — нужное или жел�
     const api = fakeApi({ categories: jest.fn(async () => LIST), editTransaction: keeping(moved, true) });
     await renderWith(<TxEditSheet tx={moved} onClose={noop} />, api);
     expect((await screen.findByRole("button", { name: "Нужное" })).props.accessibilityState.selected).toBe(true);
-    await fireEvent.press(side("Желаемое"));
+    await fireEvent.press(side("Для себя"));
     await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(7, { want: null }));
-    await waitFor(() => expect(side("Желаемое").props.accessibilityState.selected).toBe(true));
+    await waitFor(() => expect(side("Для себя").props.accessibilityState.selected).toBe(true));
   });
 
   it("the side it is already on sends nothing", async () => {
     const api = fakeApi({ categories: jest.fn(async () => LIST) });
     await renderWith(<TxEditSheet tx={cafe} onClose={noop} />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Желаемое" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Для себя" }));
     expect(api.editTransaction).not.toHaveBeenCalled();
   });
 
@@ -585,7 +585,7 @@ describe("TxEditSheet: «Эта покупка» — нужное или жел�
     await renderWith(<TxEditSheet tx={cafe} onClose={noop} />, api);
     await fireEvent.press(await screen.findByRole("button", { name: "Нужное" }));
     expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
-    expect(side("Желаемое").props.accessibilityState.selected).toBe(true);
+    expect(side("Для себя").props.accessibilityState.selected).toBe(true);
   });
 
   it("a new category shows the side the server gives the purchase now, its own choice kept", async () => {

@@ -171,11 +171,11 @@ describe("labels", () => {
 describe("«нужное» и «желаемое» (В6)", () => {
   it("names the two sides", () => {
     expect(wantLabel(false)).toBe("Нужное");
-    expect(wantLabel(true)).toBe("Желаемое");
+    expect(wantLabel(true)).toBe("Для себя");
   });
 
   it("says a category's usual side as a whole phrase", () => {
-    expect(usualWantText("Покупки", true)).toBe("Для «Покупки» обычно — желаемое");
+    expect(usualWantText("Покупки", true)).toBe("Для «Покупки» обычно — для себя");
     expect(usualWantText("Продукты", false)).toBe("Для «Продукты» обычно — нужное");
   });
 
