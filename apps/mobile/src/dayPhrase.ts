@@ -33,6 +33,11 @@ export interface PhraseInput {
   observation?: ObservationDto | null;
   /** For the observation's category name. */
   categories?: CategoryList;
+  /**
+   * Task Я2: the screen already carries bad news (the pace line, or the day over its limit), so the observation,
+   * a third piece of it, is not said: one thought a day.
+   */
+  quiet?: boolean;
 }
 
 const date = (iso: string) => {
@@ -66,8 +71,8 @@ export function observationText(o: ObservationDto, categories: CategoryList, tod
 
 /**
  * The one thing worth saying today, the most important first: a decision that is waiting, an overdue
- * payment, a loan to return, then a payment at the door, then an observation (В7) in its place, else how
- * yesterday went. Null on a day with nothing to say.
+ * payment, a loan to return, then a payment at the door, then an observation (В7) in its place unless the day
+ * is `quiet`, else how yesterday went. Null on a day with nothing to say.
  */
 export function dayPhrase(i: PhraseInput): Phrase | null {
   if (i.needsPlan) return { text: "Нужен план до дохода. Это пара минут: выберите сумму на день.", action: { kind: "bridge" } };
@@ -97,7 +102,7 @@ export function dayPhrase(i: PhraseInput): Phrase | null {
     return { text: `${when} платёж: ${soon.name}, ${formatMoney(soon.amount)}. Он уже учтён в лимите.`, action: { kind: "pay", payment: soon } };
   }
 
-  const o = i.observation;
+  const o = i.quiet ? null : i.observation;
   const noticed = o ? observationText(o, i.categories, i.today) : null;
   if (o && noticed) return { text: noticed, action: { kind: "observation", observation: o } };
 

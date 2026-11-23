@@ -506,6 +506,42 @@ describe("Activity filters", () => {
       );
       expect(await screen.findByRole("button", { name: "Фильтры: 2" })).toBeTruthy();
     });
+
+    // Я1: the audit pulled the list, went to «Итоги» while it refreshed and came back with a category; the spinner
+    // stayed over the list for minutes, through tab changes too.
+    it("a pull still under way when a category arrives does not stay over the new list (Я1)", async () => {
+      const pulls: (() => void)[] = [];
+      const asked = new Set<string | undefined>();
+      const transactions = jest.fn(async (q: { category?: string }) => {
+        // The first load of each list answers at once; a pull waits until the test answers it.
+        if (asked.has(q.category)) await new Promise<void>((r) => pulls.push(r));
+        asked.add(q.category);
+        return { items: [txFixture({ id: q.category ? 2 : 1, description: q.category ? "Сильпо" : "Кофейня" })], nextCursor: null, dayTotals: {} };
+      });
+      await renderWith(<Arriving />, fakeApi({ transactions }));
+      await screen.findByText("Кофейня");
+      const list = () => screen.getByTestId("activity-list");
+      const control = () => list().props.refreshControl as { key: string | null; props: { refreshing: boolean; onRefresh: () => void } };
+      await act(async () => control().props.onRefresh());
+      expect(control().props.refreshing).toBe(true);
+      const pulled = control().key;
+
+      await arrive({ category: "groceries", from: "2026-11-01", to: "2026-11-16" });
+      expect(await screen.findByText("Сильпо")).toBeTruthy();
+      expect(pulls).toHaveLength(1);
+      // The pull was for the list that is gone: its spinner is not carried over, and the new list gets a control of
+      // its own, so a native one stuck from before (iOS ends it badly while the tab is out of sight) goes with it.
+      expect(control().props.refreshing).toBe(false);
+      expect(control().key).not.toBe(pulled);
+
+      // A new pull here is not ended by the old one answering late.
+      await act(async () => control().props.onRefresh());
+      expect(control().props.refreshing).toBe(true);
+      await act(async () => pulls[0]!());
+      expect(control().props.refreshing).toBe(true);
+      await act(async () => pulls[1]!());
+      await waitFor(() => expect(control().props.refreshing).toBe(false));
+    });
   });
 
   describe("arriving from the row «Желаемое» of «Итоги» (В6)", () => {

@@ -177,12 +177,16 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
   const runway = data.runway ?? null;
   const incomeOn = runway?.incomeOn ?? null;
   const left = runway !== null && incomeOn !== null && runway.reserve > 0 ? runway.reserve : null;
-  const paceLine = pace ? paceLineText(pace, data.date) : null;
-  const stepLine = pace && left !== null ? `Если держаться лимита — к доходу останется ${formatMoney(left)}.` : null;
-  const calmLine = !pace && left !== null ? `К доходу останется ${formatMoney(left)}` : null;
   // The limit the runway is drawn for: on the day the shortage came on it is tomorrow's new one, not the morning's (А23).
   const runwayLimit = nextLimit ?? state.dailyLimit;
-  const calmUnder = calmLine && runwayLimit > 0 ? `если держаться лимита ${formatMoney(runwayLimit)} в день` : null;
+  // «Если держаться лимита» only when there is a limit to hold.
+  const step = left !== null && runwayLimit > 0 ? left : null;
+  const paceLine = pace ? paceLineText(pace, data.date) : null;
+  const stepLine = pace && step !== null ? `Если держаться лимита — к доходу останется ${formatMoney(step)}.` : null;
+  const calmLine = !pace && step !== null ? `К доходу останется ${formatMoney(step)}` : null;
+  const calmUnder = calmLine ? `если держаться лимита ${formatMoney(runwayLimit)} в день` : null;
+  // A calm day with nothing to promise: the reserve in the words it always had, under the card's own header.
+  const reserveLine = !pace && calmLine === null && runway !== null ? `Запас к доходу ${formatMoney(runway.reserve)}` : null;
   const incomeDay = incomeOn ? dayMonthText(incomeOn) : null;
   const noLimitNote = state.mode === "bridge" ? "Лимит появится, когда вы подтвердите план." : "До следующего дохода свободных денег нет.";
 
@@ -207,9 +211,12 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
     yesterday: calendar.data?.days.find((d) => d.date === dayBefore) ?? null,
     dayBefore: calendarBefore.data?.days.find((d) => d.date === twoDaysAgo) ?? null,
     streak: data.streak ?? 0,
-    // ЯМ1: a category observation is not said on a hard day or over the limit; the phrase finds something else.
-    observation: data.pace || over ? null : observation.data,
+    observation: observation.data,
     categories,
+    // Tasks Я2, ЯМ1: on a hard day (the server sent the pace) or an overspent one the observation is not said, nor
+    // marked shown. With the note that the minus went over the bridge plan the pace line is left out, but that note
+    // carries the same bad news, so the day stays quiet.
+    quiet: data.pace !== undefined || over,
   });
   const noticed = phrase?.action.kind === "observation" ? observationRef(phrase.action.observation) : null;
   const act = (action: PhraseAction) => {
@@ -221,10 +228,12 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
       else if (o.category !== null) onOpenObservation?.(o.category, o.from, o.to);
     } else setSheet(action.kind);
   };
+  // Tasks Я2, ЯМ1: once nothing is left the line says only tomorrow's limit (the owner's mockup); what was spent is in the calendar.
+  const spentLine = state.leftToday <= 0 ? `завтра снова ${formatMoney(state.dailyLimit)}` : `потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}`;
   const limitLabel = hasLimit && nextLimitNote
     ? `${heading} ${formatMoney(over ? 0 : shownLeft)}. ${nextLimitNote}`
     : hasLimit && state.leftToday <= 0
-    ? `${heading} ₴0, завтра снова ${formatMoney(state.dailyLimit)}`
+    ? `${heading} ${formatMoney(0)}, завтра снова ${formatMoney(state.dailyLimit)}`
     : hasLimit
       ? `${heading} ${formatMoney(shownLeft)}, из ${formatMoney(state.dailyLimit)} на день`
       : `${heading} ${formatMoney(shownLeft)}. ${noLimitNote}`;
@@ -267,9 +276,7 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
                   <LimitBar level={level} state={dayState} />
                 </View>
                 <Text style={[styles.subtle, styles.spentLine]}>
-                  {/* ЯМ1: on a ₴0 day only tomorrow's limit; what was spent is in the calendar. */}
-                  {nextLimitNote ??
-                    (state.leftToday <= 0 ? `завтра снова ${formatMoney(state.dailyLimit)}` : `потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}`)}
+                  {nextLimitNote ?? spentLine}
                 </Text>
               </>
             )}
@@ -294,17 +301,22 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
               </Pressable>
             ) : (
               incomeDay && (
-                <View style={styles.untilTop}>
+                <View
+                  accessible
+                  accessibilityLabel={[`До дохода, ${incomeDay}.`, calmLine && calmUnder ? `${calmLine}, ${calmUnder}.` : `${reserveLine}.`].join(" ")}
+                  style={styles.untilTop}
+                >
                   <UntilHead day={incomeDay} chevron={false} />
                   {calmLine && <Text style={styles.calmText}>{calmLine}</Text>}
                   {calmUnder && <Text style={styles.untilUnder}>{calmUnder}</Text>}
+                  {reserveLine && <Text style={[styles.calmText, runway.reserve < 0 && styles.reserveShort]}>{reserveLine}</Text>}
                 </View>
               )
             )}
             <Runway
               runway={runway}
               today={data.date}
-              showHead={incomeDay === null || (!pace && calmLine === null)}
+              showHead={incomeDay === null}
               onPay={(id) => setPaying(data.upcoming.find((p) => p.id === id) ?? null)}
             />
           </View>
@@ -476,6 +488,7 @@ const styles = StyleSheet.create({
   paceText: { ...type.title, fontSize: 18, color: color.limit.low },
   calmText: { ...type.title, fontSize: 18, color: color.fg.default, fontVariant: ["tabular-nums"] },
   untilUnder: { ...type.body, color: color.fg.muted, fontVariant: ["tabular-nums"] },
+  reserveShort: { color: color.limit.low },
   badge: {
     position: "absolute",
     top: space.xs,

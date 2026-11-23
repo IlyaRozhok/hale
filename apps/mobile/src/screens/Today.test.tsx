@@ -264,6 +264,37 @@ describe("Today, normal mode", () => {
         await waitFor(() => expect(screen.queryByText("Подписки")).toBeNull());
         expect(await screen.findByText("Вчера осталось ₴340.")).toBeTruthy();
       });
+
+      describe("one thought a day (Я2): not on a day that already has bad news", () => {
+        const pace = { avgDaily: 460_000, runOutOn: "2026-11-20", incomeOn: "2026-12-01" };
+        const withState = (over: Partial<DailyStateDto>, more: Parameters<typeof todayFixture>[0] = {}) => {
+          const fixture = todayFixture({ date: "2026-11-19", upcoming: [], ...more });
+          return jest.fn(async () => ({ ...fixture, state: { ...fixture.state, ...over } }));
+        };
+
+        for (const [name, today] of [
+          ["an overspent day", withState({ dailyLimit: 95_000, leftToday: -60_100, level: 0 })],
+          ["a day with the pace line", withState({ dailyLimit: 100_000, leftToday: 40_000, level: 0.4 }, { pace })],
+        ] as const) {
+          it(`${name}: yesterday is said instead, and the observation is not marked shown`, async () => {
+            const observation = jest.fn(async () => spike);
+            const observationShown = jest.fn(async () => spike);
+            await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today, calendar: calendar19, observation, observationShown }));
+            expect(await screen.findByText("Вчера осталось ₴340.")).toBeTruthy();
+            await waitFor(() => expect(observation).toHaveBeenCalled());
+            expect(screen.queryByText(SPIKE_TEXT)).toBeNull();
+            expect(observationShown).not.toHaveBeenCalled();
+          });
+        }
+
+        it("used up exactly, with no pace line, is not a bad-news day: the observation is said", async () => {
+          const observationShown = jest.fn(async () => spike);
+          const today = withState({ dailyLimit: 95_000, leftToday: 0, level: 0 });
+          await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today, calendar: calendar19, observation: jest.fn(async () => spike), observationShown }));
+          expect(await screen.findByText(SPIKE_TEXT)).toBeTruthy();
+          await waitFor(() => expect(observationShown).toHaveBeenCalledWith({ kind: "spike", category: "cafe" }));
+        });
+      });
     });
 
     it("a quiet day says nothing", async () => {
@@ -338,8 +369,10 @@ describe("Today, normal mode", () => {
       await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 95000, leftToday: 0, level: 0 }));
       expect(await screen.findByText("Сегодня можно")).toBeTruthy();
       expect(screen.getByText("₴0")).toBeTruthy();
+      // Я2 said the limit once, as «завтра снова»; ЯМ1 (the owner's mockup) leaves out what was spent as well.
       expect(screen.getByText("завтра снова ₴950")).toBeTruthy();
       expect(screen.queryByText(/потрачено/)).toBeNull();
+      expect(screen.getByLabelText("Сегодня можно ₴0, завтра снова ₴950")).toBeTruthy();
     });
 
     it("the metal bar is empty when nothing is left, and absent with no limit", async () => {
@@ -854,6 +887,18 @@ describe("Today, «До дохода»: the pace and the reserve in one card (А
       }
     });
 
+    it("with the bridge over-plan note instead of the pace line the day is still quiet: no observation", async () => {
+      const overPlan = { id: "bridge_over_plan:1", text: "Минус вышел за план моста на ₴100. Свободных денег уже нет." };
+      const observation = jest.fn(async () => spike);
+      const observationShown = jest.fn(async () => spike);
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => hardWithin({ badCases: [overPlan] })), observation, observationShown }));
+      expect(await screen.findByText(overPlan.text)).toBeTruthy();
+      await waitFor(() => expect(observation).toHaveBeenCalled());
+      await settle();
+      expect(screen.queryByText(/Кафе и рестораны/)).toBeNull();
+      expect(observationShown).not.toHaveBeenCalled();
+    });
+
     it("another note does not hide the pace", async () => {
       const other = { id: "other:1", text: "При текущем темпе — просто слова в другой заметке." };
       await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ badCases: [other] })) }));
@@ -893,10 +938,27 @@ describe("Today, «До дохода»: the pace and the reserve in one card (А
     it("money that ends even at the limit: no «останется», the reserve is named as before, in sand", async () => {
       const runway = { ...todayFixture().runway!, reserve: -240_000, zeroOn: "2026-11-06" };
       await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ runway })) }));
-      expect(await screen.findByText("Запас к доходу")).toBeTruthy();
-      const figure = screen.getByText("−₴2,400");
-      expect(StyleSheet.flatten(figure.props.style).color).toBe(tokens.color.limit.low);
+      // One line under the card's own header, in sand; no second heading of the reserve.
+      const reserve = await screen.findByText("Запас к доходу −₴2,400");
+      expect(StyleSheet.flatten(reserve.props.style).color).toBe(tokens.color.limit.low);
+      expect(screen.getByText("До дохода")).toBeTruthy();
+      expect(screen.queryByText("Запас к доходу")).toBeNull();
+      expect(screen.queryByText("−₴2,400")).toBeNull();
       expect(screen.queryByText(/останется/)).toBeNull();
+      expect(screen.getByLabelText("До дохода, 7 ноя. Запас к доходу −₴2,400.")).toBeTruthy();
+    });
+
+    it("with no limit to hold, no «останется»: the reserve as it always was", async () => {
+      const state = { ...todayFixture().state, dailyLimit: 0, leftToday: 0, level: 0 };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })) }));
+      const reserve = await screen.findByText("Запас к доходу ₴13,280");
+      expect(StyleSheet.flatten(reserve.props.style).color).toBe(tokens.color.fg.default);
+      expect(screen.queryByText(/останется|если держаться/)).toBeNull();
+    });
+
+    it("the top of the card is read as one piece", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+      expect(await screen.findByLabelText("До дохода, 7 ноя. К доходу останется ₴13,280, если держаться лимита ₴1,000 в день.")).toBeTruthy();
     });
 
     it("with no income date, the reserve for 30 days as before, with no «До дохода»", async () => {
