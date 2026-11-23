@@ -54,7 +54,18 @@ describe("Settings, lifestyle cap", () => {
     expect(api.previewSettings).toHaveBeenCalledTimes(2); // the current cap, then one request for 150,000 (never 140,000)
     expect(api.previewSettings).toHaveBeenLastCalledWith(15_000_000);
     expect(await screen.findByText("₴900")).toBeTruthy(); // daily limit under this cap, as the server said
-    expect(screen.getByText("₴15,000")).toBeTruthy(); // left for goals each month
+  });
+
+  it("shows only the daily limit under the slider, not what is left for goals (Я10)", async () => {
+    const api = fakeApi({
+      previewSettings: jest.fn(async () => ({ dailyLimit: 90000, leftForGoalsMonthly: 8_620_000, rateStale: false })),
+    });
+    await renderWith(<Settings onClose={noop} />, api);
+    expect(await screen.findByText("Дневной лимит при таком потолке")).toBeTruthy();
+    expect(await screen.findByText("₴900")).toBeTruthy();
+    // The server still sends the figure; it sums every income of the month, so it read as bigger than any income.
+    expect(screen.queryByText("Останется на цели в месяц")).toBeNull();
+    expect(screen.queryByText("₴86,200")).toBeNull();
   });
 
   it("saves the cap when the slider is released", async () => {
@@ -83,7 +94,8 @@ describe("Settings, preview accuracy", () => {
   it("warns that the figure may be inaccurate when a rate is missing", async () => {
     const previewSettings = jest.fn(async () => ({ dailyLimit: 90000, leftForGoalsMonthly: 0, rateStale: true }));
     await renderWith(<Settings onClose={noop} />, fakeApi({ previewSettings }));
-    expect(await screen.findByText(/цифра может быть неточной/)).toBeTruthy();
+    expect(await screen.findByText("Курс валюты неизвестен или устарел: цифра может быть неточной.")).toBeTruthy();
+    expect(screen.getByText("Дневной лимит при таком потолке")).toBeTruthy(); // the one figure the note is about
   });
 
   it("recalculates the preview after a loan or a tax payment is saved", async () => {
