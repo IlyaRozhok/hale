@@ -1526,8 +1526,11 @@ describe("goals", () => {
       await ds.query(`UPDATE accounts SET balance=4500000 WHERE id=$1`, [j]);
       const list = (await api.get("/plan/goals").expect(200)).body as { saved_cents: number }[];
       expect(list.map((x) => x.saved_cents)).toEqual([150_000, 4_500_000]);
+      // An older app edits «Накоплено, $» on a goal in a place: nothing is stored, the place's money is what counts.
       await api.patch(`/plan/goals/${g.id}`, { saved_cents: 1 }).expect(200);
-      expect((await api.get("/plan/goals").expect(200)).body[0].saved_cents).toBe(150_000);
+      await api.patch(`/plan/goals/${trip.id}`, { saved_cents: 2 }).expect(200);
+      expect((await api.get("/plan/goals").expect(200)).body.map((x: { saved_cents: number }) => x.saved_cents)).toEqual([150_000, 4_500_000]);
+      expect(await ds.query(`SELECT saved_cents::int AS s FROM goals ORDER BY id`)).toEqual([{ s: 0 }, { s: 0 }]);
     });
 
     it("an old goal gets a place: its progress becomes the place's; a place in another currency needs a new target", async () => {
@@ -1539,19 +1542,31 @@ describe("goals", () => {
       const moved = (await api.patch(`/plan/goals/${g.id}`, { place: { source: "account", id: j }, target_cents: 20_000_000 }).expect(200)).body;
       expect(moved).toMatchObject({ target_cents: 20_000_000, currency: "UAH", saved_cents: 4_000_000, place: { source: "account", id: j } });
 
-      // Without a place again: the currency stays, saved is what was entered by hand.
+      // Without a place again: the currency stays. The $300 entered by hand were dollars and are not read as ₴300:
+      // moving to another currency started the hand amount afresh.
       const off = (await api.patch(`/plan/goals/${g.id}`, { place: null }).expect(200)).body;
-      expect(off).toMatchObject({ target_cents: 20_000_000, currency: "UAH", saved_cents: 30_000, place: null });
+      expect(off).toMatchObject({ target_cents: 20_000_000, currency: "UAH", saved_cents: 0, place: null });
+      // A hand amount sent with leaving the place is stored, in the goal's currency.
+      await api.patch(`/plan/goals/${g.id}`, { place: { source: "account", id: j } }).expect(200);
+      const back = await api.patch(`/plan/goals/${g.id}`, { place: null, saved_cents: 100_000 }).expect(200);
+      expect(back.body).toMatchObject({ currency: "UAH", saved_cents: 100_000, place: null });
     });
 
     it("a place that is gone leaves the goal without a place, with what was entered by hand", async () => {
       const b = await binance(120_000);
+      // Created in a place, a goal keeps nothing by hand: a hand amount sent with it is not stored.
       const g = (await api.post("/plan/goals", { name: "Машина", target_cents: 500_000, saved_cents: 10_000, place: { source: "manual", id: b } }).expect(201)).body;
       expect(g.saved_cents).toBe(120_000);
       await api.del(`/plan/manual-balances/${b}`).expect(200);
       expect((await api.get("/plan/goals").expect(200)).body).toEqual([
-        { id: g.id, name: "Машина", target_cents: 500_000, saved_cents: 10_000, sort: 0, currency: "USD", place: null },
+        { id: g.id, name: "Машина", target_cents: 500_000, saved_cents: 0, sort: 0, currency: "USD", place: null },
       ]);
+      // An old goal moved to a place in its own currency keeps its hand amount for when the place is gone.
+      const b2 = await binance(50_000);
+      const old = (await api.post("/plan/goals", { name: "Подушка", target_cents: 100_000, saved_cents: 30_000 }).expect(201)).body;
+      await api.patch(`/plan/goals/${old.id}`, { place: { source: "manual", id: b2 } }).expect(200);
+      await api.del(`/plan/manual-balances/${b2}`).expect(200);
+      expect((await api.get("/plan/goals").expect(200)).body[1]).toMatchObject({ id: old.id, saved_cents: 30_000, place: null });
     });
 
     it("deleting a goal leaves the place's money as it was", async () => {

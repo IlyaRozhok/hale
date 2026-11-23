@@ -244,7 +244,10 @@ const goalShape = {
   name: z.string().trim().min(1).max(100),
   /** In minor units of the goal's currency: the place's own currency, dollars for a goal without a place. */
   target_cents: money.positive(),
-  /** Entered by hand; counts only for a goal without a place. */
+  /**
+   * Entered by hand, for a goal without a place only: with a place it is not stored (ЯМ5). Moving a goal to another
+   * currency starts it at 0 unless sent along with `place: null`.
+   */
   saved_cents: money.nonnegative(),
   sort: z.number().int().min(0).max(1_000_000),
   /**
