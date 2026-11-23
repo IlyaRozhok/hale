@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { TransactionDto } from "@hale/contracts";
-import { amountTone, formatDollars, formatOriginal, formatSignedMoney, formatSignedOriginal } from "../format";
+import { amountTone, cardTransferTitle, formatDollars, formatOriginal, formatSignedMoney, formatSignedOriginal } from "../format";
 import { categoryName, type CategoryList, typeLabel } from "../labels";
 import { categoryIcon } from "../categoryIcon";
 import { Icon } from "./Icon";
@@ -27,7 +27,7 @@ const ICON = 22;
 export function TxRow({ tx, onPress, first, last, markOutsideLimit = false, categories }: Props) {
   const foreign = tx.currency !== "UAH";
   const main = tx.amountUah !== null ? formatSignedMoney(tx.amountUah) : formatSignedOriginal(tx.amount, tx.currency);
-  const title = tx.counterName ?? tx.description;
+  const title = tx.counterName ?? cardTransferTitle(tx.description, tx.amount) ?? tx.description;
   // USDC exchanged for cash (task Б22): the dollars and the rate under the title, «свои» under the amount.
   const exchange = tx.exchange ? `${formatDollars(tx.exchange.usdc)} · курс ₴${tx.exchange.rate.toFixed(2)}` : null;
   const kind = exchange ?? tx.paymentName ?? (tx.type === "spend" ? categoryName(tx.category, categories) : typeLabel(tx.type));

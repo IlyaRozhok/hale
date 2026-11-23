@@ -24,10 +24,11 @@ describe("Activity list", () => {
     expect(screen.getByText("−₴85")).toBeTruthy();
     expect(screen.getByText("Кафе и рестораны")).toBeTruthy();
     expect(screen.getByText("−₴413")).toBeTruthy();
-    expect(screen.getByText("−$10.00")).toBeTruthy();
+    // whole dollars without empty cents (Я3)
+    expect(screen.getByText("−$10")).toBeTruthy();
     expect(screen.getByText("Подписки")).toBeTruthy();
     // no rate was known: the original amount stands alone, honestly
-    expect(screen.getByText("+€5.00")).toBeTruthy();
+    expect(screen.getByText("+€5")).toBeTruthy();
     expect(screen.getByText("курс неизвестен")).toBeTruthy();
     expect(screen.getByText("Доход")).toBeTruthy();
     expect(screen.getByText("Между своими")).toBeTruthy();
@@ -137,7 +138,9 @@ describe("Activity list", () => {
   it("an operation that paid a planned payment is named after it", async () => {
     const items = [txFixture({ id: 1, description: "545708****4563", type: "obligation", category: "transfer", paymentName: "Квартплата" })];
     await renderWith(<Activity />, fakeApi({ transactions: page(items) }));
-    expect(await screen.findByText("545708****4563")).toBeTruthy();
+    // A masked card number reads as words, not as a code (Я3).
+    expect(await screen.findByText("Перевод на карту ··4563")).toBeTruthy();
+    expect(screen.queryByText("545708****4563")).toBeNull();
     expect(screen.getByText("Квартплата")).toBeTruthy();
     expect(screen.queryByText("Обязательный платёж")).toBeNull();
   });
@@ -265,6 +268,37 @@ describe("Activity filters", () => {
     await fireEvent.press(await screen.findByRole("button", { name: "Сбросить" }));
     await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" }));
     expect(await screen.findByRole("button", { name: "Фильтры" })).toBeTruthy();
+  });
+
+  it("pressing the summary opens the same filters window (Я3)", async () => {
+    const transactions = summaryPage({ total: -2500, count: 2 });
+    await renderWith(<Activity now={now} route={{ params: { day: "2026-11-09", at: 1 } }} />, fakeApi({ transactions }));
+    const summary = await screen.findByRole("button", { name: "9 ноя: −₴25 · 2 операции" });
+    expect(summary.props.accessibilityHint).toBe("Открывает фильтры");
+    await fireEvent.press(summary);
+    expect(await screen.findByRole("button", { name: "С: 9 ноября 2026" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Показать" })).toBeTruthy();
+  });
+
+  it("on one day the day's total is said once, in the summary, not again over the list (Я3)", async () => {
+    const items = [
+      txFixture({ id: 1, description: "Первая", localDate: "2026-11-09", amount: -1000, amountUah: -1000 }),
+      txFixture({ id: 2, description: "Вторая", localDate: "2026-11-09", amount: -1500, amountUah: -1500 }),
+    ];
+    const transactions = jest.fn(async () => ({ items, nextCursor: null, dayTotals: { "2026-11-09": -2500 }, summary: { total: -2500, count: 2 } }));
+    await renderWith(<Activity now={now} route={{ params: { day: "2026-11-09", at: 1 } }} />, fakeApi({ transactions }));
+    expect(await screen.findByText("9 ноя: −₴25 · 2 операции")).toBeTruthy();
+    expect(screen.getByText("Сегодня, 9 ноя")).toBeTruthy();
+    expect(screen.queryByText("−₴25")).toBeNull();
+  });
+
+  it("a day total that differs from the summary stays over its day", async () => {
+    // A category over one day: the summary counts the category, the heading the whole day.
+    const items = [txFixture({ id: 1, description: "Первая", localDate: "2026-11-09", amount: -1000, amountUah: -1000 })];
+    const transactions = jest.fn(async () => ({ items, nextCursor: null, dayTotals: { "2026-11-09": -4000 }, summary: { total: -1000, count: 1 } }));
+    await renderWith(<Activity now={now} route={{ params: { day: "2026-11-09", at: 1 } }} />, fakeApi({ transactions }));
+    expect(await screen.findByText("9 ноя: −₴10 · 1 операция")).toBeTruthy();
+    expect(screen.getByText("−₴40")).toBeTruthy();
   });
 
   it("no categories in the window for income", async () => {

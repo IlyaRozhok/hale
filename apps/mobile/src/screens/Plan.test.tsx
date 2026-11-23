@@ -950,7 +950,7 @@ describe("Plan, Binance balance", () => {
     client.setQueryData(TODAY_KEY, todayFixture());
     await renderWith(<Plan />, fakeApi(withBalance()), client);
     await press("Binance");
-    expect(await screen.findByText("$2,700.00, ₴111,375")).toBeTruthy();
+    expect(await screen.findByText("$2,700, ₴111,375")).toBeTruthy();
   });
 
   it("saves a new value, zero included, and refreshes the balance and Today", async () => {
@@ -959,7 +959,7 @@ describe("Plan, Binance balance", () => {
     client.setQueryData(TODAY_KEY, todayFixture());
     await renderWith(<Plan />, api, client);
     await press("Binance");
-    await screen.findByText(/\$2,700\.00/);
+    await screen.findByText(/\$2,700, ₴/);
     await type("2 500,50");
     await waitFor(() => expect(api.patchManualBalance).toHaveBeenCalledWith(7, { amount: 250_050 }));
     expect(await screen.findByText("Баланс сохранён.")).toBeTruthy();
@@ -988,7 +988,7 @@ describe("Plan, Binance balance", () => {
     });
     await renderWith(<Plan />, api);
     await press("Binance");
-    await screen.findByText(/\$2,700\.00/);
+    await screen.findByText(/\$2,700, ₴/);
     await type("abc");
     expect(await screen.findByText("Проверьте сумму.")).toBeTruthy();
     expect(api.patchManualBalance).not.toHaveBeenCalled();
@@ -1026,7 +1026,7 @@ describe("Plan, set aside (an older server)", () => {
     const deposit = balanceFixture({ id: 10, name: "Депозит", amount: 50_000, currency: "EUR", counts_as_own: false });
     await renderWith(<Plan />, fakeApi({ manualBalances: jest.fn(async () => [solana(), deposit]) }));
     await openAside();
-    expect((await screen.findByRole("button", { name: "Депозит" })).props.accessibilityHint).toBe("€500.00");
+    expect((await screen.findByRole("button", { name: "Депозит" })).props.accessibilityHint).toBe("€500");
   });
 
   it("with nothing set aside «Отложено» still adds one", async () => {
