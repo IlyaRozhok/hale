@@ -5,7 +5,7 @@ import { tokens } from "@hale/tokens";
 import type { ObservationRef, TodayDto } from "@hale/contracts";
 import { LimitBar } from "../metal";
 import { limitState } from "../limitState";
-import { formatMoney, formatStamp, kyivDate, longDate, shiftDate, streakLabel } from "../format";
+import { dayMonth, formatMoney, formatStamp, kyivDate, longDate, shiftDate, streakLabel } from "../format";
 import { dayPhrase, observationRef, type PhraseAction } from "../dayPhrase";
 import {
   useAnswerCashCard,
@@ -57,6 +57,12 @@ type Props = {
   /** Test seam for the current moment. */
   now?: () => Date;
 };
+
+/** «15 дек». */
+function dayMonthText(iso: string): string {
+  const { day, month } = dayMonth(iso);
+  return `${day} ${month}`;
+}
 
 function freshnessLines(data: TodayDto, offlineSince: number | null, now: Date): string[] {
   const lines: string[] = [];
@@ -164,7 +170,24 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
   const notes = data.badCases.filter((b) => !b.id.startsWith("loan:"));
   // Task А24: the sand line about the pace. The note that the minus went over the bridge plan already names the day
   // the money runs out, so with it on the screen the line is left out (loan notes are not shown here).
-  const paceLine = data.pace && !notes.some((b) => b.id.startsWith("bridge_over_plan:")) ? paceLineText(data.pace, data.date) : null;
+  const pace = data.pace && !notes.some((b) => b.id.startsWith("bridge_over_plan:")) ? data.pace : null;
+  // Task ЯМ1: «До дохода» says one thing first — on a hard day the pace, then the step (holding the limit and what is
+  // left by the income); on a calm day only what is left. «останется» only when something is left at the limit;
+  // otherwise, and with no income date, the runway names its reserve as before.
+  const runway = data.runway ?? null;
+  const incomeOn = runway?.incomeOn ?? null;
+  const left = runway !== null && incomeOn !== null && runway.reserve > 0 ? runway.reserve : null;
+  // The limit the runway is drawn for: on the day the shortage came on it is tomorrow's new one, not the morning's (А23).
+  const runwayLimit = nextLimit ?? state.dailyLimit;
+  // «Если держаться лимита» only when there is a limit to hold.
+  const step = left !== null && runwayLimit > 0 ? left : null;
+  const paceLine = pace ? paceLineText(pace, data.date) : null;
+  const stepLine = pace && step !== null ? `Если держаться лимита — к доходу останется ${formatMoney(step)}.` : null;
+  const calmLine = !pace && step !== null ? `К доходу останется ${formatMoney(step)}` : null;
+  const calmUnder = calmLine ? `если держаться лимита ${formatMoney(runwayLimit)} в день` : null;
+  // A calm day with nothing to promise: the reserve in the words it always had, under the card's own header.
+  const reserveLine = !pace && calmLine === null && runway !== null ? `Запас к доходу ${formatMoney(runway.reserve)}` : null;
+  const incomeDay = incomeOn ? dayMonthText(incomeOn) : null;
   const noLimitNote = state.mode === "bridge" ? "Лимит появится, когда вы подтвердите план." : "До следующего дохода свободных денег нет.";
 
   const answer = (id: string, run: () => Promise<unknown>) => {
@@ -190,8 +213,10 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
     streak: data.streak ?? 0,
     observation: observation.data,
     categories,
-    // Task Я2: with the pace line or an overspent day on the screen the observation is not said, nor marked shown.
-    quiet: paceLine !== null || over,
+    // Tasks Я2, ЯМ1: on a hard day (the server sent the pace) or an overspent one the observation is not said, nor
+    // marked shown. With the note that the minus went over the bridge plan the pace line is left out, but that note
+    // carries the same bad news, so the day stays quiet.
+    quiet: data.pace !== undefined || over,
   });
   const noticed = phrase?.action.kind === "observation" ? observationRef(phrase.action.observation) : null;
   const act = (action: PhraseAction) => {
@@ -203,14 +228,12 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
       else if (o.category !== null) onOpenObservation?.(o.category, o.from, o.to);
     } else setSheet(action.kind);
   };
-  // Task Я2: once nothing is left the line names the limit once, as tomorrow's, not also as «из ₴Y».
-  const spentLine = state.leftToday <= 0
-    ? `потрачено ${formatMoney(spent)} · завтра снова ${formatMoney(state.dailyLimit)}`
-    : `потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}`;
+  // Tasks Я2, ЯМ1: once nothing is left the line says only tomorrow's limit (the owner's mockup); what was spent is in the calendar.
+  const spentLine = state.leftToday <= 0 ? `завтра снова ${formatMoney(state.dailyLimit)}` : `потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}`;
   const limitLabel = hasLimit && nextLimitNote
     ? `${heading} ${formatMoney(over ? 0 : shownLeft)}. ${nextLimitNote}`
     : hasLimit && state.leftToday <= 0
-    ? `${heading} ${formatMoney(0)}, потрачено ${formatMoney(spent)}, завтра снова ${formatMoney(state.dailyLimit)}`
+    ? `${heading} ${formatMoney(0)}, завтра снова ${formatMoney(state.dailyLimit)}`
     : hasLimit
       ? `${heading} ${formatMoney(shownLeft)}, из ${formatMoney(state.dailyLimit)} на день`
       : `${heading} ${formatMoney(shownLeft)}. ${noLimitNote}`;
@@ -260,11 +283,43 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
           </Glass>
         </Pressable>
 
-        {paceLine && data.pace && (
-          <Pressable accessibilityRole="button" accessibilityLabel={paceLine} accessibilityHint="Открывает темп трат" onPress={() => setSheet("pace")} style={styles.paceRow}>
-            <Text style={styles.paceText}>{paceLine}</Text>
-            <Icon name="chevron" color={color.limit.low} size={16} />
-          </Pressable>
+        {runway && (
+          <View style={styles.untilCard}>
+            {pace ? (
+              // A hard day: the top of the card opens «Темп трат»; the chart below keeps its own touch.
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={[incomeDay ? `До дохода, ${incomeDay}.` : null, paceLine, stepLine].filter(Boolean).join(" ")}
+                accessibilityHint="Открывает темп трат"
+                onPress={() => setSheet("pace")}
+                style={styles.untilTop}
+              >
+                {incomeDay && <UntilHead day={incomeDay} chevron />}
+                <Text style={styles.paceText}>{paceLine}</Text>
+                {/* One whole sentence (texts are not assembled from pieces), so the amount is not set in bold as in the mockup. */}
+                {stepLine && <Text style={styles.untilUnder}>{stepLine}</Text>}
+              </Pressable>
+            ) : (
+              incomeDay && (
+                <View
+                  accessible
+                  accessibilityLabel={[`До дохода, ${incomeDay}.`, calmLine && calmUnder ? `${calmLine}, ${calmUnder}.` : `${reserveLine}.`].join(" ")}
+                  style={styles.untilTop}
+                >
+                  <UntilHead day={incomeDay} chevron={false} />
+                  {calmLine && <Text style={styles.calmText}>{calmLine}</Text>}
+                  {calmUnder && <Text style={styles.untilUnder}>{calmUnder}</Text>}
+                  {reserveLine && <Text style={[styles.calmText, runway.reserve < 0 && styles.reserveShort]}>{reserveLine}</Text>}
+                </View>
+              )
+            )}
+            <Runway
+              runway={runway}
+              today={data.date}
+              showHead={incomeDay === null}
+              onPay={(id) => setPaying(data.upcoming.find((p) => p.id === id) ?? null)}
+            />
+          </View>
         )}
         {phrase && (
           <Pressable accessibilityRole="button" onPress={() => act(phrase.action)} style={styles.phraseRow}>
@@ -272,12 +327,6 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
           </Pressable>
         )}
         {noticed && <MarkShown date={data.date} which={noticed} mark={markShown} />}
-
-        {data.runway && (
-          <View style={styles.runway}>
-            <Runway runway={data.runway} today={data.date} onPay={(id) => setPaying(data.upcoming.find((p) => p.id === id) ?? null)} />
-          </View>
-        )}
 
         {state.mode === "bridge" && state.bridge?.confirmed && (
           <Pressable
@@ -299,7 +348,7 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
 
       {/* A loan to return opens the same list as in Plan (task Б7). */}
       {sheet === "loans" && <LoansSheet onClose={closeSheet} />}
-      {sheet === "pace" && data.pace && <PaceSheet pace={data.pace} dailyLimit={state.dailyLimit} today={data.date} onClose={closeSheet} />}
+      {sheet === "pace" && pace && <PaceSheet pace={pace} dailyLimit={runwayLimit} reserve={runway?.reserve ?? null} today={data.date} onClose={closeSheet} />}
       {sheet === "calendar" && (
         <LimitCalendar
           today={data.date}
@@ -400,6 +449,19 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
   );
 }
 
+/** «До дохода» on the left, the income's day on the right; with a chevron when the top of the card opens the pace. */
+function UntilHead({ day, chevron }: { day: string; chevron: boolean }) {
+  return (
+    <View style={styles.untilHead}>
+      <Text style={styles.untilTitle}>До дохода</Text>
+      <View style={styles.untilDate}>
+        <Text style={styles.untilTitle}>{day}</Text>
+        {chevron && <Icon name="chevron" color={color.list.chevron} size={14} />}
+      </View>
+    </View>
+  );
+}
+
 /** Tells the server, once a day, that the phrase showed this observation: from then on it is today's. */
 function MarkShown({ date, which, mark }: { date: string; which: ObservationRef; mark: ReturnType<typeof useMarkObservationShown> }) {
   // `mark` is new on each render and keeps its own once-a-day memory: the observation is what the effect follows.
@@ -418,9 +480,15 @@ const styles = StyleSheet.create({
   spentLine: { marginTop: space.xs },
   phraseRow: { minHeight: touchMin, justifyContent: "center", paddingHorizontal: space.xs },
   phrase: { ...type.body, color: color.fg.default },
-  paceRow: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: space.xs },
-  paceText: { ...type.body, color: color.limit.low, flex: 1 },
-  runway: { marginTop: space.sm },
+  untilCard: { borderRadius: radius.card, backgroundColor: color.card.fill, paddingHorizontal: space.md, paddingVertical: space.lg, gap: space.md },
+  untilTop: { minHeight: touchMin, gap: space.xs, paddingHorizontal: space.xs },
+  untilHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md },
+  untilDate: { flexDirection: "row", alignItems: "center", gap: 2 },
+  untilTitle: { ...type.label, fontWeight: "400", color: color.list.secondary, fontVariant: ["tabular-nums"] },
+  paceText: { ...type.title, fontSize: 18, color: color.limit.low },
+  calmText: { ...type.title, fontSize: 18, color: color.fg.default, fontVariant: ["tabular-nums"] },
+  untilUnder: { ...type.body, color: color.fg.muted, fontVariant: ["tabular-nums"] },
+  reserveShort: { color: color.limit.low },
   badge: {
     position: "absolute",
     top: space.xs,
