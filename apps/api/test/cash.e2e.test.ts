@@ -413,8 +413,10 @@ describe("a correction of the wallet keeps its sign when changed", () => {
     expect((await wallet()).balance).toBe(500_000);
   });
 
-  it("«Отдал в свои» stays negative when its note changes, and can still change its kind", async () => {
+  it("«Перевёл в свои» stays negative when its note changes, and can still change its kind", async () => {
     const { id } = (await op({ kind: "own_out", amount: 50_000 }).expect(201)).body as { id: number };
+    // Task Я5: without a note it is named as the app names the kind.
+    expect(await row(`SELECT description FROM transactions WHERE id=$1`, [id])).toEqual({ description: "Перевёл в свои" });
     expect((await api.patch(`/cash/operations/${id}`, { note: "Купил USDC" }).expect(200)).body.amount).toBe(-50_000);
     expect((await api.patch(`/cash/operations/${id}`, { kind: "own_out", amount: 60_000, note: "Купил USDC" }).expect(200)).body.amount).toBe(-60_000);
     expect((await wallet()).balance).toBe(440_000);

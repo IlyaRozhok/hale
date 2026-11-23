@@ -31,7 +31,8 @@ import { CASH_ACCOUNT_ID, cardTransferSql, walletBalance } from "./wallet";
 const DEFAULT_NOTE: Record<CashOperationKind, string> = {
   spend: "Покупка наличными",
   received: "Получил наличные",
-  own_out: "Отдал в свои",
+  // Task Я5: the app's name for the kind. Rows saved earlier keep «Отдал в свои»; nothing matches on this text.
+  own_out: "Перевёл в свои",
   exchange: "Обмен USDC на наличные",
 };
 /** An exchange is an own transfer like own_out; cash_exchanges tells them apart (task Б22). */
