@@ -360,6 +360,33 @@ describe("Plan, own and set-aside accounts (Д2б, variant А)", () => {
     expect((await screen.findByLabelText("Остаток, ₴")).props.value).toBe("0");
   });
 
+  it("puts the places at ₴0 under «Сейчас пусто» below the set-aside ones, with one quiet line at the end (ЯМ5)", async () => {
+    const empty: OwnMoneyItemDto = { kind: "manual", name: "Конверт", own: 0, currency: "UAH", amount: 0, id: 11, source: "manual", countsAsOwn: true };
+    await renderWith(<Plan />, fakeApi(newer(setAside(), [...items(), empty])));
+    await openAside();
+    const header = screen.getByText("Сейчас пусто");
+    expect(StyleSheet.flatten(header.props.style).color).toBe(tokens.color.list.secondary);
+    expect(inOrder(/^(SOL|Депозит Приват|Сейчас пусто|Конверт|Добавить счёт)$/)).toEqual(["SOL", "Депозит Приват", "Сейчас пусто", "Конверт", "Добавить счёт"]);
+    const line = screen.getByText("Пустые счета вернутся в «Счета», когда на них появятся деньги.");
+    expect(StyleSheet.flatten(line.props.style).color).toBe(tokens.color.list.secondary);
+    expect(inOrder(/^(Добавить счёт|Пустые счета вернутся.*)$/)).toEqual(["Добавить счёт", "Пустые счета вернутся в «Счета», когда на них появятся деньги."]);
+  });
+
+  it("with no place at ₴0 has neither «Сейчас пусто» nor the line (ЯМ5)", async () => {
+    await renderWith(<Plan />, fakeApi(newer()));
+    await openAside();
+    expect(screen.queryByText("Сейчас пусто")).toBeNull();
+    expect(screen.queryByText(/^Пустые счета/)).toBeNull();
+  });
+
+  it("an unstarted wallet and an unset Binance stand under «Сейчас пусто», still «не начат» and «не задан» (ЯМ5)", async () => {
+    const own = items().filter((i) => i.kind !== "binance" && i.kind !== "cash");
+    await renderWith(<Plan />, fakeApi({ ...newer(setAside(), own), manualBalances: jest.fn(async () => []), cash: jest.fn(async () => ({ started: false, start: null, balance: 0 })) }));
+    await openAside();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Наличные" }).props.accessibilityHint).toBe("не начат"));
+    expect(inOrder(/^(Депозит Приват|Сейчас пусто|Наличные|Binance|Добавить счёт)$/)).toEqual(["Депозит Приват", "Сейчас пусто", "Наличные", "Binance", "Добавить счёт"]);
+  });
+
   it("keeps an unset Binance and an unstarted wallet in «Отложено», not in «Счета»", async () => {
     const own = items().filter((i) => i.kind !== "binance" && i.kind !== "cash");
     await renderWith(<Plan />, fakeApi({ ...newer(setAside(), own), manualBalances: jest.fn(async () => []), cash: jest.fn(async () => ({ started: false, start: null, balance: 0 })) }));
@@ -475,6 +502,9 @@ describe("Plan, own and set-aside accounts (Д2б, variant А)", () => {
     await fireEvent.press(await screen.findByRole("button", { name: "Отложено" }));
     expect(await screen.findByRole("button", { name: "Добавить в отложенное" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Добавить счёт" })).toBeNull();
+    // Its places at zero stay in «Счета»: nothing here says they come back there.
+    expect(screen.queryByText("Сейчас пусто")).toBeNull();
+    expect(screen.queryByText(/^Пустые счета/)).toBeNull();
   });
 });
 
@@ -773,18 +803,53 @@ describe("Plan, obligatory payments", () => {
     await waitFor(() => expect(api.patchPayment).toHaveBeenCalledWith(11, { name: "Страховка", amount: 60_000, currency: "UAH", due_on: "2026-12-10" }));
   });
 
-  it("deletes each by its own kind, after asking", async () => {
+  it("has no «Изменить / Удалить» under the rows: a row is a button with a chevron that opens its form (ЯМ5)", async () => {
+    await renderWith(<Plan />, fakeApi(withBoth()));
+    await press("Платежи");
+    const row = await screen.findByRole("button", { name: "Изменить: Квартира" });
+    expect(row.props.accessibilityHint).toBe("₴17,000, каждый месяц, 26 числа");
+    expect(within(row).getByTestId("row-chevron")).toBeTruthy();
+    expect(StyleSheet.flatten(row.props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+    expect(screen.queryByText("Изменить")).toBeNull();
+    expect(screen.queryByText("Удалить")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Удалить/ })).toBeNull();
+    await fireEvent.press(row);
+    expect((await screen.findByLabelText("Название")).props.value).toBe("Квартира");
+    expect(screen.getByRole("button", { name: "Сохранить платёж" })).toBeTruthy();
+  });
+
+  it("deletes each by its own kind from its form, quietly, after the same question", async () => {
     const alert = jest.spyOn(Alert, "alert").mockImplementation(noop);
     const api = fakeApi(withBoth());
     await renderWith(<Plan />, api);
     await press("Платежи");
-    await press("Удалить: Квартира");
+    await press("Изменить: Квартира");
+    const remove = await screen.findByRole("button", { name: "Удалить платёж" });
+    // Quiet grey, as in Я6: red is only for going over the limit and for errors.
+    expect(StyleSheet.flatten(within(remove).getByText("Удалить платёж").props.style).color).toBe(tokens.color.fg.muted);
+    await fireEvent.press(remove);
+    expect(alert.mock.calls[0]![0]).toBe("Удалить: Квартира?");
+    expect(alert.mock.calls[0]![1]).toBe("Неоплаченные платежи исчезнут из плана, оплаченные останутся.");
+    expect(alert.mock.calls[0]![2]!.map((b) => b.text)).toEqual(["Оставить", "Удалить"]);
+    expect(api.deleteRecurring).not.toHaveBeenCalled();
     await act(async () => alert.mock.calls[0]![2]!.find((b) => b.style === "destructive")!.onPress!());
     await waitFor(() => expect(api.deleteRecurring).toHaveBeenCalledWith(3));
-    await press("Удалить: Страховка");
+    await waitFor(() => expect(screen.queryByLabelText("Какого числа")).toBeNull());
+    await press("Изменить: Страховка");
+    await press("Удалить платёж");
+    expect(alert.mock.calls[1]![0]).toBe("Удалить: Страховка?");
+    expect(alert.mock.calls[1]![1]).toBe("Платёж исчезнет из плана.");
     await act(async () => alert.mock.calls[1]![2]!.find((b) => b.style === "destructive")!.onPress!());
     await waitFor(() => expect(api.deletePayment).toHaveBeenCalledWith(11));
     alert.mockRestore();
+  });
+
+  it("offers no «Удалить платёж» in the form of a new payment", async () => {
+    await renderWith(<Plan />, fakeApi());
+    await press("Платежи");
+    await press("Новый платёж");
+    await screen.findByLabelText("Название");
+    expect(screen.queryByRole("button", { name: "Удалить платёж" })).toBeNull();
   });
 
   it("says so when a save fails, and keeps the form", async () => {
@@ -850,9 +915,19 @@ describe("Plan, installments", () => {
     await fireEvent.changeText(screen.getByLabelText("Платёж в месяц"), "1500");
     await press("Сохранить рассрочку");
     await waitFor(() => expect(api.patchInstallment).toHaveBeenCalledWith("Телефон", { name: "Телефон", amount: 150_000, currency: "UAH" }));
-    await press("Удалить: Телефон");
+    await waitFor(() => expect(screen.queryByLabelText("Платёж в месяц")).toBeNull());
+    expect(screen.queryByRole("button", { name: /^Удалить/ })).toBeNull();
+    const row = screen.getByRole("button", { name: "Изменить: Телефон" });
+    expect(within(row).getByTestId("row-chevron")).toBeTruthy();
+    await fireEvent.press(row);
+    const remove = await screen.findByRole("button", { name: "Удалить рассрочку" });
+    expect(StyleSheet.flatten(within(remove).getByText("Удалить рассрочку").props.style).color).toBe(tokens.color.fg.muted);
+    await fireEvent.press(remove);
+    expect(alert.mock.calls[0]![0]).toBe("Удалить: Телефон?");
+    expect(alert.mock.calls[0]![1]).toBe("Оставшиеся платежи исчезнут из плана, оплаченные останутся.");
     await act(async () => alert.mock.calls[0]![2]!.find((b) => b.style === "destructive")!.onPress!());
     await waitFor(() => expect(api.deleteInstallment).toHaveBeenCalledWith("Телефон"));
+    await waitFor(() => expect(screen.queryByLabelText("Платёж в месяц")).toBeNull());
     alert.mockRestore();
   });
 });
@@ -917,9 +992,9 @@ describe("Plan, goals", () => {
     const api = fakeApi(withGoal());
     await renderWith(<Plan />, api, client);
     await press("Цели");
-    await fireEvent.press(await screen.findByRole("button", { name: "Изменить накопленное: Подушка" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить: Подушка" }));
     await fireEvent.changeText(screen.getByLabelText("Накоплено, $"), "0");
-    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить цель" }));
     await waitFor(() => expect(api.patchGoal).toHaveBeenCalledWith(1, { saved_cents: 0 }));
     await waitFor(() => expect(api.goals.mock.calls.length).toBeGreaterThan(1));
     await waitFor(() => expect(api.today.mock.calls.length).toBeGreaterThan(1));
@@ -932,13 +1007,13 @@ describe("Plan, goals", () => {
     });
     await renderWith(<Plan />, fakeApi({ ...withGoal(), patchGoal }));
     await press("Цели");
-    await fireEvent.press(await screen.findByRole("button", { name: "Изменить накопленное: Подушка" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить: Подушка" }));
     await fireEvent.changeText(screen.getByLabelText("Накоплено, $"), "abc");
-    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить цель" }));
     expect(await screen.findByText("Проверьте сумму.")).toBeTruthy();
     expect(patchGoal).not.toHaveBeenCalled();
     await fireEvent.changeText(screen.getByLabelText("Накоплено, $"), "100");
-    await fireEvent.press(screen.getByRole("button", { name: "Сохранить" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить цель" }));
     expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
     expect(screen.getByLabelText("Накоплено, $")).toBeTruthy();
   });
@@ -948,13 +1023,30 @@ describe("Plan, goals", () => {
     const api = fakeApi(withGoal());
     await renderWith(<Plan />, api);
     await press("Цели");
-    await fireEvent.press(await screen.findByRole("button", { name: "Удалить цель: Подушка" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить: Подушка" }));
+    const remove = await screen.findByRole("button", { name: "Удалить цель" });
+    expect(StyleSheet.flatten(within(remove).getByText("Удалить цель").props.style).color).toBe(tokens.color.fg.muted);
+    await fireEvent.press(remove);
     expect(api.deleteGoal).not.toHaveBeenCalled();
     const buttons = alert.mock.calls[0]![2] as { text: string; style?: string; onPress?: () => void }[];
     expect(buttons.find((b) => b.style === "cancel")).toBeTruthy();
     buttons.find((b) => b.style === "destructive")!.onPress!();
     await waitFor(() => expect(api.deleteGoal).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(screen.queryByLabelText("Накоплено, $")).toBeNull());
     alert.mockRestore();
+  });
+
+  it("has no «Изменить накопленное / Удалить» under a goal: the row opens its form, with the saved amount filled in (ЯМ5)", async () => {
+    await renderWith(<Plan />, fakeApi(withGoal()));
+    await press("Цели");
+    const row = await screen.findByRole("button", { name: "Изменить: Подушка" });
+    expect(within(row).getByTestId("row-chevron")).toBeTruthy();
+    expect(within(row).getByLabelText("Прогресс: 10%")).toBeTruthy();
+    expect(screen.queryByText("Изменить накопленное")).toBeNull();
+    expect(screen.queryByText("Удалить")).toBeNull();
+    expect(screen.queryByLabelText("Накоплено, $")).toBeNull();
+    await fireEvent.press(row);
+    expect((await screen.findByLabelText("Накоплено, $")).props.value).toBe("500");
   });
 
   it("says so when goals cannot be loaded", async () => {

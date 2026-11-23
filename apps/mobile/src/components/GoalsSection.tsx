@@ -1,25 +1,38 @@
 import { useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, StyleSheet, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { GoalDto } from "@hale/contracts";
 import { ErrorText } from "./ErrorText";
 import { useCreateGoal, useDeleteGoal, useGoals, usePatchGoal } from "../api/queries";
 import { formatDollars, goalPercent, parseBalance } from "../format";
-import { Chip } from "./Chip";
+import { DeleteAction, EntryRow } from "./EntryRow";
 import { Field } from "./Field";
 import { PrimaryButton } from "./PrimaryButton";
 import { ProgressBar } from "./ProgressBar";
 import { Sheet } from "./Sheet";
 
-const { color, space, touchMin, type } = tokens;
+const { space } = tokens;
 
 const SAVE_FAILED = "Не удалось сохранить. Попробуйте ещё раз.";
 
+/** A goal as a row: saved of target and progress; a touch opens its form (ЯМ5). */
 function GoalItem({ goal }: { goal: GoalDto }) {
+  const [editing, setEditing] = useState(false);
+  return (
+    <View style={styles.item}>
+      <EntryRow title={goal.name} detail={`${formatDollars(goal.saved_cents)} из ${formatDollars(goal.target_cents)}`} onPress={() => setEditing(true)}>
+        <ProgressBar percent={goalPercent(goal.saved_cents, goal.target_cents)} />
+      </EntryRow>
+      {editing && <GoalEditForm goal={goal} onClose={() => setEditing(false)} />}
+    </View>
+  );
+}
+
+/** A goal's form: the saved amount, as before, and a quiet «Удалить цель» under it. */
+function GoalEditForm({ goal, onClose }: { goal: GoalDto; onClose: () => void }) {
   const patch = usePatchGoal();
   const remove = useDeleteGoal();
-  const [editing, setEditing] = useState(false);
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState(String(goal.saved_cents / 100));
   const [message, setMessage] = useState<string | null>(null);
 
   const save = () => {
@@ -29,16 +42,7 @@ function GoalItem({ goal }: { goal: GoalDto }) {
       return;
     }
     setMessage(null);
-    patch.mutate(
-      { id: goal.id, patch: { saved_cents: cents } },
-      {
-        onSuccess: () => {
-          setEditing(false);
-          setAmount("");
-        },
-        onError: () => setMessage(SAVE_FAILED),
-      },
-    );
+    patch.mutate({ id: goal.id, patch: { saved_cents: cents } }, { onSuccess: onClose, onError: () => setMessage(SAVE_FAILED) });
   };
 
   const confirmRemove = () =>
@@ -47,38 +51,17 @@ function GoalItem({ goal }: { goal: GoalDto }) {
       {
         text: "Удалить",
         style: "destructive",
-        onPress: () => remove.mutate(goal.id, { onError: () => setMessage(SAVE_FAILED) }),
+        onPress: () => remove.mutate(goal.id, { onSuccess: onClose, onError: () => setMessage(SAVE_FAILED) }),
       },
     ]);
 
   return (
-    <View style={styles.item}>
-      <Text style={styles.name}>{goal.name}</Text>
-      <Text style={styles.muted}>{`${formatDollars(goal.saved_cents)} из ${formatDollars(goal.target_cents)}`}</Text>
-      <ProgressBar percent={goalPercent(goal.saved_cents, goal.target_cents)} />
-      {editing ? (
-        <>
-          <Field label="Накоплено, $" keyboardType="decimal-pad" value={amount} onChangeText={setAmount} />
-          <View style={styles.actions}>
-            <Chip label="Сохранить" onPress={save} disabled={patch.isPending} />
-          </View>
-        </>
-      ) : (
-        <View style={styles.actions}>
-          <TextButton label="Изменить накопленное" a11y={`Изменить накопленное: ${goal.name}`} onPress={() => setEditing(true)} />
-          <TextButton label="Удалить" a11y={`Удалить цель: ${goal.name}`} onPress={confirmRemove} />
-        </View>
-      )}
+    <Sheet title={goal.name} onClose={onClose}>
+      <Field label="Накоплено, $" keyboardType="decimal-pad" value={amount} onChangeText={setAmount} />
       {message ? <ErrorText>{message}</ErrorText> : null}
-    </View>
-  );
-}
-
-function TextButton({ label, a11y, onPress }: { label: string; a11y: string; onPress: () => void }) {
-  return (
-    <Pressable accessibilityRole="button" accessibilityLabel={a11y} onPress={onPress} style={styles.textButton}>
-      <Text style={styles.textButtonLabel}>{label}</Text>
-    </Pressable>
+      <PrimaryButton label="Сохранить цель" onPress={save} disabled={patch.isPending} />
+      <DeleteAction label="Удалить цель" disabled={patch.isPending || remove.isPending} onPress={confirmRemove} />
+    </Sheet>
   );
 }
 
@@ -137,10 +120,5 @@ function GoalForm({ onClose }: { onClose: () => void }) {
 }
 
 const styles = StyleSheet.create({
-  item: { gap: space.xs, paddingBottom: space.sm },
-  name: { ...type.body, color: color.fg.default },
-  muted: { ...type.body, color: color.fg.muted },
-  actions: { flexDirection: "row", gap: space.lg, alignItems: "center" },
-  textButton: { minHeight: touchMin, justifyContent: "center" },
-  textButtonLabel: { ...type.label, color: color.fg.muted },
+  item: { paddingBottom: space.sm },
 });

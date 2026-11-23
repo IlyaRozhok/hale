@@ -1,9 +1,19 @@
+import type { ReactNode } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
+import { Icon } from "./Icon";
 
 const { color, space, touchMin, type } = tokens;
 
-type Props = { title: string; detail: string; onEdit: () => void; onDelete: () => void };
+type Props = {
+  title: string;
+  /** The quiet line under the name: its figures, as «₴350, каждый месяц, 6 числа». */
+  detail?: string;
+  /** Anything else under the name, such as a goal's progress. */
+  children?: ReactNode;
+  /** Opens its form, where it is changed or deleted (ЯМ5). */
+  onPress: () => void;
+};
 
 /** Deleting from the plan changes the limit, so it asks first. */
 export function askDelete(title: string, note: string, onDelete: () => void): void {
@@ -13,33 +23,36 @@ export function askDelete(title: string, note: string, onDelete: () => void): vo
   ]);
 }
 
-/** One thing in the plan: what it is, its figures and what can be done with it. */
-export function EntryRow({ title, detail, onEdit, onDelete }: Props) {
+/** One thing in the plan: what it is and its figures; a touch opens its form, the chevron says so. */
+export function EntryRow({ title, detail, children, onPress }: Props) {
   return (
-    <View style={styles.row}>
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.detail}>{detail}</Text>
-      <View style={styles.actions}>
-        <TextAction label="Изменить" a11y={`Изменить: ${title}`} onPress={onEdit} />
-        <TextAction label="Удалить" a11y={`Удалить: ${title}`} onPress={onDelete} />
+    <Pressable accessibilityRole="button" accessibilityLabel={`Изменить: ${title}`} accessibilityHint={detail} onPress={onPress} style={styles.row}>
+      <View style={styles.text}>
+        <Text style={styles.title}>{title}</Text>
+        {detail ? <Text style={styles.detail}>{detail}</Text> : null}
+        {children}
       </View>
-    </View>
+      <View testID="row-chevron">
+        <Icon name="chevron" color={color.list.chevron} size={16} />
+      </View>
+    </Pressable>
   );
 }
 
-function TextAction({ label, a11y, onPress }: { label: string; a11y: string; onPress: () => void }) {
+/** «Удалить платёж» under a form: quiet grey as in Я6, since red is only for going over the limit and for errors. */
+export function DeleteAction({ label, disabled, onPress }: { label: string; disabled?: boolean; onPress: () => void }) {
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={a11y} onPress={onPress} style={styles.action}>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} style={styles.action}>
       <Text style={styles.actionText}>{label}</Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { gap: 2 },
+  row: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.md },
+  text: { flex: 1, gap: 2 },
   title: { ...type.body, color: color.fg.default },
   detail: { ...type.caption, color: color.fg.muted },
-  actions: { flexDirection: "row", gap: space.xl },
-  action: { minHeight: touchMin, justifyContent: "center" },
+  action: { minHeight: touchMin, justifyContent: "center", alignSelf: "center" },
   actionText: { ...type.label, color: color.fg.muted },
 });

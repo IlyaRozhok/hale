@@ -7,7 +7,7 @@ import { isIsoDate, parseHryvnias, shortDate } from "../format";
 import { moneyIn } from "../planSummary";
 import { CurrencyChoice } from "./CurrencyChoice";
 import { DateField } from "./DateField";
-import { EntryRow, askDelete } from "./EntryRow";
+import { DeleteAction, EntryRow, askDelete } from "./EntryRow";
 import { ErrorText } from "./ErrorText";
 import { Field } from "./Field";
 import { PrimaryButton } from "./PrimaryButton";
@@ -23,8 +23,6 @@ type Editing = { monthly: RecurringDto } | { once: ScheduledPaymentDto } | "new"
 export function PaymentsSheet({ onClose }: { onClose: () => void }) {
   const recurring = useRecurring();
   const payments = usePayments();
-  const removeMonthly = useDeleteRecurring();
-  const removeOnce = useDeletePayment();
   const [editing, setEditing] = useState<Editing | null>(null);
 
   const monthly = recurring.data?.filter((r) => r.active && r.kind === "obligation") ?? [];
@@ -39,8 +37,7 @@ export function PaymentsSheet({ onClose }: { onClose: () => void }) {
           key={`m${r.id}`}
           title={r.name}
           detail={`${moneyIn(r.amount, r.currency)}, каждый месяц, ${r.day_of_month} числа`}
-          onEdit={() => setEditing({ monthly: r })}
-          onDelete={() => askDelete(r.name, "Неоплаченные платежи исчезнут из плана, оплаченные останутся.", () => removeMonthly.mutate(r.id, { onError: deleteFailed }))}
+          onPress={() => setEditing({ monthly: r })}
         />
       ))}
       {once.map((p) => (
@@ -48,8 +45,7 @@ export function PaymentsSheet({ onClose }: { onClose: () => void }) {
           key={`o${p.id}`}
           title={p.name}
           detail={`${moneyIn(p.amount, p.currency)}, срок ${shortDate(p.due_on)}`}
-          onEdit={() => setEditing({ once: p })}
-          onDelete={() => askDelete(p.name, "Платёж исчезнет из плана.", () => removeOnce.mutate(p.id, { onError: deleteFailed }))}
+          onPress={() => setEditing({ once: p })}
         />
       ))}
       <PrimaryButton label="Новый платёж" onPress={() => setEditing("new")} />
@@ -66,6 +62,8 @@ function PaymentForm({ editing, onClose }: { editing: Editing; onClose: () => vo
   const patchMonthly = usePatchRecurring();
   const createOnce = useCreatePayment();
   const patchOnce = usePatchPayment();
+  const removeMonthly = useDeleteRecurring();
+  const removeOnce = useDeletePayment();
   const [name, setName] = useState(row?.name ?? "");
   const [amount, setAmount] = useState(row ? String(row.amount / 100) : "");
   const [currency, setCurrency] = useState(row?.currency ?? "UAH");
@@ -103,6 +101,18 @@ function PaymentForm({ editing, onClose }: { editing: Editing; onClose: () => vo
     }
   };
 
+  // Deleting asks the same question it asked under the row, and closes the form once done.
+  const remove = () => {
+    if (editing === "new") return;
+    if ("monthly" in editing) {
+      const r = editing.monthly;
+      askDelete(r.name, "Неоплаченные платежи исчезнут из плана, оплаченные останутся.", () => removeMonthly.mutate(r.id, { onSuccess: onClose, onError: deleteFailed }));
+    } else {
+      const p = editing.once;
+      askDelete(p.name, "Платёж исчезнет из плана.", () => removeOnce.mutate(p.id, { onSuccess: onClose, onError: deleteFailed }));
+    }
+  };
+
   return (
     <Sheet title={row ? row.name : "Новый платёж"} onClose={onClose}>
       <Field label="Название" value={name} onChangeText={setName} />
@@ -128,6 +138,7 @@ function PaymentForm({ editing, onClose }: { editing: Editing; onClose: () => vo
       )}
       {message && <ErrorText>{message}</ErrorText>}
       <PrimaryButton label="Сохранить платёж" disabled={busy} onPress={() => void save()} />
+      {row && <DeleteAction label="Удалить платёж" disabled={busy || removeMonthly.isPending || removeOnce.isPending} onPress={remove} />}
     </Sheet>
   );
 }
