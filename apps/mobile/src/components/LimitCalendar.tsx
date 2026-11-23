@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { CalendarDayDto } from "@hale/contracts";
 import { useCalendar } from "../api/queries";
-import { dateLabel, formatMoney, monthGrid, monthTitle, streakLabel } from "../format";
+import { dayMonthLong, formatMoney, monthGrid, monthTitle, shortDate, streakLabel } from "../format";
 import { ErrorText } from "./ErrorText";
 import { PrimaryButton } from "./PrimaryButton";
 import { Sheet } from "./Sheet";
@@ -37,13 +37,17 @@ const LEGEND = [
   { fill: color.fg.subtle, text: WORDS.over },
 ];
 
-const dayName = (d: CalendarDayDto) => dateLabel(d.date).replace(/ \d{4}$/, "");
+/** The full date without the year, «2 ноября», for VoiceOver. */
+const dayName = (d: CalendarDayDto) => dayMonthLong(d.date);
 
-/** The day the shortage mode came on is not rated: what was spent before the new limit is not set against it. */
-const figures = (d: CalendarDayDto) =>
+/**
+ * What was spent on the day, after the day's name: «2 ноя» on the screen, the full date for VoiceOver.
+ * The day the shortage mode came on is not rated: what was spent before the new limit is not set against it.
+ */
+const figures = (d: CalendarDayDto, name: string) =>
   d.shortageStart
-    ? `${dayName(d)}: потрачено ${formatMoney(d.spent)}. В этот день изменился лимит, день без оценки.`
-    : `${dayName(d)}: потрачено ${formatMoney(d.spent)}${d.limit !== null && d.limit > 0 ? ` из ${formatMoney(d.limit)}` : ", лимита не было"}`;
+    ? `${name}: потрачено ${formatMoney(d.spent)}. В этот день изменился лимит, день без оценки.`
+    : `${name}: потрачено ${formatMoney(d.spent)}${d.limit !== null && d.limit > 0 ? ` из ${formatMoney(d.limit)}` : ", лимита не было"}`;
 
 /** "2026-11" and a number of months later. */
 function shiftMonth(month: string, by: number): string {
@@ -110,7 +114,9 @@ export function LimitCalendar({ today, streak, onClose, onOpenDay }: Props) {
       )}
       {picked && (
         <View>
-          <Text style={styles.detail}>{figures(picked)}</Text>
+          <Text style={styles.detail} accessibilityLabel={figures(picked, dayName(picked))}>
+            {figures(picked, shortDate(picked.date))}
+          </Text>
           <Pressable accessibilityRole="button" accessibilityLabel="Операции дня" onPress={() => onOpenDay(picked.date)} style={styles.link}>
             <Text style={styles.linkText}>Операции дня</Text>
           </Pressable>

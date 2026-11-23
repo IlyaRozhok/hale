@@ -159,6 +159,15 @@ describe("Settings, bank connection", () => {
     expect(screen.queryByText("Синхронизации с банком ещё не было.")).toBeNull();
   });
 
+  it("writes an earlier sync with the short date (Я11)", async () => {
+    const at = new Date();
+    at.setDate(at.getDate() - 3);
+    at.setHours(23, 40, 0, 0);
+    await renderWith(<Settings onClose={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ syncedAt: at.toISOString() })) }));
+    expect(await screen.findByText(/^Банк обновлялся \d{1,2} [а-я]{3}( \d{4})?, 23:40$/)).toBeTruthy();
+    expect(screen.queryByText(/\d\d\.\d\d/)).toBeNull();
+  });
+
   it("says so when there has been no sync yet", async () => {
     await renderWith(<Settings onClose={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ syncedAt: null })) }));
     expect(await screen.findByText("Синхронизации с банком ещё не было.")).toBeTruthy();

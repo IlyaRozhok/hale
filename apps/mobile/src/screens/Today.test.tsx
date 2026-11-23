@@ -632,7 +632,8 @@ describe("Today, normal mode", () => {
       it("tapped, tells what was spent and why the day is not rated", async () => {
         await openIt({ calendar });
         await fireEvent.press(screen.getByRole("button", { name: "2 ноября: изменился лимит" }));
-        expect(screen.getByText("2 ноября: потрачено ₴11,000. В этот день изменился лимит, день без оценки.")).toBeTruthy();
+        expect(screen.getByText("2 ноя: потрачено ₴11,000. В этот день изменился лимит, день без оценки.")).toBeTruthy();
+        expect(screen.getByLabelText("2 ноября: потрачено ₴11,000. В этот день изменился лимит, день без оценки.")).toBeTruthy();
         expect(screen.queryByText(/лимита не было/)).toBeNull();
       });
     });
@@ -699,9 +700,9 @@ describe("Today, normal mode", () => {
     it("tells a day's figures when it is tapped", async () => {
       await openIt();
       await fireEvent.press(screen.getByRole("button", { name: "2 ноября: выше лимита" }));
-      expect(screen.getByText("2 ноября: потрачено ₴1,200 из ₴1,000")).toBeTruthy();
+      expect(screen.getByText("2 ноя: потрачено ₴1,200 из ₴1,000")).toBeTruthy();
       await fireEvent.press(screen.getByRole("button", { name: "4 ноября: лимита не было" }));
-      expect(screen.getByText("4 ноября: потрачено ₴50, лимита не было")).toBeTruthy();
+      expect(screen.getByText("4 ноя: потрачено ₴50, лимита не было")).toBeTruthy();
     });
 
     it("offers a day's operations only once a day is picked, for any day", async () => {
@@ -1702,7 +1703,7 @@ describe("Today, accessibility and old data", () => {
     const api = fakeApi({ today: jest.fn(() => new Promise<never>(() => undefined)) });
     const now = () => new Date("2026-11-02T10:00:00Z");
     await renderWith(<Today onOpenActivity={noop} now={now} />, api, client);
-    expect(await screen.findByText("Показаны данные за 01.11, не за сегодня.")).toBeTruthy();
+    expect(await screen.findByText("Показаны данные за 1 ноя, не за сегодня.")).toBeTruthy();
   });
 
   it("a failed first load offers a retry", async () => {
@@ -1747,17 +1748,18 @@ describe("Today, loading and offline", () => {
         throw new NetworkError();
       }),
     });
-    await renderWith(<Today onOpenActivity={noop} />, api, client);
+    const now = () => new Date(2026, 10, 3, 12, 0);
+    await renderWith(<Today onOpenActivity={noop} now={now} />, api, client);
     expect(await screen.findByText(/Нет связи/)).toBeTruthy();
-    expect(screen.getByText(/08:30/)).toBeTruthy();
+    expect(screen.getByText(/Показаны данные от 2 ноя, 08:30\./)).toBeTruthy();
     expect(screen.getByText("₴720")).toBeTruthy();
     expect(levelOf()).toBe("bar:ok:0.72");
   });
 
   it("a stale bank sync keeps the limit and shows when it last updated", async () => {
     const stale = todayFixture({ syncStale: true, syncedAt: new Date(2026, 10, 1, 21, 10).toISOString() });
-    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => stale) }));
-    expect(await screen.findByText(/01\.11 21:10/)).toBeTruthy();
+    await renderWith(<Today onOpenActivity={noop} now={() => new Date(2026, 10, 3, 12, 0)} />, fakeApi({ today: jest.fn(async () => stale) }));
+    expect(await screen.findByText(/Банк обновлялся 1 ноя, 21:10\. Показаны последние данные\./)).toBeTruthy();
     expect(screen.getByText("₴720")).toBeTruthy();
     expect(levelOf()).toBe("bar:ok:0.72");
   });

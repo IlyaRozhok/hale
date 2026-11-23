@@ -66,7 +66,14 @@ describe("dates", () => {
   it("formats a stamp as local time today, or date and time otherwise", () => {
     const now = new Date(2026, 10, 2, 18, 0);
     expect(formatStamp(new Date(2026, 10, 2, 9, 5).toISOString(), now)).toBe("сегодня 09:05");
-    expect(formatStamp(new Date(2026, 10, 1, 23, 40).toISOString(), now)).toBe("01.11 23:40");
+    expect(formatStamp(new Date(2026, 10, 1, 23, 40).toISOString(), now)).toBe("1 ноя, 23:40");
+  });
+
+  it("writes another day as the one short date of the app, with the year only when it differs (Я11)", () => {
+    const now = new Date(2026, 11, 6, 18, 0);
+    expect(formatStamp(new Date(2026, 11, 5, 7, 3).toISOString(), now)).toBe("5 дек, 07:03");
+    expect(formatStamp(new Date(2025, 11, 31, 23, 59).toISOString(), now)).toBe("31 дек 2025, 23:59");
+    expect(formatStamp(new Date(2025, 11, 6, 9, 5).toISOString(), now)).toBe("6 дек 2025, 09:05");
   });
 });
 
