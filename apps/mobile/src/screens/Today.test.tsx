@@ -495,10 +495,12 @@ describe("Today, normal mode", () => {
       expect(await screen.findByText("Пришло на Binance?")).toBeTruthy();
     });
 
-    it("with nothing to answer it is quiet and says so", async () => {
+    it("with nothing to answer it stays in its place but opens nothing (Я9)", async () => {
       await renderWith(<Today onOpenActivity={noop} />, fakeApi());
-      await fireEvent.press(await screen.findByRole("button", { name: "Вопросы" }));
-      expect(await screen.findByText("Вопросов нет")).toBeTruthy();
+      const bell = await screen.findByLabelText("Вопросов нет");
+      expect(screen.queryByRole("button", { name: /^Вопрос/ })).toBeNull();
+      await fireEvent.press(bell);
+      expect(screen.queryByText("Осталось разобрать")).toBeNull();
     });
   });
 
@@ -1244,6 +1246,33 @@ describe("Today, questions", () => {
     await waitFor(() => expect(api.labelRecipient).toHaveBeenCalledWith("0123456789abcdef", "one_off"));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Вопросы: 1" })).toBeNull());
     expect(onOpenActivity).not.toHaveBeenCalled();
+    // The last card answered: the list closes rather than stays open and empty (Я9).
+    await waitFor(() => expect(screen.queryByText("Осталось разобрать")).toBeNull());
+  });
+
+  it("the last one-tap answer closes the list (Я9)", async () => {
+    const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
+    const api = fakeApi({ today: jest.fn(async () => todayFixture({ questions })) });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await openQuestions();
+    expect(await screen.findByText("Осталось разобрать")).toBeTruthy();
+    await fireEvent.press(await screen.findByText("Да, пришло"));
+    await waitFor(() => expect(api.confirmIncome).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText("Осталось разобрать")).toBeNull());
+    expect(screen.getByLabelText("Вопросов нет")).toBeTruthy();
+  });
+
+  it("closes the open list when a refresh brings no questions (Я9)", async () => {
+    const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
+    const today = jest.fn(async () => todayFixture({ questions }));
+    const client = makeClient();
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today }), client);
+    await openQuestions();
+    expect(await screen.findByText("Пришло на Binance?")).toBeTruthy();
+    today.mockImplementation(async () => todayFixture());
+    await act(async () => void client.refetchQueries({ queryKey: ["today"] }));
+    await waitFor(() => expect(screen.queryByText("Осталось разобрать")).toBeNull());
+    expect(screen.getByLabelText("Вопросов нет")).toBeTruthy();
   });
 
   it("brings the card back if the call fails", async () => {
