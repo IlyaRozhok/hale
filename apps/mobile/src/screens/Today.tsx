@@ -190,6 +190,8 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
     streak: data.streak ?? 0,
     observation: observation.data,
     categories,
+    // Task Я2: with the pace line or an overspent day on the screen the observation is not said, nor marked shown.
+    quiet: paceLine !== null || over,
   });
   const noticed = phrase?.action.kind === "observation" ? observationRef(phrase.action.observation) : null;
   const act = (action: PhraseAction) => {
@@ -201,10 +203,14 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
       else if (o.category !== null) onOpenObservation?.(o.category, o.from, o.to);
     } else setSheet(action.kind);
   };
+  // Task Я2: once nothing is left the line names the limit once, as tomorrow's, not also as «из ₴Y».
+  const spentLine = state.leftToday <= 0
+    ? `потрачено ${formatMoney(spent)} · завтра снова ${formatMoney(state.dailyLimit)}`
+    : `потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}`;
   const limitLabel = hasLimit && nextLimitNote
     ? `${heading} ${formatMoney(over ? 0 : shownLeft)}. ${nextLimitNote}`
-    : over
-    ? `${heading} ₴0, потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)} на день`
+    : hasLimit && state.leftToday <= 0
+    ? `${heading} ${formatMoney(0)}, потрачено ${formatMoney(spent)}, завтра снова ${formatMoney(state.dailyLimit)}`
     : hasLimit
       ? `${heading} ${formatMoney(shownLeft)}, из ${formatMoney(state.dailyLimit)} на день`
       : `${heading} ${formatMoney(shownLeft)}. ${noLimitNote}`;
@@ -247,7 +253,7 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
                   <LimitBar level={level} state={dayState} />
                 </View>
                 <Text style={[styles.subtle, styles.spentLine]}>
-                  {nextLimitNote ?? `потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}${state.leftToday <= 0 ? ` · завтра снова ${formatMoney(state.dailyLimit)}` : ""}`}
+                  {nextLimitNote ?? spentLine}
                 </Text>
               </>
             )}

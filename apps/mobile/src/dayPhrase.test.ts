@@ -150,6 +150,20 @@ describe("dayPhrase", () => {
       expect(dayPhrase(input({ upcoming: [pay({ dueOn: "2026-11-12" })], observation: o }))!.action.kind).toBe("pay");
     });
 
+    it("is not said on a day that already has bad news (Я2): yesterday is said instead, or nothing", () => {
+      for (const o of [spike(), subs]) {
+        expect(dayPhrase(input({ yesterday: yesterday(), streak: 5, observation: o, quiet: true }))).toEqual({
+          text: "Вчера осталось ₴340. Уже 5 дней в лимите.",
+          action: { kind: "calendar" },
+        });
+        expect(dayPhrase(input({ observation: o, quiet: true }))).toBeNull();
+      }
+      // A decision that is waiting is still said on such a day.
+      expect(dayPhrase(input({ questions: 1, observation: spike(), quiet: true }))!.action.kind).toBe("questions");
+      // Without the flag, as before.
+      expect(dayPhrase(input({ observation: spike(), quiet: false }))!.action.kind).toBe("observation");
+    });
+
     it("names the week, the subscriptions and the owner's own category in whole phrases", () => {
       const categories: CategoryDto[] = [{ key: "c_1", name: "Кот", icon: "paw", system: false }];
       expect(observationText(spike({ period: "week", category: "groceries", spent: 214_000, usual: 140_000, from: "2026-11-05" }), undefined, "2026-11-11")).toBe(

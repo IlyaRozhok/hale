@@ -261,6 +261,37 @@ describe("Today, normal mode", () => {
         await waitFor(() => expect(screen.queryByText("Подписки")).toBeNull());
         expect(await screen.findByText("Вчера осталось ₴340.")).toBeTruthy();
       });
+
+      describe("one thought a day (Я2): not on a day that already has bad news", () => {
+        const pace = { avgDaily: 460_000, runOutOn: "2026-11-20", incomeOn: "2026-12-01" };
+        const withState = (over: Partial<DailyStateDto>, more: Parameters<typeof todayFixture>[0] = {}) => {
+          const fixture = todayFixture({ date: "2026-11-19", upcoming: [], ...more });
+          return jest.fn(async () => ({ ...fixture, state: { ...fixture.state, ...over } }));
+        };
+
+        for (const [name, today] of [
+          ["an overspent day", withState({ dailyLimit: 95_000, leftToday: -60_100, level: 0 })],
+          ["a day with the pace line", withState({ dailyLimit: 100_000, leftToday: 40_000, level: 0.4 }, { pace })],
+        ] as const) {
+          it(`${name}: yesterday is said instead, and the observation is not marked shown`, async () => {
+            const observation = jest.fn(async () => spike);
+            const observationShown = jest.fn(async () => spike);
+            await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today, calendar: calendar19, observation, observationShown }));
+            expect(await screen.findByText("Вчера осталось ₴340.")).toBeTruthy();
+            await waitFor(() => expect(observation).toHaveBeenCalled());
+            expect(screen.queryByText(SPIKE_TEXT)).toBeNull();
+            expect(observationShown).not.toHaveBeenCalled();
+          });
+        }
+
+        it("used up exactly, with no pace line, is not a bad-news day: the observation is said", async () => {
+          const observationShown = jest.fn(async () => spike);
+          const today = withState({ dailyLimit: 95_000, leftToday: 0, level: 0 });
+          await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today, calendar: calendar19, observation: jest.fn(async () => spike), observationShown }));
+          expect(await screen.findByText(SPIKE_TEXT)).toBeTruthy();
+          await waitFor(() => expect(observationShown).toHaveBeenCalledWith({ kind: "spike", category: "cafe" }));
+        });
+      });
     });
 
     it("a quiet day says nothing", async () => {
@@ -319,21 +350,23 @@ describe("Today, normal mode", () => {
       expect(StyleSheet.flatten(heading.props.style).color).not.toBe(tokens.color.status.danger);
       expect(screen.getByText("₴0")).toBeTruthy();
       // Owner, 9 and 22 November: no red words on an overspent day, only the strip's spark; no overspend amount.
-      const line = screen.getByText("потрачено ₴1,551 из ₴950 · завтра снова ₴950");
+      const line = screen.getByText("потрачено ₴1,551 · завтра снова ₴950");
       expect(StyleSheet.flatten(line.props.style).color).toBe(tokens.color.fg.subtle);
       expect(screen.queryByText(/на ₴601|больше$/)).toBeNull();
       expect(levelOf()).toBe("bar:over:0");
       expect(screen.queryByText(/больше лимита|Сверх/)).toBeNull();
       expect(screen.queryByText(/^\+/)).toBeNull();
       expect(screen.queryByText(/−/)).toBeNull();
-      expect(screen.getByLabelText("Сегодня можно ₴0, потрачено ₴1,551 из ₴950 на день")).toBeTruthy();
+      expect(screen.getByLabelText("Сегодня можно ₴0, потрачено ₴1,551, завтра снова ₴950")).toBeTruthy();
     });
 
     it("exactly used up: the limit is used, nothing over it", async () => {
       await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 95000, leftToday: 0, level: 0 }));
       expect(await screen.findByText("Сегодня можно")).toBeTruthy();
       expect(screen.getByText("₴0")).toBeTruthy();
-      expect(screen.getByText("потрачено ₴950 из ₴950 · завтра снова ₴950")).toBeTruthy();
+      // Я2: the limit is said once in the line, as «завтра снова», not also as «из ₴950».
+      expect(screen.getByText("потрачено ₴950 · завтра снова ₴950")).toBeTruthy();
+      expect(screen.getByLabelText("Сегодня можно ₴0, потрачено ₴950, завтра снова ₴950")).toBeTruthy();
     });
 
     it("the metal bar is empty when nothing is left, and absent with no limit", async () => {
@@ -397,7 +430,7 @@ describe("Today, normal mode", () => {
 
         it("over the new limit there is still no red that day", async () => {
           await renderWith(<Today onOpenActivity={noop} />, newLimit({ leftToday: -31000, level: 0 }));
-          expect(await screen.findByText("потрачено ₴760 из ₴450 · завтра снова ₴450")).toBeTruthy();
+          expect(await screen.findByText("потрачено ₴760 · завтра снова ₴450")).toBeTruthy();
           expect(screen.queryByText(/больше$/)).toBeNull();
           expect(screen.getByText("₴0")).toBeTruthy();
           expect(levelOf()).toBe("bar:low:0");
@@ -414,7 +447,7 @@ describe("Today, normal mode", () => {
 
       it("the next day is an ordinary one: over the limit is red again", async () => {
         await renderWith(<Today onOpenActivity={noop} />, start({ dailyLimit: 45000, leftToday: -31000 }));
-        expect(await screen.findByText("потрачено ₴760 из ₴450 · завтра снова ₴450")).toBeTruthy();
+        expect(await screen.findByText("потрачено ₴760 · завтра снова ₴450")).toBeTruthy();
         expect(levelOf()).toBe("bar:over:0");
         expect(screen.queryByText(/действует с завтра/)).toBeNull();
       });
