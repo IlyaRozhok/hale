@@ -17,7 +17,7 @@ function TodayHolder() {
   return null;
 }
 
-/** One loan entered by hand, "Друг": ₴5,000 from 01.11, nothing repaid. It leaves the list once changed. */
+/** One loan entered by hand, "Друг": ₴5,000 from 1 Nov, nothing repaid. It leaves the list once changed. */
 const oneLoan = (over: Parameters<typeof fakeApi>[0] = {}) => {
   let open = true;
   const gone = async () => {
@@ -137,11 +137,11 @@ describe("the loans list in Plan", () => {
     it("gives an open loan a return date, and Today is counted again", async () => {
       const api = dated(null);
       await show(api);
-      expect(screen.getByRole("button", { name: "Вернуть до, Друг, ₴5,000 от 01.11: не выбрана" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Вернуть до, Друг, ₴5,000 от 1 ноя: не выбрана" })).toBeTruthy();
       expect(screen.queryByRole("button", { name: /^Убрать срок/ })).toBeNull();
-      await pickDate("Вернуть до, Друг, ₴5,000 от 01.11", "2026-11-20");
+      await pickDate("Вернуть до, Друг, ₴5,000 от 1 ноя", "2026-11-20");
       await waitFor(() => expect(api.patchLoan).toHaveBeenCalledWith(7, { due_on: "2026-11-20" }));
-      expect(await screen.findByRole("button", { name: /^Вернуть до, Друг, ₴5,000 от 01.11: 20 ноября/ })).toBeTruthy();
+      expect(await screen.findByRole("button", { name: /^Вернуть до, Друг, ₴5,000 от 1 ноя: 20 ноября/ })).toBeTruthy();
       await waitFor(() => expect(api.today).toHaveBeenCalledTimes(2));
     });
 
@@ -150,7 +150,7 @@ describe("the loans list in Plan", () => {
       await show(api);
       await fireEvent.press(screen.getByRole("button", { name: "Убрать срок: Друг" }));
       await waitFor(() => expect(api.patchLoan).toHaveBeenCalledWith(7, { due_on: null }));
-      expect(await screen.findByRole("button", { name: "Вернуть до, Друг, ₴5,000 от 01.11: не выбрана" })).toBeTruthy();
+      expect(await screen.findByRole("button", { name: "Вернуть до, Друг, ₴5,000 от 1 ноя: не выбрана" })).toBeTruthy();
       expect(screen.queryByRole("button", { name: /^Убрать срок/ })).toBeNull();
     });
 
@@ -163,8 +163,8 @@ describe("the loans list in Plan", () => {
         ),
       });
       await show(api);
-      expect(screen.getByRole("button", { name: "Вернуть до, Друг, ₴5,000 от 01.11: не выбрана" })).toBeTruthy();
-      expect(screen.getByRole("button", { name: /^Вернуть до, Кредит до завтра, ₴2,000 от 02\.11, осталось ₴1,500: 20 ноября/ })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Вернуть до, Друг, ₴5,000 от 1 ноя: не выбрана" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^Вернуть до, Кредит до завтра, ₴2,000 от 2 ноя, осталось ₴1,500: 20 ноября/ })).toBeTruthy();
       // The visible label stays short.
       expect(screen.getAllByText("Вернуть до")).toHaveLength(2);
     });

@@ -505,7 +505,7 @@ describe("Plan, loans", () => {
     expect(screen.queryByText("Кредит До завтра")).toBeNull();
     await fireEvent.press(screen.getByRole("button", { name: "Погашенные, 1" }));
     expect(screen.getByText("Погашенные")).toBeTruthy();
-    expect(screen.getByText("₴5,000 от 10.10, погашен 20.10, ещё ₴200 на обслуживание")).toBeTruthy();
+    expect(screen.getByText("₴5,000 от 10 окт, погашен 20 окт, ещё ₴200 на обслуживание")).toBeTruthy();
   });
 
   it("counts the open loans, the old ones included, on the right of «Займы»", async () => {
@@ -541,7 +541,7 @@ describe("Plan, loans", () => {
     await act(async () => buttons.find((b) => b.text === "Да, погашены")!.onPress!());
     await waitFor(() => expect(api.repayOldLoans).toHaveBeenCalledTimes(1));
     await fireEvent.press(await screen.findByRole("button", { name: "Погашенные, 1" }));
-    expect(await screen.findByText("₴5,000 от 01.11, погашен, дата неизвестна")).toBeTruthy();
+    expect(await screen.findByText("₴5,000 от 1 ноя, погашен, дата неизвестна")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Все уже погашены" })).toBeNull();
     alert.mockRestore();
   });
@@ -638,7 +638,7 @@ describe("Plan, incomes", () => {
     await renderWith(<Plan />, api);
     await press("Доходы");
     expect(await screen.findByText("$800 · 1–5 числа")).toBeTruthy();
-    expect(screen.getByText("Следующий — 05.11, $800.")).toBeTruthy();
+    expect(screen.getByText("Следующий — 5 ноя, $800.")).toBeTruthy();
     await press("USDC");
     expect(screen.getByLabelText("Сумма дохода").props.value).toBe("800");
     await fireEvent.changeText(screen.getByLabelText("Сумма дохода"), "900");
@@ -686,7 +686,7 @@ describe("Plan, obligatory payments", () => {
     await renderWith(<Plan />, fakeApi(withBoth()));
     await press("Платежи");
     expect(await screen.findByText("₴17,000, каждый месяц, 26 числа")).toBeTruthy();
-    expect(screen.getByText("₴500, срок 10.12")).toBeTruthy();
+    expect(screen.getByText("₴500, срок 10 дек")).toBeTruthy();
     expect(screen.getAllByText("Квартира")).toHaveLength(1);
     expect(screen.queryByText("Старый")).toBeNull();
   });
@@ -786,7 +786,7 @@ describe("Plan, installments", () => {
   it("shows a series as one line", async () => {
     await renderWith(<Plan />, fakeApi(withPhone()));
     await press("Рассрочки");
-    expect(await screen.findByText("₴2,000 в месяц, осталось платежей: 2, следующий 02.11")).toBeTruthy();
+    expect(await screen.findByText("₴2,000 в месяц, осталось платежей: 2, следующий 2 ноя")).toBeTruthy();
   });
 
   it("adds a series", async () => {
@@ -1080,7 +1080,7 @@ describe("Plan, tax payments", () => {
     await press("Налоги");
     expect(await screen.findByText("Налог за 3 кв.")).toBeTruthy();
     expect(screen.getByText("₴12,000")).toBeTruthy();
-    expect(screen.getByText("срок 20.11")).toBeTruthy();
+    expect(screen.getByText("срок 20 ноя")).toBeTruthy();
     expect(screen.getByText("Налог за 2 кв.")).toBeTruthy();
     expect(screen.getByText("₴9,000")).toBeTruthy();
     expect(screen.getByText("Оплачен")).toBeTruthy();

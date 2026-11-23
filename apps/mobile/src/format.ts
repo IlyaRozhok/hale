@@ -55,10 +55,10 @@ function plural(n: number, one: string, few: string, many: string): string {
   return many;
 }
 
-/** "сегодня", "завтра", "через 4 дня"; a past date is just DD.MM. */
+/** "сегодня", "завтра", "через 4 дня"; a past date is just the short date, "1 ноя". */
 export function dueLabel(dueOn: string, today: string): string {
   const days = Math.round((toUtc(dueOn) - toUtc(today)) / DAY_MS);
-  if (days < 0) return `${dueOn.slice(8, 10)}.${dueOn.slice(5, 7)}`;
+  if (days < 0) return shortDate(dueOn);
   if (days === 0) return "сегодня";
   if (days === 1) return "завтра";
   return `через ${days} ${plural(days, "день", "дня", "дней")}`;
@@ -162,9 +162,13 @@ export function dayHeader(iso: string, today: string): string {
   return date;
 }
 
-/** "2026-11-02" as "02.11". */
-export function shortDate(iso: string): string {
-  return `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
+/**
+ * The one short date of the app: "2026-12-06" as "6 дек". Given today, a date in another year gets its year,
+ * "6 янв 2027", so a far date is not ambiguous.
+ */
+export function shortDate(iso: string, today?: string): string {
+  const { day, month } = dayMonth(iso);
+  return today && today.slice(0, 4) !== iso.slice(0, 4) ? `${day} ${month} ${iso.slice(0, 4)}` : `${day} ${month}`;
 }
 
 /** A real calendar date typed as YYYY-MM-DD. */

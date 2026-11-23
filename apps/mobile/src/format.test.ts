@@ -60,7 +60,7 @@ describe("dates", () => {
     expect(dueLabel("2026-11-06", "2026-11-02")).toBe("через 4 дня");
     expect(dueLabel("2026-11-18", "2026-11-02")).toBe("через 16 дней");
     expect(dueLabel("2026-11-22", "2026-11-02")).toBe("через 20 дней");
-    expect(dueLabel("2026-11-01", "2026-11-02")).toBe("01.11");
+    expect(dueLabel("2026-11-01", "2026-11-02")).toBe("1 ноя");
   });
 
   it("formats a stamp as local time today, or date and time otherwise", () => {
@@ -132,8 +132,16 @@ describe("taxQuarterOfDue", () => {
 });
 
 describe("shortDate", () => {
-  it("prints DD.MM", () => {
-    expect(shortDate("2026-11-02")).toBe("02.11");
+  it("prints the day and the short month", () => {
+    expect(shortDate("2026-11-02")).toBe("2 ноя");
+    expect(shortDate("2026-12-06")).toBe("6 дек");
+    expect(shortDate("2026-05-31")).toBe("31 мая");
+  });
+
+  it("adds the year only for a date outside the current one", () => {
+    expect(shortDate("2026-12-06", "2026-11-23")).toBe("6 дек");
+    expect(shortDate("2027-01-06", "2026-11-23")).toBe("6 янв 2027");
+    expect(shortDate("2025-12-06", "2026-11-23")).toBe("6 дек 2025");
   });
 });
 
