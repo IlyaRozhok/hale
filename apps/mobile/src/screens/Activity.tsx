@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, SectionList, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RouteProp } from "@react-navigation/native";
 import { tokens } from "@hale/tokens";
@@ -135,15 +135,19 @@ export function Activity({ now = () => new Date(), route }: Props) {
   const chosenCategory = withCategories ? category : null;
   // «Желаемое» is purchases only: like a category, it does not narrow income and waits there untouched.
   const chosenWant = withCategories && want;
-  const list = useTransactions({
+  const filter = {
     group: tab,
     ...(account ? { account } : {}),
     ...(chosenCategory ? { category: chosenCategory } : {}),
     ...(chosenWant ? { want: true as const } : {}),
     ...(period ? { from: period.from, to: period.to } : {}),
     ...(search ? { q: search } : {}),
-  });
-  const pull = usePullRefresh(list.refetch);
+  };
+  const list = useTransactions(filter);
+  // A pull belongs to the list it was made on (Я1): another filter ends it, and the list gets a refresh control of
+  // its own, so one iOS left spinning (it ends badly while the tab is out of sight) goes with the old list.
+  const listKey = JSON.stringify(filter);
+  const pull = usePullRefresh(list.refetch, listKey);
   const categories = useCategoryList();
   const observation = useObservation(watchObservation);
   const dismissObservation = useDismissObservation();
@@ -258,8 +262,7 @@ export function Activity({ now = () => new Date(), route }: Props) {
           onEndReached={() => {
             if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage();
           }}
-          refreshing={pull.refreshing}
-          onRefresh={pull.onRefresh}
+          refreshControl={<RefreshControl key={listKey} {...pull} />}
           ListHeaderComponent={
             noticed && noticedCategory ? (
               <View style={styles.notice}>
