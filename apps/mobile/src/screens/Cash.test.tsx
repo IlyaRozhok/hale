@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { Alert } from "react-native";
 import { Activity } from "./Activity";
 import { Plan } from "./Plan";
@@ -343,6 +343,9 @@ describe("a cash purchase's categories (В5)", () => {
     await press("Трата");
     await fireEvent.changeText(await screen.findByLabelText("Сумма"), "120");
     await press("Кот");
+    // The server's icons, own categories included (Я7).
+    expect(within(screen.getByRole("button", { name: "Кот" })).getByTestId("icon-paw")).toBeTruthy();
+    expect(within(screen.getByRole("button", { name: "Еда" })).getByTestId("icon-cart")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Возвраты" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Кафе и рестораны" })).toBeNull();
     await press("Сохранить");

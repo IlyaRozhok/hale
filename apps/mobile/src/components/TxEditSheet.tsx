@@ -11,7 +11,7 @@ import { CategoryFormSheet, WantSwitch } from "./CategoryFormSheet";
 import { ErrorText } from "./ErrorText";
 import { ActionRow } from "./ActionRow";
 import { Chip } from "./Chip";
-import { Icon, type IconName } from "./Icon";
+import { CategoryChip } from "./CategoryChip";
 import { Sheet } from "./Sheet";
 
 const { color, radius, space, touchMin, type } = tokens;
@@ -164,29 +164,6 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
   );
 }
 
-/** A category to pick: its icon and name in one colour; the chosen one is inverted, as the other chips. */
-function CategoryChip({ label, icon, selected = false, disabled = false, onPress }: {
-  label: string;
-  icon: IconName;
-  selected?: boolean;
-  disabled?: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ selected, disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={[styles.pill, selected && styles.pillOn, disabled && styles.disabled]}
-    >
-      <Icon name={icon} color={selected ? color.accent.fgOnAccent : color.fg.muted} size={16} />
-      <Text style={[styles.pillText, selected && styles.pillTextOn]}>{label}</Text>
-    </Pressable>
-  );
-}
-
 function Answer({ label, strong = false, disabled, onPress }: { label: string; strong?: boolean; disabled: boolean; onPress: () => void }) {
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} style={styles.answer}>
@@ -279,19 +256,6 @@ const styles = StyleSheet.create({
   note: { ...type.caption, color: color.fg.muted },
   link: { minHeight: touchMin, justifyContent: "center" },
   linkText: { ...type.label, color: color.accent.default },
-  pill: {
-    minHeight: touchMin,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space.xs,
-    paddingHorizontal: space.lg,
-    borderRadius: radius.full,
-    backgroundColor: color.surface.overlay,
-  },
-  pillOn: { backgroundColor: color.accent.default },
-  pillText: { ...type.label, color: color.fg.default },
-  pillTextOn: { color: color.accent.fgOnAccent },
-  disabled: { opacity: 0.6 },
   ask: {
     gap: space.xs,
     paddingTop: space.md,

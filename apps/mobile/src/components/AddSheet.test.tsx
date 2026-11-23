@@ -31,13 +31,15 @@ describe("AddSheet: one window for everything entered by hand (Д5)", () => {
   });
 
   describe("«Трата»", () => {
-    it("is spent from cash: «С чего», amount, category, save", async () => {
+    it("is spent from cash: amount, category, save", async () => {
       const api = fakeApi(started());
       const onClose = jest.fn();
       await renderWith(<AddSheet onClose={onClose} />, api);
       await press("Трата");
-      expect(await screen.findByText("С чего")).toBeTruthy();
-      expect(screen.getByRole("radio", { name: "Наличные" }).props.accessibilityState.selected).toBe(true);
+      expect(await screen.findByLabelText("Сумма")).toBeTruthy();
+      // Cash is the only source, so there is no choice of it (Я7).
+      expect(screen.queryByText("С чего")).toBeNull();
+      expect(screen.queryByRole("radio", { name: "Наличные" })).toBeNull();
       expect(screen.queryByText("Сколько наличных сейчас?")).toBeNull();
       // The cash sheet's other kinds live elsewhere now.
       expect(screen.queryByRole("button", { name: "Получил" })).toBeNull();
@@ -47,6 +49,17 @@ describe("AddSheet: one window for everything entered by hand (Д5)", () => {
       await press("Сохранить");
       await waitFor(() => expect(api.addCashOperation).toHaveBeenCalledWith({ kind: "spend", amount: 24_000, category: "cafe", date: kyivDate() }));
       await waitFor(() => expect(onClose).toHaveBeenCalled());
+    });
+
+    it("shows each category with its icon, as the operation's card does, and the chosen one says so (Я7)", async () => {
+      await renderWith(<AddSheet onClose={noop} />, fakeApi(started()));
+      await press("Трата");
+      const cafe = await screen.findByRole("button", { name: "Кафе и рестораны" });
+      expect(within(cafe).getByTestId("icon-coffee")).toBeTruthy();
+      expect(within(screen.getByRole("button", { name: "Продукты" })).getByTestId("icon-cart")).toBeTruthy();
+      expect(cafe.props.accessibilityState.selected).toBe(false);
+      await fireEvent.press(cafe);
+      expect(screen.getByRole("button", { name: "Кафе и рестораны" }).props.accessibilityState.selected).toBe(true);
     });
 
     it("the first time, asks once how much cash there is after this purchase: the wallet starts with it plus the purchase", async () => {
