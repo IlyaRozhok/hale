@@ -1,7 +1,7 @@
 import { Alert, StyleSheet } from "react-native";
 import type { LedgerCheckDto, LedgerCheckIssueDto } from "@hale/contracts";
 import { tokens } from "@hale/tokens";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { SessionProvider } from "../session";
 import { Settings } from "./Settings";
 import { Plan } from "./Plan";
@@ -137,6 +137,13 @@ describe("Settings, closing", () => {
     expect(screen.queryByLabelText("Сумма займа")).toBeNull();
     await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("closes with the word «Закрыть», as every sheet does, not with a «×» (Я6)", async () => {
+    await renderWith(<Settings onClose={noop} />, fakeApi());
+    await screen.findByLabelText("Сколько тратить в месяц");
+    const word = within(screen.getByRole("button", { name: "Закрыть" })).getByText("Закрыть");
+    expect(StyleSheet.flatten(word.props.style)).toMatchObject({ ...tokens.type.label, color: tokens.color.fg.muted });
   });
 });
 

@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
-import { Alert } from "react-native";
+import { Alert, StyleSheet } from "react-native";
+import { tokens } from "@hale/tokens";
 import { Settings } from "./Settings";
 import { Today } from "./Today";
 import { TxEditSheet } from "../components/TxEditSheet";
@@ -50,12 +51,14 @@ describe("the owner's rules in Settings", () => {
     const api = fakeApi({ rules: jest.fn(async () => rules) });
     await renderWith(<Settings onClose={noop} />, api);
     await press("Мои правила");
-    expect(await screen.findByText("видача готівки сільпо")).toBeTruthy();
+    // The name starts with a capital letter when shown (Я6); what is stored and sent stays as it was.
+    expect(await screen.findByText("Видача готівки сільпо")).toBeTruthy();
+    expect(screen.queryByText("видача готівки сільпо")).toBeNull();
     expect(screen.getByText("Трата · 1 операция")).toBeTruthy();
     expect(screen.getByText("Olena K")).toBeTruthy();
     expect(screen.getByText(/· 12 операций$/)).toBeTruthy();
     const alert = jest.spyOn(Alert, "alert");
-    await press("Удалить правило «видача готівки сільпо»");
+    await press("Удалить правило «Видача готівки сільпо»");
     expect(alert.mock.calls.at(-1)!.slice(0, 2)).toEqual([
       "Удалить правило?",
       "1 операция снова распознается автоматически. Лимит пересчитается.",
@@ -70,7 +73,7 @@ describe("the owner's rules in Settings", () => {
     const alert = jest.spyOn(Alert, "alert");
     await renderWith(<Settings onClose={noop} />, fakeApi({ rules: jest.fn(async () => [{ ...rules[0]!, count: 0 }]) }));
     await press("Мои правила");
-    await press("Удалить правило «видача готівки сільпо»");
+    await press("Удалить правило «Видача готівки сільпо»");
     expect(alert.mock.calls.at(-1)![1]).toBe("Сейчас под ним нет операций.");
   });
 
@@ -81,6 +84,15 @@ describe("the owner's rules in Settings", () => {
     expect(await screen.findByText("Не определён · 1 операция")).toBeTruthy();
     expect(screen.getByText("Не определён · Продукты · 1 операция")).toBeTruthy();
     expect(screen.queryByText(/undefined/)).toBeNull();
+  });
+
+  it("«Удалить» is quiet, not red: red is only for going over the limit and for errors (Я6)", async () => {
+    await renderWith(<Settings onClose={noop} />, fakeApi({ rules: jest.fn(async () => rules) }));
+    await press("Мои правила");
+    await screen.findByText("Видача готівки сільпо");
+    const deletes = screen.getAllByText("Удалить");
+    expect(deletes).toHaveLength(2);
+    for (const d of deletes) expect(StyleSheet.flatten(d.props.style).color).toBe(tokens.color.fg.muted);
   });
 
   it("says when there are none", async () => {

@@ -4,6 +4,7 @@ import {
   cardTransferTitle,
   dayHeader,
   dayMonth,
+  firstCapital,
   formatDollars,
   formatSignedMoney,
   formatSignedOriginal,
@@ -250,5 +251,14 @@ describe("dates in words (В4)", () => {
   it("a month in the prepositional case", () => {
     expect(inMonth(10)).toBe("октябре");
     expect(inMonth(5)).toBe("мае");
+  });
+
+  it("starts a shown name with a capital letter, the rest as it was (Я6)", () => {
+    expect(firstCapital("видача готівки сільпо")).toBe("Видача готівки сільпо");
+    expect(firstCapital("olena K")).toBe("Olena K");
+    expect(firstCapital("Olena K")).toBe("Olena K");
+    expect(firstCapital("ёлка")).toBe("Ёлка");
+    expect(firstCapital("2 кофе")).toBe("2 кофе");
+    expect(firstCapital("")).toBe("");
   });
 });

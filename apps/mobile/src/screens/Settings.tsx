@@ -7,7 +7,7 @@ import { ErrorText } from "../components/ErrorText";
 import { dayMonth, formatMoney, formatOriginal, formatStamp, kyivDate, pluralIndex } from "../format";
 import { useCapPreview, useLedgerCheck, useSaveSettings, useSettings, useToday } from "../api/queries";
 import { Glass } from "../components/Glass";
-import { Icon } from "../components/Icon";
+import { CloseButton } from "../components/CloseButton";
 import { ActionRow } from "../components/ActionRow";
 import { RulesSheet } from "../components/RulesSheet";
 import { useSignOut } from "../session";
@@ -119,9 +119,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
     >
       <View style={styles.head}>
         <Text style={styles.title}>Настройки</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="Закрыть" onPress={onClose} style={styles.close}>
-          <Icon name="close" color={color.fg.muted} />
-        </Pressable>
+        <CloseButton onPress={onClose} />
       </View>
       {error && <ErrorText>{error}</ErrorText>}
       {settings.isError && !saved && <ErrorText>Не получилось загрузить настройки.</ErrorText>}
@@ -179,7 +177,6 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: color.surface.base },
   content: { paddingHorizontal: space.xl, paddingVertical: space.lg, gap: space.lg },
   head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  close: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
   title: { ...type.title, color: color.fg.default },
   stack: { gap: space.md },
   heading: { ...type.title, color: color.fg.default },

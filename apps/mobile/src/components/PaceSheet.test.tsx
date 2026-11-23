@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react-native";
+import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { PaceDto } from "@hale/contracts";
@@ -67,11 +67,14 @@ describe("the pace sheet (ЯМ1: two sentences instead of a table)", () => {
     expect(screen.queryByText(/23 ноя/)).toBeNull();
   });
 
-  it("«Понятно» closes it", async () => {
+  it("closes as every sheet does, with «Закрыть», and has no «Понятно» of its own (Я6)", async () => {
     const onClose = jest.fn();
     await renderWith(<PaceSheet pace={pace()} dailyLimit={200_000} reserve={1_200_000} today="2026-11-23" onClose={onClose} />, fakeApi());
-    await fireEvent.press(await screen.findByRole("button", { name: "Понятно" }));
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await screen.findByText(FIRST);
+    expect(screen.queryByRole("button", { name: "Понятно" })).toBeNull();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   describe("the hint's words", () => {

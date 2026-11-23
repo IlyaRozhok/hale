@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { Alert, StyleSheet } from "react-native";
 import type { OwnMoneyItemDto, TodayDto } from "@hale/contracts";
 import { Plan } from "./Plan";
@@ -438,6 +438,33 @@ describe("Plan, own and set-aside accounts (Д2б, variant А)", () => {
     expect(screen.getAllByRole("button", { name: "Binance" })).toHaveLength(1);
     await fireEvent.press(screen.getByRole("button", { name: "Binance" }));
     expect(await screen.findByText("Баланс Binance")).toBeTruthy();
+  });
+
+  it("«Карта monobank» at ₴0 in «Отложено» has a chevron and opens its window (Я6)", async () => {
+    const card: OwnMoneyItemDto = { kind: "other", name: "Карта monobank", own: 0, id: 12, source: "account", countsAsOwn: false };
+    await renderWith(<Plan />, fakeApi(newer([card])));
+    await openAside();
+    const row = screen.getByRole("button", { name: "Карта monobank" });
+    expect(within(row).getByTestId("row-chevron")).toBeTruthy();
+    await fireEvent.press(row);
+    expect(await screen.findByText("приходит из monobank")).toBeTruthy();
+  });
+
+  it("a place has a chevron exactly when its row opens something (Я6)", async () => {
+    await renderWith(<Plan />, fakeApi(newer()));
+    await openAside();
+    for (const row of screen.getAllByTestId("plan-row")) {
+      const opens = row.props.accessibilityRole === "button";
+      expect(within(row).queryAllByTestId("row-chevron")).toHaveLength(opens ? 1 : 0);
+    }
+  });
+
+  it("an older server's card opens nothing and has no chevron (Я6)", async () => {
+    await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => todayWithItems()) }));
+    await screen.findByText("Белая карта");
+    const rows = screen.getAllByTestId("plan-row").filter((r) => within(r).queryByText("Белая карта"));
+    expect(rows).toHaveLength(1);
+    expect(within(rows[0]!).queryByTestId("row-chevron")).toBeNull();
   });
 
   it("an older server's cards open nothing, and «Отложено» lists the set-aside balances as before", async () => {
