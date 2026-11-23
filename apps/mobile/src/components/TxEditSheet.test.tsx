@@ -484,7 +484,7 @@ describe("TxEditSheet: the answer to «Откуда наличные?» can be c
     await renderWith(<TxEditSheet tx={deposit({ answer: "binance", canBinance: true, binanceOnChange: "returns" })} onClose={noop} />, fakeApi());
     expect(await screen.findByText("Откуда наличные")).toBeTruthy();
     expect(selected("Вывод с Binance")).toBe(true);
-    expect(selected("Из кошелька")).toBe(false);
+    expect(selected("Из моих наличных")).toBe(false);
     expect(selected("Другое")).toBe(false);
     expect(screen.getByText(RETURNS)).toBeTruthy();
     expect(screen.queryByText(UNTOUCHED)).toBeNull();
@@ -494,7 +494,7 @@ describe("TxEditSheet: the answer to «Откуда наличные?» can be c
     const api = fakeApi();
     const onClose = jest.fn();
     await renderWith(<TxEditSheet tx={deposit({ answer: "binance", canBinance: true, binanceOnChange: "returns" })} onClose={onClose} />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Из кошелька" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Из моих наличных" }));
     await waitFor(() => expect(api.changeDepositAnswer).toHaveBeenCalledWith(12, "wallet"));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(api.editTransaction).not.toHaveBeenCalled();
@@ -503,7 +503,7 @@ describe("TxEditSheet: the answer to «Откуда наличные?» can be c
   it("the answer already chosen sends nothing", async () => {
     const api = fakeApi();
     await renderWith(<TxEditSheet tx={deposit({ answer: "wallet", canBinance: true, binanceOnChange: null })} onClose={noop} />, api);
-    await fireEvent.press(await screen.findByRole("button", { name: "Из кошелька" }));
+    await fireEvent.press(await screen.findByRole("button", { name: "Из моих наличных" }));
     expect(api.changeDepositAnswer).not.toHaveBeenCalled();
     expect(screen.queryByText(RETURNS)).toBeNull();
     expect(screen.queryByText(UNTOUCHED)).toBeNull();
@@ -540,6 +540,6 @@ describe("TxEditSheet: the answer to «Откуда наличные?» can be c
     delete old.cashAnswer;
     await renderWith(<TxEditSheet tx={old} onClose={noop} />, fakeApi());
     expect(screen.queryByText("Откуда наличные")).toBeNull();
-    expect(chip("Из кошелька")).toBeNull();
+    expect(chip("Из моих наличных")).toBeNull();
   });
 });

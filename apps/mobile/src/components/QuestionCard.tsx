@@ -104,7 +104,7 @@ export function QuestionCard({
         <Glass style={styles.stack}>
           {text}
           <View style={styles.choices}>
-            <Choice label="Из кошелька" onPress={() => onCashFromWallet(transactionId)} />
+            <Choice label="Из моих наличных" onPress={() => onCashFromWallet(transactionId)} />
             {Number.isInteger(usdcEvent) && usdcEvent > 0 && <Choice label="Вывод с Binance" onPress={() => onMatchUsdc(usdcEvent, transactionId)} />}
             <Choice label="Другое" onPress={() => onDismissUsdc(transactionId)} />
           </View>

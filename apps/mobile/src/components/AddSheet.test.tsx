@@ -163,16 +163,19 @@ describe("AddSheet: one window for everything entered by hand (Д5)", () => {
     await waitFor(() => expect(api.addCashOperation).toHaveBeenCalledWith({ kind: "received", amount: 100_000, date: kyivDate(), note: "Вернули долг" }));
   });
 
-  it("«Перевёл между своими» holds «Отдал в свои» and «Обменял USDC»", async () => {
+  it("«Перевёл между своими» holds «Перевёл в свои» and «Обменял USDC»", async () => {
     const api = fakeApi(started());
     await renderWith(<AddSheet onClose={noop} />, api);
     await press("Перевёл между своими");
-    expect(await screen.findByRole("button", { name: "Отдал в свои" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Перевёл в свои" })).toBeTruthy();
+    // Task Я5: its own hint, which also covers buying USDC for cash.
+    expect(screen.getByText("Наличные на карту или на Binance. Наличных меньше, лимит не меняется.")).toBeTruthy();
+    expect(screen.queryByText(/Например, купил USDC/)).toBeNull();
     expect(screen.getByRole("button", { name: "Обменял USDC" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Трата" })).toBeNull();
-    // The two kinds are the native switch, «Отдал в свои» first and chosen.
+    // The two kinds are the native switch, «Перевёл в свои» first and chosen.
     const kinds = within(screen.getByTestId("cash-kind")).getAllByRole("button");
-    expect(kinds.map((k) => k.props.accessibilityLabel as string)).toEqual(["Отдал в свои", "Обменял USDC"]);
+    expect(kinds.map((k) => k.props.accessibilityLabel as string)).toEqual(["Перевёл в свои", "Обменял USDC"]);
     expect(kinds[0]!.props.accessibilityState.selected).toBe(true);
     await fireEvent.changeText(screen.getByLabelText("Сумма"), "500");
     await press("Сохранить");

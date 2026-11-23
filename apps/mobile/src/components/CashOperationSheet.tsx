@@ -22,13 +22,13 @@ const { color, radius, space, touchMin, type } = tokens;
 const KINDS: { kind: CashOperationKind; label: string; effect: string }[] = [
   { kind: "spend", label: "Трата", effect: "Тратит лимит дня." },
   { kind: "received", label: "Получил", effect: "Наличных больше, лимит не меняется." },
-  { kind: "own_out", label: "Отдал в свои", effect: "Например, купил USDC за наличные. Наличных меньше, лимит не меняется." },
+  { kind: "own_out", label: "Перевёл в свои", effect: "Наличные на карту или на Binance. Наличных меньше, лимит не меняется." },
   { kind: "exchange", label: "Обменял USDC", effect: "Binance уменьшится на отданные USDC, наличных станет больше. Это перевод между своими, не доход." },
 ];
 const KIND_OF_TYPE: Record<string, CashOperationKind> = { spend: "spend", person_in: "received", own_transfer: "own_out" };
 /**
  * The opening balance or a count that found more: an own transfer into the wallet that is no exchange. It corrects
- * the balance and is no operation of any kind; read as «Отдал в свои» it would be saved as a minus.
+ * the balance and is no operation of any kind; read as «Перевёл в свои» it would be saved as a minus.
  */
 const isCorrection = (tx: TransactionDto) => tx.type === "own_transfer" && tx.amount > 0 && !tx.exchange;
 
@@ -159,7 +159,7 @@ export function CashOperationSheet({ tx, mode, onClose }: Props) {
   return (
     <Sheet title={tx ? "Наличные" : MODES[mode].title} subtitle={tx ? "Изменить или удалить" : undefined} onClose={onClose}>
       {/* Two kinds («Перевёл между своими») fit the native switch; all four, when an operation is edited, do not:
-          «Отдал в свои» and «Обменял USDC» would be cut short in a quarter of the row, so they stay chips. */}
+          «Перевёл в свои» and «Обменял USDC» would be cut short in a quarter of the row, so they stay chips. */}
       {!correction && kinds.length === 2 && (
         <Segmented testID="cash-kind" options={kinds.map((k) => ({ key: k.kind, label: k.label }))} value={kind} onChange={setKind} />
       )}

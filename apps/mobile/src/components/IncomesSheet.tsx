@@ -4,7 +4,7 @@ import { tokens } from "@hale/tokens";
 import type { ExpectedIncomeDto, IncomeAccount, IncomeSchedule, OwnMoneyItemDto } from "@hale/contracts";
 import { useCreateIncome, useDeleteIncome, useExpectedIncomes, useIncomeEvents, usePatchIncome, useSetIncomeDate, useToday } from "../api/queries";
 import { parseHryvnias } from "../format";
-import { hasNamedIncomes, incomeDetail, incomePlaces, nextEvent, nextIncomeLine, sameAccount } from "../planSummary";
+import { hasNamedIncomes, incomeDetail, incomePlaces, nextEvent, sameAccount } from "../planSummary";
 import { Chip } from "./Chip";
 import { CurrencyChoice } from "./CurrencyChoice";
 import { DateField } from "./DateField";
@@ -41,8 +41,8 @@ const day = (text: string): number | null => {
 const amountText = (minor: number): string => String(minor / 100);
 
 /**
- * «Доходы» (Д3б, variant А): one row per income — its name, amount, when and where it comes — and the next income
- * under the list. A row opens the income's form. A server older than Д3а names no income: then the old form.
+ * «Доходы» (Д3б, variant А): one row per income — its name, amount, when and where it comes. No line about the next
+ * income under the list (task Я5): the rows already say when each comes. A row opens the income's form. A server older than Д3а names no income: then the old form.
  */
 export function IncomesSheet({ onClose }: { onClose: () => void }) {
   const incomes = useExpectedIncomes();
@@ -51,7 +51,6 @@ export function IncomesSheet({ onClose }: { onClose: () => void }) {
   const [editing, setEditing] = useState<ExpectedIncomeDto | "new" | null>(null);
   const items: OwnMoneyItemDto[] = [...(today.data?.accounts.items ?? []), ...(today.data?.accounts.setAside ?? [])];
   const named = hasNamedIncomes(incomes.data ?? []);
-  const next = incomes.data && events.data ? nextIncomeLine(incomes.data, events.data) : null;
   const income = editing === "new" ? null : editing;
   const nextOfIncome = income ? nextEvent(events.data ?? [], income.id) : undefined;
 
@@ -66,7 +65,6 @@ export function IncomesSheet({ onClose }: { onClose: () => void }) {
           ))}
         </View>
       )}
-      {next && <Text style={styles.muted}>{next}</Text>}
       <PrimaryButton label="Новый доход" onPress={() => setEditing("new")} />
       {editing &&
         (named ? (

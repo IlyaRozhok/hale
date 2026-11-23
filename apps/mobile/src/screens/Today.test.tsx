@@ -606,8 +606,8 @@ describe("Today, normal mode", () => {
       expect(StyleSheet.flatten(dot("2026-11-02")!.props.style).backgroundColor).toBe(tokens.color.fg.subtle);
       expect(StyleSheet.flatten(dot("2026-11-03")!.props.style).backgroundColor).toBe(tokens.color.fg.subtle);
       expect(screen.getByRole("button", { name: "1 ноября: в лимите" })).toBeTruthy();
-      expect(screen.getByRole("button", { name: "2 ноября: выше лимита" })).toBeTruthy();
-      expect(screen.getByRole("button", { name: "3 ноября: выше лимита" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "2 ноября: больше лимита" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "3 ноября: больше лимита" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "4 ноября: лимита не было" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "5 ноября: сегодня" })).toBeTruthy();
     });
@@ -641,7 +641,7 @@ describe("Today, normal mode", () => {
     it("has no red anywhere, and a legend of two: within and over the limit (А24)", async () => {
       await openIt();
       expect(screen.getByText("в лимите")).toBeTruthy();
-      expect(screen.getByText("выше лимита")).toBeTruthy();
+      expect(screen.getByText("больше лимита")).toBeTruthy();
       expect(screen.queryByText(/сверх|150%/)).toBeNull();
       const red = [tokens.color.calendar.farOver, tokens.color.calendar.over, tokens.color.status.danger, tokens.color.limit.over];
       const marks = [...screen.getAllByTestId(/^calendar-dot-/), ...screen.getAllByTestId("calendar-legend-dot")];
@@ -668,7 +668,7 @@ describe("Today, normal mode", () => {
       await openIt();
       expect(ring("2026-11-05")).toMatchObject({ borderWidth: 1, borderColor: tokens.color.fg.subtle });
       expect(ring("2026-11-02").borderWidth).toBeUndefined();
-      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: выше лимита" }));
+      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: больше лимита" }));
       expect(ring("2026-11-02")).toMatchObject({ borderWidth: 1, borderColor: tokens.color.fg.default });
       expect(ring("2026-11-05").borderColor).toBe(tokens.color.fg.subtle);
       await fireEvent.press(screen.getByRole("button", { name: "5 ноября: сегодня" }));
@@ -699,7 +699,7 @@ describe("Today, normal mode", () => {
 
     it("tells a day's figures when it is tapped", async () => {
       await openIt();
-      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: выше лимита" }));
+      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: больше лимита" }));
       expect(screen.getByText("2 ноя: потрачено ₴1,200 из ₴1,000")).toBeTruthy();
       await fireEvent.press(screen.getByRole("button", { name: "4 ноября: лимита не было" }));
       expect(screen.getByText("4 ноя: потрачено ₴50, лимита не было")).toBeTruthy();
@@ -708,7 +708,7 @@ describe("Today, normal mode", () => {
     it("offers a day's operations only once a day is picked, for any day", async () => {
       await openIt();
       expect(screen.queryByRole("button", { name: "Операции дня" })).toBeNull();
-      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: выше лимита" }));
+      await fireEvent.press(screen.getByRole("button", { name: "2 ноября: больше лимита" }));
       const link = screen.getByRole("button", { name: "Операции дня" });
       expect(StyleSheet.flatten(link.props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
       await fireEvent.press(screen.getByRole("button", { name: "4 ноября: лимита не было" }));
@@ -726,7 +726,7 @@ describe("Today, normal mode", () => {
       const api = fakeApi({ today: jest.fn(async () => todayFixture({ date: "2026-11-05", streak: 2 })), ...november() });
       await renderWith(<Today onOpenActivity={onOpenActivity} />, api);
       await openCalendar();
-      await fireEvent.press(await screen.findByRole("button", { name: "2 ноября: выше лимита" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "2 ноября: больше лимита" }));
       await fireEvent.press(screen.getByRole("button", { name: "Операции дня" }));
       expect(onOpenActivity).toHaveBeenCalledTimes(1);
       expect(onOpenActivity).toHaveBeenCalledWith("2026-11-02");

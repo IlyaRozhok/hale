@@ -72,10 +72,10 @@ describe("a payment paid in parts (Б9)", () => {
     });
     await renderWith(<PaymentPaidSheet payment={{ ...payment, paid: 1_000_000 }} today="2026-11-09" onClose={noop} />, api);
     expect(await screen.findByText("Уже оплачено ₴10,000 из ₴17,000")).toBeTruthy();
-    await screen.findByLabelText("Наличными из кошелька");
+    await screen.findByLabelText("Из моих наличных");
 
     await tick(/Видача готівки Сільпо/);
-    expect(screen.queryByLabelText("Наличными из кошелька")).toBeNull();
+    expect(screen.queryByLabelText("Из моих наличных")).toBeNull();
     expect(screen.getByText("Платёж останется открытым: не хватает ₴3,895. Остальное можно отметить потом.")).toBeTruthy();
     await tick(/Видача готівки Сільпо/);
     await tick(/Переказ решти/);
@@ -103,7 +103,7 @@ describe("a payment paid in parts (Б9)", () => {
       const onClose = jest.fn();
       const api = fakeApi(wallet(2_000_000));
       await renderWith(<PaymentPaidSheet payment={partly} today="2026-11-09" onClose={onClose} />, api);
-      await fireEvent(await screen.findByLabelText("Наличными из кошелька"), "valueChange", true);
+      await fireEvent(await screen.findByLabelText("Из моих наличных"), "valueChange", true);
       expect(screen.getByText("Наличные уменьшатся на ₴9,000 — остаток платежа.")).toBeTruthy();
       await press("Оплачено");
       await waitFor(() => expect(api.payFromWallet).toHaveBeenCalledWith(11));
@@ -114,9 +114,9 @@ describe("a payment paid in parts (Б9)", () => {
     it("a wallet with less than the rest cannot pay it, and says what it has against the rest", async () => {
       const api = fakeApi(wallet(500_000));
       await renderWith(<PaymentPaidSheet payment={partly} today="2026-11-09" onClose={noop} />, api);
-      expect((await screen.findByLabelText("Наличными из кошелька")).props.disabled).toBe(true);
+      expect((await screen.findByLabelText("Из моих наличных")).props.disabled).toBe(true);
       expect(
-        screen.getByText("В кошельке по записям ₴5,000, остаток платежа — ₴9,000. Если наличные были до начала учёта, просто отметьте оплату."),
+        screen.getByText("Наличных по записям ₴5,000, остаток платежа — ₴9,000. Если их было больше — просто отметьте оплату."),
       ).toBeTruthy();
       await press("Оплачено");
       await waitFor(() => expect(api.markPaid).toHaveBeenCalledWith(11));
@@ -126,7 +126,7 @@ describe("a payment paid in parts (Б9)", () => {
     it("a wallet with exactly the rest can pay it", async () => {
       const api = fakeApi(wallet(900_000));
       await renderWith(<PaymentPaidSheet payment={partly} today="2026-11-09" onClose={noop} />, api);
-      expect((await screen.findByLabelText("Наличными из кошелька")).props.disabled).toBe(false);
+      expect((await screen.findByLabelText("Из моих наличных")).props.disabled).toBe(false);
     });
   });
 

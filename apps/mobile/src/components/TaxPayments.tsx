@@ -4,6 +4,7 @@ import { tokens } from "@hale/tokens";
 import { ErrorText } from "./ErrorText";
 import { useCreatePayment, useMarkPaid, useTaxPayments } from "../api/queries";
 import { formatMoney, isIsoDate, parseHryvnias, shortDate, taxQuarterOfDue } from "../format";
+import { unpaidTaxCount } from "../planSummary";
 import { Chip } from "./Chip";
 import { DateField } from "./DateField";
 import { Field } from "./Field";
@@ -37,6 +38,7 @@ export function TaxSheet({ onClose }: { onClose: () => void }) {
           </View>
         </View>
       ))}
+      {payments.data && unpaidTaxCount(payments.data) === 0 && <Text style={styles.note}>Налогов к оплате нет.</Text>}
       {markPaid.isError && <ErrorText>Не удалось отметить. Попробуйте ещё раз.</ErrorText>}
       <PrimaryButton label="Новый налог" onPress={() => setAdding(true)} />
       {adding && <TaxForm onClose={() => setAdding(false)} />}

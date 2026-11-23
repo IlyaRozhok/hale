@@ -229,7 +229,7 @@ function CashSource({ id, answer, onChanged }: { id: number; answer: CashAnswerD
     change.mutate({ id, answer: next }, { onSuccess: onChanged, onError: () => setFailed(true) });
   };
   const choices: { value: CashDepositAnswerName; label: string }[] = [
-    { value: "wallet", label: "Из кошелька" },
+    { value: "wallet", label: "Из моих наличных" },
     ...(answer.canBinance ? [{ value: "binance" as const, label: "Вывод с Binance" }] : []),
     { value: "other", label: "Другое" },
   ];
