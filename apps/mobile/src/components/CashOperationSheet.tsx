@@ -5,8 +5,10 @@ import type { CashOperationKind, TransactionDto } from "@hale/contracts";
 import { exchangeRate } from "@hale/contracts/exchange";
 import { useAddCashOperation, useCash, useCategoryList, useDeleteCashOperation, usePatchCashOperation, useStartCash } from "../api/queries";
 import { formatDollars, formatMoney, kyivDate, parseBalance, parseHryvnias } from "../format";
+import { categoryIconOf } from "../categoryIcon";
 import { categoryChoices } from "../labels";
 import { CashStartForm } from "./CashStartForm";
+import { CategoryChip } from "./CategoryChip";
 import { Chip } from "./Chip";
 import { DateField } from "./DateField";
 import { ErrorText } from "./ErrorText";
@@ -62,7 +64,8 @@ export function CashOperationSheet({ tx, mode, onClose }: Props) {
   const patch = usePatchCashOperation();
   const remove = useDeleteCashOperation();
   // The server's categories, own ones included (В5); a refund is no cash purchase.
-  const categories = categoryChoices(useCategoryList()).filter((c) => c.key !== "refund");
+  const list = useCategoryList();
+  const categories = categoryChoices(list).filter((c) => c.key !== "refund");
   const [kind, setKind] = useState<CashOperationKind>(tx ? (tx.exchange ? "exchange" : (KIND_OF_TYPE[tx.type ?? ""] ?? "own_out")) : MODES[mode].kinds[0]!);
   const [pocket, setPocket] = useState("");
   const [amount, setAmount] = useState(tx ? String(Math.abs(tx.amount) / 100) : "");
@@ -167,14 +170,7 @@ export function CashOperationSheet({ tx, mode, onClose }: Props) {
           ))}
         </View>
       )}
-      {mode === "spend" && (
-        <View style={styles.group}>
-          <Text style={styles.caption}>С чего</Text>
-          <View style={styles.chips}>
-            <Chip role="radio" label="Наличные" selected onPress={() => undefined} />
-          </View>
-        </View>
-      )}
+      {/* A purchase here is spent only from cash: with one source there is nothing to choose, so no «С чего» (Я7). */}
       {firstTime && (
         <View style={styles.start}>
           <Text style={styles.startTitle}>Сколько наличных сейчас?</Text>
@@ -195,7 +191,7 @@ export function CashOperationSheet({ tx, mode, onClose }: Props) {
       {kind === "spend" && (
         <View style={styles.chips}>
           {categories.map((c) => (
-            <Chip key={c.key} label={c.name} selected={category === c.key} onPress={() => setCategory(c.key)} />
+            <CategoryChip key={c.key} label={c.name} icon={categoryIconOf(c.key, list)} selected={category === c.key} onPress={() => setCategory(c.key)} />
           ))}
         </View>
       )}
@@ -216,7 +212,6 @@ export function CashOperationSheet({ tx, mode, onClose }: Props) {
 
 const styles = StyleSheet.create({
   chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
-  group: { gap: space.xs },
   caption: { ...type.caption, color: color.fg.muted },
   start: { gap: space.sm, padding: space.lg, borderRadius: radius.lg, backgroundColor: color.surface.raised },
   startTitle: { ...type.label, color: color.fg.default },
