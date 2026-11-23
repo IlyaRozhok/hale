@@ -5,7 +5,7 @@ import { tokens } from "@hale/tokens";
 import type { ObservationRef, TodayDto } from "@hale/contracts";
 import { LimitBar } from "../metal";
 import { limitState } from "../limitState";
-import { dayMonth, formatMoney, formatStamp, kyivDate, longDate, shiftDate, streakLabel } from "../format";
+import { dayMonth, formatMoney, formatStamp, kyivDate, longDate, shiftDate, shortDate, streakLabel } from "../format";
 import { dayPhrase, observationRef, type PhraseAction } from "../dayPhrase";
 import {
   useAnswerCashCard,
@@ -67,15 +67,15 @@ function dayMonthText(iso: string): string {
 function freshnessLines(data: TodayDto, offlineSince: number | null, now: Date): string[] {
   const lines: string[] = [];
   if (data.date !== kyivDate(now)) {
-    lines.push(`Показаны данные за ${data.date.slice(8, 10)}.${data.date.slice(5, 7)}, не за сегодня.`);
+    lines.push(`Показаны данные за ${shortDate(data.date, kyivDate(now))}, не за сегодня.`);
   }
   if (offlineSince !== null) {
-    lines.push(`Нет связи. Показаны данные от ${formatStamp(new Date(offlineSince).toISOString())}.`);
+    lines.push(`Нет связи. Показаны данные от ${formatStamp(new Date(offlineSince).toISOString(), now)}.`);
   }
   if (data.syncStale) {
     lines.push(
       data.syncedAt
-        ? `Банк обновлялся ${formatStamp(data.syncedAt)}. Показаны последние данные.`
+        ? `Банк обновлялся ${formatStamp(data.syncedAt, now)}. Показаны последние данные.`
         : "Синхронизации с банком ещё не было.",
     );
   }

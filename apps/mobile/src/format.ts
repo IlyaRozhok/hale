@@ -67,12 +67,16 @@ export function dueLabel(dueOn: string, today: string): string {
 /** A number as two digits: 5 -> "05". */
 export const two = (n: number) => String(n).padStart(2, "0");
 
-/** A moment in the device's local time: "сегодня 09:05" or "01.11 23:40". */
+/** A moment's local calendar date on the device, as YYYY-MM-DD. */
+const localIso = (d: Date) => `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+
+/** A moment in the device's local time: "сегодня 09:05", "1 ноя, 23:40", or "31 дек 2025, 23:40" for another year. */
 export function formatStamp(iso: string, now: Date = new Date()): string {
   const d = new Date(iso);
   const time = `${two(d.getHours())}:${two(d.getMinutes())}`;
-  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  return sameDay ? `сегодня ${time}` : `${two(d.getDate())}.${two(d.getMonth() + 1)} ${time}`;
+  const day = localIso(d);
+  const today = localIso(now);
+  return day === today ? `сегодня ${time}` : `${shortDate(day, today)}, ${time}`;
 }
 
 /** Today's calendar date in Kyiv, as the server counts days. */
