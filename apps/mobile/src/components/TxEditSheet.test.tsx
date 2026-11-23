@@ -28,6 +28,19 @@ describe("TxEditSheet header: the operation itself", () => {
     expect(screen.queryByText("Изменить тип или категорию")).toBeNull();
   });
 
+  it("an operation the bank still processes says so in one calm line (ЯМ2)", async () => {
+    await renderWith(<TxEditSheet tx={txFixture({ hold: true })} onClose={noop} />, fakeApi());
+    expect(await screen.findByText("Банк ещё проводит операцию — сумма может немного измениться.")).toBeTruthy();
+  });
+
+  it("a settled operation, or one from an older server without the field, has no such line", async () => {
+    const tx = txFixture();
+    delete (tx as Partial<typeof tx>).hold;
+    await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi());
+    await screen.findByText("Тип");
+    expect(screen.queryByText(/Банк ещё проводит/)).toBeNull();
+  });
+
   it("shows the bank's text when the name on top is the counterparty's", async () => {
     const tx = txFixture({ description: "SILPO KYIV UA", counterName: "Сільпо" });
     await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi());

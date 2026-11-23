@@ -83,11 +83,26 @@ describe("Activity list", () => {
     expect(screen.getByText("−₴30")).toBeTruthy();
   });
 
-  it("marks operations still on hold quietly under the amount, not in the category line", async () => {
-    await renderWith(<Activity />, fakeApi({ transactions: page([txFixture({ hold: true })]) }));
-    expect(await screen.findByText("Кафе и рестораны")).toBeTruthy();
-    expect(screen.getByText("в обработке")).toBeTruthy();
-    expect(screen.queryByText(/· в обработке/)).toBeNull();
+  it("an operation still on hold has no caption, only a quieter amount; VoiceOver still hears it (ЯМ2)", async () => {
+    const items = [
+      txFixture({ id: 1, description: "Сільпо", amount: -48600, amountUah: -48600, hold: true }),
+      txFixture({ id: 2, description: "Uklon", amount: -18000, amountUah: -18000, hold: false }),
+    ];
+    await renderWith(<Activity />, fakeApi({ transactions: page(items) }));
+    expect(await screen.findByText("Сільпо")).toBeTruthy();
+    expect(screen.queryByText(/в обработке/)).toBeNull();
+    expect(flat(screen.getByText("−₴486").props.style).color).toBe(tokens.color.fg.muted);
+    expect(flat(screen.getByText("−₴180").props.style).color).toBe(tokens.color.money.neutral);
+    expect(screen.getByRole("button", { name: /^Сільпо.*в обработке$/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Uklon.*в обработке/ })).toBeNull();
+  });
+
+  it("an older server that says nothing about hold: the amount in its usual colour", async () => {
+    const tx = txFixture({ description: "Старый сервер", amount: -48600, amountUah: -48600 });
+    delete (tx as Partial<typeof tx>).hold;
+    await renderWith(<Activity />, fakeApi({ transactions: page([tx]) }));
+    expect(flat((await screen.findByText("−₴486")).props.style).color).toBe(tokens.color.money.neutral);
+    expect(screen.queryByRole("button", { name: /в обработке/ })).toBeNull();
   });
 
   it("under «Траты» a row the limit does not count is marked quietly; one without the field is not", async () => {
@@ -278,6 +293,27 @@ describe("Activity filters", () => {
     await fireEvent.press(summary);
     expect(await screen.findByRole("button", { name: "С: 9 ноября 2026" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Показать" })).toBeTruthy();
+  });
+
+  it("a «×» at the end of the summary takes every filter off in one tap (ЯМ2)", async () => {
+    const transactions = summaryPage({ total: -2500, count: 2 });
+    await renderWith(<Activity now={now} route={{ params: { day: "2026-11-09", at: 1 } }} />, fakeApi({ transactions }));
+    const reset = await screen.findByRole("button", { name: "Сбросить фильтры" });
+    const style = StyleSheet.flatten(reset.props.style) as { minWidth: number; minHeight: number };
+    expect(style.minWidth).toBeGreaterThanOrEqual(44);
+    expect(style.minHeight).toBeGreaterThanOrEqual(44);
+    await fireEvent.press(reset);
+    await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" }));
+    expect(await screen.findByRole("button", { name: "Фильтры" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Сбросить фильтры" })).toBeNull();
+    // It did not open the window on the way.
+    expect(screen.queryByRole("button", { name: "Показать" })).toBeNull();
+  });
+
+  it("no «×» without filters", async () => {
+    await renderWith(<Activity now={now} />, fakeApi({ transactions: summaryPage({ total: -2500, count: 2 }) }));
+    await screen.findByRole("button", { name: "Фильтры" });
+    expect(screen.queryByRole("button", { name: "Сбросить фильтры" })).toBeNull();
   });
 
   it("on one day the day's total is said once, in the summary, not again over the list (Я3)", async () => {
@@ -612,6 +648,16 @@ describe("Activity filters", () => {
       // The same again is applied again.
       await arrive({ want: true, from: "2026-11-01", to: "2026-11-16" });
       await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(wanted));
+    });
+
+    it("the summary's «×» takes it off too, as «Сбросить» does (ЯМ2)", async () => {
+      const transactions = summaryPage({ total: -360000, count: 9 });
+      await renderWith(<Activity now={now} route={{ params: { want: true, from: "2026-11-01", to: "2026-11-16", at: 1 } }} />, fakeApi({ transactions }));
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(wanted));
+      await fireEvent.press(await screen.findByRole("button", { name: "Сбросить фильтры" }));
+      await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" }));
+      expect(await screen.findByRole("button", { name: "Фильтры" })).toBeTruthy();
+      expect(screen.queryByText(/Желаемое/)).toBeNull();
     });
 
     it("«Показать» with another period keeps it", async () => {

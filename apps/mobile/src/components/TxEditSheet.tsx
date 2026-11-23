@@ -118,6 +118,8 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
     <Sheet title={title} subtitle={facts(tx)} onClose={onClose}>
       {tx.description !== "" && tx.description !== named && <Text style={styles.note}>{tx.description}</Text>}
       {credit !== null && <Text style={styles.note}>{credit}</Text>}
+      {/* The list only quiets a held amount (ЯМ2); here it is said what that means. An older server: not held. */}
+      {tx.hold === true && <Text style={styles.note}>Банк ещё проводит операцию — сумма может немного измениться.</Text>}
       {onAnswer && <ActionRow label={`Что это за перевод: ${answerText(tx.recipientLabel)}`} onPress={onAnswer} />}
       {tx.cashOut !== null && <CardCash tx={tx} cashOut={tx.cashOut} />}
       {tx.cashAnswer != null && <CashSource id={tx.id} answer={tx.cashAnswer} onChanged={onClose} />}

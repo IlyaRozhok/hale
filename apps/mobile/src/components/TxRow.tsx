@@ -33,8 +33,24 @@ export function TxRow({ tx, onPress, first, last, markOutsideLimit = false, cate
   const kind = exchange ?? tx.paymentName ?? (tx.type === "spend" ? categoryName(tx.category, categories) : typeLabel(tx.type));
   const tone = amountTone(tx.type, tx.amount);
   const icon = categoryIcon(tx, categories);
+  const outside = markOutsideLimit && tx.inLimit === false;
+  const original = foreign ? (tx.amountUah !== null ? formatOriginal(tx.amount, tx.currency) : "курс неизвестен") : null;
+  // Still processed by the bank (ЯМ2): no caption on the row, only a quieter amount; the card says what it means.
+  // VoiceOver hears it, so the row's label is everything it shows and «в обработке» after it. An older server
+  // without the field: not held.
+  const held = tx.hold === true;
+  const label = held
+    ? [title, kind, outside ? "не из лимита" : null, tx.needsLabel ? "Ждёт ответа" : null, main, original, exchange ? "свои" : null, "в обработке"]
+        .filter((part) => part !== null)
+        .join(", ")
+    : undefined;
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={[styles.row, first && styles.first, last && styles.last]}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={[styles.row, first && styles.first, last && styles.last]}
+    >
       <View testID={`tx-icon-${icon}`} style={styles.icon}>
         <Icon name={icon} color={tone === "income" ? color.accent.signal : color.list.icon} size={18} />
       </View>
@@ -44,14 +60,12 @@ export function TxRow({ tx, onPress, first, last, markOutsideLimit = false, cate
             {title}
           </Text>
           <Text style={styles.note}>{kind}</Text>
-          {markOutsideLimit && tx.inLimit === false ? <Text style={styles.outside}>не из лимита</Text> : null}
+          {outside ? <Text style={styles.outside}>не из лимита</Text> : null}
           {tx.needsLabel ? <Text style={styles.ask}>Ждёт ответа</Text> : null}
         </View>
         <View style={styles.right}>
-          <Text style={[styles.amount, { color: TONES[tone] }]}>{main}</Text>
-          {foreign && tx.amountUah !== null ? <Text style={styles.note}>{formatOriginal(tx.amount, tx.currency)}</Text> : null}
-          {foreign && tx.amountUah === null ? <Text style={styles.note}>курс неизвестен</Text> : null}
-          {tx.hold ? <Text style={styles.note}>в обработке</Text> : null}
+          <Text style={[styles.amount, { color: held ? color.fg.muted : TONES[tone] }]}>{main}</Text>
+          {original !== null ? <Text style={styles.note}>{original}</Text> : null}
           {exchange ? <Text style={styles.note}>свои</Text> : null}
         </View>
       </View>
