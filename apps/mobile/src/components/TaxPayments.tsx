@@ -37,6 +37,7 @@ export function TaxSheet({ onClose }: { onClose: () => void }) {
           </View>
         </View>
       ))}
+      {payments.data && payments.data.every((p) => p.paid_at) && <Text style={styles.note}>Налогов к оплате нет.</Text>}
       {markPaid.isError && <ErrorText>Не удалось отметить. Попробуйте ещё раз.</ErrorText>}
       <PrimaryButton label="Новый налог" onPress={() => setAdding(true)} />
       {adding && <TaxForm onClose={() => setAdding(false)} />}

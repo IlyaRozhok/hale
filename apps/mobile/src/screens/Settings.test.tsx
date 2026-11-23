@@ -42,8 +42,12 @@ describe("Settings, lifestyle cap", () => {
       ),
     });
     await renderWith(<Settings onClose={noop} />, api);
-    const slider = await screen.findByLabelText("Потолок трат в месяц");
+    const slider = await screen.findByLabelText("Сколько тратить в месяц");
     expect(slider.props.value).toBe(100000);
+    // Task Я5: the heading says what the number is, and one line says what it changes.
+    expect(screen.getByText("Сколько тратить в месяц")).toBeTruthy();
+    expect(screen.getByText("Выше этого лимит на день не поднимется, даже если денег больше.")).toBeTruthy();
+    expect(screen.queryByText(/[Пп]отол/)).toBeNull();
     expect(await screen.findByText("₴500")).toBeTruthy(); // the current cap's consequence is shown from the start
     await fireEvent(slider, "valueChange", 140000);
     await settle(200);
@@ -61,7 +65,7 @@ describe("Settings, lifestyle cap", () => {
       previewSettings: jest.fn(async () => ({ dailyLimit: 90000, leftForGoalsMonthly: 8_620_000, rateStale: false })),
     });
     await renderWith(<Settings onClose={noop} />, api);
-    expect(await screen.findByText("Дневной лимит при таком потолке")).toBeTruthy();
+    expect(await screen.findByText("Дневной лимит при такой сумме")).toBeTruthy();
     expect(await screen.findByText("₴900")).toBeTruthy();
     // The server still sends the figure; it sums every income of the month, so it read as bigger than any income.
     expect(screen.queryByText("Останется на цели в месяц")).toBeNull();
@@ -71,7 +75,7 @@ describe("Settings, lifestyle cap", () => {
   it("saves the cap when the slider is released", async () => {
     const api = fakeApi();
     await renderWith(<Settings onClose={noop} />, api);
-    const slider = await screen.findByLabelText("Потолок трат в месяц");
+    const slider = await screen.findByLabelText("Сколько тратить в месяц");
     await fireEvent(slider, "valueChange", 150000);
     await fireEvent(slider, "slidingComplete", 150000);
     await waitFor(() => expect(api.patchSettings).toHaveBeenCalledWith({ lifestyle_cap: 15_000_000 }));
@@ -82,11 +86,11 @@ describe("Settings, lifestyle cap", () => {
       throw new NetworkError();
     });
     await renderWith(<Settings onClose={noop} />, fakeApi({ patchSettings }));
-    const slider = await screen.findByLabelText("Потолок трат в месяц");
+    const slider = await screen.findByLabelText("Сколько тратить в месяц");
     await fireEvent(slider, "valueChange", 150000);
     await fireEvent(slider, "slidingComplete", 150000);
     expect(await screen.findByText("Не удалось сохранить. Значение возвращено.")).toBeTruthy();
-    expect(screen.getByLabelText("Потолок трат в месяц").props.value).toBe(100000);
+    expect(screen.getByLabelText("Сколько тратить в месяц").props.value).toBe(100000);
   });
 });
 
@@ -95,7 +99,7 @@ describe("Settings, preview accuracy", () => {
     const previewSettings = jest.fn(async () => ({ dailyLimit: 90000, leftForGoalsMonthly: 0, rateStale: true }));
     await renderWith(<Settings onClose={noop} />, fakeApi({ previewSettings }));
     expect(await screen.findByText("Курс валюты неизвестен или устарел: цифра может быть неточной.")).toBeTruthy();
-    expect(screen.getByText("Дневной лимит при таком потолке")).toBeTruthy(); // the one figure the note is about
+    expect(screen.getByText("Дневной лимит при такой сумме")).toBeTruthy(); // the one figure the note is about
   });
 
   it("recalculates the preview after a loan or a tax payment is saved", async () => {
@@ -128,7 +132,7 @@ describe("Settings, closing", () => {
   it("has a close control and no display or loan settings", async () => {
     const onClose = jest.fn();
     await renderWith(<Settings onClose={onClose} />, fakeApi());
-    await screen.findByLabelText("Потолок трат в месяц");
+    await screen.findByLabelText("Сколько тратить в месяц");
     expect(screen.queryByText("Показ лимита")).toBeNull();
     expect(screen.queryByLabelText("Сумма займа")).toBeNull();
     await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
@@ -142,7 +146,7 @@ describe("Settings, refetch of Today", () => {
     client.setQueryData(TODAY_KEY, todayFixture());
     const api = fakeApi();
     await renderWith(<Settings onClose={noop} />, api, client);
-    const slider = await screen.findByLabelText("Потолок трат в месяц");
+    const slider = await screen.findByLabelText("Сколько тратить в месяц");
     // Settings itself reads Today (the bank line), so an invalidated Today is fetched again at once.
     await waitFor(() => expect(api.today).toHaveBeenCalledTimes(1));
     await fireEvent(slider, "slidingComplete", 120000);
@@ -176,7 +180,7 @@ describe("Settings, bank connection", () => {
 
   it("shows no bank line until Today is loaded", async () => {
     await renderWith(<Settings onClose={noop} />, fakeApi({ today: jest.fn(() => new Promise<never>(() => undefined)) }));
-    await screen.findByLabelText("Потолок трат в месяц");
+    await screen.findByLabelText("Сколько тратить в месяц");
     expect(screen.queryByText(/Банк обновлялся/)).toBeNull();
     expect(screen.queryByText(/Синхронизации с банком/)).toBeNull();
   });
@@ -224,7 +228,7 @@ describe("Settings, ledger check (Б11)", () => {
     await one({ kind: "own_transfers", amount: 0, currency: "UAH", since: "2026-11-03", count: 1 }, "У 1 перевода между своими счетами нет второй части, с 3 ноя.");
     await one({ kind: "categories", amount: 1_000, currency: "UAH", since: "2026-11-10" }, "С 10 ноя траты по категориям не сходятся с общей суммой на ₴10.");
     await one({ kind: "day_spent", amount: -50_000, currency: "UAH", since: "2026-11-06" }, "Потрачено за 6 ноя не везде одинаково: разница ₴500.");
-    await one({ kind: "cash_wallet", amount: -10_000, currency: "UAH", since: "2026-11-09" }, "В кошельке наличных −₴100 с 9 ноя.");
+    await one({ kind: "cash_wallet", amount: -10_000, currency: "UAH", since: "2026-11-09" }, "Наличных по записям −₴100 с 9 ноя.");
   });
 
   it("shows the first problem and how many more there are", async () => {

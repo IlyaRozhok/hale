@@ -149,7 +149,7 @@ describe("the cash question", () => {
     await fireEvent.press(await screen.findByRole("button", { name: /^Вопросы: / }));
     expect(screen.getByRole("button", { name: "Вывод с Binance" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Другое" })).toBeTruthy();
-    await press("Из кошелька");
+    await press("Из моих наличных");
     await waitFor(() => expect(api.depositFromWallet).toHaveBeenCalledWith(42));
   });
 
@@ -292,7 +292,7 @@ describe("a payment that is waiting, from the phrase of the day", () => {
     const api = fakeApi({ today: jest.fn(async () => overdue()), ...wallet(0, false) });
     await renderWith(<Today onOpenActivity={noop} />, api);
     await press(/^Квартплата/);
-    expect(screen.queryByLabelText("Наличными из кошелька")).toBeNull();
+    expect(screen.queryByLabelText("Из моих наличных")).toBeNull();
     await press("Оплачено");
     await waitFor(() => expect(api.markPaid).toHaveBeenCalledWith(3));
     expect(api.payFromWallet).not.toHaveBeenCalled();
@@ -302,7 +302,7 @@ describe("a payment that is waiting, from the phrase of the day", () => {
     const api = fakeApi({ today: jest.fn(async () => overdue()), ...wallet(2_000_000) });
     await renderWith(<Today onOpenActivity={noop} />, api);
     await press(/^Квартплата/);
-    await fireEvent(await screen.findByLabelText("Наличными из кошелька"), "valueChange", true);
+    await fireEvent(await screen.findByLabelText("Из моих наличных"), "valueChange", true);
     expect(screen.getByText("Наличные уменьшатся на ₴17,000, лимит не изменится.")).toBeTruthy();
     await press("Оплачено");
     await waitFor(() => expect(api.payFromWallet).toHaveBeenCalledWith(3));
@@ -312,8 +312,8 @@ describe("a payment that is waiting, from the phrase of the day", () => {
   it("cannot be paid from a wallet that has less", async () => {
     await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => overdue()), ...wallet(1_000_000) }));
     await press(/^Квартплата/);
-    expect((await screen.findByLabelText("Наличными из кошелька")).props.disabled).toBe(true);
-    expect(screen.getByText("В кошельке по записям ₴10,000. Если наличные были до начала учёта, просто отметьте оплату.")).toBeTruthy();
+    expect((await screen.findByLabelText("Из моих наличных")).props.disabled).toBe(true);
+    expect(screen.getByText("Наличных по записям ₴10,000. Если их было больше — просто отметьте оплату.")).toBeTruthy();
   });
 });
 

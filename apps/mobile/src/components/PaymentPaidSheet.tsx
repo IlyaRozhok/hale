@@ -95,9 +95,9 @@ export function PaymentPaidSheet({ payment, today, onClose }: Props) {
       )}
       {canOfferCash && (
         <View style={styles.switchRow}>
-          <Text style={styles.text}>Наличными из кошелька</Text>
+          <Text style={styles.text}>Из моих наличных</Text>
           <Switch
-            accessibilityLabel="Наличными из кошелька"
+            accessibilityLabel="Из моих наличных"
             value={inCash && covers}
             disabled={!covers}
             onValueChange={setInCash}
@@ -109,8 +109,8 @@ export function PaymentPaidSheet({ payment, today, onClose }: Props) {
       {canOfferCash && !covers && (
         <Text style={styles.muted}>
           {alreadyPaid > 0
-            ? `В кошельке по записям ${formatMoney(w.balance)}, остаток платежа — ${formatMoney(cashDue)}. Если наличные были до начала учёта, просто отметьте оплату.`
-            : `В кошельке по записям ${formatMoney(w.balance)}. Если наличные были до начала учёта, просто отметьте оплату.`}
+            ? `Наличных по записям ${formatMoney(w.balance)}, остаток платежа — ${formatMoney(cashDue)}. Если их было больше — просто отметьте оплату.`
+            : `Наличных по записям ${formatMoney(w.balance)}. Если их было больше — просто отметьте оплату.`}
         </Text>
       )}
       <Text style={styles.muted}>

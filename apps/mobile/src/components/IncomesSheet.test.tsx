@@ -38,11 +38,11 @@ const taxSwitch = () => screen.getByLabelText("С этого дохода пла
 const cryptoSwitch = () => screen.getByLabelText("Приходит в крипте — спросить о выводе");
 
 describe("IncomesSheet, a list of named incomes (Д3б, variant А)", () => {
-  it("shows each income as a row with its amount, when and where, and the next one under the list", async () => {
+  it("shows each income as a row with its amount, when and where, and no footnote under the list", async () => {
     await renderWith(<IncomesSheet onClose={noop} />, api());
     expect(await screen.findByText("$5,000 · 1–5 числа · на счёт ФОП")).toBeTruthy();
     expect(await screen.findByText("$1,200 · 20-го · на Binance")).toBeTruthy();
-    expect(screen.getByText("Следующий — 1 дек, $5,000.")).toBeTruthy();
+    expect(screen.queryByText(/Следующий —/)).toBeNull();
     expect(screen.getByRole("button", { name: "Новый доход" })).toBeTruthy();
     // The list is quiet: no «Изменить» under every row, the row itself opens the form.
     expect(screen.queryByText("Изменить")).toBeNull();

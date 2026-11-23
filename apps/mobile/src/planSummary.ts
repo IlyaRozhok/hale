@@ -1,6 +1,6 @@
 // What the Plan screen's lines say, from the same rows its windows list. No native imports: runs in node tests.
 import type { ExpectedIncomeDto, IncomeAccount, IncomeEventDto, OwnMoneyItemDto, RecurringDto, ScheduledPaymentDto } from "@hale/contracts";
-import { formatDollars, formatMoney, shortDate } from "./format";
+import { formatDollars, formatMoney } from "./format";
 import { placeName } from "./ownMoney";
 
 /** An amount in its own currency, whole units: the lines are a summary. */
@@ -50,13 +50,6 @@ export const sameAccount = (a: IncomeAccount | null | undefined, b: IncomeAccoun
 export function incomeDetail(i: ExpectedIncomeDto, items: readonly OwnMoneyItemDto[]): string {
   const place = incomePlaces(items).find((p) => sameAccount(p.account, i.account));
   return [moneyIn(i.amount, i.currency), incomeWhen(i), ...(place ? [place.to] : [])].join(" · ");
-}
-
-/** The line under the list of incomes: the next one not yet received. */
-export function nextIncomeLine(expected: readonly ExpectedIncomeDto[], events: readonly IncomeEventDto[]): string | null {
-  const event = nextEvent(events);
-  const income = event && expected.find((x) => x.id === event.expected_income_id);
-  return event && income ? `Следующий — ${shortDate(event.expected_on)}, ${moneyIn(income.amount, income.currency)}.` : null;
 }
 
 /** A server since Д3а names every income; an older one does not, and takes only the old fields. No incomes: a newer server is assumed. */

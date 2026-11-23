@@ -571,11 +571,11 @@ describe("Plan, loans", () => {
 describe("Plan, settings", () => {
   it("opens settings from the gear in the corner and closes them", async () => {
     await renderWith(<Plan />, fakeApi());
-    expect(screen.queryByText("Потолок трат")).toBeNull();
+    expect(screen.queryByText("Сколько тратить в месяц")).toBeNull();
     await fireEvent.press(await screen.findByRole("button", { name: "Настройки" }));
-    expect(await screen.findByText("Потолок трат")).toBeTruthy();
+    expect(await screen.findByText("Сколько тратить в месяц")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
-    await waitFor(() => expect(screen.queryByText("Потолок трат")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Сколько тратить в месяц")).toBeNull());
   });
 
   it("settings stay reachable when the data does not load", async () => {
@@ -638,7 +638,7 @@ describe("Plan, incomes", () => {
     await renderWith(<Plan />, api);
     await press("Доходы");
     expect(await screen.findByText("$800 · 1–5 числа")).toBeTruthy();
-    expect(screen.getByText("Следующий — 5 ноя, $800.")).toBeTruthy();
+    expect(screen.queryByText(/Следующий —/)).toBeNull();
     await press("USDC");
     expect(screen.getByLabelText("Сумма дохода").props.value).toBe("800");
     await fireEvent.changeText(screen.getByLabelText("Сумма дохода"), "900");
@@ -1085,6 +1085,21 @@ describe("Plan, tax payments", () => {
     expect(screen.getByText("₴9,000")).toBeTruthy();
     expect(screen.getByText("Оплачен")).toBeTruthy();
     expect(screen.queryByText("Интернет")).toBeNull();
+    expect(screen.queryByText("Налогов к оплате нет.")).toBeNull();
+  });
+
+  it("says no tax is left to pay when every tax payment is paid (Я5)", async () => {
+    const paid = jest.fn(async () => [taxFixture({ id: 1, name: "Налог за 2 кв.", amount: 900_000, due_on: "2026-08-20", paid_at: "2026-08-19T09:00:00.000Z" })]);
+    await renderWith(<Plan />, fakeApi({ payments: paid }));
+    await press("Налоги");
+    expect(await screen.findByText("Налогов к оплате нет.")).toBeTruthy();
+    expect(screen.getByText("Оплачен")).toBeTruthy();
+  });
+
+  it("says no tax is left to pay when there are no tax payments at all (Я5)", async () => {
+    await renderWith(<Plan />, fakeApi({ payments: jest.fn(async () => []) }));
+    await press("Налоги");
+    expect(await screen.findByText("Налогов к оплате нет.")).toBeTruthy();
   });
 
   it("marks a payment as paid with one tap and reloads the list", async () => {

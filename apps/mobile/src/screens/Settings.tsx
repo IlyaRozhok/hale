@@ -54,7 +54,7 @@ function issueSentence(issue: LedgerCheckIssueDto, ranAt: string): string | null
     case "day_spent":
       return `Потрачено за ${date} не везде одинаково: разница ${amount}.`;
     case "cash_wallet":
-      return `В кошельке наличных ${formatMoney(issue.amount)} с ${date}.`;
+      return `Наличных по записям ${formatMoney(issue.amount)} с ${date}.`;
     default:
       return null;
   }
@@ -129,10 +129,11 @@ export function Settings({ onClose }: { onClose: () => void }) {
       {saved && cap !== null && (
         <>
           <Glass style={styles.stack}>
-            <Text style={styles.heading}>Потолок трат</Text>
+            <Text style={styles.heading}>Сколько тратить в месяц</Text>
+            <Text style={styles.muted}>Выше этого лимит на день не поднимется, даже если денег больше.</Text>
             <Text style={styles.value}>{`${formatMoney(cap * 100)} в месяц`}</Text>
             <Slider
-              accessibilityLabel="Потолок трат в месяц"
+              accessibilityLabel="Сколько тратить в месяц"
               accessibilityValue={{ text: `${formatMoney(cap * 100)} в месяц` }}
               style={styles.slider}
               minimumValue={Math.min(CAP_MIN, cap)}
@@ -148,7 +149,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
             {preview.data ? (
               <View style={[styles.stack, preview.stale && styles.stale]}>
                 <View style={styles.line}>
-                  <Text style={styles.muted}>Дневной лимит при таком потолке</Text>
+                  <Text style={styles.muted}>Дневной лимит при такой сумме</Text>
                   <Text style={styles.value}>{formatMoney(preview.data.dailyLimit)}</Text>
                 </View>
                 {preview.data.rateStale && <Text style={styles.muted}>Курс валюты неизвестен или устарел: цифра может быть неточной.</Text>}

@@ -137,7 +137,7 @@ describe("paid with chosen operations", () => {
     await waitFor(() => expect(api.cash).toHaveBeenCalled());
     await waitFor(() => expect(api.paymentCandidates).toHaveBeenCalled());
     expect(screen.queryByText(/\$/)).toBeNull();
-    expect(screen.queryByLabelText("Наличными из кошелька")).toBeNull();
+    expect(screen.queryByLabelText("Из моих наличных")).toBeNull();
     expect(screen.queryByText("Чем оплачено")).toBeNull();
     await press("Оплачено");
     await waitFor(() => expect(api.markPaid).toHaveBeenCalledWith(12));

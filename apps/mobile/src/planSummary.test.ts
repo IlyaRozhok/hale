@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExpectedIncomeDto, OwnMoneyItemDto } from "@hale/contracts";
-import { hasNamedIncomes, incomeDetail, incomePlaces, incomeOnDay, incomeWhen, installmentGroups, nextIncomeLine, paymentsCount, taxesShown, unpaidTaxCount } from "./planSummary";
+import { hasNamedIncomes, incomeDetail, incomePlaces, incomeOnDay, incomeWhen, installmentGroups, paymentsCount, taxesShown, unpaidTaxCount } from "./planSummary";
 import { dateLabel, monthGrid, monthTitle } from "./format";
 
 const pay = (over: object) => ({ id: 1, kind: "obligation", name: "Квартира", amount: 100_000, currency: "UAH", due_on: "2026-11-26", paid_at: null, recurring_id: null, tax_quarter: null, is_estimate: false, ...over }) as never;
@@ -63,12 +63,6 @@ describe("incomes, named (Д3б)", () => {
     expect(incomeDetail({ ...fop, account: null }, places)).toBe("$5,000 · 1–5 числа");
     expect(incomeDetail({ ...fop, account: { source: "account", id: 99 } }, places)).toBe("$5,000 · 1–5 числа");
     expect(incomeDetail({ ...fop, account: undefined }, [])).toBe("$5,000 · 1–5 числа");
-  });
-
-  it("names the next income under the list", () => {
-    const ev = (id: number, expected_income_id: number, expected_on: string) => ({ id, expected_income_id, period: expected_on.slice(0, 7), expected_on, status: "expected" });
-    expect(nextIncomeLine([fop, usdc], [ev(1, 2, "2026-11-20"), ev(2, 1, "2026-12-01")])).toBe("Следующий — 20 ноя, $1,200.");
-    expect(nextIncomeLine([fop], [])).toBeNull();
   });
 
   it("knows an older server by incomes without names", () => {
