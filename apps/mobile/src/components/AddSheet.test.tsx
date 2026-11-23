@@ -19,6 +19,9 @@ describe("AddSheet: one window for everything entered by hand (Д5)", () => {
     expect(await screen.findByText("Квартплата · 6 дек")).toBeTruthy();
     for (const name of ["Трата", "Получил", "Оплатил платёж", "Перевёл между своими"]) expect(screen.getByRole("button", { name })).toBeTruthy();
     expect(screen.getByText("доход или вернули долг")).toBeTruthy();
+    // The subtitle names the kind as it is now called, «Перевёл в свои» (Я5).
+    expect(screen.getByText("перевёл в свои или обменял USDC · лимит не меняется")).toBeTruthy();
+    expect(screen.queryByText(/отдал/i)).toBeNull();
     // No form yet: the action comes first.
     expect(screen.queryByLabelText("Сумма")).toBeNull();
   });

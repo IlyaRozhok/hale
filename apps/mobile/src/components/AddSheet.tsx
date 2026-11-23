@@ -75,7 +75,7 @@ export function AddSheet({ onClose }: { onClose: () => void }) {
       : []),
     {
       title: "Перевёл между своими",
-      line: "отдал в свои или обменял USDC · лимит не меняется",
+      line: "перевёл в свои или обменял USDC · лимит не меняется",
       icon: "transfer",
       tint: color.fg.muted,
       onPress: () => setStep({ to: "cash", mode: "transfer" }),
