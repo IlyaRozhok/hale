@@ -236,6 +236,11 @@ export class Goal {
   @Column({ type: "bigint", transformer: bt, default: 0 }) saved_cents!: number;
   @Column({ type: "integer", default: 0 }) sort!: number;
   @Column({ type: "timestamptz", default: () => "now()" }) created_at!: Date;
+  /** ЯМ5: the target's currency (the place's own); minor units. */
+  @Column({ type: "text", default: "USD" }) currency!: string;
+  /** ЯМ5: the place the goal is kept in, one of the two or none. */
+  @Column({ type: "integer", nullable: true }) account_id!: number | null;
+  @Column({ type: "integer", nullable: true }) manual_balance_id!: number | null;
 }
 
 /** A spending category (В5). `key` is what rows store; a deleted one keeps its row so its key is not reused. */

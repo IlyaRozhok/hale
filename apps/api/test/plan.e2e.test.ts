@@ -1494,6 +1494,101 @@ describe("goals", () => {
     await api.patch("/plan/goals/999", { saved_cents: 1 }).expect(404);
     await api.del("/plan/goals/999").expect(404);
   });
+
+  describe("a goal kept in a place (ЯМ5)", () => {
+    const jar = async (balance: number, currency = "UAH") => {
+      const id = await account("jar", currency);
+      await ds.query(`UPDATE accounts SET balance=$2, title='Отпуск' WHERE id=$1`, [id, balance]);
+      return id;
+    };
+    const binance = async (amount: number) =>
+      (await ds.query(`INSERT INTO manual_balances (name, amount, currency) VALUES ('Binance', $1, 'USD') RETURNING id`, [amount]))[0].id as number;
+
+    it("an existing goal stays in dollars, without a place, with what was entered by hand", async () => {
+      const g = (await api.post("/plan/goals", { name: "Машина", target_cents: 500_000, saved_cents: 30_000 }).expect(201)).body;
+      expect(g).toEqual({ id: g.id, name: "Машина", target_cents: 500_000, saved_cents: 30_000, sort: 0, currency: "USD", place: null });
+      expect((await api.get("/plan/goals").expect(200)).body).toEqual([g]);
+    });
+
+    it("saved is the place's balance, in the place's currency, named as «Отложено» names it", async () => {
+      const b = await binance(120_000);
+      const g = (await api.post("/plan/goals", { name: "Машина", target_cents: 500_000, place: { source: "manual", id: b } }).expect(201)).body;
+      expect(g).toEqual({
+        id: g.id, name: "Машина", target_cents: 500_000, saved_cents: 120_000, sort: 0, currency: "USD",
+        place: { source: "manual", id: b, name: "Binance" },
+      });
+      const j = await jar(4_000_000);
+      const trip = (await api.post("/plan/goals", { name: "Отпуск", target_cents: 5_000_000, place: { source: "account", id: j } }).expect(201)).body;
+      expect(trip).toMatchObject({ saved_cents: 4_000_000, currency: "UAH", place: { source: "account", id: j, name: "Отпуск" } });
+
+      // The balance moves, the goal follows; nothing entered by hand counts.
+      await ds.query(`UPDATE manual_balances SET amount=150000 WHERE id=$1`, [b]);
+      await ds.query(`UPDATE accounts SET balance=4500000 WHERE id=$1`, [j]);
+      const list = (await api.get("/plan/goals").expect(200)).body as { saved_cents: number }[];
+      expect(list.map((x) => x.saved_cents)).toEqual([150_000, 4_500_000]);
+      await api.patch(`/plan/goals/${g.id}`, { saved_cents: 1 }).expect(200);
+      expect((await api.get("/plan/goals").expect(200)).body[0].saved_cents).toBe(150_000);
+    });
+
+    it("an old goal gets a place: its progress becomes the place's; a place in another currency needs a new target", async () => {
+      const g = (await api.post("/plan/goals", { name: "Машина", target_cents: 500_000, saved_cents: 30_000 }).expect(201)).body;
+      const j = await jar(4_000_000);
+      await api.patch(`/plan/goals/${g.id}`, { place: { source: "account", id: j } }).expect(400);
+      expect((await api.get("/plan/goals").expect(200)).body[0]).toMatchObject({ currency: "USD", place: null, saved_cents: 30_000 });
+
+      const moved = (await api.patch(`/plan/goals/${g.id}`, { place: { source: "account", id: j }, target_cents: 20_000_000 }).expect(200)).body;
+      expect(moved).toMatchObject({ target_cents: 20_000_000, currency: "UAH", saved_cents: 4_000_000, place: { source: "account", id: j } });
+
+      // Without a place again: the currency stays, saved is what was entered by hand.
+      const off = (await api.patch(`/plan/goals/${g.id}`, { place: null }).expect(200)).body;
+      expect(off).toMatchObject({ target_cents: 20_000_000, currency: "UAH", saved_cents: 30_000, place: null });
+    });
+
+    it("a place that is gone leaves the goal without a place, with what was entered by hand", async () => {
+      const b = await binance(120_000);
+      const g = (await api.post("/plan/goals", { name: "Машина", target_cents: 500_000, saved_cents: 10_000, place: { source: "manual", id: b } }).expect(201)).body;
+      expect(g.saved_cents).toBe(120_000);
+      await api.del(`/plan/manual-balances/${b}`).expect(200);
+      expect((await api.get("/plan/goals").expect(200)).body).toEqual([
+        { id: g.id, name: "Машина", target_cents: 500_000, saved_cents: 10_000, sort: 0, currency: "USD", place: null },
+      ]);
+    });
+
+    it("deleting a goal leaves the place's money as it was", async () => {
+      const b = await binance(120_000);
+      const j = await jar(4_000_000);
+      const g1 = (await api.post("/plan/goals", { name: "Машина", target_cents: 500_000, place: { source: "manual", id: b } }).expect(201)).body;
+      const g2 = (await api.post("/plan/goals", { name: "Отпуск", target_cents: 5_000_000, place: { source: "account", id: j } }).expect(201)).body;
+      const before = (await api.get("/today").expect(200)).body;
+      await api.del(`/plan/goals/${g1.id}`).expect(200);
+      await api.del(`/plan/goals/${g2.id}`).expect(200);
+      expect(await ds.query(`SELECT amount::float8 AS a FROM manual_balances WHERE id=$1`, [b])).toEqual([{ a: 120_000 }]);
+      expect(await ds.query(`SELECT balance::float8 AS b FROM accounts WHERE id=$1`, [j])).toEqual([{ b: 4_000_000 }]);
+      const after = (await api.get("/today").expect(200)).body;
+      expect([after.state, after.accounts]).toEqual([before.state, before.accounts]);
+    });
+
+    it("a goal in a place changes no money the day counts with", async () => {
+      const b = await binance(120_000);
+      await jar(4_000_000);
+      const before = (await api.get("/today").expect(200)).body;
+      await api.post("/plan/goals", { name: "Машина", target_cents: 500_000, place: { source: "manual", id: b } }).expect(201);
+      const after = (await api.get("/today").expect(200)).body;
+      expect([after.state, after.accounts, after.runway]).toEqual([before.state, before.accounts, before.runway]);
+    });
+
+    it("refuses a place that is not there, the wallet's row and a place of an unknown kind", async () => {
+      await api.post("/plan/goals", { name: "x", target_cents: 100, place: { source: "account", id: 999 } }).expect(400);
+      await api.post("/plan/goals", { name: "x", target_cents: 100, place: { source: "manual", id: 999 } }).expect(400);
+      const wallet = await account("cash");
+      await api.post("/plan/goals", { name: "x", target_cents: 100, place: { source: "account", id: wallet } }).expect(400);
+      await api.post("/plan/goals", { name: "x", target_cents: 100, place: { source: "cash" } }).expect(400);
+      await api.post("/plan/goals", { name: "x", target_cents: 100, currency: "UAH" }).expect(400);
+      const g = (await api.post("/plan/goals", { name: "x", target_cents: 100 }).expect(201)).body;
+      await api.patch(`/plan/goals/${g.id}`, { place: { source: "account", id: 999 } }).expect(400);
+      expect(await ds.query(`SELECT count(*)::int AS n FROM goals`)).toEqual([{ n: 1 }]);
+    });
+  });
 });
 
 describe("incomes with a name, a schedule, an account and flags (Д3а)", () => {
