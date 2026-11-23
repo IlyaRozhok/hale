@@ -13,17 +13,16 @@ import {
   upcomingSubscriptions,
 } from "../domain/observations";
 import { kyivDate } from "../domain/money";
-import { type ChargeRow, findSubscriptions, subscriptionsFrom } from "../domain/subscriptions";
-import { SUBSCRIPTION_CHARGES_SQL } from "../insights/insights.service";
+import { subscriptionsAsOf } from "../insights/insights.service";
 import { Clock } from "../time/clock";
 import { TodayService } from "../today/today.service";
 import { IN_LIMIT } from "../transactions/day-totals";
 
 /**
  * Task В7: today's observation for the phrase of the day. Reads money, never writes it: the spending is the limit's
- * one definition (IN_LIMIT, signed as «Итоги» sign it), the subscriptions are the ones «Итоги» find, and the day's
- * mode and income date are «Сегодня»'s own (TodayService.getToday, which only reads). Its own two tables hold what was
- * shown and what was dismissed.
+ * one definition (IN_LIMIT, signed as «Итоги» sign it), the subscriptions are the ones «Итоги» find (subscriptionsAsOf,
+ * the places marked «Не подписка» left out, ЯМ6), and the day's mode and income date are «Сегодня»'s own
+ * (TodayService.getToday, which only reads). Its own two tables hold what was shown and what was dismissed.
  */
 @Injectable()
 export class ObservationsService {
@@ -80,8 +79,7 @@ export class ObservationsService {
     const { state, runway } = await this.today.getToday();
     if (state.mode === "bridge") {
       if (gate.excluded.has(observationKey("subscriptions", null))) return null;
-      const charges = (await m.query(SUBSCRIPTION_CHARGES_SQL, [subscriptionsFrom(today), today])) as ChargeRow[];
-      return upcomingSubscriptions(findSubscriptions(charges, today).items, today, runway?.incomeOn ?? null);
+      return upcomingSubscriptions((await subscriptionsAsOf(m, today)).items, today, runway?.incomeOn ?? null);
     }
     return this.spike(m, today, gate.excluded);
   }

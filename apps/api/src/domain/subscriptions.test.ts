@@ -206,6 +206,18 @@ describe("findSubscriptions", () => {
     expect(findSubscriptions(rows, "2026-11-16")).toEqual({ monthly: 0, items: [] });
   });
 
+  it("leaves out a place the owner marked «Не подписка», and its sum leaves the monthly total; the rest stay as they were (ЯМ6)", () => {
+    const rows = [
+      ...["2026-08-05", "2026-09-05", "2026-10-05", "2026-11-05"].map((d) => row("netflix", d, 24_900, "Netflix")),
+      ...["2026-08-10", "2026-09-10", "2026-10-10", "2026-11-10"].map((d) => row("pharmacy", d, 30_000, "Аптека")),
+    ];
+    const all = findSubscriptions(rows, "2026-11-16");
+    expect(all.items.map((i) => i.key)).toEqual(["pharmacy", "netflix"]);
+    expect(findSubscriptions(rows, "2026-11-16", new Set(["pharmacy"]))).toEqual({ monthly: 24_900, items: [all.items[1]] });
+    expect(findSubscriptions(rows, "2026-11-16", new Set())).toEqual(all);
+    expect(findSubscriptions(rows, "2026-11-16", new Set(["pharmacy", "netflix"]))).toEqual({ monthly: 0, items: [] });
+  });
+
   it("does not see charges after the day asked, for a past month", () => {
     const rows = [row("s", "2026-08-01", 5_000), row("s", "2026-09-01", 5_000), row("s", "2026-10-01", 5_000), row("s", "2026-11-01", 7_000)];
     expect(findSubscriptions(rows, "2026-10-31").items).toEqual([{ key: "s", name: "s", amount: 5_000, lastDate: "2026-10-01", raisedBy: 0, missed: 0 }]);
