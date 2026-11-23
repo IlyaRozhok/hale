@@ -27,7 +27,18 @@ const dateOf = (iso: string) => {
  * payment there can be pressed to mark it paid. While no day is touched, the same place under the
  * graph names the nearest payment of the stretch, if there is one.
  */
-export function Runway({ runway, today, onPay }: { runway: RunwayDto; today: string; onPay?: (paymentId: string) => void }) {
+export function Runway({
+  runway,
+  today,
+  onPay,
+  showHead = true,
+}: {
+  runway: RunwayDto;
+  today: string;
+  onPay?: (paymentId: string) => void;
+  /** False when the screen says the reserve itself, in the words of «До дохода» (task ЯМ1). */
+  showHead?: boolean;
+}) {
   const [width, setWidth] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const touched = useRef<number | null>(null);
@@ -93,10 +104,12 @@ export function Runway({ runway, today, onPay }: { runway: RunwayDto; today: str
   const crossX = chart.cross === null ? null : EDGE + chart.cross;
   return (
     <View style={styles.root}>
-      <View style={styles.head} accessible accessibilityLabel={label}>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={[styles.figure, short && styles.short]}>{formatMoney(runway.reserve)}</Text>
-      </View>
+      {showHead && (
+        <View style={styles.head} accessible accessibilityLabel={label}>
+          <Text style={styles.title}>{title}</Text>
+          <Text style={[styles.figure, short && styles.short]}>{formatMoney(runway.reserve)}</Text>
+        </View>
+      )}
       {drawable && (
         <>
           <View

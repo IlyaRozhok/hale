@@ -46,8 +46,9 @@ describe("Today, normal mode", () => {
     expect(screen.getByText("Понедельник, 2 ноября")).toBeTruthy();
     expect(screen.getByText("₴720")).toBeTruthy();
     expect(screen.getByText("потрачено ₴280 из ₴1,000")).toBeTruthy();
-    expect(screen.getByText("Запас к доходу")).toBeTruthy();
-    expect(screen.getByText("₴13,280")).toBeTruthy();
+    expect(screen.getByText("До дохода")).toBeTruthy();
+    expect(screen.getByText("К доходу останется ₴13,280")).toBeTruthy();
+    expect(screen.queryByText("Запас к доходу")).toBeNull();
     expect(screen.getByText("доход 7 ноя")).toBeTruthy();
     expect(screen.queryByText(/до зарплаты/)).toBeNull();
     expect(screen.queryByText(/сейчас$/)).toBeNull();
@@ -67,6 +68,8 @@ describe("Today, normal mode", () => {
     await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => old) }));
     await screen.findByText("Сегодня можно");
     expect(screen.queryByText(/^Запас/)).toBeNull();
+    expect(screen.queryByText("До дохода")).toBeNull();
+    expect(screen.queryByText(/останется/)).toBeNull();
   });
 
   it("reads the same while no income date is known", async () => {
@@ -143,7 +146,7 @@ describe("Today, normal mode", () => {
     it("no payments before the income: no row under the graph", async () => {
       const runway = { ...todayFixture().runway!, events: [] };
       await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ runway, upcoming: [] })) }));
-      await screen.findByText("Запас к доходу");
+      await screen.findByText("До дохода");
       expect(screen.queryByText("Ближайший платёж")).toBeNull();
     });
 
@@ -319,21 +322,24 @@ describe("Today, normal mode", () => {
       expect(StyleSheet.flatten(heading.props.style).color).not.toBe(tokens.color.status.danger);
       expect(screen.getByText("₴0")).toBeTruthy();
       // Owner, 9 and 22 November: no red words on an overspent day, only the strip's spark; no overspend amount.
-      const line = screen.getByText("потрачено ₴1,551 из ₴950 · завтра снова ₴950");
+      // ЯМ1: on a ₴0 day only tomorrow's limit; what was spent is left out.
+      const line = screen.getByText("завтра снова ₴950");
+      expect(screen.queryByText(/потрачено/)).toBeNull();
       expect(StyleSheet.flatten(line.props.style).color).toBe(tokens.color.fg.subtle);
       expect(screen.queryByText(/на ₴601|больше$/)).toBeNull();
       expect(levelOf()).toBe("bar:over:0");
       expect(screen.queryByText(/больше лимита|Сверх/)).toBeNull();
       expect(screen.queryByText(/^\+/)).toBeNull();
       expect(screen.queryByText(/−/)).toBeNull();
-      expect(screen.getByLabelText("Сегодня можно ₴0, потрачено ₴1,551 из ₴950 на день")).toBeTruthy();
+      expect(screen.getByLabelText("Сегодня можно ₴0, завтра снова ₴950")).toBeTruthy();
     });
 
     it("exactly used up: the limit is used, nothing over it", async () => {
       await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 95000, leftToday: 0, level: 0 }));
       expect(await screen.findByText("Сегодня можно")).toBeTruthy();
       expect(screen.getByText("₴0")).toBeTruthy();
-      expect(screen.getByText("потрачено ₴950 из ₴950 · завтра снова ₴950")).toBeTruthy();
+      expect(screen.getByText("завтра снова ₴950")).toBeTruthy();
+      expect(screen.queryByText(/потрачено/)).toBeNull();
     });
 
     it("the metal bar is empty when nothing is left, and absent with no limit", async () => {
@@ -373,6 +379,8 @@ describe("Today, normal mode", () => {
           expect(screen.queryByText(/₴1,000/)).toBeNull();
           expect(screen.queryByText(/−/)).toBeNull();
           expect(screen.getByLabelText("Сегодня можно ₴0. Новый лимит ₴450 действует с завтра")).toBeTruthy();
+          // «До дохода» names the limit the runway is drawn for: tomorrow's new one (ЯМ1, А23).
+          expect(screen.getByText("если держаться лимита ₴450 в день")).toBeTruthy();
         });
 
         it("with some of the morning limit left, shows it and stays sand", async () => {
@@ -397,7 +405,7 @@ describe("Today, normal mode", () => {
 
         it("over the new limit there is still no red that day", async () => {
           await renderWith(<Today onOpenActivity={noop} />, newLimit({ leftToday: -31000, level: 0 }));
-          expect(await screen.findByText("потрачено ₴760 из ₴450 · завтра снова ₴450")).toBeTruthy();
+          expect(await screen.findByText("завтра снова ₴450")).toBeTruthy();
           expect(screen.queryByText(/больше$/)).toBeNull();
           expect(screen.getByText("₴0")).toBeTruthy();
           expect(levelOf()).toBe("bar:low:0");
@@ -414,7 +422,7 @@ describe("Today, normal mode", () => {
 
       it("the next day is an ordinary one: over the limit is red again", async () => {
         await renderWith(<Today onOpenActivity={noop} />, start({ dailyLimit: 45000, leftToday: -31000 }));
-        expect(await screen.findByText("потрачено ₴760 из ₴450 · завтра снова ₴450")).toBeTruthy();
+        expect(await screen.findByText("завтра снова ₴450")).toBeTruthy();
         expect(levelOf()).toBe("bar:over:0");
         expect(screen.queryByText(/действует с завтра/)).toBeNull();
       });
@@ -735,81 +743,192 @@ describe("Today, normal mode", () => {
   });
 });
 
-describe("Today, the pace and a calm day (А24)", () => {
-  const pace = { avgDaily: 460_000, runOutOn: "2026-11-20", incomeOn: "2026-12-01", hint: { daily: 380_000, lastsUntil: "2026-11-24", untilIncome: 260_000 } };
-  const line = "В таком темпе хватит до 20 ноя — доход 1 дек";
+describe("Today, «До дохода»: the pace and the reserve in one card (А24, ЯМ1)", () => {
+  // The fixture's runway: the income on 7 November, ₴13,280 left at the limit.
+  const pace = { avgDaily: 460_000, runOutOn: "2026-11-04", incomeOn: "2026-11-07", hint: { daily: 380_000, lastsUntil: "2026-11-05", untilIncome: 260_000 } };
+  const line = "В таком темпе хватит до 4 ноя.";
+  const STEP = "Если держаться лимита — к доходу останется ₴13,280.";
+  const OPENS = "Открывает темп трат";
+  const settle = () =>
+    act(async () => {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
   const fastDay = (over: Parameters<typeof todayFixture>[0] = {}) =>
     todayFixture({ state: { ...todayFixture().state, dailyLimit: 230_000, leftToday: -82_000, level: 0 }, pace, upcoming: [], ...over });
+  /** A hard day with some of today's limit still left. */
+  const hardWithin = (over: Parameters<typeof todayFixture>[0] = {}) =>
+    fastDay({ state: { ...todayFixture().state, dailyLimit: 230_000, leftToday: 100_000, level: 0.43 }, ...over });
+  // A week's spike: a month's one is not said in the first days of the month, and the fixture's day is 2 November.
+  const spike = { kind: "spike" as const, period: "week" as const, category: "cafe", spent: 482_000, usual: 310_000, amount: null, from: "2026-10-27", to: "2026-11-02" };
 
-  it("under the limit, one sand line says how far the money lasts at this pace", async () => {
-    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay()) }));
-    const text = await screen.findByText(line);
-    expect(StyleSheet.flatten(text.props.style).color).toBe(tokens.color.limit.low);
-    expect(screen.getByRole("button", { name: line })).toBeTruthy();
+  describe("a hard day", () => {
+    it("one card: the sand day by the pace first, then what is left at the limit; no separate reserve", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => hardWithin()) }));
+      const first = await screen.findByText(line);
+      expect(StyleSheet.flatten(first.props.style).color).toBe(tokens.color.limit.low);
+      expect(screen.getByText("До дохода")).toBeTruthy();
+      expect(screen.getByText("7 ноя")).toBeTruthy();
+      const step = screen.getByText(STEP);
+      expect(StyleSheet.flatten(step.props.style).color).toBe(tokens.color.fg.muted);
+      expect(screen.queryByText("Запас к доходу")).toBeNull();
+      expect(screen.queryByText(/— доход/)).toBeNull();
+      expect(screen.queryByText(/^К доходу останется/)).toBeNull();
+      // The chart and the nearest payment stay in the same card.
+      expect(screen.getByTestId("runway-chart")).toBeTruthy();
+      expect(screen.getByText("доход 7 ноя")).toBeTruthy();
+    });
+
+    it("the card stands under the limit card, the pace above the step, the chart under both", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => hardWithin()) }));
+      await screen.findByText(line);
+      const texts = screen.getAllByText(/./).map((t) => t.props.children);
+      const at = (t: string) => texts.findIndex((c) => c === t);
+      expect(at("Сегодня можно")).toBeLessThan(at("До дохода"));
+      expect(at("До дохода")).toBeLessThan(at(line));
+      expect(at(line)).toBeLessThan(at("сегодня"));
+    });
+
+    it("«7 ноя ›» opens «Темп трат» with the two sentences; «Понятно» closes it", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => hardWithin()) }));
+      await fireEvent.press(await screen.findByText("7 ноя"));
+      expect(await screen.findByText("Темп трат")).toBeTruthy();
+      expect(screen.getByText("Последние 7 дней уходило около ₴4,600 в день. В таком темпе денег хватит до 4 ноя, а доход — 7 ноя.")).toBeTruthy();
+      expect(screen.getByText("Если держаться лимита ₴2,300 в день, хватит до дохода и останется ₴13,280.")).toBeTruthy();
+      expect(screen.getByText("Лимит от этого не меняется.")).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Понятно" }));
+      await waitFor(() => expect(screen.queryByText("Темп трат")).toBeNull());
+    });
+
+    it("the top of the card tells assistive tech what it says and what it opens", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => hardWithin()) }));
+      const head = await screen.findByRole("button", { name: `До дохода, 7 ноя. ${line} ${STEP}` });
+      expect(head.props.accessibilityHint).toBe(OPENS);
+      expect(StyleSheet.flatten(head.props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+    });
+
+    it("no category observation on a hard day, and it is not marked shown", async () => {
+      const observation = jest.fn(async () => spike);
+      const observationShown = jest.fn(async () => spike);
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => hardWithin()), observation, observationShown }));
+      await screen.findByText(line);
+      await waitFor(() => expect(observation).toHaveBeenCalled());
+      await settle();
+      expect(screen.queryByText(/Кафе и рестораны/)).toBeNull();
+      expect(observationShown).not.toHaveBeenCalled();
+    });
+
+    it("a ₴0 day under the limit card says only «завтра снова»", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay()) }));
+      await screen.findByText(line);
+      expect(screen.getByText("завтра снова ₴2,300")).toBeTruthy();
+      expect(screen.queryByText(/потрачено/)).toBeNull();
+    });
+
+    it("money that lasts only today is said in one sentence, and the sheet says the same", async () => {
+      const todayOnly = { ...pace, runOutOn: "2026-11-02", hint: undefined };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => hardWithin({ pace: todayOnly })) }));
+      expect(await screen.findByText("В таком темпе денег хватит только на сегодня.")).toBeTruthy();
+      await fireEvent.press(screen.getByText("7 ноя"));
+      expect(await screen.findByText(/хватит только на сегодня, а доход — 7 ноя\.$/)).toBeTruthy();
+    });
+
+    it("money that ends even at the limit: only the pace, no «останется»", async () => {
+      const runway = { ...todayFixture().runway!, reserve: -240_000, zeroOn: "2026-11-06" };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => hardWithin({ runway })) }));
+      expect(await screen.findByText(line)).toBeTruthy();
+      expect(screen.queryByText(/останется/)).toBeNull();
+      expect(screen.getByText("До дохода")).toBeTruthy();
+      await fireEvent.press(screen.getByText("7 ноя"));
+      expect(await screen.findByText("Темп трат")).toBeTruthy();
+      expect(screen.queryByText(/останется/)).toBeNull();
+    });
+
+    it("is not said twice: the note that the minus went over the bridge plan leaves the pace out, whatever its words", async () => {
+      for (const text of ["Минус вышел за план моста на ₴100. При текущем темпе деньги закончатся 20.11.", "Минус вышел за план моста на ₴100. Свободных денег уже нет."]) {
+        const overPlan = { id: "bridge_over_plan:1", text };
+        const { unmount } = await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ badCases: [overPlan] })) }));
+        expect(await screen.findByText(overPlan.text)).toBeTruthy();
+        expect(screen.queryByText(/В таком темпе/)).toBeNull();
+        expect(screen.queryByRole("button", { name: /До дохода/ })).toBeNull();
+        await unmount();
+      }
+    });
+
+    it("another note does not hide the pace", async () => {
+      const other = { id: "other:1", text: "При текущем темпе — просто слова в другой заметке." };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ badCases: [other] })) }));
+      expect(await screen.findByText(line)).toBeTruthy();
+    });
+
+    it("a loan's run-out words are not on this screen, so the pace stays", async () => {
+      const bankLoan = { id: "loan:1", text: "Займ ₴5,000 от 01.11. При текущем темпе деньги закончатся 20.11.", repayLoan: { id: 1, remaining: 500_000 } };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ badCases: [bankLoan] })) }));
+      expect(await screen.findByText(line)).toBeTruthy();
+      expect(screen.queryByText(/При текущем темпе/)).toBeNull();
+    });
   });
 
-  it("the line stands right under the limit card, before the phrase of the day", async () => {
-    const calendar = jest.fn(async (month: string) =>
-      calendarFixture({ month, days: month === "2026-11" ? [{ date: "2026-11-01", limit: 230_000, spent: 300_000, status: "over" as const }] : [] }),
-    );
-    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay()), calendar }));
-    await screen.findByText("Вчера вышло на ₴700 больше лимита. Сегодня новый день.");
-    const texts = screen.getAllByText(/./).map((t) => t.props.children);
-    const at = (t: string) => texts.findIndex((c) => c === t);
-    expect(at("Сегодня можно")).toBeLessThan(at(line));
-    expect(at(line)).toBeLessThan(at("Вчера вышло на ₴700 больше лимита. Сегодня новый день."));
-  });
-
-  it("a tap opens «Темп трат», with the hint capped at the person's own limit; «Понятно» closes it", async () => {
-    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay()) }));
-    await fireEvent.press(await screen.findByRole("button", { name: line }));
-    expect(await screen.findByText("Темп трат")).toBeTruthy();
-    expect(screen.getByText("₴4,600")).toBeTruthy();
-    expect(screen.getByText("Если тратить около ₴3,800 в день — хватит до 24 ноя. Около ₴2,300 — до самого дохода.")).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button", { name: "Понятно" }));
-    await waitFor(() => expect(screen.queryByText("Темп трат")).toBeNull());
-  });
-
-  it("an older server, or money that lasts: no line", async () => {
-    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ pace: undefined })) }));
-    await screen.findByText("Сегодня можно");
-    expect(screen.queryByText(/В таком темпе/)).toBeNull();
-  });
-
-  it("is not said twice: the note that the minus went over the bridge plan leaves the line out, whatever its words", async () => {
-    for (const text of ["Минус вышел за план моста на ₴100. При текущем темпе деньги закончатся 20.11.", "Минус вышел за план моста на ₴100. Свободных денег уже нет."]) {
-      const overPlan = { id: "bridge_over_plan:1", text };
-      const { unmount } = await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ badCases: [overPlan] })) }));
-      expect(await screen.findByText(overPlan.text)).toBeTruthy();
+  describe("a calm day", () => {
+    it("one answer: what is left by the income at the limit, and the limit under it; nothing opens from the date", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+      const answer = await screen.findByText("К доходу останется ₴13,280");
+      expect(StyleSheet.flatten(answer.props.style).color).toBe(tokens.color.fg.default);
+      const under = screen.getByText("если держаться лимита ₴1,000 в день");
+      expect(StyleSheet.flatten(under.props.style).color).toBe(tokens.color.fg.muted);
+      expect(screen.getByText("До дохода")).toBeTruthy();
       expect(screen.queryByText(/В таком темпе/)).toBeNull();
-      await unmount();
-    }
-  });
+      expect(screen.queryByText("Запас к доходу")).toBeNull();
+      expect(screen.queryByRole("button", { name: /До дохода/ })).toBeNull();
+      await fireEvent.press(screen.getByText("7 ноя"));
+      await settle();
+      expect(screen.queryByText("Темп трат")).toBeNull();
+    });
 
-  it("another note does not hide the line", async () => {
-    const other = { id: "other:1", text: "При текущем темпе — просто слова в другой заметке." };
-    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ badCases: [other] })) }));
-    expect(await screen.findByText(line)).toBeTruthy();
-  });
+    it("an older server sends no pace: the calm card", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ pace: undefined })) }));
+      expect(await screen.findByText("К доходу останется ₴13,280")).toBeTruthy();
+      expect(screen.queryByText(/В таком темпе/)).toBeNull();
+    });
 
-  it("the line tells assistive tech what it opens", async () => {
-    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay()) }));
-    expect((await screen.findByRole("button", { name: line })).props.accessibilityHint).toBe("Открывает темп трат");
-  });
+    it("money that ends even at the limit: no «останется», the reserve is named as before, in sand", async () => {
+      const runway = { ...todayFixture().runway!, reserve: -240_000, zeroOn: "2026-11-06" };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ runway })) }));
+      expect(await screen.findByText("Запас к доходу")).toBeTruthy();
+      const figure = screen.getByText("−₴2,400");
+      expect(StyleSheet.flatten(figure.props.style).color).toBe(tokens.color.limit.low);
+      expect(screen.queryByText(/останется/)).toBeNull();
+    });
 
-  it("money that lasts only today is said in one sentence, and the sheet says the same", async () => {
-    const todayOnly = { ...pace, runOutOn: "2026-11-02", hint: undefined };
-    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ pace: todayOnly })) }));
-    const only = "В таком темпе денег хватит только на сегодня — доход 1 дек";
-    await fireEvent.press(await screen.findByRole("button", { name: only }));
-    expect(await screen.findByText("только на сегодня")).toBeTruthy();
-  });
+    it("with no income date, the reserve for 30 days as before, with no «До дохода»", async () => {
+      const runway = { ...todayFixture().runway!, incomeOn: null };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ runway })) }));
+      expect(await screen.findByText("Запас на 30 дней")).toBeTruthy();
+      expect(screen.getByText("₴13,280")).toBeTruthy();
+      expect(screen.queryByText("До дохода")).toBeNull();
+      expect(screen.queryByText(/останется/)).toBeNull();
+    });
 
-  it("a loan's run-out words are not on this screen, so the line stays", async () => {
-    const bankLoan = { id: "loan:1", text: "Займ ₴5,000 от 01.11. При текущем темпе деньги закончатся 20.11.", repayLoan: { id: 1, remaining: 500_000 } };
-    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => fastDay({ badCases: [bankLoan] })) }));
-    expect(await screen.findByText(line)).toBeTruthy();
-    expect(screen.queryByText(/При текущем темпе/)).toBeNull();
+    it("over the limit, no category observation either", async () => {
+      const observation = jest.fn(async () => spike);
+      const observationShown = jest.fn(async () => spike);
+      const state = { ...todayFixture().state, leftToday: -12_000, level: 0 };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state, upcoming: [] })), observation, observationShown }));
+      await screen.findByText("завтра снова ₴1,000");
+      await waitFor(() => expect(observation).toHaveBeenCalled());
+      await settle();
+      expect(screen.queryByText(/Кафе и рестораны/)).toBeNull();
+      expect(observationShown).not.toHaveBeenCalled();
+    });
+
+    it("within the limit, the observation is said as before", async () => {
+      const observationShown = jest.fn(async () => spike);
+      await renderWith(
+        <Today onOpenActivity={noop} />,
+        fakeApi({ today: jest.fn(async () => todayFixture({ upcoming: [] })), observation: jest.fn(async () => spike), observationShown }),
+      );
+      expect(await screen.findByText("Кафе и рестораны за неделю ₴4,820. Обычно около ₴3,100.")).toBeTruthy();
+      await waitFor(() => expect(observationShown).toHaveBeenCalledWith({ kind: "spike", category: "cafe" }));
+    });
   });
 
   describe("a step closer to the limit", () => {

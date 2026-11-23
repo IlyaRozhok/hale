@@ -54,6 +54,15 @@ describe("Runway", () => {
     expect(screen.queryByText(/14 ноя/)).toBeNull();
   });
 
+  it("leaves its reserve to the screen when asked (ЯМ1): the chart, the axis and the nearest payment stay", async () => {
+    await render(<Runway runway={run()} today="2026-11-11" showHead={false} />);
+    expect(screen.queryByText("Запас к доходу")).toBeNull();
+    expect(screen.queryByText("₴3,100")).toBeNull();
+    expect(screen.getByTestId("runway-chart")).toBeTruthy();
+    expect(screen.getByText("доход 15 ноя")).toBeTruthy();
+    expect(screen.getByText("Ближайший платёж")).toBeTruthy();
+  });
+
   describe("the nearest payment", () => {
     const two = () =>
       run({
