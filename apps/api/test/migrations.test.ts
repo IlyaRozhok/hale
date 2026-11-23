@@ -19,6 +19,7 @@ import { Want1796688000000 } from "../src/db/migrations/0037-want";
 import { AccountCountsAsOwn1796774400000 } from "../src/db/migrations/0038-account-counts-as-own";
 import { IncomeSources1796860800000 } from "../src/db/migrations/0039-income-sources";
 import { NotSubscriptions1796947200000 } from "../src/db/migrations/0040-not-subscriptions";
+import { GoalPlace1797033600000 } from "../src/db/migrations/0041-goal-place";
 import { CLASSIFIER_VERSION } from "../src/domain/classify";
 import { JobRunner } from "../src/mono/jobs/job-runner";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
@@ -739,6 +740,43 @@ describe("migrations", () => {
     for (let i = migrations.indexOf(NotSubscriptions1796947200000); i < migrations.length; i++) await ds.undoLastMigration();
     expect(await ds.query(`SELECT to_regclass('not_subscriptions') AS t`)).toEqual([{ t: null }]);
     expect(await ds.query(rows)).toEqual(was);
+    await ds.destroy();
+  });
+
+  it("0041 gives goals a place and a currency: existing goals stay in dollars, without a place, with what was entered by hand (ЯМ5)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(GoalPlace1797033600000)) });
+    await before.initialize();
+    await before.runMigrations();
+    await before.query(`INSERT INTO goals (name, target_cents, saved_cents, sort) VALUES ('Машина', 500000, 120000, 1), ('Подушка', 100000, 0, 0)`);
+    const jar = (await before.query(`INSERT INTO accounts (external_id, kind, currency, balance, title) VALUES ('jar','jar','UAH',4000000,'Отпуск') RETURNING id`))[0].id;
+    const binance = (await before.query(`INSERT INTO manual_balances (name, amount, currency) VALUES ('Binance', 120000, 'USD') RETURNING id`))[0].id;
+    const goals = `SELECT id, name, target_cents::float8 AS target, saved_cents::float8 AS saved, sort FROM goals ORDER BY id`;
+    const was = await before.query(goals);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    expect(await ds.query(goals)).toEqual(was);
+    expect(await ds.query(`SELECT currency, account_id, manual_balance_id FROM goals ORDER BY id`)).toEqual([
+      { currency: "USD", account_id: null, manual_balance_id: null },
+      { currency: "USD", account_id: null, manual_balance_id: null },
+    ]);
+    // A goal lies in one place at most; a new one without a currency is in dollars, as before.
+    await expect(ds.query(`UPDATE goals SET account_id=$1, manual_balance_id=$2 WHERE id=1`, [jar, binance])).rejects.toThrow();
+    await expect(ds.query(`UPDATE goals SET currency='usd' WHERE id=1`)).rejects.toThrow();
+    await ds.query(`UPDATE goals SET manual_balance_id=$1 WHERE id=1`, [binance]);
+    await ds.query(`INSERT INTO goals (name, target_cents, currency, account_id) VALUES ('Отпуск', 5000000, 'UAH', $1)`, [jar]);
+    // A place that goes leaves its goal without a place; the goal stays.
+    await ds.query(`DELETE FROM manual_balances WHERE id=$1`, [binance]);
+    expect(await ds.query(`SELECT name, manual_balance_id FROM goals WHERE id=1`)).toEqual([{ name: "Машина", manual_balance_id: null }]);
+
+    // Down: a goal in another currency than dollars has no place before 0041 and goes; dollar goals stay as they were.
+    for (let i = migrations.indexOf(GoalPlace1797033600000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'goals' AND column_name IN ('currency', 'account_id', 'manual_balance_id')`)).toEqual([]);
+    expect(await ds.query(goals)).toEqual(was);
+    expect(await ds.query(`SELECT balance::float8 AS b FROM accounts WHERE id=$1`, [jar])).toEqual([{ b: 4000000 }]);
     await ds.destroy();
   });
 });

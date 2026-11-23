@@ -41,6 +41,7 @@ import { Want1796688000000 } from "./migrations/0037-want";
 import { AccountCountsAsOwn1796774400000 } from "./migrations/0038-account-counts-as-own";
 import { IncomeSources1796860800000 } from "./migrations/0039-income-sources";
 import { NotSubscriptions1796947200000 } from "./migrations/0040-not-subscriptions";
+import { GoalPlace1797033600000 } from "./migrations/0041-goal-place";
 
 export const migrations = [
   Init1793577600000,
@@ -83,6 +84,7 @@ export const migrations = [
   AccountCountsAsOwn1796774400000,
   IncomeSources1796860800000,
   NotSubscriptions1796947200000,
+  GoalPlace1797033600000,
 ];
 
 export function createDataSource(url: string): DataSource {

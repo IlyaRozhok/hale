@@ -231,14 +231,39 @@ export interface LoanHistoryDto {
 }
 
 // --- goals ------------------------------------------------------------------
+/**
+ * The place a goal is kept in (ЯМ5), as `GET /today` names its rows in «Отложено» and «Счета»: a bank account or a
+ * balance kept by hand, by id. The wallet is not one.
+ */
+export const goalPlace = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("account"), id: z.number().int().positive() }).strict(),
+  z.object({ source: z.literal("manual"), id: z.number().int().positive() }).strict(),
+]);
+export type GoalPlace = z.infer<typeof goalPlace>;
 const goalShape = {
   name: z.string().trim().min(1).max(100),
+  /** In minor units of the goal's currency: the place's own currency, dollars for a goal without a place. */
   target_cents: money.positive(),
+  /**
+   * Entered by hand, for a goal without a place only: with a place it is not stored (ЯМ5). Moving a goal to another
+   * currency starts it at 0 unless sent along with `place: null`.
+   */
   saved_cents: money.nonnegative(),
   sort: z.number().int().min(0).max(1_000_000),
+  /**
+   * «Где копите?» (ЯМ5): the goal's currency becomes the place's; moving a goal to a place in another currency needs
+   * its new `target_cents` in the same request. null leaves the goal without a place, in its currency.
+   */
+  place: goalPlace.nullable(),
 };
 export const goalInput = z
-  .object({ name: goalShape.name, target_cents: goalShape.target_cents, saved_cents: goalShape.saved_cents.optional(), sort: goalShape.sort.optional() })
+  .object({
+    name: goalShape.name,
+    target_cents: goalShape.target_cents,
+    saved_cents: goalShape.saved_cents.optional(),
+    sort: goalShape.sort.optional(),
+    place: goalShape.place.optional(),
+  })
   .strict();
 export const goalPatch = partial(z.object(goalShape));
 export type GoalInput = z.infer<typeof goalInput>;
@@ -247,11 +272,21 @@ export type GoalPatch = z.infer<typeof goalPatch>;
 export interface GoalDto {
   id: number;
   name: string;
-  /** US cents. */
+  /** Minor units of `currency` (US cents on an older server). */
   target_cents: number;
-  /** US cents. */
+  /**
+   * Minor units of `currency`: for a goal kept in a place, that place's balance now (ЯМ5); otherwise what was entered by
+   * hand.
+   */
   saved_cents: number;
   sort: number;
+  /** The goal's currency, the place's own (ЯМ5). Absent on an older server: dollars. */
+  currency?: string;
+  /**
+   * Where the goal is kept (ЯМ5), named as its row in «Отложено»; null when it has no place, its place is gone, or the
+   * place is now in another currency than the goal. Absent on an older server.
+   */
+  place?: (GoalPlace & { name: string }) | null;
 }
 
 // --- manual balances --------------------------------------------------------

@@ -16,6 +16,7 @@ import {
 import {
   type AccountDto,
   type ExpectedIncomeDto,
+  type GoalDto,
   accountPatch,
   confirmIncomeInput,
   expectedIncomeInput,
@@ -44,6 +45,7 @@ import { type IncomeRow, changedIncome, incomeDto, incomeProblem, newIncome } fr
 import { type AccountKind, countsAsOwn } from "../domain/ledger";
 import { LimitService } from "../today/limit.service";
 import { type BankAccountKind, accountName } from "../today/today.service";
+import { goalDtos, goalPlaceColumns, goalPlaceCurrency } from "./goals";
 import { LoansService } from "./loans.service";
 import { PlanEntriesService } from "./plan-entries.service";
 import { PlanService } from "./plan.service";
@@ -238,21 +240,54 @@ export class PlanController {
 
   // --- goals ----------------------------------------------------------------
   @Get("goals")
-  listGoals() {
-    return this.ds.getRepository(Goal).find({ order: { sort: "ASC", id: "ASC" } });
+  listGoals(): Promise<GoalDto[]> {
+    return goalDtos(this.ds.manager);
   }
 
+  /**
+   * A new goal (ЯМ5): kept in a place, it is in that place's currency and keeps nothing by hand (a hand amount sent with
+   * it is not stored); without one, in dollars as before.
+   */
   @Post("goals")
-  createGoal(@Body() body: unknown) {
+  async createGoal(@Body() body: unknown): Promise<GoalDto> {
+    const { place, saved_cents, ...input } = parse(goalInput, body);
+    const currency = place ? await goalPlaceCurrency(this.ds.manager, place) : "USD";
     const repo = this.ds.getRepository(Goal);
-    return repo.save(repo.create(parse(goalInput, body)));
+    const row = await repo.save(
+      repo.create({ ...input, saved_cents: place ? 0 : (saved_cents ?? 0), currency, ...goalPlaceColumns(place ?? null) }),
+    );
+    return (await goalDtos(this.ds.manager, row.id))[0]!;
   }
 
+  /**
+   * A change (ЯМ5): a new place brings its currency, and a goal moving to another currency needs its new target in the
+   * same request, or its old target would be read in the new currency. Without a place the goal keeps its currency.
+   * The hand amount follows the same rule: moving to another currency starts it at 0 (dollars are never read as
+   * hryvnias), and a hand amount is stored only for a goal left without a place — an older app editing «Накоплено, $»
+   * on a goal kept in a place sends a number that means nothing there.
+   */
   @Patch("goals/:id")
-  patchGoal(@Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
-    return patchRow(this.ds.getRepository(Goal), id, parse(goalPatch, body));
+  async patchGoal(@Param("id", ParseIntPipe) id: number, @Body() body: unknown): Promise<GoalDto> {
+    const { place, saved_cents, ...data } = parse(goalPatch, body);
+    const repo = this.ds.getRepository(Goal);
+    const cur = await repo.findOneBy({ id });
+    if (!cur) throw new NotFoundException();
+    let moved: Partial<Goal> = {};
+    if (place !== undefined) {
+      const currency = place ? await goalPlaceCurrency(this.ds.manager, place) : cur.currency;
+      if (currency !== cur.currency && data.target_cents === undefined) {
+        throw new BadRequestException("a goal in another currency needs its new target");
+      }
+      moved = { currency, ...goalPlaceColumns(place), ...(currency !== cur.currency ? { saved_cents: 0 } : {}) };
+    }
+    // In a place as the answer shows it (domain/goals goalSaved): a place now in another currency counts as none.
+    const inPlace = place !== undefined ? place !== null : (await goalDtos(this.ds.manager, id))[0]!.place !== null;
+    const hand = saved_cents !== undefined && !inPlace ? { saved_cents } : {};
+    await patchRow(repo, id, { ...data, ...moved, ...hand });
+    return (await goalDtos(this.ds.manager, id))[0]!;
   }
 
+  /** Deletes the goal only: the money in its place stays where it is. */
   @Delete("goals/:id")
   deleteGoal(@Param("id", ParseIntPipe) id: number) {
     return removeRow(this.ds.getRepository(Goal), id);
