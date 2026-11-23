@@ -517,14 +517,12 @@ describe("Plan, loans", () => {
     await openPlanPart("Займы");
   };
 
-  it("shows how much was borrowed, returned and spent on servicing, with open and repaid loans", async () => {
+  it("shows what is open now, the open and repaid loans, and servicing only at the end of the history (ЯМ4)", async () => {
     await open(fakeApi({ loanHistory: jest.fn(async () => history()) }));
-    expect(await screen.findByText("Взято")).toBeTruthy();
-    expect(screen.getByText("₴20,000")).toBeTruthy();
-    expect(screen.getByText("Возвращено")).toBeTruthy();
-    expect(screen.getByText("₴15,000")).toBeTruthy();
-    expect(screen.getByText("На обслуживание")).toBeTruthy();
-    expect(screen.getByText("₴1,200")).toBeTruthy();
+    expect(await screen.findByText("Открыто сейчас")).toBeTruthy();
+    expect(screen.getByText("₴5,000")).toBeTruthy();
+    for (const t of ["Взято", "Возвращено", "На обслуживание", "₴20,000", "₴15,000"]) expect(screen.queryByText(t)).toBeNull();
+    expect(screen.queryByText(/На обслуживание ушло/)).toBeNull();
     expect(screen.getByText("Открытые")).toBeTruthy();
     expect(screen.getByText("Друг")).toBeTruthy();
     expect(screen.getByText("До начала учёта")).toBeTruthy();
@@ -533,6 +531,7 @@ describe("Plan, loans", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Погашенные, 1" }));
     expect(screen.getByText("Погашенные")).toBeTruthy();
     expect(screen.getByText("₴5,000 от 10 окт, погашен 20 окт, ещё ₴200 на обслуживание")).toBeTruthy();
+    expect(screen.getByText("На обслуживание ушло ₴1,200 за всё время.")).toBeTruthy();
   });
 
   it("counts the open loans, the old ones included, on the right of «Займы»", async () => {
@@ -542,7 +541,7 @@ describe("Plan, loans", () => {
 
   it("only a loan entered by hand can be deleted; only an unpaid one can be repaid", async () => {
     await open(fakeApi({ loanHistory: jest.fn(async () => history()) }));
-    await screen.findByText("Взято");
+    await screen.findByText("Открыто сейчас");
     expect(screen.getByRole("button", { name: "Погасил: Друг" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Удалить: Друг" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Погасил: Розстрочка на картку" })).toBeTruthy();

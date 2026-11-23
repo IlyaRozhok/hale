@@ -258,4 +258,82 @@ describe("the loans list in Plan", () => {
       await waitFor(() => expect(api.deleteLoan).toHaveBeenCalledWith(9));
     });
   });
+  describe("no totals for the whole history at the top (ЯМ4)", () => {
+    const repaid = [
+      loanFixture({ id: 101, title: "Кредит в магазине", manual: false, amount: 1_800_000, remaining: 0, receivedOn: "2026-03-06", repaidOn: "2026-08-14", serviceCost: 124_000 }),
+      loanFixture({ id: 102, title: "Мама", amount: 500_000, remaining: 0, receivedOn: "2026-01-12", repaidOn: "2026-03-03" }),
+    ];
+    const stats = { borrowed: 4_300_000, repaid: 4_300_000, serviceCost: 186_000, stillOpen: 0 };
+    const gone = () => {
+      for (const t of ["Взято", "Возвращено", "На обслуживание", "Открыто сейчас"]) expect(screen.queryByText(t)).toBeNull();
+      expect(screen.queryByText("₴43,000")).toBeNull();
+    };
+    const order = () => screen.getAllByText(/./).map((t) => t.props.children);
+
+    it("with nothing open shows only the calm line and the folded history", async () => {
+      await renderWith(<LoansSheet onClose={noop} />, fakeApi({ loanHistory: jest.fn(async () => loanHistoryFixture({ stats, repaid })) }));
+      expect(await screen.findByText("Открытых займов нет.")).toBeTruthy();
+      expect(screen.getByText("Погашенные · 2")).toBeTruthy();
+      gone();
+      expect(screen.queryByText(/На обслуживание ушло/)).toBeNull();
+    });
+
+    it("tells what servicing cost once, at the very end of the unfolded history, and folds it back", async () => {
+      await renderWith(<LoansSheet onClose={noop} />, fakeApi({ loanHistory: jest.fn(async () => loanHistoryFixture({ stats, repaid })) }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Погашенные, 2" }));
+      expect(screen.getByText("₴18,000 от 6 мар, погашен 14 авг, ещё ₴1,240 на обслуживание")).toBeTruthy();
+      expect(screen.getByText("На обслуживание ушло ₴1,860 за всё время.")).toBeTruthy();
+      const texts = order();
+      expect(texts.indexOf("Мама")).toBeLessThan(texts.indexOf("На обслуживание ушло ₴1,860 за всё время."));
+      expect(texts.indexOf("Кредит в магазине")).toBeLessThan(texts.indexOf("На обслуживание ушло ₴1,860 за всё время."));
+      gone();
+      await fireEvent.press(screen.getByRole("button", { name: "Свернуть погашенные" }));
+      expect(screen.queryByText("Мама")).toBeNull();
+      expect(screen.queryByText(/На обслуживание ушло/)).toBeNull();
+      expect(screen.getByText("Погашенные · 2")).toBeTruthy();
+    });
+
+    it("says nothing about servicing when it cost nothing", async () => {
+      const free = loanHistoryFixture({ stats: { ...stats, serviceCost: 0 }, repaid: [repaid[1]!] });
+      await renderWith(<LoansSheet onClose={noop} />, fakeApi({ loanHistory: jest.fn(async () => free) }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Погашенные, 1" }));
+      expect(screen.getByText("Мама")).toBeTruthy();
+      expect(screen.queryByText(/На обслуживание ушло/)).toBeNull();
+    });
+
+    it("with an open loan shows one sum on top, «Открыто сейчас», as the server counts it", async () => {
+      const api = fakeApi({
+        loanHistory: jest.fn(async () => loanHistoryFixture({ stats: { ...stats, stillOpen: 800_000 }, open: [loanFixture()], repaid })),
+      });
+      await show(api);
+      expect(screen.getByText("Открыто сейчас")).toBeTruthy();
+      expect(screen.getByText("₴8,000")).toBeTruthy();
+      for (const t of ["Взято", "Возвращено", "На обслуживание"]) expect(screen.queryByText(t)).toBeNull();
+      const texts = order();
+      expect(texts.indexOf("Открыто сейчас")).toBeLessThan(texts.indexOf("Открытые"));
+      expect(screen.getByRole("button", { name: "Погасил: Друг" })).toBeTruthy();
+    });
+
+    it("with old loans not yet marked repaid does not say nothing is open, and keeps them as they are", async () => {
+      const old = [loanFixture({ id: 8, title: "Розстрочка на картку", manual: false, amount: 300_000, remaining: 300_000, receivedOn: "2026-03-01" })];
+      await renderWith(<LoansSheet onClose={noop} />, fakeApi({ loanHistory: jest.fn(async () => loanHistoryFixture({ stats, old, repaid })) }));
+      expect(await screen.findByText("Розстрочка на картку")).toBeTruthy();
+      expect(screen.getByText("До начала учёта")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Все уже погашены" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Погасил: Розстрочка на картку" })).toBeTruthy();
+      expect(screen.queryByText("Открытых займов нет.")).toBeNull();
+      gone();
+    });
+
+    it("with open and old loans shows the server's «Открыто сейчас», without adding the old ones", async () => {
+      const old = [loanFixture({ id: 8, title: "Розстрочка на картку", manual: false, amount: 300_000, remaining: 300_000, receivedOn: "2026-03-01" })];
+      await show(
+        fakeApi({ loanHistory: jest.fn(async () => loanHistoryFixture({ stats: { ...stats, stillOpen: 500_000 }, open: [loanFixture()], old })) }),
+      );
+      expect(screen.getByText("Открыто сейчас")).toBeTruthy();
+      expect(screen.getAllByText("₴5,000")).toHaveLength(1);
+      expect(screen.queryByText("₴8,000")).toBeNull();
+      expect(screen.queryByText("Открытых займов нет.")).toBeNull();
+    });
+  });
 });

@@ -6,6 +6,7 @@ import { useDeleteLoan, useLoanHistory, usePatchLoan, useRepayOldLoans } from ".
 import { formatMoney, shortDate } from "../format";
 import { DateField } from "./DateField";
 import { ErrorText } from "./ErrorText";
+import { Icon } from "./Icon";
 import { ManualLoanSheet } from "./ManualLoan";
 import { PrimaryButton } from "./PrimaryButton";
 import { RepayLoanSheet } from "./RepayLoanSheet";
@@ -31,7 +32,10 @@ function detail(l: LoanRowDto): string {
   return l.remaining < l.amount ? `${base}, осталось ${formatMoney(l.remaining)}` : base;
 }
 
-/** Every loan the app knows and what borrowing has cost so far. */
+/**
+ * Every loan the app knows. No totals for the whole history on top (ЯМ4): with a loan open only «Открыто сейчас»,
+ * and what servicing cost is one quiet line at the end of the unfolded history.
+ */
 export function LoansSheet({ onClose }: { onClose: () => void }) {
   const history = useLoanHistory();
   const remove = useDeleteLoan();
@@ -108,14 +112,10 @@ export function LoansSheet({ onClose }: { onClose: () => void }) {
       {data && total === 0 && <Text style={styles.name}>Займов пока нет.</Text>}
       {data && total > 0 && (
         <>
-          <View style={styles.section}>
-            <Stat label="Взято" value={data.stats.borrowed} />
-            <Stat label="Возвращено" value={data.stats.repaid} />
-            <Stat label="На обслуживание" value={data.stats.serviceCost} />
-            <Stat label="Открыто сейчас" value={data.stats.stillOpen} />
-          </View>
+          {data.open.length > 0 && <Stat label="Открыто сейчас" value={data.stats.stillOpen} />}
           {section("Открытые", data.open, undefined, undefined, true)}
-          {data.open.length === 0 && <Text style={styles.detail}>Открытых займов нет.</Text>}
+          {/* Old loans not yet marked repaid are still unpaid: the line would be untrue next to them. */}
+          {data.open.length === 0 && data.old.length === 0 && <Text style={styles.name}>Открытых займов нет.</Text>}
           {section(
             "До начала учёта",
             data.old,
@@ -125,15 +125,36 @@ export function LoansSheet({ onClose }: { onClose: () => void }) {
             </Pressable>,
           )}
           {repaidShown
-            ? section("Погашенные", data.repaid)
+            ? data.repaid.length > 0 && (
+                <View style={styles.section}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Свернуть погашенные"
+                    accessibilityState={{ expanded: true }}
+                    onPress={() => setRepaidShown(false)}
+                    style={[styles.quiet, styles.fold]}
+                  >
+                    <Text style={styles.heading}>Погашенные</Text>
+                    <View style={styles.down}>
+                      <Icon name="chevron" color={color.list.chevron} size={14} />
+                    </View>
+                  </Pressable>
+                  {data.repaid.map((l) => row(l))}
+                  {data.stats.serviceCost > 0 && (
+                    <Text style={styles.detail}>{`На обслуживание ушло ${formatMoney(data.stats.serviceCost)} за всё время.`}</Text>
+                  )}
+                </View>
+              )
             : data.repaid.length > 0 && (
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Погашенные, ${data.repaid.length}`}
+                  accessibilityState={{ expanded: false }}
                   onPress={() => setRepaidShown(true)}
-                  style={styles.quiet}
+                  style={[styles.quiet, styles.fold]}
                 >
                   <Text style={styles.more}>{`Погашенные · ${data.repaid.length}`}</Text>
+                  <Icon name="chevron" color={color.list.chevron} size={14} />
                 </Pressable>
               )}
         </>
@@ -204,6 +225,8 @@ const styles = StyleSheet.create({
   actionText: { ...type.label, color: color.fg.default },
   deleteText: { ...type.label, color: color.fg.muted },
   quiet: { minHeight: touchMin, justifyContent: "center" },
+  fold: { flexDirection: "row", alignItems: "center", gap: space.xs },
+  down: { transform: [{ rotate: "90deg" }] },
   more: { ...type.caption, color: color.fg.subtle },
   retry: {
     minHeight: touchMin,
