@@ -151,10 +151,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
                   <Text style={styles.muted}>Дневной лимит при таком потолке</Text>
                   <Text style={styles.value}>{formatMoney(preview.data.dailyLimit)}</Text>
                 </View>
-                <View style={styles.line}>
-                  <Text style={styles.muted}>Останется на цели в месяц</Text>
-                  <Text style={styles.value}>{formatMoney(preview.data.leftForGoalsMonthly)}</Text>
-                </View>
                 {preview.data.rateStale && <Text style={styles.muted}>Курс валюты неизвестен или устарел: цифра может быть неточной.</Text>}
               </View>
             ) : preview.failed ? (
