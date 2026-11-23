@@ -63,8 +63,8 @@ describe("the subscriptions sheet (В4)", () => {
   it("the ones not charged for a while go apart, with the last date in Russian", async () => {
     await renderWith(<SubscriptionsSheet subscriptions={subscriptions} onClose={() => undefined} />, fakeApi());
     await screen.findByText("Давно не списывались");
-    expect(rowLabels("subscription-missed-row")).toEqual(["Megogo: ₴199, последний раз 4 августа"]);
-    expect(screen.getByText("последний раз 4 августа")).toBeTruthy();
+    expect(rowLabels("subscription-missed-row")).toEqual(["Megogo: ₴199, последний раз 4 авг"]);
+    expect(screen.getByText("последний раз 4 авг")).toBeTruthy();
     const texts = screen.getAllByText(/./).map((t) => t.props.children as unknown);
     expect(texts.indexOf("Megogo")).toBeGreaterThan(texts.indexOf("Давно не списывались"));
     expect(texts.indexOf("Давно не списывались")).toBeGreaterThan(texts.indexOf("iCloud+"));

@@ -133,7 +133,7 @@ describe("paid with chosen operations", () => {
     const dollar = { id: "12", name: "Ноутбук", amount: 412_500, dueOn: "2026-11-20", kind: "installment", currency: "USD" };
     const api = fakeApi({ cash: jest.fn(async () => ({ started: true, start: "2026-11-01", balance: 5_000_000 })) });
     await renderWith(<PaymentPaidSheet payment={dollar} today="2026-11-09" onClose={noop} />, api);
-    expect(await screen.findByText("₴4,125 · до 20.11")).toBeTruthy();
+    expect(await screen.findByText("₴4,125 · до 20 ноя")).toBeTruthy();
     await waitFor(() => expect(api.cash).toHaveBeenCalled());
     await waitFor(() => expect(api.paymentCandidates).toHaveBeenCalled());
     expect(screen.queryByText(/\$/)).toBeNull();

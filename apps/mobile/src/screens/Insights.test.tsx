@@ -484,7 +484,7 @@ describe("Insights", () => {
       ]);
       expect(screen.getByText("Давно не списывались")).toBeTruthy();
       expect(screen.getAllByTestId("subscription-missed-row").map((r) => r.props.accessibilityLabel as string)).toEqual([
-        "Megogo: ₴199, последний раз 4 августа",
+        "Megogo: ₴199, последний раз 4 авг",
       ]);
       const t = texts();
       expect(t.indexOf("₴1,886 в месяц · 6 подписок")).toBeLessThan(t.indexOf("ChatGPT"));

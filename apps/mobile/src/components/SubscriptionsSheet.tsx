@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { InsightsMonthDto } from "@hale/contracts";
-import { dayMonthLong, formatMoney, inMonth, pluralIndex } from "../format";
+import { formatMoney, inMonth, pluralIndex, shortDate } from "../format";
 import { Sheet } from "./Sheet";
 
 const { color, radius, space, touchMin, type } = tokens;
@@ -67,7 +67,7 @@ export function SubscriptionsList({ subscriptions }: { subscriptions: Subscripti
                 key={`${i.key}-${i.lastDate}`}
                 testID="subscription-missed-row"
                 item={i}
-                note={`последний раз ${dayMonthLong(i.lastDate)}`}
+                note={`последний раз ${shortDate(i.lastDate)}`}
                 quiet
                 first={n === 0}
               />

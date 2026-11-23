@@ -67,7 +67,7 @@ describe("incomes, named (Д3б)", () => {
 
   it("names the next income under the list", () => {
     const ev = (id: number, expected_income_id: number, expected_on: string) => ({ id, expected_income_id, period: expected_on.slice(0, 7), expected_on, status: "expected" });
-    expect(nextIncomeLine([fop, usdc], [ev(1, 2, "2026-11-20"), ev(2, 1, "2026-12-01")])).toBe("Следующий — 20.11, $1,200.");
+    expect(nextIncomeLine([fop, usdc], [ev(1, 2, "2026-11-20"), ev(2, 1, "2026-12-01")])).toBe("Следующий — 20 ноя, $1,200.");
     expect(nextIncomeLine([fop], [])).toBeNull();
   });
 

@@ -17,6 +17,21 @@ const rest = out(4, "Переказ решти", 700_000);
 const SHORT = /^Платёж останется открытым/;
 const CLOSES = "Платёж закроется, выбранные операции станут им и не потратят лимит.";
 
+describe("dates in the sheet (Я4)", () => {
+  it("shows the due date and the operations' dates as «6 ноя»", async () => {
+    const api = fakeApi({ paymentCandidates: jest.fn(async () => [silpo]) });
+    await renderWith(<PaymentPaidSheet payment={payment} today="2026-11-09" onClose={noop} />, api);
+    expect(await screen.findByText("8 ноя")).toBeTruthy();
+    expect(screen.getByText("₴17,000 · просрочен с 6 ноя")).toBeTruthy();
+  });
+
+  it("an upcoming payment reads «до 6 ноя»", async () => {
+    const api = fakeApi({ paymentCandidates: jest.fn(async () => []) });
+    await renderWith(<PaymentPaidSheet payment={payment} today="2026-11-02" onClose={noop} />, api);
+    expect(await screen.findByText("₴17,000 · до 6 ноя")).toBeTruthy();
+  });
+});
+
 describe("a payment paid in parts (Б9)", () => {
   it("says the payment stays open only while the chosen operations do not cover it", async () => {
     const api = fakeApi({ paymentCandidates: jest.fn(async () => [card, silpo, almost]) });

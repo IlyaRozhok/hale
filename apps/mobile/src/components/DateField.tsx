@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
-import { dateLabel, kyivDate, monthGrid, monthTitle } from "../format";
+import { dateLabel, kyivDate, monthGrid, monthTitle, shortDate } from "../format";
 
 const { color, radius, space, touchMin, type } = tokens;
 
@@ -39,7 +39,7 @@ export function DateField({ label, value, onChange, min, max, accessibilityName 
         style={styles.field}
       >
         <Text style={styles.label}>{label}</Text>
-        <Text style={styles.value}>{value ? dateLabel(value) : "Выбрать"}</Text>
+        <Text style={styles.value}>{value ? shortDate(value, kyivDate()) : "Выбрать"}</Text>
       </Pressable>
       {open && (
         <View style={styles.calendar}>

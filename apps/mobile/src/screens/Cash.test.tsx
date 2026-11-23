@@ -168,7 +168,7 @@ describe("the wallet in Plan", () => {
     const api = fakeApi(started());
     await renderWith(<Plan />, api);
     await press(/^Наличные/);
-    expect(await screen.findByText("По записям ₴2,500, учёт с 01.11")).toBeTruthy();
+    expect(await screen.findByText("По записям ₴2,500, учёт с 1 ноя")).toBeTruthy();
     await fireEvent.changeText(screen.getByLabelText("Сколько в кармане"), "2000");
     expect(screen.getByText("₴500 запишется как «Не записано» за сегодня. Лимит дня не изменится.")).toBeTruthy();
     expect(screen.queryByText(/запишется тратой/)).toBeNull();
