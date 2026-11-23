@@ -6,12 +6,13 @@ import { useCategoryList, useChangeDepositAnswer, useEditTransaction, useSetCard
 import { categoryIconOf } from "../categoryIcon";
 import { cardTransferTitle, dayMonth, formatMoney, formatSignedMoney, formatSignedOriginal, two } from "../format";
 import { AmountForm } from "./AmountForm";
-import { accountLabel, alwaysCountText, answerText, categoryChoices, categoryName, typeChips, typeLabel, usualWantText } from "../labels";
+import { accountLabel, alwaysCountText, answerText, categoryChoices, categoryName, limitFact, typeChips, typeLabel, usualWantText } from "../labels";
 import { CategoryFormSheet, WantSwitch } from "./CategoryFormSheet";
 import { ErrorText } from "./ErrorText";
 import { ActionRow } from "./ActionRow";
 import { Chip } from "./Chip";
 import { CategoryChip } from "./CategoryChip";
+import { Icon, type IconName } from "./Icon";
 import { Sheet } from "./Sheet";
 
 const { color, radius, space, touchMin, type } = tokens;
@@ -43,11 +44,13 @@ function creditText(tx: TransactionDto): string | null {
 type Change = Pick<TransactionPatch, "type" | "category">;
 
 /**
- * The operation on top, then its category and type, each changed with one tap for this operation alone. After a
- * change a quiet card asks «Всегда так для …?» (task В5): «Да, всегда» sends the same change for the similar ones,
- * exactly what the «Применить к похожим» switch did; no answer leaves only this operation changed. The rare types
- * wait behind "Ещё". A purchase in a category with a side has «Эта покупка» (task В6): «нужное» or «желаемое» for it
- * alone, saved at once in a request of its own, with no question about the similar ones.
+ * The operation on top with its facts first (ЯМ3): whether the bank still processes it and whether the day's limit
+ * counts it. Then its category — the chosen one alone, the whole list behind «Изменить» — and its type, folded into
+ * one row «Ещё: тип операции»; each is changed with one tap for this operation alone. After a change a quiet card
+ * asks «Всегда так для …?» (task В5): «Да, всегда» sends the same change for the similar ones, exactly what the
+ * «Применить к похожим» switch did; no answer leaves only this operation changed. The rare types wait behind "Ещё".
+ * A purchase in a category with a side has «Эта покупка» (task В6): «нужное» or «желаемое» for it alone, saved at
+ * once in a request of its own, with no question about the similar ones.
  */
 export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
   const edit = useEditTransaction();
@@ -58,6 +61,9 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
   const [row, setRow] = useState(tx);
   const [asked, setAsked] = useState<Change | null>(null);
   const [allTypes, setAllTypes] = useState(false);
+  const [showTypes, setShowTypes] = useState(false);
+  // The whole category list, opened by «Изменить»; a row with no category yet has nothing to fold back to.
+  const [choosing, setChoosing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [failed, setFailed] = useState(false);
   const count = useSimilarCount(tx.id, asked?.type, asked !== null);
@@ -75,6 +81,7 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
       {
         onSuccess: (result) => {
           setRow(result.transaction);
+          setChoosing(false);
           ask(change, result.transaction.type);
         },
         onError: () => setFailed(true),
@@ -82,7 +89,11 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
     );
   };
   // The category it already has: nothing to save, but the owner may want it for the similar ones.
-  const pickCategory = (key: string) => (row.category === key ? ask({ category: key }, row.type) : save({ category: key }));
+  const pickCategory = (key: string) => {
+    if (row.category !== key) return save({ category: key });
+    setChoosing(false);
+    ask({ category: key }, row.type);
+  };
   const pickType = (type: NonNullable<TransactionDto["type"]>) => (row.type === type ? ask({ type }, row.type) : save({ type }));
 
   // The side of its category, from the server's list; none for a system one or from an older server.
@@ -113,31 +124,46 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
   const credit = creditText(tx);
   const askedName = asked === null ? "" : asked.type !== undefined ? typeLabel(asked.type) : categoryName(asked.category ?? null, list);
   const more = asked !== null && count.data !== undefined ? alwaysCountText(count.data, askedName) : null;
+  // The saved row: a new type can move it in or out of the limit, and the server's answer says which.
+  const limit = limitFact(row);
+  const listed = choosing || row.category === null;
 
   return (
     <Sheet title={title} subtitle={facts(tx)} onClose={onClose}>
+      {/* The list only quiets a held amount (ЯМ2); here it is said what that means. An older server sends neither
+          field: no fact lines. */}
+      {tx.hold === true && <Fact icon="circle" text="В обработке у банка — сумма может немного измениться" />}
+      {limit !== null && <Fact icon={limit.icon} text={limit.text} />}
       {tx.description !== "" && tx.description !== named && <Text style={styles.note}>{tx.description}</Text>}
       {credit !== null && <Text style={styles.note}>{credit}</Text>}
-      {/* The list only quiets a held amount (ЯМ2); here it is said what that means. An older server: not held. */}
-      {tx.hold === true && <Text style={styles.note}>Банк ещё проводит операцию — сумма может немного измениться.</Text>}
       {onAnswer && <ActionRow label={`Что это за перевод: ${answerText(tx.recipientLabel)}`} onPress={onAnswer} />}
       {tx.cashOut !== null && <CardCash tx={tx} cashOut={tx.cashOut} />}
       {tx.cashAnswer != null && <CashSource id={tx.id} answer={tx.cashAnswer} onChanged={onClose} />}
-      <Text style={styles.heading}>Категория</Text>
-      <View style={styles.chips}>
-        {categoryChoices(list).map((c) => (
-          <CategoryChip
-            key={c.key}
-            label={c.name}
-            icon={categoryIconOf(c.key, list)}
-            selected={row.category === c.key}
-            disabled={busy}
-            onPress={() => pickCategory(c.key)}
-          />
-        ))}
-        {/* Only a server that keeps categories can add one. */}
-        {list && <CategoryChip label="Новая" icon="plus" disabled={busy} onPress={() => setCreating(true)} />}
+      <View style={styles.header}>
+        <Text style={styles.heading}>Категория</Text>
+        {choosing && row.category !== null && <Link label="Свернуть" onPress={() => setChoosing(false)} />}
       </View>
+      {listed ? (
+        <View style={styles.chips}>
+          {categoryChoices(list).map((c) => (
+            <CategoryChip
+              key={c.key}
+              label={c.name}
+              icon={categoryIconOf(c.key, list)}
+              selected={row.category === c.key}
+              disabled={busy}
+              onPress={() => pickCategory(c.key)}
+            />
+          ))}
+          {/* Only a server that keeps categories can add one. */}
+          {list && <CategoryChip label="Новая" icon="plus" disabled={busy} onPress={() => setCreating(true)} />}
+        </View>
+      ) : (
+        <View style={styles.chosen}>
+          <CategoryChip label={categoryName(row.category, list)} icon={categoryIconOf(row.category, list)} selected onPress={() => setChoosing(true)} />
+          <Link label="Изменить" onPress={() => setChoosing(true)} />
+        </View>
+      )}
       {asked !== null && (
         <View style={styles.ask}>
           <Text style={styles.text}>{"Всегда так для «{name}»?".replace("{name}", named)}</Text>
@@ -155,16 +181,43 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
           <Text style={styles.note}>{usualWantText(categoryName(row.category, list), categoryWant === true)}</Text>
         </View>
       )}
-      <Text style={styles.heading}>Тип</Text>
-      <View style={styles.chips}>
-        {(allTypes ? [...types.shown, ...types.rest] : types.shown).map((t) => (
-          <Chip key={t} label={typeLabel(t)} selected={row.type === t} disabled={busy} onPress={() => pickType(t)} />
-        ))}
-        {!allTypes && <Chip label="Ещё" onPress={() => setAllTypes(true)} />}
-      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Ещё: тип операции"
+        accessibilityValue={{ text: typeLabel(row.type) }}
+        accessibilityState={{ expanded: showTypes }}
+        onPress={() => setShowTypes((v) => !v)}
+        style={styles.more}
+      >
+        <Text style={styles.text}>Ещё: тип операции</Text>
+        <View style={styles.moreValue}>
+          <Text style={styles.moreText}>{typeLabel(row.type)}</Text>
+          <Icon name={showTypes ? "up" : "down"} color={color.fg.muted} size={16} />
+        </View>
+      </Pressable>
+      {showTypes && (
+        <View style={styles.chips}>
+          {(allTypes ? [...types.shown, ...types.rest] : types.shown).map((t) => (
+            <Chip key={t} label={typeLabel(t)} selected={row.type === t} disabled={busy} onPress={() => pickType(t)} />
+          ))}
+          {!allTypes && <Chip label="Ещё" onPress={() => setAllTypes(true)} />}
+        </View>
+      )}
       {failed && <ErrorText>Не удалось сохранить. Попробуйте ещё раз.</ErrorText>}
       {creating && <CategoryFormSheet onClose={() => setCreating(false)} onCreated={(c) => save({ category: c.key })} />}
     </Sheet>
+  );
+}
+
+/** One fact about the operation, a small icon before it (ЯМ3). */
+function Fact({ icon, text }: { icon: IconName; text: string }) {
+  return (
+    <View style={styles.fact}>
+      <View testID={`fact-icon-${icon}`} style={styles.factIcon}>
+        <Icon name={icon} color={color.fg.muted} size={16} />
+      </View>
+      <Text style={styles.text}>{text}</Text>
+    </View>
   );
 }
 
@@ -276,4 +329,19 @@ const styles = StyleSheet.create({
   text: { ...type.body, color: color.fg.default, flexShrink: 1 },
   heading: { ...type.label, color: color.fg.muted },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  fact: { flexDirection: "row", alignItems: "flex-start", gap: space.sm },
+  factIcon: { paddingTop: 2 },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  chosen: { flexDirection: "row", alignItems: "center", gap: space.lg },
+  more: {
+    minHeight: touchMin,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.card.edge,
+  },
+  moreValue: { flexDirection: "row", alignItems: "center", gap: space.xs },
+  moreText: { ...type.body, color: color.fg.muted },
 });

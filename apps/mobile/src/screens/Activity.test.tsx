@@ -1059,18 +1059,22 @@ describe("Activity edit sheet", () => {
     const api = fakeApi();
     await renderWith(<Activity />, api);
     await fireEvent.press(await screen.findByText("Кофейня"));
+    // The category list waits behind «Изменить» (ЯМ3).
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить" }));
     await fireEvent.press(await screen.findByRole("button", { name: "Продукты" }));
     await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(1, { category: "groceries", applyToSimilar: false }));
     expect(await screen.findByText("Всегда так для «Кофейня»?")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Да, всегда" }));
     await waitFor(() => expect(api.editTransaction).toHaveBeenLastCalledWith(1, { category: "groceries", applyToSimilar: true }));
-    await waitFor(() => expect(screen.queryByText("Тип")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Ещё: тип операции")).toBeNull());
   });
 
   it("changes the type in one tap; «Только эта» leaves the similar ones as they are (В5)", async () => {
     const api = fakeApi();
     await renderWith(<Activity />, api);
     await fireEvent.press(await screen.findByText("Кофейня"));
+    // The types wait behind their row (ЯМ3).
+    await fireEvent.press(await screen.findByRole("button", { name: "Ещё: тип операции" }));
     await fireEvent.press(await screen.findByRole("button", { name: "Обязательный платёж" }));
     await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(1, { type: "obligation", applyToSimilar: false }));
     await fireEvent.press(await screen.findByRole("button", { name: "Только эта" }));
@@ -1082,6 +1086,7 @@ describe("Activity edit sheet", () => {
     const api = fakeApi();
     await renderWith(<Activity />, api);
     await fireEvent.press(await screen.findByText("Кофейня"));
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить" }));
     await fireEvent.press(await screen.findByRole("button", { name: "Транспорт" }));
     await waitFor(() => expect(api.transactions.mock.calls.length).toBeGreaterThan(1));
   });
@@ -1092,9 +1097,10 @@ describe("Activity edit sheet", () => {
     });
     await renderWith(<Activity />, fakeApi({ editTransaction }));
     await fireEvent.press(await screen.findByText("Кофейня"));
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить" }));
     await fireEvent.press(await screen.findByRole("button", { name: "Транспорт" }));
     expect(await screen.findByText("Не удалось сохранить. Попробуйте ещё раз.")).toBeTruthy();
-    expect(screen.getByText("Тип")).toBeTruthy();
+    expect(screen.getByText("Ещё: тип операции")).toBeTruthy();
   });
 });
 
@@ -1163,7 +1169,7 @@ describe("Activity recipient label", () => {
     // The window closes with an animation and covers the list until it is gone: a person cannot tap a row before that.
     await waitFor(() => expect(screen.queryByRole("button", { name: /Что это за перевод/ })).toBeNull());
     await fireEvent.press(await screen.findByText("Кофейня"));
-    await screen.findByText("Тип");
+    await screen.findByText("Ещё: тип операции");
     expect(screen.queryByRole("button", { name: /Что это за перевод/ })).toBeNull();
   });
 
@@ -1172,7 +1178,7 @@ describe("Activity recipient label", () => {
     await renderWith(<Activity />, api);
     await fireEvent.press(await screen.findByText("Иван"));
     await fireEvent.press(await screen.findByRole("button", { name: "Изменить тип" }));
-    expect(await screen.findByText("Тип")).toBeTruthy();
+    await fireEvent.press(await screen.findByRole("button", { name: "Ещё: тип операции" }));
     await fireEvent.press(screen.getByRole("button", { name: "Обязательный платёж" }));
     await waitFor(() => expect(api.editTransaction).toHaveBeenCalledWith(5, { type: "obligation", applyToSimilar: false }));
   });

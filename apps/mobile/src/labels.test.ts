@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { recipientLabelName, txType } from "@hale/contracts";
 import {
-  accountChoices, accountLabel, alwaysCountText, balanceFieldLabel, NEW_ACCOUNT_CURRENCIES, answerChoices, answerText, categoryChoices, categoryLabel, categoryName, deleteCategoryText, FREQUENT_ANSWERS, LABEL_CHOICES, recipientLine, SPEND_CATEGORIES, TYPE_CHOICES, typeChips,
+  accountChoices, accountLabel, limitFact, alwaysCountText, balanceFieldLabel, NEW_ACCOUNT_CURRENCIES, answerChoices, answerText, categoryChoices, categoryLabel, categoryName, deleteCategoryText, FREQUENT_ANSWERS, LABEL_CHOICES, recipientLine, SPEND_CATEGORIES, TYPE_CHOICES, typeChips,
   typeLabel, usualWantText, wantLabel,
 } from "./labels";
 
@@ -177,5 +177,47 @@ describe("«нужное» и «желаемое» (В6)", () => {
   it("says a category's usual side as a whole phrase", () => {
     expect(usualWantText("Покупки", true)).toBe("Для «Покупки» обычно — желаемое");
     expect(usualWantText("Продукты", false)).toBe("Для «Продукты» обычно — нужное");
+  });
+
+  describe("limitFact: whether the operation counts in the day's limit (ЯМ3)", () => {
+    const row = (over: Partial<Parameters<typeof limitFact>[0]>) =>
+      limitFact({ type: "spend", amountUah: -15_000, accountKind: "black", inLimit: true, ...over });
+
+    it("a row the limit counts says so", () => {
+      expect(row({})).toEqual({ text: "Считается в лимите дня", icon: "check" });
+      expect(row({ type: "person_transfer" })).toEqual({ text: "Считается в лимите дня", icon: "check" });
+    });
+
+    it("an own transfer is outside the limit, between own money", () => {
+      expect(row({ type: "own_transfer", inLimit: false })).toEqual({ text: "Не в лимите — между своими", icon: "transfer" });
+      expect(row({ type: "own_transfer", inLimit: false, amountUah: 15_000 })?.text).toBe("Не в лимите — между своими");
+    });
+
+    it("money going out of the limit by its kind, each a whole phrase", () => {
+      const cases: [Parameters<typeof limitFact>[0]["type"], string][] = [
+        ["obligation", "Не в лимите — обязательный платёж"],
+        ["tax", "Не в лимите — налог"],
+        ["debt_payment", "Не в лимите — платёж по долгу"],
+        ["cash_out", "Не в лимите — деньги перешли в наличные"],
+        ["goal_contribution", "Не в лимите — взнос в цель"],
+        ["loan_out", "Не в лимите — вы дали в долг"],
+      ];
+      for (const [type, text] of cases) expect(row({ type, inLimit: false })).toEqual({ text, icon: "circle" });
+    });
+
+    it("says nothing where it has no plain reason: money in, a jar, no rate, an uncounted purchase, no type", () => {
+      for (const type of ["income", "person_in", "loan_in", "cash_in"] as const) expect(row({ type, inLimit: false, amountUah: 50_000 })).toBeNull();
+      expect(row({ type: "obligation", inLimit: false, accountKind: "jar" })).toBeNull();
+      expect(row({ type: "tax", inLimit: false, amountUah: null })).toBeNull();
+      expect(row({ type: "spend", inLimit: false })).toBeNull();
+      expect(row({ type: "person_transfer", inLimit: false })).toBeNull();
+      expect(row({ type: null, inLimit: false })).toBeNull();
+      expect(row({ type: "something_new" as never, inLimit: false })).toBeNull();
+    });
+
+    it("an older server without the field: nothing", () => {
+      expect(row({ inLimit: undefined })).toBeNull();
+      expect(row({ type: "own_transfer", inLimit: undefined })).toBeNull();
+    });
   });
 });

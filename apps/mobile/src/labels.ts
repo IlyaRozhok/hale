@@ -1,5 +1,5 @@
 // Russian names for server codes. No native imports: runs in node tests.
-import type { AccountFilterKind, CategoryDto, RecipientLabelName, TxTypeDto } from "@hale/contracts";
+import type { AccountFilterKind, CategoryDto, RecipientLabelName, TransactionDto, TxTypeDto } from "@hale/contracts";
 import { formatMoney, pluralIndex } from "./format";
 
 const TYPES: Record<TxTypeDto, string> = {
@@ -22,6 +22,35 @@ export const TYPE_CHOICES = Object.keys(TYPES) as TxTypeDto[];
 
 // A type this app has no name for (from a newer server) reads as no type, as in typeChips.
 export const typeLabel = (type: TxTypeDto | null): string => (type && TYPES[type]) || "Не определён";
+
+/** Why an operation of this kind is outside the day's limit: whole phrases, one per kind (ЯМ3). */
+const OUTSIDE_LIMIT: Partial<Record<TxTypeDto, string>> = {
+  obligation: "Не в лимите — обязательный платёж",
+  tax: "Не в лимите — налог",
+  debt_payment: "Не в лимите — платёж по долгу",
+  cash_out: "Не в лимите — деньги перешли в наличные",
+  goal_contribution: "Не в лимите — взнос в цель",
+  loan_out: "Не в лимите — вы дали в долг",
+};
+
+/** The icons a limit fact goes with; names from the app's icon set. */
+export type LimitFactIcon = "check" | "transfer" | "circle";
+
+/**
+ * The operation card's line about the day's limit (ЯМ3), from the server's `inLimit`: no rule is repeated here. An
+ * own transfer and money going out of the limit by its kind say why; where there is no plain reason (money coming in,
+ * a jar, no rate, a purchase the limit leaves out) nothing is said rather than a guess. An older server: nothing.
+ */
+export function limitFact(
+  tx: Pick<TransactionDto, "type" | "amountUah" | "accountKind" | "inLimit">,
+): { text: string; icon: LimitFactIcon } | null {
+  if (tx.inLimit === true) return { text: "Считается в лимите дня", icon: "check" };
+  if (tx.inLimit !== false || tx.type === null) return null;
+  if (tx.type === "own_transfer") return { text: "Не в лимите — между своими", icon: "transfer" };
+  if (tx.accountKind === "jar" || tx.amountUah === null) return null;
+  const text = OUTSIDE_LIMIT[tx.type];
+  return text === undefined ? null : { text, icon: "circle" };
+}
 
 /** The types offered at once for money going out; the others wait behind "Ещё". */
 export const FREQUENT_TYPES_OUT: readonly TxTypeDto[] = ["spend", "obligation", "own_transfer", "person_transfer"];

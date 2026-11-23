@@ -227,7 +227,7 @@ describe("an operation entered by hand, in Activity", () => {
   it("a bank row still opens the type editor", async () => {
     await renderWith(<Activity />, fakeApi());
     await fireEvent.press(await screen.findByText("Кофейня"));
-    expect(await screen.findByText("Тип")).toBeTruthy();
+    expect(await screen.findByText("Ещё: тип операции")).toBeTruthy();
     expect(screen.getByText("Категория")).toBeTruthy();
   });
 
