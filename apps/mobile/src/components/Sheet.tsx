@@ -34,13 +34,18 @@ type Props = {
    */
   onOpened?: () => void;
   children: ReactNode;
+  /**
+   * Pinned under the scrolling body, always in sight (task ЯМ2): the sheet's own buttons, so a long list above them
+   * does not push them off the screen. Without it the sheet is as it always was.
+   */
+  footer?: ReactNode;
 };
 
 /**
  * A bottom sheet: glass over a scrim that fades in place, so only the panel moves. Closed with a
  * button, by tapping outside or by swiping it down.
  */
-export function Sheet({ title, subtitle, onClose, onOpened, children }: Props) {
+export function Sheet({ title, subtitle, onClose, onOpened, children, footer }: Props) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const shown = useRef(new Animated.Value(0)).current;
@@ -142,6 +147,7 @@ export function Sheet({ title, subtitle, onClose, onOpened, children }: Props) {
               </Pressable>
             </View>
             <ScrollView
+              testID="sheet-body"
               contentContainerStyle={styles.body}
               keyboardShouldPersistTaps="handled"
               bounces={false}
@@ -152,6 +158,11 @@ export function Sheet({ title, subtitle, onClose, onOpened, children }: Props) {
             >
               {children}
             </ScrollView>
+            {footer !== undefined && (
+              <View testID="sheet-footer" style={styles.footer}>
+                {footer}
+              </View>
+            )}
           </Glass>
         </Animated.View>
       </KeyboardAvoidingView>
@@ -180,4 +191,12 @@ const styles = StyleSheet.create({
   close: { minHeight: touchMin, justifyContent: "center", paddingHorizontal: space.sm },
   closeText: { ...type.label, color: color.fg.muted },
   body: { gap: space.md, paddingBottom: space.md },
+  // Outside the scroll, so it never shrinks; the hairline marks where the choices scroll under it.
+  footer: {
+    flexShrink: 0,
+    gap: space.xs,
+    paddingTop: space.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.card.edge,
+  },
 });

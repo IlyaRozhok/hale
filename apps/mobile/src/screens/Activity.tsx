@@ -121,6 +121,15 @@ export function Activity({ now = () => new Date(), route }: Props) {
     if (params?.observation === true) setWatchObservation(true);
   }
 
+  const applyFilters = (f: Filters) => {
+    setPeriod(f.period);
+    setCategory(f.category);
+    setAccount(f.account);
+    // The window has no «желаемое» of its own: «Сбросить» (nothing left chosen) takes it off with the rest.
+    if (f.period === null && f.category === null && f.account === null) setWant(false);
+    setFromObservation(false);
+  };
+
   const toggleSearch = () => {
     if (searching) {
       setText("");
@@ -222,16 +231,31 @@ export function Activity({ now = () => new Date(), route }: Props) {
       {searching && <Field label="Поиск по операциям" value={text} onChangeText={setText} maxLength={100} autoFocus returnKeyType="search" />}
       <Segmented testID="kind-switch" options={TAB_OPTIONS} value={tab} onChange={setTab} />
       {summaryText !== null && (
-        // The summary says what is chosen, so pressing it leads to where it is changed (Я3).
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={summaryText}
-          accessibilityHint="Открывает фильтры"
-          onPress={() => setFiltering(true)}
-          hitSlop={space.md}
-        >
-          <Text style={styles.summary}>{summaryText}</Text>
-        </Pressable>
+        <View style={styles.summaryRow}>
+          {/* The summary says what is chosen, so pressing it leads to where it is changed (Я3). Its slop stops short
+              of the «×» on the right, so the two presses never overlap. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={summaryText}
+            accessibilityHint="Открывает фильтры"
+            onPress={() => setFiltering(true)}
+            hitSlop={{ top: space.md, bottom: space.md, left: space.md, right: 0 }}
+            style={styles.summaryPress}
+          >
+            <Text style={styles.summary}>{summaryText}</Text>
+          </Pressable>
+          {/* Everything off in one tap (ЯМ2), as «Сбросить» in the window. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Сбросить фильтры"
+            onPress={() => applyFilters({ period: null, category: null, account: null })}
+            style={styles.clear}
+          >
+            <View style={styles.clearDot}>
+              <Icon name="close" color={color.fg.muted} size={12} />
+            </View>
+          </Pressable>
+        </View>
       )}
       {list.isError && items.length === 0 ? (
         <Glass style={styles.stack}>
@@ -315,14 +339,7 @@ export function Activity({ now = () => new Date(), route }: Props) {
           value={{ period, category, account }}
           withCategories={withCategories}
           accounts={accountChoices(accountKinds)}
-          onApply={(f) => {
-            setPeriod(f.period);
-            setCategory(f.category);
-            setAccount(f.account);
-            // The window has no «желаемое» of its own: «Сбросить» (nothing left chosen) takes it off with the rest.
-            if (f.period === null && f.category === null && f.account === null) setWant(false);
-            setFromObservation(false);
-          }}
+          onApply={applyFilters}
           onClose={() => setFiltering(false)}
         />
       )}
@@ -334,7 +351,26 @@ export function Activity({ now = () => new Date(), route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  summary: { ...type.caption, color: color.fg.muted, fontVariant: ["tabular-nums"] },  // A solid card, not glass: the observation is text to read, not a floating control.
+  summary: { ...type.caption, color: color.fg.muted, fontVariant: ["tabular-nums"] },
+  summaryRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  summaryPress: { flex: 1 },
+  // A 44 pt press around a small round mark; the negative margins keep the row as tall as the summary's text.
+  clear: {
+    minWidth: touchMin,
+    minHeight: touchMin,
+    marginVertical: -space.sm,
+    marginRight: -space.sm,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  clearDot: {
+    width: space.xl,
+    height: space.xl,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: color.surface.overlay,
+  },  // A solid card, not glass: the observation is text to read, not a floating control.
   notice: {
     marginTop: space.md,
     paddingHorizontal: space.lg,

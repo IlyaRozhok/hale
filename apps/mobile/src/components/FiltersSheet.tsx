@@ -55,8 +55,26 @@ export function FiltersSheet({
     onApply(f);
     onClose();
   };
+  // Pinned under the choices (ЯМ2): however many categories there are, both buttons stay in sight.
+  const footer = (
+    <>
+      {/* Without the category block the category is the one that came in: remembered for spending, not erased here. */}
+      <PrimaryButton
+        label="Показать"
+        onPress={() => apply({ period, category, account })}
+      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Сбросить"
+        onPress={() => apply({ period: null, category: null, account: null })}
+        style={styles.reset}
+      >
+        <Text style={styles.resetText}>Сбросить</Text>
+      </Pressable>
+    </>
+  );
   return (
-    <Sheet title="Фильтры" onClose={onClose}>
+    <Sheet title="Фильтры" onClose={onClose} footer={footer}>
       <Text style={styles.heading}>Период</Text>
       <View style={styles.chips}>
         {quick.map((q) => (
@@ -127,19 +145,6 @@ export function FiltersSheet({
           </View>
         </>
       )}
-      {/* Without the category block the category is the one that came in: remembered for spending, not erased here. */}
-      <PrimaryButton
-        label="Показать"
-        onPress={() => apply({ period, category, account })}
-      />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Сбросить"
-        onPress={() => apply({ period: null, category: null, account: null })}
-        style={styles.reset}
-      >
-        <Text style={styles.resetText}>Сбросить</Text>
-      </Pressable>
     </Sheet>
   );
 }
