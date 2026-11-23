@@ -1561,6 +1561,15 @@ describe("goals", () => {
       expect((await api.get("/plan/goals").expect(200)).body).toEqual([
         { id: g.id, name: "Машина", target_cents: 500_000, saved_cents: 0, sort: 0, currency: "USD", place: null },
       ]);
+      // A place now in another currency than the goal is shown as no place, and a hand edit is stored, as shown.
+      const b3 = await binance(80_000);
+      const eur = (await api.post("/plan/goals", { name: "Ноутбук", target_cents: 200_000, place: { source: "manual", id: b3 } }).expect(201)).body;
+      await api.patch(`/plan/manual-balances/${b3}`, { currency: "EUR" }).expect(200);
+      expect((await api.get("/plan/goals").expect(200)).body.find((x: { id: number }) => x.id === eur.id)).toMatchObject({ place: null, saved_cents: 0 });
+      const edited = (await api.patch(`/plan/goals/${eur.id}`, { saved_cents: 7_000 }).expect(200)).body;
+      expect(edited).toMatchObject({ place: null, saved_cents: 7_000, currency: "USD" });
+      await api.del(`/plan/goals/${eur.id}`).expect(200);
+      await api.del(`/plan/manual-balances/${b3}`).expect(200);
       // An old goal moved to a place in its own currency keeps its hand amount for when the place is gone.
       const b2 = await binance(50_000);
       const old = (await api.post("/plan/goals", { name: "Подушка", target_cents: 100_000, saved_cents: 30_000 }).expect(201)).body;

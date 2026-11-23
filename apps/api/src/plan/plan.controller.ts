@@ -280,7 +280,8 @@ export class PlanController {
       }
       moved = { currency, ...goalPlaceColumns(place), ...(currency !== cur.currency ? { saved_cents: 0 } : {}) };
     }
-    const inPlace = place !== undefined ? place !== null : cur.account_id !== null || cur.manual_balance_id !== null;
+    // In a place as the answer shows it (domain/goals goalSaved): a place now in another currency counts as none.
+    const inPlace = place !== undefined ? place !== null : (await goalDtos(this.ds.manager, id))[0]!.place !== null;
     const hand = saved_cents !== undefined && !inPlace ? { saved_cents } : {};
     await patchRow(repo, id, { ...data, ...moved, ...hand });
     return (await goalDtos(this.ds.manager, id))[0]!;
