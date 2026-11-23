@@ -618,12 +618,27 @@ export const transactionsQuery = z
      * refuses it (400): the app sends it only when the page named `accountKinds`.
      */
     account: z.enum(["black", "white", "fop", "cash"]).optional(),
+    /**
+     * Task Я8: only "true" — the rows that make up «Платежи вне лимита» in «Итоги» (`otherPayments`): planned
+     * payments, taxes and debt payments outside the limit. They add up in the summary and the day totals under every
+     * group, «Траты» included, so with a period the summary's total is −`otherPayments` for those days. An older
+     * server refuses it (400): the app sends it only when the page named it in `filters`.
+     */
+    other: z.enum(["true"]).transform(() => true as const).optional(),
+    /**
+     * Task Я8: every row of one place — the counterparty key (`counterKey`, a place's or a subscription's `key` in
+     * «Итоги»), whatever type the row has now. An older server refuses it (400): sent only when `filters` names it.
+     */
+    place: z.string().regex(/^[0-9a-f]{16}$/).optional(),
   })
   .strict()
   .refine((v) => !v.from || !v.to || v.from <= v.to, "from must not be after to");
 export type TransactionsQuery = z.infer<typeof transactionsQuery>;
 /** The kinds of account «Операции» can be narrowed to (task Д1). */
 export type AccountFilterKind = NonNullable<TransactionsQuery["account"]>;
+/** The filters of «Операции» a server names in `filters` because an older one refuses them (task Я8). */
+export const TRANSACTION_FILTERS = ["other", "place"] as const;
+export type TransactionFilterName = (typeof TRANSACTION_FILTERS)[number];
 
 export const transactionPatch = z
   .object({
@@ -761,8 +776,9 @@ export interface TransactionPageDto {
    */
   dayTotals: Record<string, number>;
   /**
-   * With a category, «желаемое», an account or a period chosen: the sum and the count of everything found; under group "spend" of
-   * the rows that count against the limit only. Otherwise null; absent from an older server.
+   * With a category, «желаемое», an account, a period, the payments outside the limit or a place chosen: the sum and the
+   * count of everything found; under group "spend" of the rows that count against the limit only — except with
+   * `other`, whose rows add up under every group. Otherwise null; absent from an older server.
    */
   summary?: { total: number; count: number } | null;
   /**
@@ -771,6 +787,11 @@ export interface TransactionPageDto {
    * also refuses `account`: no such filter is offered then.
    */
   accountKinds?: AccountFilterKind[];
+  /**
+   * Task Я8: the query filters this server takes that an older one refuses with 400 (`other`, `place`). Only on the
+   * first page (without a cursor). Absent from an older server: the app then does not send them.
+   */
+  filters?: TransactionFilterName[];
 }
 
 export interface TransactionEditDto {

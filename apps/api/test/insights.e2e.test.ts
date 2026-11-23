@@ -199,6 +199,21 @@ describe("GET /insights/month", () => {
     const october = (await get("/insights/month?month=2026-10").expect(200)).body;
     expect(october.otherPayments).toBe(120_000 + 1_870_500);
     expect(october.previousOtherPayments).toBe(0);
+
+    // Task Я8: «Операции» with other=true list exactly those rows, and their summary is the line's sum over the same
+    // days — under «Траты» too, where these rows are listed but do not count against the limit.
+    const list = async (q: string) => (await get(`/transactions?other=true&limit=200&${q}`).expect(200)).body;
+    for (const group of ["", "group=spend&"]) {
+      const current = await list(`${group}from=2026-11-01&to=${now.through}`);
+      expect(current.summary, group).toEqual({ total: -now.otherPayments, count: 4 });
+      expect(current.items.map((i: { amount: number }) => i.amount)).toEqual([-30_000, -80_000, -730_100, -795_000]);
+      expect(current.items.every((i: { inLimit: boolean }) => !i.inLimit)).toBe(true);
+      expect(current.dayTotals).toEqual({ "2026-11-12": -30_000, "2026-11-10": -80_000, "2026-11-05": -730_100, "2026-11-03": -795_000 });
+      expect((await list(`${group}from=${now.previous.from}&to=${now.previous.to}`)).summary).toEqual({ total: -now.previousOtherPayments, count: 1 });
+      expect((await list(`${group}from=2026-10-01&to=${october.through}`)).summary).toEqual({ total: -october.otherPayments, count: 2 });
+    }
+    // None of them is income.
+    expect((await list("group=income")).items).toEqual([]);
   });
 
   it("names the month's largest places, with visits and the sum after refunds, and marks the new ones (В3)", async () => {
@@ -304,6 +319,25 @@ describe("GET /insights/month", () => {
       description: string;
     }[];
     expect(body.subscriptions.items[0].key).toBe(list.find((i) => i.description === "Netflix")!.counterKey);
+
+    // Task Я8: «Операции» with place=<key> list that place's operations — its charges and the refund — and nothing else.
+    const place = async (key: string, q = "") => (await get(`/transactions?place=${key}&limit=200${q}`).expect(200)).body;
+    const netflix = await place(body.subscriptions.items[0].key);
+    expect(netflix.items.map((i: { localDate: string; amount: number }) => [i.localDate, i.amount])).toEqual([
+      ["2026-11-05", -29_900],
+      ["2026-10-07", 24_900],
+      ["2026-10-05", -24_900],
+      ["2026-09-05", -24_900],
+      ["2026-08-05", -24_900],
+    ]);
+    expect(netflix.summary).toEqual({ total: -29_900 - 24_900 * 2, count: 5 });
+    const sportLife = await place(body.subscriptions.items[1].key, "&group=spend");
+    expect(sportLife.items.map((i: { counterName: string | null; amount: number }) => [i.counterName, i.amount])).toEqual([
+      ["Sport Life", -90_000],
+      ["Sport Life", -90_000],
+      ["Sport Life", -90_000],
+    ]);
+    expect(sportLife.summary).toEqual({ total: -270_000, count: 3 });
 
     // A past month is seen as of its last day: November's charge and rise are not there yet.
     const october = (await get("/insights/month?month=2026-10").expect(200)).body;
