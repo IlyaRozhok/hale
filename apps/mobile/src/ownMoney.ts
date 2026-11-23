@@ -103,13 +103,14 @@ export function goalDetail(goal: GoalDto): string {
 export type GoalPlaceOption = GoalPlace & { name: string; currency: string; balance: string | null; icon: IconName };
 
 /**
- * The places «Где копите?» offers: the bank accounts and balances kept by hand of own money and of «Отложено», each
- * once. Not the wallet (the server takes no goal there), not a card spent into its credit (nothing lies there), and
- * nothing an older server lists without an id.
+ * The places «Где копите?» offers: what «Отложено» shows, then Binance, each once. Not the cards and accounts of own
+ * money (a goal there would drop with every purchase), not the wallet (the server takes no goal there), and nothing an
+ * older server lists without an id.
  */
 export function goalPlaces(accounts: { items?: OwnMoneyItemDto[]; setAside?: OwnMoneyItemDto[] } | undefined): GoalPlaceOption[] {
   const out: GoalPlaceOption[] = [];
-  for (const item of [...(accounts?.items ?? []), ...(accounts?.setAside ?? [])]) {
+  const binance = (accounts?.items ?? []).filter((i) => i.kind === "binance");
+  for (const item of [...(accounts?.setAside ?? []), ...binance]) {
     const source = item.source;
     if ((source !== "account" && source !== "manual") || item.id === undefined || item.own < 0) continue;
     if (out.some((p) => p.source === source && p.id === item.id)) continue;

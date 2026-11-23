@@ -125,20 +125,21 @@ describe("goals kept in a place (ЯМ5, variant А)", () => {
   const deposit: OwnMoneyItemDto = { kind: "manual", name: "Депозит", own: 6_000_000, currency: "UAH", amount: 6_000_000, id: 9, source: "manual", countsAsOwn: false };
   const older: OwnMoneyItemDto = { kind: "white", name: "Белая карта", own: 100_000 };
 
-  it("offers the places with an id, own money and set aside, each with its balance in its own currency", () => {
+  it("offers the places «Отложено» shows, then Binance, each with its balance in its own currency", () => {
     const places = goalPlaces({ items: [white, black, wallet, binance], setAside: [usd, deposit] });
     expect(places.map((p) => [p.source, p.id, p.name, p.currency, p.balance])).toEqual([
-      ["account", 2, "Белая карта", "UAH", "₴14,313"],
-      ["manual", 7, "Binance", "USD", "$1,200"],
       ["account", 3, "Валютный", "USD", "$1,001"],
       ["manual", 9, "Депозит", "UAH", "₴60,000"],
+      ["manual", 7, "Binance", "USD", "$1,200"],
     ]);
-    expect(places.map((p) => p.icon)).toEqual(["card", "coin", "card", "lock"]);
+    expect(places.map((p) => p.icon)).toEqual(["card", "lock", "coin"]);
   });
 
-  it("leaves out the wallet, a card spent into its credit, places an older server does not name, and repeats", () => {
-    expect(goalPlaces({ items: [wallet, black, older], setAside: [] })).toEqual([]);
-    expect(goalPlaces({ items: [deposit], setAside: [deposit] })).toHaveLength(1);
+  it("leaves out own-money cards and accounts, the wallet, places an older server does not name, and repeats", () => {
+    const fop: OwnMoneyItemDto = { kind: "fop", name: "ФОП", own: 426_000, id: 5, source: "account", countsAsOwn: true };
+    expect(goalPlaces({ items: [white, black, fop, wallet, older], setAside: [] })).toEqual([]);
+    expect(goalPlaces({ items: [binance], setAside: [{ ...binance, countsAsOwn: false }] })).toHaveLength(1);
+    expect(goalPlaces({ items: [], setAside: [{ ...wallet, countsAsOwn: false }] })).toEqual([]);
     expect(goalPlaces(undefined)).toEqual([]);
   });
 

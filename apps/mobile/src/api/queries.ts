@@ -158,6 +158,8 @@ function useManualBalanceMutation<V>(mutationFn: (vars: V) => Promise<unknown>) 
         client.invalidateQueries({ queryKey: TODAY_KEY }),
         client.invalidateQueries({ queryKey: CAP_PREVIEW_KEY }),
         client.invalidateQueries({ queryKey: INSIGHTS_KEY }),
+        // A goal kept in a place shows that place's balance (ЯМ5).
+        client.invalidateQueries({ queryKey: GOALS_KEY }),
       ]),
   });
 }

@@ -17,6 +17,7 @@ import { Sheet } from "./Sheet";
 const { color, space, touchMin, type } = tokens;
 
 const SAVE_FAILED = "Не удалось сохранить. Попробуйте ещё раз.";
+const SAVE_FAILED_IN_PLACE = "Не удалось сохранить. Можно выбрать «Без места» и попробовать ещё раз.";
 const IN_PLACE_NOTE = "Накоплено — сколько лежит на этом месте. Вводить вручную не нужно.";
 
 /** The sign a currency goes by in a field's label: «₴», «$», «€», or its code. */
@@ -249,7 +250,8 @@ function GoalForm({ withPlaces, onClose }: { withPlaces: boolean; onClose: () =>
     }
     setMessage(null);
     const input = place ? { name: title, target_cents: cents, place: asPlace(place) } : { name: title, target_cents: cents };
-    create.mutate(input, { onSuccess: onClose, onError: () => setMessage(SAVE_FAILED) });
+    // An older server with no goals yet takes no place: «Без места» is the way on.
+    create.mutate(input, { onSuccess: onClose, onError: () => setMessage(place ? SAVE_FAILED_IN_PLACE : SAVE_FAILED) });
   };
 
   const choose = (p: GoalPlaceOption | null) => {

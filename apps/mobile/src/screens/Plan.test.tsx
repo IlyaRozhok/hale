@@ -1101,6 +1101,52 @@ describe("Plan, a goal kept in a place (ЯМ5, variant А)", () => {
     await waitFor(() => expect(screen.queryByLabelText("Название цели")).toBeNull());
   });
 
+  it("offers «Где копите?» for the first goal too, when there are no goals to tell the server by", async () => {
+    await renderWith(<Plan />, fakeApi(newer([])));
+    await press("Цели");
+    await press("Новая цель");
+    expect(await screen.findByText("Где копите?")).toBeTruthy();
+    expect(radio("Депозит")).toBeTruthy();
+    expect(radio("Binance")).toBeTruthy();
+  });
+
+  it("offers only what «Отложено» shows and Binance, not the cards of own money", async () => {
+    const white: OwnMoneyItemDto = { kind: "white", name: "Белая карта", own: 1_431_300, id: 2, source: "account", countsAsOwn: true };
+    const base = todayWithItems([white, binance, wallet]);
+    const api = fakeApi({ ...newer(), today: jest.fn(async () => todayFixture({ accounts: { ...base.accounts, setAside: [deposit, jar] } })) });
+    await renderWith(<Plan />, api);
+    await press("Цели");
+    await press("Новая цель");
+    await screen.findByText("Где копите?");
+    expect(screen.getAllByRole("radio").map((r) => r.props.accessibilityLabel)).toEqual(["Депозит", "Банка на отпуск", "Binance", "Без места"]);
+  });
+
+  it("when a goal in a place cannot be saved, says «Без места» is a way on", async () => {
+    const createGoal = jest.fn(async () => {
+      throw new NetworkError();
+    });
+    await renderWith(<Plan />, fakeApi({ ...newer(), createGoal }));
+    await press("Цели");
+    await press("Новая цель");
+    await fireEvent.changeText(await screen.findByLabelText("Название цели"), "Отпуск");
+    await fireEvent.press(radio("Депозит"));
+    await fireEvent.changeText(screen.getByLabelText("Сумма цели, ₴"), "90000");
+    await fireEvent.press(screen.getByRole("button", { name: "Добавить цель" }));
+    expect(await screen.findByText("Не удалось сохранить. Можно выбрать «Без места» и попробовать ещё раз.")).toBeTruthy();
+  });
+
+  it("refreshes the goals when a place's balance is saved: their progress is that balance", async () => {
+    const api = fakeApi({ ...newer(), manualBalances: jest.fn(async () => [balanceFixture()]) });
+    await renderWith(<Plan />, api);
+    await waitFor(() => expect(api.goals).toHaveBeenCalled());
+    const before = api.goals.mock.calls.length;
+    await press("Binance");
+    await fireEvent.changeText(await screen.findByLabelText("Новый баланс Binance, $"), "1300");
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить баланс" }));
+    await waitFor(() => expect(api.patchManualBalance).toHaveBeenCalled());
+    await waitFor(() => expect(api.goals.mock.calls.length).toBeGreaterThan(before));
+  });
+
   it("keeps the dollar goal without a place, as before", async () => {
     const api = fakeApi(newer());
     await renderWith(<Plan />, api);
