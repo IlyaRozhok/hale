@@ -238,6 +238,18 @@ describe("api client", () => {
     ]);
   });
 
+  it("sends a goal's place, and null to take it off its place (ЯМ5)", async () => {
+    const fetchImpl = vi.fn(async () => json({}));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await api.createGoal({ name: "Отпуск", target_cents: 9_000_000, place: { source: "manual", id: 9 } });
+    await api.patchGoal(3, { place: null, saved_cents: 30_000 });
+    const calls = fetchImpl.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([, i]) => JSON.parse(String(i.body)))).toEqual([
+      { name: "Отпуск", target_cents: 9_000_000, place: { source: "manual", id: 9 } },
+      { place: null, saved_cents: 30_000 },
+    ]);
+  });
+
   it("builds the transactions query and sends edits with PATCH", async () => {
     const fetchImpl = vi.fn(async () => json({ items: [], nextCursor: null, dayTotals: {} }));
     const { api } = setup(fetchImpl as unknown as typeof fetch);

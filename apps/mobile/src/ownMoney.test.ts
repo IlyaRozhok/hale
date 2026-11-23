@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { formatMoney } from "./format";
 import type { OwnMoneyItemDto } from "@hale/contracts";
-import { accountPatchOf, placeName, placeNote, placeOpens, setAsideDetail, setAsideTotal, wholeShares } from "./ownMoney";
+import { accountPatchOf, goalDetail, goalMoney, goalPlaces, placeName, placeNote, placeOpens, setAsideDetail, setAsideTotal, wholeShares } from "./ownMoney";
 
 const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
 /** The total as the screen shows it, in whole hryvnias. */
@@ -113,5 +113,46 @@ describe("the note under a place (variant А)", () => {
     expect(placeNote({ kind: "binance", name: "Binance", own: 579_900, currency: "USD", amount: 12_600 })).toBe("$126");
     expect(placeNote({ kind: "manual", name: "Конверт", own: 100_000, currency: "UAH", amount: 100_000 })).toBeNull();
     expect(placeNote({ kind: "white", name: "Белая карта", own: 100_000 })).toBeNull();
+  });
+});
+
+describe("goals kept in a place (ЯМ5, variant А)", () => {
+  const white: OwnMoneyItemDto = { kind: "white", name: "Белая карта", own: 1_431_300, id: 2, source: "account", countsAsOwn: true };
+  const black: OwnMoneyItemDto = { kind: "black", name: "Чёрная карта", own: -3_000_000, creditLimit: 3_000_000, id: 1, source: "account", countsAsOwn: true };
+  const wallet: OwnMoneyItemDto = { kind: "cash", name: "Наличные", own: 3_025_000, source: "cash", countsAsOwn: true };
+  const binance: OwnMoneyItemDto = { kind: "binance", name: "Binance", own: 5_000_000, currency: "USD", amount: 120_000, id: 7, source: "manual", countsAsOwn: true };
+  const usd: OwnMoneyItemDto = { kind: "other", name: "Валютный", own: 4_100_000, currency: "USD", amount: 100_050, id: 3, source: "account", countsAsOwn: false };
+  const deposit: OwnMoneyItemDto = { kind: "manual", name: "Депозит", own: 6_000_000, currency: "UAH", amount: 6_000_000, id: 9, source: "manual", countsAsOwn: false };
+  const older: OwnMoneyItemDto = { kind: "white", name: "Белая карта", own: 100_000 };
+
+  it("offers the places with an id, own money and set aside, each with its balance in its own currency", () => {
+    const places = goalPlaces({ items: [white, black, wallet, binance], setAside: [usd, deposit] });
+    expect(places.map((p) => [p.source, p.id, p.name, p.currency, p.balance])).toEqual([
+      ["account", 2, "Белая карта", "UAH", "₴14,313"],
+      ["manual", 7, "Binance", "USD", "$1,200"],
+      ["account", 3, "Валютный", "USD", "$1,001"],
+      ["manual", 9, "Депозит", "UAH", "₴60,000"],
+    ]);
+    expect(places.map((p) => p.icon)).toEqual(["card", "coin", "card", "lock"]);
+  });
+
+  it("leaves out the wallet, a card spent into its credit, places an older server does not name, and repeats", () => {
+    expect(goalPlaces({ items: [wallet, black, older], setAside: [] })).toEqual([]);
+    expect(goalPlaces({ items: [deposit], setAside: [deposit] })).toHaveLength(1);
+    expect(goalPlaces(undefined)).toEqual([]);
+  });
+
+  it("shows a goal's money whole in its currency, dollars when the server does not say", () => {
+    expect(goalMoney(120_000, "USD")).toBe("$1,200");
+    expect(goalMoney(6_000_000, "UAH")).toBe("₴60,000");
+    expect(goalMoney(50_040, "EUR")).toBe("€500");
+    expect(goalMoney(50_000, undefined)).toBe("$500");
+  });
+
+  it("says saved of target, and where the goal is kept when it has a place", () => {
+    const goal = { id: 1, name: "Отпуск", target_cents: 500_000, saved_cents: 120_000, sort: 0 };
+    expect(goalDetail(goal)).toBe("$1,200 из $5,000");
+    expect(goalDetail({ ...goal, currency: "USD", place: { source: "manual", id: 7, name: "Binance" } })).toBe("$1,200 из $5,000 · на Binance");
+    expect(goalDetail({ ...goal, currency: "UAH", target_cents: 9_000_000, saved_cents: 6_000_000, place: null })).toBe("₴60,000 из ₴90,000");
   });
 });

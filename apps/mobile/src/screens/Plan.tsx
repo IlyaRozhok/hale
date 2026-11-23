@@ -9,7 +9,6 @@ import { AccountSheet, NewAccountSheet } from "../components/AccountSheet";
 import { AsideSheet } from "../components/AsideSheet";
 import { BinanceSheet } from "../components/BinanceBalance";
 import { CashSheet } from "../components/CashSheet";
-import type { IconName } from "../components/Icon";
 import { GoalsSheet } from "../components/GoalsSection";
 import { LAYOUT } from "../components/layout";
 import { IncomesSheet } from "../components/IncomesSheet";
@@ -20,7 +19,7 @@ import { DateRow, ListRow, PlanSection } from "../components/PlanList";
 import { SetAsideSheet } from "../components/SetAsideSheet";
 import { TaxSheet } from "../components/TaxPayments";
 import { formatDollars, formatMoney, formatOriginal } from "../format";
-import { placeName, placeNote, placeOpens, setAsideDetail, setAsideTotal, wholeShares } from "../ownMoney";
+import { placeIcon, placeName, placeNote, placeOpens, setAsideDetail, setAsideTotal, wholeShares } from "../ownMoney";
 import { incomeOnDay, installmentGroups, moneyIn, paymentsCount, taxesShown, unpaidTaxCount } from "../planSummary";
 
 const { color, space, type } = tokens;
@@ -32,12 +31,6 @@ function balanceDetail(b: ManualBalanceDto): string {
 
 /** A short count on the right of a part; nothing when there is nothing, rather than a word. */
 const count = (n: number | undefined): string | undefined => (n ? String(n) : undefined);
-
-function placeIcon(item: OwnMoneyItemDto): IconName {
-  if (item.kind === "cash") return "cash";
-  if (item.kind === "binance") return "coin";
-  return item.source === "manual" || item.kind === "manual" ? "lock" : "card";
-}
 
 type Part = "incomes" | "payments" | "installments" | "tax" | "loans" | "goals" | "binance" | "cash";
 

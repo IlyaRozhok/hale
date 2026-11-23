@@ -1048,6 +1048,161 @@ describe("Plan, goals", () => {
   });
 });
 
+describe("Plan, a goal kept in a place (ЯМ5, variant А)", () => {
+  const binance: OwnMoneyItemDto = { kind: "binance", name: "Binance", own: 5_000_000, currency: "USD", amount: 120_000, id: 7, source: "manual", countsAsOwn: true };
+  const deposit: OwnMoneyItemDto = { kind: "manual", name: "Депозит", own: 6_000_000, currency: "UAH", amount: 6_000_000, id: 9, source: "manual", countsAsOwn: false };
+  const jar: OwnMoneyItemDto = { kind: "jar", name: "Банка на отпуск", own: 840_000, id: 4, source: "account", countsAsOwn: false };
+  const wallet: OwnMoneyItemDto = { kind: "cash", name: "Наличные", own: 300_000, source: "cash", countsAsOwn: true };
+  const today = () => {
+    const base = todayWithItems([binance, wallet]);
+    return todayFixture({ accounts: { ...base.accounts, setAside: [deposit, jar] } });
+  };
+  const onBinance = { currency: "USD", place: { source: "manual" as const, id: 7, name: "Binance" }, saved_cents: 120_000 };
+  /** A newer server: its goals carry a currency. */
+  const newer = (goals = [goalFixture({ ...onBinance })]) => ({ today: jest.fn(async () => today()), goals: jest.fn(async () => goals) });
+  const radio = (name: string) => screen.getByRole("radio", { name });
+  const chosen = (name: string) => radio(name).props.accessibilityState?.selected;
+  const NOTE = "Накоплено — сколько лежит на этом месте. Вводить вручную не нужно.";
+
+  it("shows a goal's progress in its place's currency, and where it is kept", async () => {
+    await renderWith(<Plan />, fakeApi(newer()));
+    await press("Цели");
+    expect(await screen.findByText("$1,200 из $5,000 · на Binance")).toBeTruthy();
+    expect(screen.getByLabelText("Прогресс: 24%")).toBeTruthy();
+  });
+
+  it("a goal whose place is gone looks like one without a place", async () => {
+    await renderWith(<Plan />, fakeApi(newer([goalFixture({ currency: "UAH", place: null, saved_cents: 0, target_cents: 9_000_000 })])));
+    await press("Цели");
+    expect(await screen.findByText("₴0 из ₴90,000")).toBeTruthy();
+  });
+
+  it("asks «Где копите?» for a new goal: the places with their balances, not the wallet; the target in the place's currency", async () => {
+    const api = fakeApi(newer());
+    await renderWith(<Plan />, api);
+    await press("Цели");
+    await press("Новая цель");
+    expect(await screen.findByText("Где копите?")).toBeTruthy();
+    expect(within(radio("Binance")).getByText("$1,200")).toBeTruthy();
+    expect(within(radio("Депозит")).getByText("₴60,000")).toBeTruthy();
+    expect(within(radio("Банка на отпуск")).getByText("₴8,400")).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: "Наличные" })).toBeNull();
+    expect(chosen("Без места")).toBe(true);
+    expect(screen.queryByText(NOTE)).toBeNull();
+    await fireEvent.changeText(screen.getByLabelText("Название цели"), "Отпуск");
+    await fireEvent.press(radio("Депозит"));
+    expect(chosen("Депозит")).toBe(true);
+    expect(chosen("Без места")).toBe(false);
+    expect(screen.getByText(NOTE)).toBeTruthy();
+    expect(screen.queryByLabelText(/^Накоплено/)).toBeNull();
+    await fireEvent.changeText(screen.getByLabelText("Сумма цели, ₴"), "90 000");
+    await fireEvent.press(screen.getByRole("button", { name: "Добавить цель" }));
+    await waitFor(() => expect(api.createGoal).toHaveBeenCalledWith({ name: "Отпуск", target_cents: 9_000_000, place: { source: "manual", id: 9 } }));
+    await waitFor(() => expect(screen.queryByLabelText("Название цели")).toBeNull());
+  });
+
+  it("keeps the dollar goal without a place, as before", async () => {
+    const api = fakeApi(newer());
+    await renderWith(<Plan />, api);
+    await press("Цели");
+    await press("Новая цель");
+    await fireEvent.changeText(await screen.findByLabelText("Название цели"), "Машина");
+    await fireEvent.changeText(screen.getByLabelText("Сумма цели, $"), "10 000");
+    await fireEvent.press(screen.getByRole("button", { name: "Добавить цель" }));
+    await waitFor(() => expect(api.createGoal).toHaveBeenCalledWith({ name: "Машина", target_cents: 1_000_000 }));
+  });
+
+  it("opens «Новый счёт» from «Другое место»", async () => {
+    await renderWith(<Plan />, fakeApi(newer()));
+    await press("Цели");
+    await press("Новая цель");
+    await fireEvent.press(await screen.findByRole("button", { name: "Другое место" }));
+    expect(await screen.findByText("Новый счёт")).toBeTruthy();
+  });
+
+  it("has no «Где копите?» when the server's goals carry no currency (an older server)", async () => {
+    await renderWith(<Plan />, fakeApi({ today: jest.fn(async () => today()), goals: jest.fn(async () => [goalFixture()]) }));
+    await press("Цели");
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить: Подушка" }));
+    expect(await screen.findByLabelText("Накоплено, $")).toBeTruthy();
+    expect(screen.queryByText("Где копите?")).toBeNull();
+    await fireEvent.press(screen.getAllByRole("button", { name: "Закрыть" }).at(-1)!);
+    await waitFor(() => expect(screen.queryByLabelText("Накоплено, $")).toBeNull());
+    await press("Новая цель");
+    expect(await screen.findByLabelText("Сумма цели, $")).toBeTruthy();
+    expect(screen.queryByText("Где копите?")).toBeNull();
+  });
+
+  it("shows a linked goal's place in its form, with no «Накоплено» to type", async () => {
+    await renderWith(<Plan />, fakeApi(newer()));
+    await press("Цели");
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить: Подушка" }));
+    expect(await screen.findByText("Где копите?")).toBeTruthy();
+    expect(chosen("Binance")).toBe(true);
+    expect(screen.getByText(NOTE)).toBeTruthy();
+    expect(screen.queryByLabelText(/^Накоплено/)).toBeNull();
+    expect(screen.getByLabelText("Сумма цели, $").props.value).toBe("5000");
+    expect(screen.getByRole("button", { name: "Удалить цель" })).toBeTruthy();
+  });
+
+  it("moving a goal to a place in another currency asks for the target in that currency, in the same save", async () => {
+    const api = fakeApi(newer());
+    await renderWith(<Plan />, api);
+    await press("Цели");
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить: Подушка" }));
+    await fireEvent.press(await screen.findByRole("radio", { name: "Депозит" }));
+    expect(screen.getByLabelText("Сумма цели, ₴").props.value).toBe("");
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить цель" }));
+    expect(await screen.findByText("Проверьте сумму.")).toBeTruthy();
+    expect(api.patchGoal).not.toHaveBeenCalled();
+    await fireEvent.changeText(screen.getByLabelText("Сумма цели, ₴"), "90000");
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить цель" }));
+    await waitFor(() => expect(api.patchGoal).toHaveBeenCalledWith(1, { place: { source: "manual", id: 9 }, target_cents: 9_000_000 }));
+  });
+
+  it("a goal without a place keeps «Накоплено» by hand; a place in the same currency needs no new target", async () => {
+    const api = fakeApi(newer([goalFixture({ currency: "USD", place: null })]));
+    await renderWith(<Plan />, api);
+    await press("Цели");
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить: Подушка" }));
+    expect((await screen.findByLabelText("Накоплено, $")).props.value).toBe("500");
+    expect(chosen("Без места")).toBe(true);
+    await fireEvent.changeText(screen.getByLabelText("Накоплено, $"), "700");
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить цель" }));
+    await waitFor(() => expect(api.patchGoal).toHaveBeenCalledWith(1, { saved_cents: 70_000 }));
+    await waitFor(() => expect(screen.queryByLabelText("Накоплено, $")).toBeNull());
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить: Подушка" }));
+    await fireEvent.press(await screen.findByRole("radio", { name: "Binance" }));
+    expect(screen.queryByLabelText("Накоплено, $")).toBeNull();
+    expect(screen.getByLabelText("Сумма цели, $").props.value).toBe("5000");
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить цель" }));
+    await waitFor(() => expect(api.patchGoal).toHaveBeenLastCalledWith(1, { place: { source: "manual", id: 7 } }));
+  });
+
+  it("takes a goal off its place with «Без места», and then «Накоплено» is typed by hand", async () => {
+    const api = fakeApi(newer());
+    await renderWith(<Plan />, api);
+    await press("Цели");
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить: Подушка" }));
+    await fireEvent.press(await screen.findByRole("radio", { name: "Без места" }));
+    expect(screen.getByLabelText("Накоплено, $").props.value).toBe("");
+    await fireEvent.changeText(screen.getByLabelText("Накоплено, $"), "300");
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить цель" }));
+    await waitFor(() => expect(api.patchGoal).toHaveBeenCalledWith(1, { place: null, saved_cents: 30_000 }));
+  });
+
+  it("renames a goal and changes its target", async () => {
+    const api = fakeApi(newer());
+    await renderWith(<Plan />, api);
+    await press("Цели");
+    await fireEvent.press(await screen.findByRole("button", { name: "Изменить: Подушка" }));
+    await fireEvent.changeText(await screen.findByLabelText("Название цели"), " Отпуск ");
+    await fireEvent.changeText(screen.getByLabelText("Сумма цели, $"), "6000");
+    await fireEvent.press(screen.getByRole("button", { name: "Сохранить цель" }));
+    await waitFor(() => expect(api.patchGoal).toHaveBeenCalledWith(1, { name: "Отпуск", target_cents: 600_000 }));
+  });
+});
+
 describe("Plan, Binance balance", () => {
   const withBalance = () => ({ manualBalances: jest.fn(async () => [balanceFixture({ id: 1, name: "Other", amount: 1 }), balanceFixture()]) });
   const type = async (text: string) => {
