@@ -1,7 +1,15 @@
 // Pure: runs in node tests.
-import type { AccountPatch, OwnMoneyItemDto } from "@hale/contracts";
+import type { AccountPatch, GoalDto, GoalPlace, OwnMoneyItemDto } from "@hale/contracts";
+import type { IconName } from "./components/Icon";
 import { formatDollars, formatMoney, formatOriginal } from "./format";
 import { accountLabel } from "./labels";
+
+/** The glyph of a place of money in a list: the wallet, Binance, a balance kept by hand, or a card. */
+export function placeIcon(item: OwnMoneyItemDto): IconName {
+  if (item.kind === "cash") return "cash";
+  if (item.kind === "binance") return "coin";
+  return item.source === "manual" || item.kind === "manual" ? "lock" : "card";
+}
 
 /**
  * The window a place of money opens (Д2б): the wallet and Binance their own ones, a bank account or a balance kept by
@@ -75,5 +83,40 @@ export function wholeShares(totalKopecks: number, kopecks: number[]): number[] {
     .slice(0, missing);
   const out = [...floors];
   for (const { i } of byRemainder) out[i]! += 1;
+  return out;
+}
+
+/** Money of a goal in its own currency, whole (ЯМ5); dollars when an older server does not say. */
+export function goalMoney(minor: number, currency: string | undefined): string {
+  if (currency === undefined || currency === "USD") return formatDollars(minor);
+  if (currency === "UAH") return formatMoney(minor);
+  return formatOriginal(Math.round(minor / 100) * 100, currency);
+}
+
+/** The line under a goal: «$1,200 из $5,000», and «· на Binance» when it is kept in a place (ЯМ5). */
+export function goalDetail(goal: GoalDto): string {
+  const of = `${goalMoney(goal.saved_cents, goal.currency)} из ${goalMoney(goal.target_cents, goal.currency)}`;
+  return goal.place ? `${of} · на ${goal.place.name}` : of;
+}
+
+/** A place a goal can be kept in (ЯМ5, «Где копите?»), with its balance as its row shows it. */
+export type GoalPlaceOption = GoalPlace & { name: string; currency: string; balance: string | null; icon: IconName };
+
+/**
+ * The places «Где копите?» offers: what «Отложено» shows, then Binance, each once. Not the cards and accounts of own
+ * money (a goal there would drop with every purchase), not the wallet (the server takes no goal there), and nothing an
+ * older server lists without an id.
+ */
+export function goalPlaces(accounts: { items?: OwnMoneyItemDto[]; setAside?: OwnMoneyItemDto[] } | undefined): GoalPlaceOption[] {
+  const out: GoalPlaceOption[] = [];
+  const binance = (accounts?.items ?? []).filter((i) => i.kind === "binance");
+  for (const item of [...(accounts?.setAside ?? []), ...binance]) {
+    const source = item.source;
+    if ((source !== "account" && source !== "manual") || item.id === undefined || item.own < 0) continue;
+    if (out.some((p) => p.source === source && p.id === item.id)) continue;
+    const currency = item.currency ?? "UAH";
+    const balance = item.amount !== undefined ? goalMoney(item.amount, currency) : formatMoney(item.own);
+    out.push({ source, id: item.id, name: placeName(item), currency, balance, icon: placeIcon(item) });
+  }
   return out;
 }
