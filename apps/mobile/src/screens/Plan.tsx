@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { ManualBalanceDto, OwnMoneyItemDto } from "@hale/contracts";
-import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePullRefresh } from "../usePullRefresh";
 import { tokens } from "@hale/tokens";
@@ -9,8 +9,7 @@ import { AccountSheet, NewAccountSheet } from "../components/AccountSheet";
 import { AsideSheet } from "../components/AsideSheet";
 import { BinanceSheet } from "../components/BinanceBalance";
 import { CashSheet } from "../components/CashSheet";
-import { Icon, type IconName } from "../components/Icon";
-import { Settings } from "./Settings";
+import type { IconName } from "../components/Icon";
 import { GoalsSheet } from "../components/GoalsSection";
 import { LAYOUT } from "../components/layout";
 import { IncomesSheet } from "../components/IncomesSheet";
@@ -24,7 +23,7 @@ import { formatDollars, formatMoney, formatOriginal } from "../format";
 import { placeName, placeNote, placeOpens, setAsideDetail, setAsideTotal, wholeShares } from "../ownMoney";
 import { incomeOnDay, installmentGroups, moneyIn, paymentsCount, taxesShown, unpaidTaxCount } from "../planSummary";
 
-const { color, space, touchMin, type } = tokens;
+const { color, space, type } = tokens;
 
 /** A balance kept by hand in its own currency: whole dollars like the rest of the plan, others with cents. */
 function balanceDetail(b: ManualBalanceDto): string {
@@ -40,7 +39,7 @@ function placeIcon(item: OwnMoneyItemDto): IconName {
   return item.source === "manual" || item.kind === "manual" ? "lock" : "card";
 }
 
-type Part = "incomes" | "payments" | "installments" | "tax" | "loans" | "goals" | "binance" | "cash" | "settings";
+type Part = "incomes" | "payments" | "installments" | "tax" | "loans" | "goals" | "binance" | "cash";
 
 /**
  * «План» as an iOS list (variant А, the owner's «Оба А» of 22 November): own money at the top, what happens before the
@@ -157,11 +156,6 @@ export function Plan() {
       contentContainerStyle={[styles.content, { paddingBottom: LAYOUT.tabBar + insets.bottom }]}
       refreshControl={<RefreshControl {...pull} />}
     >
-      <View style={styles.bar}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Настройки" onPress={() => setOpen("settings")} style={styles.gear}>
-          <Icon name="settings" color={color.fg.muted} size={22} />
-        </Pressable>
-      </View>
       <Text style={styles.title}>План</Text>
       {data && (
         <View style={styles.hero}>
@@ -212,11 +206,6 @@ export function Plan() {
       ) : (
         windows
       )}
-      {open === "settings" && (
-        <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={close}>
-          <Settings onClose={close} />
-        </Modal>
-      )}
     </ScrollView>
   );
 }
@@ -224,9 +213,6 @@ export function Plan() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { paddingHorizontal: space.xl, paddingTop: space.sm, gap: space.lg },
-  // The gear sits alone in the top right corner, over the large title, as in iOS.
-  bar: { flexDirection: "row", justifyContent: "flex-end", marginBottom: -space.lg },
-  gear: { minWidth: touchMin, minHeight: touchMin, alignItems: "center", justifyContent: "center" },
   // Large titles and the hero line up with the text inside the cards below them.
   title: { ...type.display, color: color.fg.strong, paddingHorizontal: space.xs },
   hero: { paddingHorizontal: space.xs, marginTop: -space.sm },
