@@ -82,6 +82,11 @@ function freshnessLines(data: TodayDto, offlineSince: number | null, now: Date):
   return lines;
 }
 
+/** The questions still waiting: a date question with no income event cannot be answered; an older cached answer may still hold one. */
+function openQuestions(data: TodayDto, answered: ReadonlySet<string>): TodayDto["questions"] {
+  return data.questions.filter((q) => !answered.has(q.id) && !(q.kind === "income_date" && eventIdOf(q.id) === null));
+}
+
 export function Today({ onOpenActivity, onOpenObservation, now = () => new Date() }: Props) {
   const insets = useSafeAreaInsets();
   const today = useToday();
@@ -130,6 +135,21 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
   const closeSheet = () => setSheet(null);
   /** Closes the sheet only if it is still the one open: a late answer must not close another. */
   const closeIfOpen = (name: "bridge" | "questions") => setSheet((s) => (s === name ? null : s));
+  // Task Я9: once the server lists no questions (a refresh while the list is open), the list closes rather than stays
+  // empty. Answers hidden here while their call runs do not count: a failed call brings its card back into the list.
+  const listed = data ? openQuestions(data, new Set()).length : 0;
+  useEffect(() => {
+    if (listed === 0) closeIfOpen("questions");
+  }, [listed]);
+  // The recipient and arrival sheets live inside the list: when it closes, however it closes, they are dropped too,
+  // so the list never reopens on top of an old, already answered question.
+  const listOpen = sheet === "questions";
+  useEffect(() => {
+    if (!listOpen) {
+      setLabeling(null);
+      setArriving(null);
+    }
+  }, [listOpen]);
 
   if (!data) {
     return (
@@ -164,8 +184,7 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
   const nextLimit = state.shortageStart?.nextLimit;
   const nextLimitNote = nextLimit !== undefined ? `Новый лимит ${formatMoney(nextLimit)} действует с завтра` : null;
   const offlineSince = today.isError ? today.dataUpdatedAt : null;
-  // A date question with no income event cannot be answered; an older cached answer may still hold one.
-  const questions = data.questions.filter((q) => !answered.has(q.id) && !(q.kind === "income_date" && eventIdOf(q.id) === null));
+  const questions = openQuestions(data, answered);
   // Loans live in Plan: the server still lists each open one here, and Today leaves them out.
   const notes = data.badCases.filter((b) => !b.id.startsWith("loan:"));
   // Task А24: the sand line about the pace. The note that the minus went over the bridge plan already names the day
@@ -248,19 +267,19 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
       >
         <View style={styles.header}>
           <Text style={styles.date}>{longDate(data.date)}</Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={questions.length > 0 ? `Вопросы: ${questions.length}` : "Вопросы"}
-            onPress={() => setSheet("questions")}
-            style={styles.profile}
-          >
-            <Icon name="bell" color={color.fg.muted} size={20} />
-            {questions.length > 0 && (
+          {/* Task Я9: with nothing to answer the bell keeps its place (the header does not jump) but is not a button. */}
+          {questions.length > 0 ? (
+            <Pressable accessibilityRole="button" accessibilityLabel={`Вопросы: ${questions.length}`} onPress={() => setSheet("questions")} style={styles.profile}>
+              <Icon name="bell" color={color.fg.muted} size={20} />
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{questions.length}</Text>
               </View>
-            )}
-          </Pressable>
+            </Pressable>
+          ) : (
+            <View accessible accessibilityLabel="Вопросов нет" style={styles.profile}>
+              <Icon name="bell" color={color.fg.muted} size={20} />
+            </View>
+          )}
         </View>
         <StaleBanner lines={freshnessLines(data, offlineSince, now())} />
         {/* The whole card is the way into the limit calendar. */}
@@ -389,7 +408,6 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
       )}
       {sheet === "questions" && (
         <Sheet title="Осталось разобрать" onClose={closeSheet}>
-          {questions.length === 0 && <Text style={styles.note}>Вопросов нет</Text>}
           {questions.map((q) => (
             <QuestionCard
               key={q.id}
@@ -417,7 +435,11 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
               counterKey={labeling.counterKey}
               name={labeling.name}
               onClose={() => setLabeling(null)}
-              onLabeled={() => hide(labeling.id, true)}
+              onLabeled={() => {
+                // Called once the label is saved: the last card closes the list too, as a one-tap answer does (Я9).
+                if (questions.length <= 1) closeIfOpen("questions");
+                hide(labeling.id, true);
+              }}
             />
           )}
           {arriving && (
