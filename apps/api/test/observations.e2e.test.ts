@@ -73,7 +73,8 @@ let black: number;
 beforeEach(async () => {
   await ds.query(
     `TRUNCATE jobs, rules, transactions, accounts, fx_rates, income_events, expected_incomes, scheduled_payments,
-              recurring_payments, manual_balances, loans, bridge_plans, daily_snapshots, goals, observations_shown, observation_dismissals
+              recurring_payments, manual_balances, loans, bridge_plans, daily_snapshots, goals, observations_shown, observation_dismissals,
+              not_subscriptions
      RESTART IDENTITY CASCADE`,
   );
   at("2026-11-19T10:00:00Z");
@@ -202,6 +203,15 @@ describe("observations", () => {
     it("offers nothing when no subscription is due before the income", async () => {
       await ds.query(`DELETE FROM transactions WHERE counter_name='Netflix'`);
       expect(await observation()).toBeNull();
+    });
+
+    it("leaves out a place marked «Не подписка», and brings it back once unmarked (ЯМ6)", async () => {
+      const key = (await get("/insights/month").expect(200)).body.subscriptions.items.find((i: { name: string }) => i.name === "Netflix").key;
+      await request(http()).put(`/insights/not-subscriptions/${key}`).set("Authorization", auth).expect(204);
+      // Spotify is due after the income: with Netflix not a subscription, nothing is due before it.
+      expect(await observation()).toBeNull();
+      await request(http()).delete(`/insights/not-subscriptions/${key}`).set("Authorization", auth).expect(204);
+      expect((await observation()).amount).toBe(24_900);
     });
 
     it("stops the subscriptions kind once it is dismissed", async () => {

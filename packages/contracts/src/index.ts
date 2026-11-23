@@ -1064,6 +1064,13 @@ export const insightsMonthDto = z
     wanted: money.refine((n) => n >= 0, "not below zero").optional(),
     /** The same over the stretch of the month before (`previous`). */
     previousWanted: money.refine((n) => n >= 0, "not below zero").optional(),
+    /**
+     * Task ЯМ6, optional: true when this server remembers «Не подписка» — `PUT /insights/not-subscriptions/:key` marks
+     * a subscription's place (its `key`, a `counterKeyParam`) as not one, `DELETE` on the same path undoes it; both
+     * answer 204 and are idempotent. A marked place is left out of `subscriptions` (and of the observation on
+     * «Сегодня»). An older server does not send it, and the app then offers no «Не подписка».
+     */
+    canMarkNotSubscription: z.boolean().optional(),
   })
   .strict();
 export type InsightsMonthDto = z.infer<typeof insightsMonthDto>;

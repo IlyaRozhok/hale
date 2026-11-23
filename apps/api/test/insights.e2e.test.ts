@@ -54,7 +54,7 @@ const limitSpent = async (from: string, to: string): Promise<number> => (await d
 beforeEach(async () => {
   await ds.query(
     `TRUNCATE jobs, rules, transactions, accounts, fx_rates, income_events, expected_incomes,
-              scheduled_payments, recurring_payments, manual_balances, loans, bridge_plans, daily_snapshots, goals
+              scheduled_payments, recurring_payments, manual_balances, loans, bridge_plans, daily_snapshots, goals, not_subscriptions
      RESTART IDENTITY CASCADE`,
   );
   await ds.query(`UPDATE settings SET cash_start='2026-11-10'`);
@@ -125,6 +125,8 @@ describe("GET /insights/month", () => {
       // hryvnia amount, not «Возвраты», the transfer or «Без категории». October: the cafe.
       wanted: 9_000 - 2_000 + 30_000,
       previousWanted: 4_000,
+      // This server remembers «Не подписка» (ЯМ6): the app may offer it.
+      canMarkNotSubscription: true,
     });
   });
 
@@ -387,6 +389,61 @@ describe("GET /insights/month", () => {
     for (const r of rows) expect([r.description, r.person]).toEqual([r.description, isPaidToPerson(r)]);
   });
 
+  it("leaves out a place marked «Не подписка» in this month and a past one, and brings it back once unmarked; the limit stays the same (ЯМ6)", async () => {
+    const black = (await ds.query(`SELECT id FROM accounts WHERE kind='black'`))[0].id as number;
+    const at = async (day: string, amount: number, description: string) => {
+      seq++;
+      await ds.query(
+        `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, category, raw)
+         VALUES ($1,$2,$3,${kyivDaySql("$3::timestamptz")},$4,$5,$5,'spend','subscriptions','{}')`,
+        [`tx-${seq}`, black, `${day}T10:00:00Z`, description, amount],
+      );
+    };
+    for (const d of ["2026-08-05", "2026-09-05", "2026-10-05", "2026-11-05"]) await at(d, -24_900, "Netflix");
+    // A pharmacy visited about monthly at one price: found as a subscription, which it is not.
+    for (const d of ["2026-08-09", "2026-09-09", "2026-10-09", "2026-11-09"]) await at(d, -30_000, "Аптека");
+    const today = async () => (await get("/today").expect(200)).body;
+    const limitBefore = await today();
+
+    const found = (await get("/insights/month").expect(200)).body;
+    expect(found.subscriptions.items.map((i: { name: string }) => i.name)).toEqual(["Аптека", "Netflix"]);
+    expect(found.subscriptions.monthly).toBe(54_900);
+    const pharmacy = found.subscriptions.items[0].key as string;
+
+    // Marked twice: the same as once.
+    await request(http()).put(`/insights/not-subscriptions/${pharmacy}`).set("Authorization", auth).expect(204);
+    await request(http()).put(`/insights/not-subscriptions/${pharmacy}`).set("Authorization", auth).expect(204);
+    expect(await ds.query(`SELECT key FROM not_subscriptions`)).toEqual([{ key: pharmacy }]);
+    const marked = (await get("/insights/month").expect(200)).body;
+    expect(insightsMonthDto.safeParse(marked).success).toBe(true);
+    expect(marked.subscriptions).toEqual({ monthly: 24_900, items: [found.subscriptions.items[1]] });
+    expect((await get("/insights/month?month=2026-10").expect(200)).body.subscriptions.items.map((i: { name: string }) => i.name)).toEqual(["Netflix"]);
+    // Only the list changed: the place is still a place, its purchases still the limit's spending, and «Сегодня» reads the same.
+    expect(marked.spent).toBe(found.spent);
+    expect(marked.places).toEqual(found.places);
+    expect(await today()).toEqual(limitBefore);
+
+    // «Вернуть»: unmarked twice, the same as once.
+    await request(http()).delete(`/insights/not-subscriptions/${pharmacy}`).set("Authorization", auth).expect(204);
+    await request(http()).delete(`/insights/not-subscriptions/${pharmacy}`).set("Authorization", auth).expect(204);
+    expect(await ds.query(`SELECT key FROM not_subscriptions`)).toEqual([]);
+    expect((await get("/insights/month").expect(200)).body.subscriptions).toEqual(found.subscriptions);
+  });
+
+  it("marks and unmarks «Не подписка» only for the owner and only by a counterparty key (ЯМ6)", async () => {
+    const key = "0123456789abcdef";
+    await request(http()).put(`/insights/not-subscriptions/${key}`).expect(401);
+    await request(http()).delete(`/insights/not-subscriptions/${key}`).expect(401);
+    for (const bad of ["0123456789ABCDEF", "0123456789abcde", "0123456789abcdef0", "xyz", "0123456789abcdeg"]) {
+      await request(http()).put(`/insights/not-subscriptions/${bad}`).set("Authorization", auth).expect(400);
+      await request(http()).delete(`/insights/not-subscriptions/${bad}`).set("Authorization", auth).expect(400);
+    }
+    expect(await ds.query(`SELECT key FROM not_subscriptions`)).toEqual([]);
+    // A key with no subscription behind it is remembered all the same: the place may charge again later.
+    await request(http()).put(`/insights/not-subscriptions/${key}`).set("Authorization", auth).expect(204);
+    expect(await ds.query(`SELECT key FROM not_subscriptions`)).toEqual([{ key }]);
+  });
+
   it("adds up to the limit's spending over the same days, for both stretches", async () => {
     for (const q of ["", "?month=2026-10", "?month=2026-09"]) {
       const { body } = await get(`/insights/month${q}`).expect(200);
@@ -455,7 +512,7 @@ describe("GET /insights/month", () => {
 
   it("answers a month with nothing in it with zeros", async () => {
     const { body } = await get("/insights/month?month=2025-01").expect(200);
-    expect(body).toEqual({ month: "2025-01", through: "2025-01-31", previous: { from: "2024-12-01", to: "2024-12-31" }, spent: 0, previousSpent: 0, categories: [], places: [], otherPayments: 0, previousOtherPayments: 0, subscriptions: { monthly: 0, items: [] }, wanted: 0, previousWanted: 0 });
+    expect(body).toEqual({ month: "2025-01", through: "2025-01-31", previous: { from: "2024-12-01", to: "2024-12-31" }, spent: 0, previousSpent: 0, categories: [], places: [], otherPayments: 0, previousOtherPayments: 0, subscriptions: { monthly: 0, items: [] }, wanted: 0, previousWanted: 0, canMarkNotSubscription: true });
   });
 
   it("refuses a malformed month and a month in the future", async () => {

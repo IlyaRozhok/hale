@@ -18,6 +18,7 @@ import { Observations1796601600000 } from "../src/db/migrations/0036-observation
 import { Want1796688000000 } from "../src/db/migrations/0037-want";
 import { AccountCountsAsOwn1796774400000 } from "../src/db/migrations/0038-account-counts-as-own";
 import { IncomeSources1796860800000 } from "../src/db/migrations/0039-income-sources";
+import { NotSubscriptions1796947200000 } from "../src/db/migrations/0040-not-subscriptions";
 import { CLASSIFIER_VERSION } from "../src/domain/classify";
 import { JobRunner } from "../src/mono/jobs/job-runner";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
@@ -36,6 +37,7 @@ const TABLES = [
   "daily_snapshots", "fx_rates",
       "goals", "jobs", "devices", "notifications_log", "loan_repayments", "payment_links", "cash_cards", "payment_dismissals", "cash_answers",
   "ledger_checks", "cash_exchanges", "recurring_skips", "categories", "observations_shown", "observation_dismissals",
+  "not_subscriptions",
 ];
 
 async function listTables(url: string): Promise<string[]> {
@@ -705,5 +707,38 @@ describe("migrations", () => {
     expect((await back.query(events)).filter((e: { period: string }) => e.period !== "2027-01")).toEqual(kept);
     expect((await back.query(`SELECT period, expected_on::text AS on FROM income_events WHERE period = '2027-01'`))).toEqual([{ period: "2027-01", on: "2027-01-28" }]);
     await back.destroy();
+  });
+
+  it("0040 adds an empty table of places marked «Не подписка» and changes no existing row (ЯМ6)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(NotSubscriptions1796947200000)) });
+    await before.initialize();
+    await before.runMigrations();
+    const account = (await before.query(`INSERT INTO accounts (external_id, kind, currency, balance) VALUES ('a','black','UAH',0) RETURNING id`))[0].id;
+    await before.query(
+      `INSERT INTO transactions (external_id, account_id, occurred_at, local_date, description, amount, amount_uah, type, category, raw)
+       VALUES ('t1',$1,'2026-11-08T10:00:00Z','2026-11-08','Netflix',-24900,-24900,'spend','subscriptions','{}')`,
+      [account],
+    );
+    const rows = `SELECT external_id, description, category, amount_uah FROM transactions ORDER BY id`;
+    const was = await before.query(rows);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    expect(await ds.query(`SELECT * FROM not_subscriptions`)).toEqual([]);
+    expect(await ds.query(rows)).toEqual(was);
+    // One row a place, by the counterparty key and nothing else.
+    await ds.query(`INSERT INTO not_subscriptions (key) VALUES ('0123456789abcdef')`);
+    await expect(ds.query(`INSERT INTO not_subscriptions (key) VALUES ('0123456789abcdef')`)).rejects.toThrow();
+    await expect(ds.query(`INSERT INTO not_subscriptions (key) VALUES ('0123456789ABCDEF')`)).rejects.toThrow();
+    await expect(ds.query(`INSERT INTO not_subscriptions (key) VALUES ('Netflix')`)).rejects.toThrow();
+    expect(await ds.query(`SELECT created_at IS NOT NULL AS stamped FROM not_subscriptions`)).toEqual([{ stamped: true }]);
+
+    for (let i = migrations.indexOf(NotSubscriptions1796947200000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT to_regclass('not_subscriptions') AS t`)).toEqual([{ t: null }]);
+    expect(await ds.query(rows)).toEqual(was);
+    await ds.destroy();
   });
 });

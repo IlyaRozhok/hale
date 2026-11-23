@@ -133,13 +133,14 @@ function follow(start: ChargeRow, charges: readonly ChargeRow[], taken: Readonly
  * one-off purchase at the store that also bills a subscription does not matter. One not charged for a while is left
  * out when the place has since charged a sum like it outside the chains still standing: it may be back, and
  * «не списывалась» would be wrong. A yearly charge never chains. A place with no name is left out: the
- * screen would have nothing to call it.
+ * screen would have nothing to call it. A place in `notSubscriptions` (marked «Не подписка» by the owner, ЯМ6) is
+ * never a subscription: its charges are left out before anything is followed.
  */
-export function findSubscriptions(rows: readonly ChargeRow[], asOf: string): Subscriptions {
+export function findSubscriptions(rows: readonly ChargeRow[], asOf: string, notSubscriptions: ReadonlySet<string> = new Set()): Subscriptions {
   const from = subscriptionsFrom(asOf);
   const byKey = new Map<string, ChargeRow[]>();
   for (const r of rows) {
-    if (r.date < from || r.date > asOf || r.amount <= 0 || r.name.trim() === "") continue;
+    if (r.date < from || r.date > asOf || r.amount <= 0 || r.name.trim() === "" || notSubscriptions.has(r.key)) continue;
     byKey.set(r.key, [...(byKey.get(r.key) ?? []), r]);
   }
   const found: Subscription[] = [];

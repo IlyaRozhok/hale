@@ -119,6 +119,13 @@ describe("contracts", () => {
     expect(insightsMonthDto.safeParse({ ...base, previousOtherPayments: -1 }).success).toBe(false);
   });
 
+  it("takes the «Не подписка» capability as an optional flag, so an older server's answer still reads (ЯМ6)", () => {
+    const base = { month: "2026-11", through: "2026-11-16", previous: { from: "2026-10-01", to: "2026-10-16" }, spent: 0, previousSpent: 0, categories: [] };
+    expect(insightsMonthDto.safeParse(base).success).toBe(true);
+    expect(insightsMonthDto.safeParse({ ...base, canMarkNotSubscription: true }).success).toBe(true);
+    expect(insightsMonthDto.safeParse({ ...base, canMarkNotSubscription: "yes" }).success).toBe(false);
+  });
+
   it("takes the month's subscriptions as optional, so an older server's answer still reads (В4)", () => {
     const base = { month: "2026-11", through: "2026-11-16", previous: { from: "2026-10-01", to: "2026-10-16" }, spent: 0, previousSpent: 0, categories: [] };
     const item = { key: "0123456789abcdef", name: "Netflix", amount: 29_900, lastDate: "2026-11-05", raisedBy: 5_000, missed: 0 };
