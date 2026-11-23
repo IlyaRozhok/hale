@@ -13,13 +13,14 @@ import type {
   TransactionsQuery,
   TxTypeDto,
 } from "@hale/contracts";
-import { exchangeRate } from "@hale/contracts";
+import { TRANSACTION_FILTERS, exchangeRate } from "@hale/contracts";
 import { DataSource, type EntityManager } from "typeorm";
 import { isCounterpartyName } from "../domain/counterparty";
 import { creditPart } from "../domain/credit";
 import { UNCATEGORIZED } from "../domain/insights";
 import { type TxType, isWeakRuleValue, normaliseText, ruleMatches, typeCategory } from "../domain/classify";
 import { binanceOnChange, cashAnswerOf } from "../domain/cash-answer";
+import { outOfLimitPaymentSql } from "../domain/ledger";
 import { canOverrideWant, categoryWantSql, effectiveWant, wantedSql } from "../domain/want";
 import { PlanService } from "../plan/plan.service";
 import { LimitService } from "../today/limit.service";
@@ -189,6 +190,11 @@ export class TransactionsService {
     if (q.want) where.push(wantedSql("t", "a"));
     // By kind, not by account: a card's hryvnia and dollar accounts are one card to the person (Д1).
     if (q.account) where.push(`a.kind = ${arg(q.account)}`);
+    // Exactly the rows «Итоги» add up as «Платежи вне лимита» (Я8): the payments outside the limit.
+    if (q.other) where.push(outOfLimitPaymentSql("t", "a"));
+    // Every row of one place (Я8), by the key «Итоги» name it with, whatever the owner has made of the row since:
+    // a charge retyped to a planned payment is still that place's operation.
+    if (q.place) where.push(`${KEY} = ${arg(q.place)}`);
     if (q.from) where.push(`t.local_date >= ${arg(q.from)}::date`);
     if (q.to) where.push(`t.local_date <= ${arg(q.to)}::date`);
     if (q.q) {
@@ -213,13 +219,15 @@ export class TransactionsService {
     // Under «Траты» the totals are the limit's (Б2): the sum and count of the rows that count against it,
     // the same figure as «потрачено» on «Сегодня» and in the calendar. Payments, taxes, debts, loans out
     // and jar rows stay on the list, marked by inLimit, but do not add up. «Все» and «Доходы» sum every row.
-    const counted = q.group === "spend" ? SPEND_TAB.counted : "true";
+    // The payments outside the limit add up under every group (Я8): their sum is the line of «Итоги», and none of
+    // them counts against the limit, so under «Траты» they would otherwise sum to nothing.
+    const counted = q.group === "spend" && !q.other ? SPEND_TAB.counted : "true";
     return {
       items: page.map((r) => view(r, rules, binanceOpen)),
       nextCursor: rows.length > q.limit ? encodeCursor(page[page.length - 1]!) : null,
       dayTotals: await this.dayTotals([...new Set(page.map((r) => r.local_date))], filters, filterArgs, counted),
-      summary: q.category || q.want || q.account || q.from || q.to ? await this.summary(filters, filterArgs, counted) : null,
-      ...(q.cursor ? {} : { accountKinds: await this.accountKinds() }),
+      summary: q.category || q.want || q.account || q.other || q.place || q.from || q.to ? await this.summary(filters, filterArgs, counted) : null,
+      ...(q.cursor ? {} : { accountKinds: await this.accountKinds(), filters: [...TRANSACTION_FILTERS] }),
     };
   }
 

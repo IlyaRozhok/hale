@@ -939,6 +939,83 @@ describe("filters by category and period", () => {
   });
 });
 
+describe("filters for the lines of «Итоги» (Я8)", () => {
+  it("lists every operation of one place, whatever the owner made of it; under «Траты» only the limit's add up", async () => {
+    const a = await account();
+    await tx(a, { description: "Apple", amount: -10_000, category: "subscriptions", at: "2026-11-05T10:00:00.000Z" });
+    await tx(a, { description: "apple ", amount: 3_000, category: "refund", at: "2026-11-06T10:00:00.000Z" }); // the same place, as the key normalises it
+    await tx(a, { description: "Apple", amount: -20_000, type: "obligation", category: "subscriptions", source: "owner", at: "2026-11-07T10:00:00.000Z" });
+    await tx(a, { description: "Оплата", name: "Apple", amount: -4_000, at: "2026-11-08T10:00:00.000Z" }); // named by the counterparty
+    await tx(a, { description: "Apple", iban: IBAN, amount: -50_000, at: "2026-11-09T10:00:00.000Z" }); // a known account: someone else
+    await tx(a, { description: "Shop", amount: -5_000, at: "2026-11-10T10:00:00.000Z" });
+    const key = (await api.get("/transactions?limit=1&from=2026-11-05&to=2026-11-05").expect(200)).body.items[0].counterKey as string;
+
+    const all = (await api.get(`/transactions?place=${key}`).expect(200)).body;
+    expect(all.items.map((i: { amount: number }) => i.amount)).toEqual([-4_000, -20_000, 3_000, -10_000]);
+    expect(all.items.every((i: { counterKey: string }) => i.counterKey === key)).toBe(true);
+    expect(all.summary).toEqual({ total: -31_000, count: 4 });
+
+    const spend = (await api.get(`/transactions?group=spend&place=${key}`).expect(200)).body;
+    expect(spend.items.map((i: { amount: number }) => i.amount)).toEqual([-4_000, -20_000, 3_000, -10_000]);
+    expect(spend.summary).toEqual({ total: -11_000, count: 3 });
+
+    // With the other filters: a period, and the payments outside the limit.
+    const period = (await api.get(`/transactions?place=${key}&from=2026-11-06&to=2026-11-07`).expect(200)).body;
+    expect(period.items.map((i: { amount: number }) => i.amount)).toEqual([-20_000, 3_000]);
+    const other = (await api.get(`/transactions?place=${key}&other=true`).expect(200)).body;
+    expect(other.items.map((i: { amount: number }) => i.amount)).toEqual([-20_000]);
+    expect(other.summary).toEqual({ total: -20_000, count: 1 });
+
+    // A key nobody has: an empty list, not an error.
+    const none = (await api.get("/transactions?place=0000000000000000").expect(200)).body;
+    expect(none.items).toEqual([]);
+    expect(none.summary).toEqual({ total: 0, count: 0 });
+  });
+
+  it("lists the payments outside the limit and adds them up under every tab but «Доходы»", async () => {
+    const a = await account();
+    await tx(a, { description: "Rent", amount: -800_000, type: "obligation", at: "2026-11-02T10:00:00.000Z" });
+    await tx(a, { description: "Tax", amount: -100_000, type: "tax", at: "2026-11-03T10:00:00.000Z" });
+    await tx(a, { description: "Loan", amount: -50_000, type: "debt_payment", at: "2026-11-04T10:00:00.000Z" });
+    await tx(a, { description: "Cafe", amount: -10_000, at: "2026-11-04T11:00:00.000Z" });
+    await tx(a, { description: "Lent", amount: -70_000, type: "loan_out", at: "2026-11-05T10:00:00.000Z" });
+    await tx(a, { description: "Pay", amount: 900_000, type: "income", at: "2026-11-05T11:00:00.000Z" });
+    await tx(await account("jar"), { description: "Jar rent", amount: -1_000, type: "obligation", at: "2026-11-06T10:00:00.000Z" });
+
+    for (const group of ["", "&group=spend", "&group=all"]) {
+      const res = (await api.get(`/transactions?other=true${group}`).expect(200)).body;
+      expect(res.items.map((i: { description: string }) => i.description), group).toEqual(["Loan", "Tax", "Rent"]);
+      expect(res.summary).toEqual({ total: -950_000, count: 3 });
+      expect(res.dayTotals).toEqual({ "2026-11-04": -50_000, "2026-11-03": -100_000, "2026-11-02": -800_000 });
+    }
+    const income = (await api.get("/transactions?other=true&group=income").expect(200)).body;
+    expect(income.items).toEqual([]);
+    expect(income.summary).toEqual({ total: 0, count: 0 });
+    // With «желаемое», which is purchases in the limit: nothing.
+    expect((await api.get("/transactions?other=true&want=true").expect(200)).body.items).toEqual([]);
+  });
+
+  it("refuses anything but other=true and a place's key", async () => {
+    await api.get("/transactions?other=false").expect(400);
+    await api.get("/transactions?other=1").expect(400);
+    await api.get("/transactions?place=Apple").expect(400);
+    await api.get("/transactions?place=0123456789ABCDEF").expect(400);
+    await api.get("/transactions?place=").expect(400);
+    await api.get("/transactions?placeKey=0123456789abcdef").expect(400);
+  });
+
+  it("names the filters it understands beyond the old ones, on the first page only, so a newer app knows to send them", async () => {
+    const a = await account();
+    await tx(a, { description: "A", at: "2026-11-05T10:00:00.000Z" });
+    await tx(a, { description: "B", at: "2026-11-04T10:00:00.000Z" });
+    const first = (await api.get("/transactions?limit=1").expect(200)).body;
+    expect(first.filters).toEqual(["other", "place"]);
+    const next = (await api.get(`/transactions?limit=1&cursor=${first.nextCursor as string}`).expect(200)).body;
+    expect(next.filters).toBeUndefined();
+    expect((await api.get("/transactions?other=true").expect(200)).body.filters).toEqual(["other", "place"]);
+  });
+});
+
 describe("a tax closed by its operations, one of them retyped (Б26)", () => {
   // 14 November: Q3 tax is due on the 20th and is paid in two payments.
   const plan = () => app.get(PlanService);

@@ -63,6 +63,15 @@ describe("contracts", () => {
     expect(transactionsQuery.safeParse({ account: "" }).success).toBe(false);
     expect(transactionsQuery.safeParse({}).success).toBe(true);
   });
+  it("narrows «Операции» to the payments outside the limit and to one place, and takes nothing else for them (Я8)", () => {
+    expect(transactionsQuery.parse({ other: "true" }).other).toBe(true);
+    expect(transactionsQuery.safeParse({ other: "false" }).success).toBe(false);
+    expect(transactionsQuery.safeParse({ other: "1" }).success).toBe(false);
+    expect(transactionsQuery.parse({ place: "0123456789abcdef" }).place).toBe("0123456789abcdef");
+    for (const place of ["", "0123456789ABCDEF", "0123456789abcde", "0123456789abcdef0", "Apple"]) {
+      expect(transactionsQuery.safeParse({ place }).success).toBe(false);
+    }
+  });
   it("takes an optional month for «Итоги» and nothing else", () => {
     expect(insightsMonthQuery.safeParse({}).success).toBe(true);
     expect(insightsMonthQuery.safeParse({ month: "2026-11" }).success).toBe(true);
