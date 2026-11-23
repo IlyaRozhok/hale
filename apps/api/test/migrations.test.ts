@@ -671,7 +671,7 @@ describe("migrations", () => {
       accounts: { own: 6962200, fop: 500000, binance: 522900 },
       questions: [
         ["usdc_arrived:4", "usdc_arrived", "Пришло на Binance?", 120000],
-        ["usdc_match:3:9", "usdc_match", "Пришло ₴50,000 (05.11). Это вывод с Binance?", null],
+        ["usdc_match:3:9", "usdc_match", "Пришло ₴50,000 (5 ноя). Это вывод с Binance?", null],
       ],
       leftForGoalsMonthly: 5620000,
       events: [

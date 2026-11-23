@@ -1,20 +1,18 @@
+import { cardDigits, cardDots, isMaskedCard } from "./text-format";
+
 /** Whole bank templates only: "Переказ Тая М." names a person and must stay a question. */
 const GENERIC_TEXT = /^(?:(?:переказ|перевод)(?: коштів| средств)?(?: на (?:картку|карту)(?: monobank)?)?|(?:поповнення|пополнение)(?: рахунку| счёта| счета| банки)?(?: «[^»]*»)?)$/iu;
-/** Only digits, asterisks and separators: a masked card number with no name attached. */
-const MASKED_CARD = /^[\d*\s-]*\*[\d*\s-]*$/;
 
 /** Whether a statement label names someone the owner can be asked about, rather than a bank template. */
 export function isCounterpartyName(label: string | null | undefined): boolean {
   const text = label?.trim() ?? "";
-  return text !== "" && !GENERIC_TEXT.test(text) && !MASKED_CARD.test(text);
+  return text !== "" && !GENERIC_TEXT.test(text) && !isMaskedCard(text);
 }
 
 /** "*4563" for a masked card number with digits after its stars; null for anything else. */
 export function cardTail(label: string): string | null {
-  const text = label.trim();
-  if (!MASKED_CARD.test(text)) return null;
-  const digits = text.slice(text.lastIndexOf("*") + 1).replace(/\D/g, "");
-  return digits === "" ? null : `*${digits.slice(-4)}`;
+  const digits = cardDigits(label);
+  return digits === null ? null : `*${digits}`;
 }
 
 /**
@@ -24,12 +22,13 @@ export function cardTail(label: string): string | null {
 export function unnamedTransferQuestion(label: string, count: number, amount: string, day: string): { subject: string; text: string } {
   const text = label.trim();
   const tail = cardTail(text);
-  if (tail) {
+  const dots = cardDots(text);
+  if (tail && dots) {
     return {
       subject: `Карта ${tail}`,
       text: count === 1
-        ? `Перевод ${amount} на карту ${tail} (${day})`
-        : `${count} ${transfersWord(count)} на карту ${tail}, ${amount}, последний ${day}`,
+        ? `Перевод ${amount} на карту ${dots} (${day})`
+        : `${count} ${transfersWord(count)} на карту ${dots}, ${amount}, последний ${day}`,
     };
   }
   return {

@@ -18,6 +18,7 @@ import { usdcMatchRows } from "../domain/usdc-match";
 import { PAID_QUESTION_WINDOW_DAYS, type PayableTx, type Payment, paidQuestions } from "../domain/recurring-match";
 import { BINANCE } from "../plan/plan.service";
 import { cardTail, isCounterpartyName, transfersWord, unnamedTransferQuestion } from "../domain/counterparty";
+import { cardDots, shortDate } from "../domain/text-format";
 import { TRANSFER_MCCS } from "../domain/merchants";
 import { counterKeySql } from "../transactions/counter-key";
 import { paymentCandidateIds } from "../cash/candidates";
@@ -116,8 +117,6 @@ interface Resolved {
 
 const fmt = (kopecks: number) => `₴${Math.round(kopecks / 100).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
 
-const fmtDay = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
-
 /**
  * The second line of «Это оплата?» (task Б45): the operation, its day and the payment's due date, so the
  * owner sees which month is asked about. Each variant is one whole string, to be translated later.
@@ -130,7 +129,7 @@ function paidDetail(description: string, day: string, due: string): string {
 /** Calm tail for a bad case: when the money runs out at the current pace, if that is known. */
 function runOutText(runOutOn: string | null, today: string): string {
   if (runOutOn === null) return "";
-  return runOutOn <= today ? " Свободных денег уже нет." : ` При текущем темпе деньги закончатся ${fmtDay(runOutOn)}.`;
+  return runOutOn <= today ? " Свободных денег уже нет." : ` При текущем темпе деньги закончатся ${shortDate(runOutOn, today)}.`;
 }
 
 /** Assembles the main screen from the database and the pure money engine; computes nothing itself. */
@@ -778,7 +777,7 @@ export class TodayService {
     }).map((r) => ({
       id: `usdc_match:${event.id}:${r.id}`,
       kind: "usdc_match" as const,
-      text: `Пришло ${fmt(r.amountUah!)} (${fmtDay(r.localDate)}). Это вывод с Binance?`,
+      text: `Пришло ${fmt(r.amountUah!)} (${shortDate(r.localDate, f.date)}). Это вывод с Binance?`,
     }));
   }
 
@@ -807,7 +806,7 @@ export class TodayService {
     return rows.map((r) => ({
       id: `cash_source:${r.id}:${event?.id ?? 0}`,
       kind: "cash_source" as const,
-      text: `Внесено ${fmt(r.amount_uah)} (${fmtDay(r.local_date)}). Откуда наличные?`,
+      text: `Внесено ${fmt(r.amount_uah)} (${shortDate(r.local_date, f.date)}). Откуда наличные?`,
     }));
   }
 
@@ -836,11 +835,18 @@ export class TodayService {
         ORDER BY occurred_at, id`,
       [f.date],
     );
-    return rows.map((r) => ({
-      id: `cash_card:${r.id}`,
-      kind: "cash_card" as const,
-      text: `Перевод ${fmt(-r.amount_uah)} на ${r.target} (${fmtDay(r.local_date)}). Снял наличными?`,
-    }));
+    return rows.map((r) => {
+      // A masked card number is named as the app names it (Я11): «на карту ··4563».
+      const card = cardDots(r.target);
+      const day = shortDate(r.local_date, f.date);
+      return {
+        id: `cash_card:${r.id}`,
+        kind: "cash_card" as const,
+        text: card
+          ? `Перевод ${fmt(-r.amount_uah)} на карту ${card} (${day}). Снял наличными?`
+          : `Перевод ${fmt(-r.amount_uah)} на ${r.target} (${day}). Снял наличными?`,
+      };
+    });
   }
 
   /**
@@ -885,7 +891,7 @@ export class TodayService {
       kind: "payment_paid" as const,
       // A foreign payment is named by what left the card, in hryvnias.
       text: `Это оплата «${payment.name}» ${fmt(payment.currency === "UAH" ? payment.amount : Math.abs(tx.amountUah ?? tx.amount))}?`,
-      detail: paidDetail(texts.get(tx.id) ?? "", fmtDay(tx.localDate), fmtDay(payment.due_on)),
+      detail: paidDetail(texts.get(tx.id) ?? "", shortDate(tx.localDate, f.date), shortDate(payment.due_on, f.date)),
     }));
   }
 
@@ -939,11 +945,11 @@ export class TodayService {
     const asked = people.flatMap((p) => {
       const label = p.labels.find((l) => isCounterpartyName(l));
       if (label) {
-        return [{ key: p.key, subject: label, text: `${label}: ${p.count} ${transfersWord(p.count)}, ${fmt(p.total)}, последний ${fmtDay(p.last_on)}` }];
+        return [{ key: p.key, subject: label, text: `${label}: ${p.count} ${transfersWord(p.count)}, ${fmt(p.total)}, последний ${shortDate(p.last_on, f.date)}` }];
       }
       const latest = p.labels[0];
       const destination = p.iban || (latest !== undefined && cardTail(latest) !== null);
-      return p.transfer && destination && latest ? [{ key: p.key, ...unnamedTransferQuestion(latest, p.count, fmt(p.total), fmtDay(p.last_on)) }] : [];
+      return p.transfer && destination && latest ? [{ key: p.key, ...unnamedTransferQuestion(latest, p.count, fmt(p.total), shortDate(p.last_on, f.date)) }] : [];
     });
     for (const p of asked.slice(0, MAX_RECIPIENT_QUESTIONS)) {
       questions.push({ id: `recipient_label:${p.key}`, kind: "recipient_label", subject: p.subject, text: p.text });
@@ -954,7 +960,7 @@ export class TodayService {
     // Task А24: the pace line, from the same free money and pace as `runOutOn`; the limit is only read.
     const paceNow = pace({ today: f.date, free: state.free, avgDailySpend: f.avgDailySpend, dailyLimit: state.dailyLimit, spentToday: f.spentToday, nextIncomeOn: f.input.nextIncomeOn });
     for (const l of f.loans) {
-      const fact = `Займ ${fmt(l.amount)} от ${fmtDay(l.received_on)}${l.remaining < l.amount ? `, осталось ${fmt(l.remaining)}` : ""}`;
+      const fact = `Займ ${fmt(l.amount)} от ${shortDate(l.received_on, f.date)}${l.remaining < l.amount ? `, осталось ${fmt(l.remaining)}` : ""}`;
       const repayLoan = { id: l.id, remaining: l.remaining, receivedOn: l.received_on };
       badCases.push(
         l.manual

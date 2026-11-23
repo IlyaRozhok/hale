@@ -1,4 +1,5 @@
 import { addDays, kyivDate } from "../domain/money";
+import { shortDate } from "../domain/text-format";
 import { KYIV_TZ } from "../time/clock";
 
 export type NotificationKind = "tax" | "over_limit" | "bad_case" | "usdc" | "income_date" | "sync_broken";
@@ -60,12 +61,11 @@ function money(minor: number, currency = "UAH"): string {
   const v = group(minor / 100);
   return sym ? `${sym}${v}` : `${v} ${currency}`;
 }
-const fmtDay = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
 
 function taxNotifications(t: TaxPayment, date: string, hour: number, sent: ReadonlySet<string>): Notification[] {
   if (t.paid || hour < REMINDER_HOUR) return [];
   const sum = money(t.amount, t.currency);
-  const due = fmtDay(t.dueOn);
+  const due = shortDate(t.dueOn, date);
   const steps: [string, string, string][] = [
     [addDays(t.dueOn, -7), "d7", `${t.name}: ${sum} к уплате до ${due}, через 7 дней.`],
     [addDays(t.dueOn, -1), "d1", `${t.name}: ${sum} к уплате до ${due}, срок завтра.`],
@@ -125,7 +125,7 @@ export function dueNotifications(state: NotifyState, now: Date): Notification[] 
           key: `sync_broken:${kyivDate(at)}`,
           kind: "sync_broken",
           title: "Синхронизация с monobank",
-          body: `Данные из monobank не обновлялись больше суток, последний раз ${fmtDay(kyivDate(at))}. Цифры на экране могут отставать.`,
+          body: `Данные из monobank не обновлялись больше суток, последний раз ${shortDate(kyivDate(at), date)}. Цифры на экране могут отставать.`,
         });
       }
     }

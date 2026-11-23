@@ -60,7 +60,15 @@ describe("tax reminders", () => {
     expect(n!.kind).toBe("tax");
     expect(text).toContain("Единый налог");
     expect(text).toContain("₴12 345");
-    expect(text).toContain("20.11");
+    expect(n!.body).toBe("Единый налог: ₴12 345 к уплате до 20 ноя, через 7 дней.");
+  });
+
+  it("write the due date as the app does, with the year when it is the next one", () => {
+    const body = (d: string, dueOn: string) => dueNotifications(base({ taxes: [tax({ dueOn })] }), kyiv(d, "10:00"))[0]!.body;
+    expect(body("2026-11-19", "2026-11-20")).toBe("Единый налог: ₴12 345 к уплате до 20 ноя, срок завтра.");
+    expect(body("2026-11-20", "2026-11-20")).toBe("Единый налог: ₴12 345, срок уплаты сегодня, 20 ноя.");
+    expect(body("2026-11-21", "2026-11-20")).toBe("Единый налог: ₴12 345, срок прошёл 20 ноя.");
+    expect(body("2026-12-29", "2027-01-05")).toBe("Единый налог: ₴12 345 к уплате до 5 янв 2027, через 7 дней.");
   });
 
   it("do not count against the one-ordinary-a-day limit", () => {
@@ -173,6 +181,10 @@ describe("sync_broken", () => {
     const stale = base({ syncedAt: "2026-11-10T07:00:00Z" });
     expect(keys(stale, "2026-11-11", "10:00")).toEqual(["sync_broken:2026-11-10"]);
     expect(keys({ ...stale, sentKeys: new Set(["sync_broken:2026-11-10"]) }, "2026-11-12", "10:00")).toEqual([]);
+  });
+  it("names the last sync day as the app writes dates", () => {
+    const [n] = dueNotifications(base({ syncedAt: "2026-11-10T07:00:00Z" }), kyiv("2026-11-11", "10:00"));
+    expect(n!.body).toBe("Данные из monobank не обновлялись больше суток, последний раз 10 ноя. Цифры на экране могут отставать.");
   });
   it("is silent within 24 hours or when never synced", () => {
     expect(keys(base({ syncedAt: "2026-11-10T09:00:00Z" }), "2026-11-11", "10:00")).toEqual([]);
