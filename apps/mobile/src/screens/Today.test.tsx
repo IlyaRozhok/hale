@@ -824,14 +824,14 @@ describe("Today, «До дохода»: the pace and the reserve in one card (А
       expect(at(line)).toBeLessThan(at("сегодня"));
     });
 
-    it("«7 ноя ›» opens «Темп трат» with the two sentences; «Понятно» closes it", async () => {
+    it("«7 ноя ›» opens «Темп трат» with the two sentences; «Закрыть» closes it", async () => {
       await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => hardWithin()) }));
       await fireEvent.press(await screen.findByText("7 ноя"));
       expect(await screen.findByText("Темп трат")).toBeTruthy();
       expect(screen.getByText("Последние 7 дней уходило около ₴4,600 в день. В таком темпе денег хватит до 4 ноя, а доход — 7 ноя.")).toBeTruthy();
       expect(screen.getByText("Если держаться лимита ₴2,300 в день, хватит до дохода и останется ₴13,280.")).toBeTruthy();
       expect(screen.getByText("Лимит от этого не меняется.")).toBeTruthy();
-      await fireEvent.press(screen.getByRole("button", { name: "Понятно" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
       await waitFor(() => expect(screen.queryByText("Темп трат")).toBeNull());
     });
 

@@ -77,7 +77,11 @@ export function ListRow({ icon, label, subtitle, value, quiet, onPress }: RowPro
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         </View>
         {value ? <Text style={quiet ? styles.count : styles.value}>{value}</Text> : null}
-        {onPress ? <Icon name="chevron" color={color.list.chevron} size={16} /> : null}
+        {onPress ? (
+          <View testID="row-chevron">
+            <Icon name="chevron" color={color.list.chevron} size={16} />
+          </View>
+        ) : null}
       </View>
     </>
   );

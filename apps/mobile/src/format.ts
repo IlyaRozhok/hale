@@ -236,6 +236,9 @@ export function pluralIndex(n: number): 0 | 1 | 2 {
 
 export const operationsText = (n: number): string => `${n} ${["операция", "операции", "операций"][pluralIndex(n)]}`;
 
+/** A name as shown: its first letter capital, the rest as it was (a rule's bank text comes in lower case, Я6). */
+export const firstCapital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
 /** A chosen period, short: "9 ноя", "3–9 ноя", "28 окт – 3 ноя". */
 export function periodLabel(from: string, to: string): string {
   const a = dayMonth(from);

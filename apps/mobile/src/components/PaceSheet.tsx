@@ -2,7 +2,6 @@ import { StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { PaceDto } from "@hale/contracts";
 import { dayMonth, formatMoney } from "../format";
-import { PrimaryButton } from "./PrimaryButton";
 import { Sheet } from "./Sheet";
 
 const { color, space, type } = tokens;
@@ -68,7 +67,6 @@ export function PaceSheet({ pace, dailyLimit, reserve, today, onClose }: Props) 
         )}
         <Text style={styles.note}>Лимит от этого не меняется.</Text>
       </View>
-      <PrimaryButton label="Понятно" onPress={onClose} />
     </Sheet>
   );
 }

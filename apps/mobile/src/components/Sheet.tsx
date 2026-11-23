@@ -15,10 +15,11 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
+import { CloseButton } from "./CloseButton";
 import { Glass } from "./Glass";
 import { shouldCloseSheet, shouldDragSheet } from "./sheetGesture";
 
-const { color, radius, space, touchMin, type } = tokens;
+const { color, radius, space, type } = tokens;
 
 const OPEN_MS = 280;
 const CLOSE_MS = 200;
@@ -142,9 +143,7 @@ export function Sheet({ title, subtitle, onClose, onOpened, children, footer }: 
                 <Text style={styles.title}>{title}</Text>
                 {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
               </View>
-              <Pressable accessibilityRole="button" accessibilityLabel="Закрыть" onPress={close} style={styles.close}>
-                <Text style={styles.closeText}>Закрыть</Text>
-              </Pressable>
+              <CloseButton onPress={close} />
             </View>
             <ScrollView
               testID="sheet-body"
@@ -188,8 +187,6 @@ const styles = StyleSheet.create({
   titles: { flex: 1 },
   title: { ...type.title, color: color.fg.default },
   subtitle: { ...type.body, color: color.fg.muted },
-  close: { minHeight: touchMin, justifyContent: "center", paddingHorizontal: space.sm },
-  closeText: { ...type.label, color: color.fg.muted },
   body: { gap: space.md, paddingBottom: space.md },
   // Outside the scroll, so it never shrinks; the hairline marks where the choices scroll under it.
   footer: {
