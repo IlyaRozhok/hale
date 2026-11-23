@@ -24,11 +24,14 @@ describe("«Всегда так» says how many other rows change (В5)", () => 
   it("asks nothing until something is changed, then for the row's own type, or for the new type", async () => {
     const api = fakeApi({ similarCount: jest.fn(async () => 4) });
     await renderWith(<TxEditSheet tx={txFixture({ id: 7, type: "spend" })} onClose={noop} />, api);
-    await screen.findByText("Тип");
+    await screen.findByText("Ещё: тип операции");
     expect(api.similarCount).not.toHaveBeenCalled();
+    // The category list waits behind «Изменить», the types behind their row (ЯМ3).
+    await press("Изменить");
     await press("Продукты");
     expect(await screen.findByText("Ещё 3 операции станут «Продукты»")).toBeTruthy();
     expect(api.similarCount).toHaveBeenCalledWith(7, undefined);
+    await press("Ещё: тип операции");
     await press("Обязательный платёж");
     expect(await screen.findByText("Ещё 3 операции станут «Обязательный платёж»")).toBeTruthy();
     expect(api.similarCount).toHaveBeenCalledWith(7, "obligation");
@@ -36,6 +39,7 @@ describe("«Всегда так» says how many other rows change (В5)", () => 
 
   it("one other row reads in the singular", async () => {
     await renderWith(<TxEditSheet tx={txFixture()} onClose={noop} />, fakeApi({ similarCount: jest.fn(async () => 2) }));
+    await press("Изменить");
     await press("Продукты");
     expect(await screen.findByText("Ещё 1 операция станет «Продукты»")).toBeTruthy();
   });
@@ -218,7 +222,7 @@ describe("cash taken from the owner's card at another bank", () => {
 
   it("an ordinary row says nothing about cash", async () => {
     await renderWith(<TxEditSheet tx={txFixture()} onClose={noop} />, fakeApi());
-    await screen.findByText("Тип");
+    await screen.findByText("Ещё: тип операции");
     expect(screen.queryByText(/^Снял наличными/)).toBeNull();
   });
 });
