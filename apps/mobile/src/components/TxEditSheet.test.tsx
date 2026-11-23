@@ -107,6 +107,27 @@ describe("TxEditSheet: facts first (ЯМ3)", () => {
     expect(screen.queryByText("Считается в лимите дня")).toBeNull();
   });
 
+  it("the limit line follows the saved row after a new type, both ways", async () => {
+    // The server answers an edit with the row as it is now, its `inLimit` counted again.
+    const cases: [TransactionDto, string, NonNullable<TransactionDto["type"]>, string, boolean, string][] = [
+      [txFixture({ id: 3, type: "spend", inLimit: true }), "Считается в лимите дня", "own_transfer", "Между своими", false, "Не в лимите — между своими"],
+      [
+        txFixture({ id: 4, type: "obligation", category: "utilities", inLimit: false }),
+        "Не в лимите — обязательный платёж", "spend", "Трата", true, "Считается в лимите дня",
+      ],
+    ];
+    for (const [tx, before, type, chipName, inLimit, after] of cases) {
+      const editTransaction = jest.fn(async () => ({ transaction: { ...tx, type, inLimit }, updated: 1 }));
+      const { unmount } = await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi({ editTransaction }));
+      expect(await screen.findByText(before)).toBeTruthy();
+      await openTypes();
+      await fireEvent.press(screen.getByRole("button", { name: chipName }));
+      expect(await screen.findByText(after)).toBeTruthy();
+      expect(screen.queryByText(before)).toBeNull();
+      await unmount();
+    }
+  });
+
   it("a held operation: the bank's line above the limit's, both above the category", async () => {
     await renderWith(<TxEditSheet tx={txFixture({ hold: true, inLimit: true })} onClose={noop} />, fakeApi());
     await screen.findByText(HELD);
@@ -485,7 +506,7 @@ describe("TxEditSheet: categories from the server and «Всегда так» (�
       await renderWith(<TxEditSheet tx={silpo} onClose={noop} />, fakeApi({ categories: jest.fn(async () => LIST) }));
       await openings.finish();
       await openCategories();
-    await fireEvent.press(await screen.findByRole("button", { name: "Новая" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Новая" }));
       const field = await screen.findByLabelText("Название");
       expect(field.props.autoFocus).toBeFalsy();
       // Still sliding in: no keyboard yet.

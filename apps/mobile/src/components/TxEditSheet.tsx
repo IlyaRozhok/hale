@@ -48,8 +48,9 @@ type Change = Pick<TransactionPatch, "type" | "category">;
  * counts it. Then its category — the chosen one alone, the whole list behind «Изменить» — and its type, folded into
  * one row «Ещё: тип операции»; each is changed with one tap for this operation alone. After a change a quiet card
  * asks «Всегда так для …?» (task В5): «Да, всегда» sends the same change for the similar ones, exactly what the
- * «Применить к похожим» switch did; no answer leaves only this operation changed. The rare types wait behind "Ещё". A purchase in a category with a side has «Эта покупка» (task В6): «нужное» or «желаемое» for it
- * alone, saved at once in a request of its own, with no question about the similar ones.
+ * «Применить к похожим» switch did; no answer leaves only this operation changed. The rare types wait behind "Ещё".
+ * A purchase in a category with a side has «Эта покупка» (task В6): «нужное» or «желаемое» for it alone, saved at
+ * once in a request of its own, with no question about the similar ones.
  */
 export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
   const edit = useEditTransaction();
@@ -123,7 +124,8 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
   const credit = creditText(tx);
   const askedName = asked === null ? "" : asked.type !== undefined ? typeLabel(asked.type) : categoryName(asked.category ?? null, list);
   const more = asked !== null && count.data !== undefined ? alwaysCountText(count.data, askedName) : null;
-  const limit = limitFact(tx);
+  // The saved row: a new type can move it in or out of the limit, and the server's answer says which.
+  const limit = limitFact(row);
   const listed = choosing || row.category === null;
 
   return (
