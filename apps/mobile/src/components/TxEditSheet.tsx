@@ -4,7 +4,7 @@ import { tokens } from "@hale/tokens";
 import type { CashAnswerDto, CashDepositAnswerName, TransactionDto, TransactionPatch } from "@hale/contracts";
 import { useCategoryList, useChangeDepositAnswer, useEditTransaction, useSetCardCash, useSimilarCount } from "../api/queries";
 import { categoryIconOf } from "../categoryIcon";
-import { dayMonth, formatMoney, formatSignedMoney, formatSignedOriginal, two } from "../format";
+import { cardTransferTitle, dayMonth, formatMoney, formatSignedMoney, formatSignedOriginal, two } from "../format";
 import { AmountForm } from "./AmountForm";
 import { accountLabel, alwaysCountText, answerText, categoryChoices, categoryName, typeChips, typeLabel, usualWantText } from "../labels";
 import { CategoryFormSheet, WantSwitch } from "./CategoryFormSheet";
@@ -106,7 +106,9 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
     always.mutate({ id: tx.id, patch: { ...asked, applyToSimilar: true } }, { onSuccess: onClose, onError: () => setFailed(true) });
   };
 
-  const title = tx.counterName ?? tx.description;
+  const named = tx.counterName ?? tx.description;
+  // A masked card number reads as words in the heading (Я3); the note and the rule question keep the bank's name.
+  const title = tx.counterName ?? cardTransferTitle(tx.description, tx.amount) ?? tx.description;
   const types = typeChips(row.amount, row.type);
   const credit = creditText(tx);
   const askedName = asked === null ? "" : asked.type !== undefined ? typeLabel(asked.type) : categoryName(asked.category ?? null, list);
@@ -114,7 +116,7 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
 
   return (
     <Sheet title={title} subtitle={facts(tx)} onClose={onClose}>
-      {tx.description !== "" && tx.description !== title && <Text style={styles.note}>{tx.description}</Text>}
+      {tx.description !== "" && tx.description !== named && <Text style={styles.note}>{tx.description}</Text>}
       {credit !== null && <Text style={styles.note}>{credit}</Text>}
       {onAnswer && <ActionRow label={`Что это за перевод: ${answerText(tx.recipientLabel)}`} onPress={onAnswer} />}
       {tx.cashOut !== null && <CardCash tx={tx} cashOut={tx.cashOut} />}
@@ -136,7 +138,7 @@ export function TxEditSheet({ tx, onClose, onAnswer }: Props) {
       </View>
       {asked !== null && (
         <View style={styles.ask}>
-          <Text style={styles.text}>{"Всегда так для «{name}»?".replace("{name}", title)}</Text>
+          <Text style={styles.text}>{"Всегда так для «{name}»?".replace("{name}", named)}</Text>
           {more !== null && <Text style={styles.note}>{more}</Text>}
           <View style={styles.answers}>
             <Answer label="Да, всегда" strong disabled={busy} onPress={yes} />

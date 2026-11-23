@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   amountTone,
+  cardTransferTitle,
   dayHeader,
   dayMonth,
   formatDollars,
@@ -94,9 +95,31 @@ describe("parseBalance", () => {
 
 describe("formatOriginal", () => {
   it("shows the account currency with cents, a real minus, and symbols for the usual ones", () => {
-    expect(formatOriginal(-1000, "USD")).toBe("−$10.00");
     expect(formatOriginal(2550, "EUR")).toBe("€25.50");
     expect(formatOriginal(-100050, "PLN")).toBe("−1,000.50 PLN");
+    expect(formatOriginal(-1005, "USD")).toBe("−$10.05");
+  });
+
+  it("drops the cents only when there are none (Я3)", () => {
+    expect(formatOriginal(-1000, "USD")).toBe("−$10");
+    expect(formatOriginal(270_000, "USD")).toBe("$2,700");
+    expect(formatOriginal(-100000, "PLN")).toBe("−1,000 PLN");
+    expect(formatOriginal(0, "EUR")).toBe("€0");
+  });
+});
+
+describe("cardTransferTitle", () => {
+  it("names a transfer out to a masked card number by its last four digits (Я3)", () => {
+    expect(cardTransferTitle("545708****4563", -1_560_000)).toBe("Перевод на карту ··4563");
+    expect(cardTransferTitle("5457 08** **** 4563", -100)).toBe("Перевод на карту ··4563");
+  });
+
+  it("leaves everything else alone: names, money coming in, numbers that are not a masked card", () => {
+    expect(cardTransferTitle("Кофейня", -8500)).toBeNull();
+    expect(cardTransferTitle("545708****4563", 1_560_000)).toBeNull();
+    expect(cardTransferTitle("4563", -100)).toBeNull();
+    expect(cardTransferTitle("Оплата ****4563", -100)).toBeNull();
+    expect(cardTransferTitle("", -100)).toBeNull();
   });
 });
 
@@ -129,8 +152,8 @@ describe("signed money", () => {
     expect(formatSignedMoney(-8500)).toBe("−₴85");
     expect(formatSignedMoney(0)).toBe("₴0");
     expect(formatSignedMoney(40)).toBe("₴0");
-    expect(formatSignedOriginal(1000, "USD")).toBe("+$10.00");
-    expect(formatSignedOriginal(-1000, "USD")).toBe("−$10.00");
+    expect(formatSignedOriginal(1000, "USD")).toBe("+$10");
+    expect(formatSignedOriginal(-1050, "USD")).toBe("−$10.50");
   });
 });
 

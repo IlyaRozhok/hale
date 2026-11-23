@@ -87,10 +87,10 @@ describe("places of money as rows (task Д2б)", () => {
     expect(accountPatchOf(card, "   ", true)).toEqual({ name: null });
   });
 
-  it("shows money set aside in its own currency: hryvnias and dollars whole, others with cents", () => {
+  it("shows money set aside in its own currency: hryvnias and dollars whole, others with cents when there are any", () => {
     expect(setAsideDetail(deposit)).toBe("₴50,000");
     expect(setAsideDetail({ ...deposit, name: "SOL", currency: "USD", amount: 100_500, own: 4_100_000 })).toBe("$1,005");
-    expect(setAsideDetail({ ...deposit, currency: "EUR", amount: 50_000, own: 2_400_000 })).toBe("€500.00");
+    expect(setAsideDetail({ ...deposit, currency: "EUR", amount: 50_000, own: 2_400_000 })).toBe("€500");
     // A bank account is shown in hryvnias, as it counts.
     expect(setAsideDetail({ ...card, own: 210_000, countsAsOwn: false })).toBe("₴2,100");
   });

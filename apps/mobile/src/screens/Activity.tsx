@@ -191,6 +191,10 @@ export function Activity({ now = () => new Date(), route }: Props) {
   ]
     .filter(Boolean)
     .join(" · ");
+  const summaryText = filtered && summary ? `${summaryTitle}: ${formatSignedMoney(summary.total)} · ${operationsText(summary.count)}` : null;
+  // The list is one day (a one-day filter) and its heading would say the summary's sum again: the summary keeps it (Я3).
+  const oneDayTotal = summaryText !== null && sections.length === 1 ? sections[0]!.date : null;
+  const repeatsSummary = (date: string, total: number) => date === oneDayTotal && total === summary?.total;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + space.lg }]}>
@@ -217,8 +221,17 @@ export function Activity({ now = () => new Date(), route }: Props) {
       </View>
       {searching && <Field label="Поиск по операциям" value={text} onChangeText={setText} maxLength={100} autoFocus returnKeyType="search" />}
       <Segmented testID="kind-switch" options={TAB_OPTIONS} value={tab} onChange={setTab} />
-      {filtered && summary && (
-        <Text style={styles.summary}>{`${summaryTitle}: ${formatSignedMoney(summary.total)} · ${operationsText(summary.count)}`}</Text>
+      {summaryText !== null && (
+        // The summary says what is chosen, so pressing it leads to where it is changed (Я3).
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={summaryText}
+          accessibilityHint="Открывает фильтры"
+          onPress={() => setFiltering(true)}
+          hitSlop={space.md}
+        >
+          <Text style={styles.summary}>{summaryText}</Text>
+        </Pressable>
       )}
       {list.isError && items.length === 0 ? (
         <Glass style={styles.stack}>
@@ -241,7 +254,7 @@ export function Activity({ now = () => new Date(), route }: Props) {
             return (
               <View style={styles.day}>
                 <Text style={styles.dayText}>{dayHeader(section.date, today)}</Text>
-                {total !== undefined ? <Text style={styles.dayText}>{formatSignedMoney(total)}</Text> : null}
+                {total !== undefined && !repeatsSummary(section.date, total) ? <Text style={styles.dayText}>{formatSignedMoney(total)}</Text> : null}
               </View>
             );
           }}
@@ -321,8 +334,7 @@ export function Activity({ now = () => new Date(), route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  summary: { ...type.caption, color: color.fg.muted, fontVariant: ["tabular-nums"] },
-  // A solid card, not glass: the observation is text to read, not a floating control.
+  summary: { ...type.caption, color: color.fg.muted, fontVariant: ["tabular-nums"] },  // A solid card, not glass: the observation is text to read, not a floating control.
   notice: {
     marginTop: space.md,
     paddingHorizontal: space.lg,

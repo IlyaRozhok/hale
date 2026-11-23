@@ -40,6 +40,13 @@ describe("TxEditSheet header: the operation itself", () => {
     expect(screen.getAllByText("Кофейня")).toHaveLength(1);
   });
 
+  it("a transfer to a masked card number is headed in words, the number not repeated under it (Я3)", async () => {
+    const tx = txFixture({ description: "545708****4563", type: "own_transfer", category: "own", amount: -1_560_000, amountUah: -1_560_000 });
+    await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi());
+    expect(await screen.findByText("Перевод на карту ··4563")).toBeTruthy();
+    expect(screen.queryByText("545708****4563")).toBeNull();
+  });
+
   it("an empty bank text under a name leaves no blank line", async () => {
     await renderWith(<TxEditSheet tx={txFixture({ description: "", counterName: "Сільпо" })} onClose={noop} />, fakeApi());
     await screen.findByText("Тип");
@@ -61,7 +68,7 @@ describe("TxEditSheet header: the operation itself", () => {
   it("a foreign amount with no rate is shown in its own currency, as in the list", async () => {
     const tx = txFixture({ amount: -1000, amountUah: null, currency: "USD", occurredAt: at, accountKind: "white" });
     await renderWith(<TxEditSheet tx={tx} onClose={noop} />, fakeApi());
-    expect(await screen.findByText("−$10.00 · 10 ноя, 14:32 · Белая карта")).toBeTruthy();
+    expect(await screen.findByText("−$10 · 10 ноя, 14:32 · Белая карта")).toBeTruthy();
   });
 });
 

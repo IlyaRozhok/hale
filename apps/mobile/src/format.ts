@@ -103,10 +103,11 @@ export function taxQuarterOfDue(due: string): string {
 
 const SYMBOLS: Record<string, string> = { USD: "$", EUR: "€" };
 
-/** An amount in its own account currency, cents shown: "−$10.00" or "−1,000.50 PLN". */
+/** An amount in its own account currency, cents shown only when there are any: "−$10", "€25.50" or "−1,000.50 PLN". */
 export function formatOriginal(minor: number, currency: string): string {
   const abs = Math.abs(minor);
-  const text = `${group(Math.floor(abs / 100))}.${String(abs % 100).padStart(2, "0")}`;
+  const cents = abs % 100;
+  const text = `${group(Math.floor(abs / 100))}${cents === 0 ? "" : `.${String(cents).padStart(2, "0")}`}`;
   const sign = minor < 0 ? "−" : "";
   const symbol = SYMBOLS[currency];
   return symbol ? `${sign}${symbol}${text}` : `${sign}${text} ${currency}`;
@@ -115,6 +116,18 @@ export function formatOriginal(minor: number, currency: string): string {
 /** Like formatOriginal, with a plus on money coming in. */
 export function formatSignedOriginal(minor: number, currency: string): string {
   return `${minor > 0 ? "+" : ""}${formatOriginal(minor, currency)}`;
+}
+
+const MASKED_CARD = /^\d{4,8}\*+(\d{4})$/;
+
+/**
+ * A transfer out whose description is only a masked card number ("545708****4563", as the bank sends it), in words:
+ * «Перевод на карту ··4563». Null for anything else, money coming in included.
+ */
+export function cardTransferTitle(description: string, amount: number): string | null {
+  if (amount >= 0) return null;
+  const m = MASKED_CARD.exec(description.replace(/\s/g, ""));
+  return m ? "Перевод на карту ··{last4}".replace("{last4}", m[1]!) : null;
 }
 
 /** What colour an amount carries: transfers between own accounts are neither spending nor income. */
