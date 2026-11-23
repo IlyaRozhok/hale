@@ -6,7 +6,7 @@ import { isIsoDate, parseHryvnias, shortDate } from "../format";
 import { type InstallmentGroup, installmentGroups, moneyIn } from "../planSummary";
 import { CurrencyChoice } from "./CurrencyChoice";
 import { DateField } from "./DateField";
-import { EntryRow, askDelete } from "./EntryRow";
+import { DeleteAction, EntryRow, askDelete } from "./EntryRow";
 import { ErrorText } from "./ErrorText";
 import { Field } from "./Field";
 import { PrimaryButton } from "./PrimaryButton";
@@ -17,7 +17,6 @@ const { color, type } = tokens;
 /** Installments, each series as one line. */
 export function InstallmentsSheet({ onClose }: { onClose: () => void }) {
   const payments = usePayments();
-  const remove = useDeleteInstallment();
   const [editing, setEditing] = useState<InstallmentGroup | "new" | null>(null);
   const groups = payments.data ? installmentGroups(payments.data) : [];
 
@@ -30,12 +29,7 @@ export function InstallmentsSheet({ onClose }: { onClose: () => void }) {
           key={g.name}
           title={g.name}
           detail={`${moneyIn(g.amount, g.currency)} в месяц, осталось платежей: ${g.left}, следующий ${shortDate(g.nextDue)}`}
-          onEdit={() => setEditing(g)}
-          onDelete={() =>
-            askDelete(g.name, "Оставшиеся платежи исчезнут из плана, оплаченные останутся.", () =>
-              remove.mutate(g.name, { onError: () => Alert.alert("Не удалось удалить", "Проверьте связь и попробуйте ещё раз.") }),
-            )
-          }
+          onPress={() => setEditing(g)}
         />
       ))}
       <PrimaryButton label="Новая рассрочка" onPress={() => setEditing("new")} />
@@ -47,6 +41,7 @@ export function InstallmentsSheet({ onClose }: { onClose: () => void }) {
 function InstallmentForm({ group, onClose }: { group: InstallmentGroup | null; onClose: () => void }) {
   const create = useCreateInstallment();
   const patch = usePatchInstallment();
+  const remove = useDeleteInstallment();
   const [name, setName] = useState(group?.name ?? "");
   const [amount, setAmount] = useState(group ? String(group.amount / 100) : "");
   const [currency, setCurrency] = useState(group?.currency ?? "UAH");
@@ -82,6 +77,17 @@ function InstallmentForm({ group, onClose }: { group: InstallmentGroup | null; o
       )}
       {message && <ErrorText>{message}</ErrorText>}
       <PrimaryButton label="Сохранить рассрочку" disabled={create.isPending || patch.isPending} onPress={save} />
+      {group && (
+        <DeleteAction
+          label="Удалить рассрочку"
+          disabled={patch.isPending || remove.isPending}
+          onPress={() =>
+            askDelete(group.name, "Оставшиеся платежи исчезнут из плана, оплаченные останутся.", () =>
+              remove.mutate(group.name, { onSuccess: onClose, onError: () => Alert.alert("Не удалось удалить", "Проверьте связь и попробуйте ещё раз.") }),
+            )
+          }
+        />
+      )}
     </Sheet>
   );
 }

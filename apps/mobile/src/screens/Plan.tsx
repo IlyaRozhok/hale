@@ -109,6 +109,7 @@ export function Plan() {
 
   let accounts: ReactNode[] = [];
   let asideRows: ReactNode[] = [];
+  let emptyRows: ReactNode[] = [];
   if (data && items) accounts = withMoney.map((item, i) => placeRow(item, formatMoney(whole[i]! * 100), keyOf(item, i)));
   else if (data) {
     // An older server without places: own money is the figure above, credit money a row of its own (a limit, not a balance).
@@ -120,12 +121,9 @@ export function Plan() {
     accounts.push(...empty.map((item, i) => placeRow(item, formatMoney(0), `empty:${keyOf(item, i)}`)), cashRow, binanceRow);
     asideRows = setAsideBalances.map((b) => <ListRow key={`b${b.id}`} icon="lock" label={b.name} value={balanceDetail(b)} onPress={() => openBalance(b)} />);
   } else if (setAside) {
-    asideRows = [
-      ...setAside.map((item, i) => placeRow(item, setAsideDetail(item), `aside:${keyOf(item, i)}`)),
-      ...empty.map((item, i) => placeRow(item, formatMoney(0), `empty:${keyOf(item, i)}`)),
-      cashRow,
-      binanceRow,
-    ];
+    asideRows = setAside.map((item, i) => placeRow(item, setAsideDetail(item), `aside:${keyOf(item, i)}`));
+    // Under «Сейчас пусто» (ЯМ5): places at zero, and a wallet not started or a Binance not set, which hold nothing yet.
+    emptyRows = [...empty.map((item, i) => placeRow(item, formatMoney(0), `empty:${keyOf(item, i)}`)), cashRow, binanceRow];
   }
   const asideTotal = setAsideTotal(setAside);
   const addAside = older
@@ -208,7 +206,7 @@ export function Plan() {
       {open === "loans" && <LoansSheet onClose={close} />}
       {open === "goals" && <GoalsSheet onClose={close} />}
       {asideOpen ? (
-        <AsideSheet rows={asideRows} add={addAside} onClose={() => setAsideOpen(false)}>
+        <AsideSheet rows={asideRows} empty={emptyRows} add={addAside} onClose={() => setAsideOpen(false)}>
           {windows}
         </AsideSheet>
       ) : (
