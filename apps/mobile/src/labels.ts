@@ -168,12 +168,15 @@ export function deleteCategoryText(count: number | null, uncategorized: string):
   return "Операции этой категории ({n}) станут «{name}».".replace("{n}", String(count)).replace("{name}", uncategorized);
 }
 
-/** «Нужное» (false) or «желаемое» (true), task В6: neutral words, never «лишнее». */
-export const wantLabel = (want: boolean): string => (want ? "Желаемое" : "Нужное");
+/**
+ * «Нужное» (false) or «Для себя» (true), task В6: neutral words, never «лишнее». ЯМ6 (variant А): «Для себя» in place
+ * of «Желаемое», which next to a sum could read as a judgement. The server keeps its field `want`.
+ */
+export const wantLabel = (want: boolean): string => (want ? "Для себя" : "Нужное");
 
 /** Under «Эта покупка»: the side its category puts purchases on. Whole phrases, so they can be translated. */
 export const usualWantText = (category: string, want: boolean): string =>
-  (want ? "Для «{name}» обычно — желаемое" : "Для «{name}» обычно — нужное").replace("{name}", category);
+  (want ? "Для «{name}» обычно — для себя" : "Для «{name}» обычно — нужное").replace("{name}", category);
 
 export const LABEL_CHOICES:{ label: RecipientLabelName; text: string; effect: string }[] = [
   { label: "close_regular", text: "Близкий человек, регулярно", effect: "Считается в дневном лимите. Платёж из плана лимит не тратит" },

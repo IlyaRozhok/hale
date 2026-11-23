@@ -1,12 +1,12 @@
-import { useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { AccessibilityInfo, ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
 import type { InsightsMonthDto } from "@hale/contracts";
-import { useCategoryList, useInsights, useTransactionFilters } from "../api/queries";
+import { useCategoryList, useInsights, useNotSubscription, useTransactionFilters } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
 import { formatMoney, inMonth, kyivDate, monthTitle } from "../format";
-import { categoryName, type CategoryList } from "../labels";
+import { categoryName, type CategoryList, wantLabel } from "../labels";
 import { categoryIconOf } from "../categoryIcon";
 import { CategoriesSheet } from "../components/CategoriesSheet";
 import { ErrorText } from "../components/ErrorText";
@@ -16,7 +16,7 @@ import { InsetList, ListRow } from "../components/ListRow";
 import { PlacesCard } from "../components/PlacesCard";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { Segmented } from "../components/Segmented";
-import { isActive, type OpenPlace, SubscriptionsList, subscriptionsSummary } from "../components/SubscriptionsSheet";
+import { isActive, type NotSubscription, type OpenPlace, SubscriptionsList, subscriptionsSummary } from "../components/SubscriptionsSheet";
 
 const { color, radius, space, touchMin, type } = tokens;
 
@@ -54,7 +54,7 @@ type Props = {
   now?: () => Date;
   /** Leads to the operations of a category over the shown days of its month. */
   onOpenCategory?: (category: string, from: string, to: string) => void;
-  /** Leads to the purchases of «желаемое» over the same days (task В6). */
+  /** Leads to the purchases «для себя» over the same days (task В6). */
   onOpenWanted?: (from: string, to: string) => void;
   /** Leads to the payments outside the limit over the same days (task Я8). */
   onOpenOther?: (from: string, to: string) => void;
@@ -86,55 +86,116 @@ export function Insights({ now = () => new Date(), onOpenCategory, onOpenWanted,
   const thisYear = today.slice(0, 4);
   const go = (by: number) => setBack(Math.max(0, back - by));
 
+  // Task ЯМ6: places marked «Не подписка» leave the list at once, before «Итоги» come again without them.
+  const notSubscription = useNotSubscription();
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const show = (n: Notice) => {
+    clearTimeout(timer.current);
+    setNotice(n);
+    AccessibilityInfo.announceForAccessibility(n.text);
+    timer.current = setTimeout(() => setNotice(null), NOTICE_MS);
+  };
+  const hide = (key: string, on: boolean) =>
+    setHidden((h) => {
+      const next = new Set(h);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  const markNot: NotSubscription = (key) => {
+    hide(key, true);
+    show({ text: "Убрали из подписок", key });
+    notSubscription.mutate(
+      { key, mark: true },
+      {
+        onError: () => {
+          hide(key, false);
+          show({ text: "Не получилось убрать из подписок. Попробуйте ещё раз.", key: null });
+        },
+      },
+    );
+  };
+  const giveBack = (key: string) => {
+    clearTimeout(timer.current);
+    setNotice(null);
+    hide(key, false);
+    // Not taken back: the place is still out of the list, so the line comes again with its «Вернуть».
+    notSubscription.mutate({ key, mark: false }, { onError: () => show({ text: "Убрали из подписок", key }) });
+  };
+
   return (
-    <ScrollView
-      style={[styles.root, { marginTop: insets.top }]}
-      contentContainerStyle={[styles.content, { paddingBottom: LAYOUT.tabBar + insets.bottom }]}
-      refreshControl={<RefreshControl {...pull} />}
-    >
-      {/* Task В5: the list of categories is changed from the corner, as in any iOS list; an older server keeps the built-in one. */}
-      <View style={styles.top}>
-        {list && data !== null && (
-          <Pressable accessibilityRole="button" accessibilityLabel="Править" onPress={() => setEditing(true)} style={styles.edit}>
-            <Text style={styles.editText}>Править</Text>
-          </Pressable>
-        )}
-      </View>
-      <Text style={styles.title}>Итоги</Text>
-      {data !== null && (
-        <View style={styles.monthLine}>
-          <Arrow label="Предыдущий месяц" text="‹" onPress={() => go(-1)} />
-          <Text style={styles.subtitle}>{data ? subtitle(data.month, data.through, thisYear) : subtitle(asked ?? thisMonth, asked ? null : today, thisYear)}</Text>
-          <Arrow label="Следующий месяц" text="›" disabled={back === 0} onPress={() => go(1)} />
+    <View style={[styles.root, { marginTop: insets.top }]}>
+      <ScrollView
+        style={styles.root}
+        contentContainerStyle={[styles.content, { paddingBottom: LAYOUT.tabBar + insets.bottom }]}
+        refreshControl={<RefreshControl {...pull} />}
+      >
+        {/* Task В5: the list of categories is changed from the corner, as in any iOS list; an older server keeps the built-in one. */}
+        <View style={styles.top}>
+          {list && data !== null && (
+            <Pressable accessibilityRole="button" accessibilityLabel="Править" onPress={() => setEditing(true)} style={styles.edit}>
+              <Text style={styles.editText}>Править</Text>
+            </Pressable>
+          )}
         </View>
-      )}
-      {data === null ? (
-        // An older server has no «Итоги» yet.
-        <Text style={styles.quiet}>Итоги появятся после обновления сервера.</Text>
-      ) : data ? (
-        <Month
-          data={data}
-          past={back > 0}
-          list={list}
-          tab={tab}
-          onTab={setTab}
-          onOpenCategory={onOpenCategory}
-          onOpenWanted={onOpenWanted}
-          onOpenOther={filters.includes("other") ? onOpenOther : undefined}
-          onOpenPlace={filters.includes("place") ? onOpenPlace : undefined}
-        />
-      ) : query.isError ? (
-        <Glass style={styles.stack}>
-          <ErrorText>Не получилось загрузить итоги. Проверьте связь и попробуйте ещё раз.</ErrorText>
-          <PrimaryButton label="Повторить" onPress={() => void query.refetch()} />
+        <Text style={styles.title}>Итоги</Text>
+        {data !== null && (
+          <View style={styles.monthLine}>
+            <Arrow label="Предыдущий месяц" text="‹" onPress={() => go(-1)} />
+            <Text style={styles.subtitle}>{data ? subtitle(data.month, data.through, thisYear) : subtitle(asked ?? thisMonth, asked ? null : today, thisYear)}</Text>
+            <Arrow label="Следующий месяц" text="›" disabled={back === 0} onPress={() => go(1)} />
+          </View>
+        )}
+        {data === null ? (
+          // An older server has no «Итоги» yet.
+          <Text style={styles.quiet}>Итоги появятся после обновления сервера.</Text>
+        ) : data ? (
+          <Month
+            data={data}
+            past={back > 0}
+            list={list}
+            tab={tab}
+            onTab={setTab}
+            onOpenCategory={onOpenCategory}
+            onOpenWanted={onOpenWanted}
+            onOpenOther={filters.includes("other") ? onOpenOther : undefined}
+            onOpenPlace={filters.includes("place") ? onOpenPlace : undefined}
+            // Task ЯМ6: only a server that says it remembers the choice; an older one has no swipe.
+            onNotSubscription={data.canMarkNotSubscription === true ? markNot : undefined}
+            hidden={hidden}
+          />
+        ) : query.isError ? (
+          <Glass style={styles.stack}>
+            <ErrorText>Не получилось загрузить итоги. Проверьте связь и попробуйте ещё раз.</ErrorText>
+            <PrimaryButton label="Повторить" onPress={() => void query.refetch()} />
+          </Glass>
+        ) : (
+          <ActivityIndicator color={color.fg.muted} />
+        )}
+        {editing && <CategoriesSheet onClose={() => setEditing(false)} />}
+      </ScrollView>
+      {notice && (
+        <Glass kind="floating" testID="insights-notice" style={[styles.notice, { bottom: LAYOUT.tabBar + insets.bottom + space.sm }]}>
+          <Text style={styles.noticeText} accessibilityLiveRegion="polite">{notice.text}</Text>
+          {notice.key !== null && (
+            <Pressable accessibilityRole="button" accessibilityLabel="Вернуть" onPress={() => giveBack(notice.key!)} style={styles.noticeAction}>
+              <Text style={styles.noticeActionText}>Вернуть</Text>
+            </Pressable>
+          )}
         </Glass>
-      ) : (
-        <ActivityIndicator color={color.fg.muted} />
       )}
-      {editing && <CategoriesSheet onClose={() => setEditing(false)} />}
-    </ScrollView>
+    </View>
   );
 }
+
+/** The floating line after «Не подписка» (task ЯМ6): with the place's key it offers «Вернуть». */
+type Notice = { text: string; key: string | null };
+
+/** How long the floating line stays, as in the mockup. */
+const NOTICE_MS = 5_000;
 
 type MonthProps = {
   data: InsightsMonthDto;
@@ -146,16 +207,19 @@ type MonthProps = {
   onOpenWanted?: (from: string, to: string) => void;
   onOpenOther?: (from: string, to: string) => void;
   onOpenPlace?: OpenPlace;
+  onNotSubscription?: NotSubscription;
+  /** Places marked «Не подписка» that the month on screen may still have. */
+  hidden: ReadonlySet<string>;
 };
 
 /**
- * Task В6, variant А: the part of «потрачено» that went on «желаемое». An older server does not send it; none is
+ * Task В6, variant А: the part of «потрачено» that went «для себя». An older server does not send it; none is
  * nothing to say; more than all that was spent (refunds landing on «нужное») would read as nonsense, so no row.
  */
 const wantedShown = (d: InsightsMonthDto): number | null =>
   d.wanted !== undefined && d.wanted > 0 && d.wanted <= d.spent ? d.wanted : null;
 
-function Month({ data, past, list, tab, onTab, onOpenCategory, onOpenWanted, onOpenOther, onOpenPlace }: MonthProps) {
+function Month({ data, past, list, tab, onTab, onOpenCategory, onOpenWanted, onOpenOther, onOpenPlace, onNotSubscription, hidden }: MonthProps) {
   // A category spent on only in the month before has nothing to show for this one.
   const rows = data.categories.filter((c) => c.count > 0 || c.spent !== 0);
   // One bar per row: its share of this month's largest category; nothing below zero.
@@ -167,7 +231,9 @@ function Month({ data, past, list, tab, onTab, onOpenCategory, onOpenWanted, onO
   const other = (data.otherPayments ?? 0) > 0 ? data.otherPayments! : null;
   // Tasks В3 and В4: an older server sends neither; a segment with nothing in it is not offered.
   const places = data.places && data.places.length > 0 ? data.places : null;
-  const subscriptions = data.subscriptions && data.subscriptions.items.some(isActive) ? data.subscriptions : null;
+  // The total a month is the server's: the line over the list waits for it, rows marked «Не подписка» leave at once.
+  const found = data.subscriptions ? { ...data.subscriptions, items: data.subscriptions.items.filter((i) => !hidden.has(i.key)) } : null;
+  const subscriptions = found && found.items.some(isActive) ? found : null;
   const options: { key: Tab; label: string }[] = [
     { key: "categories", label: "Категории" },
     ...(places ? [{ key: "places" as const, label: "Места" }] : []),
@@ -186,8 +252,8 @@ function Month({ data, past, list, tab, onTab, onOpenCategory, onOpenWanted, onO
       {shown === "places" && <PlacesCard places={places ?? undefined} />}
       {shown === "subscriptions" && subscriptions && (
         <View style={styles.stack}>
-          <Text style={styles.summary}>{subscriptionsSummary(subscriptions)}</Text>
-          <SubscriptionsList subscriptions={subscriptions} onOpenPlace={onOpenPlace} />
+          <Text style={styles.summary}>{subscriptionsSummary(data.subscriptions!)}</Text>
+          <SubscriptionsList subscriptions={subscriptions} onOpenPlace={onOpenPlace} onNotSubscription={onNotSubscription} />
         </View>
       )}
       {shown === "categories" && (
@@ -207,10 +273,10 @@ function Month({ data, past, list, tab, onTab, onOpenCategory, onOpenWanted, onO
                 <ListRow
                   testID="wanted-row"
                   icon="card"
-                  title="Желаемое"
+                  title={wantLabel(true)}
                   // Only the server's own figure: «нужное» is not sent, and spent − wanted would not be it exactly.
                   amount={formatMoney(wanted)}
-                  accessibilityLabel={`Желаемое: ${formatMoney(wanted)}`}
+                  accessibilityLabel={`${wantLabel(true)}: ${formatMoney(wanted)}`}
                   first
                   onPress={() => onOpenWanted?.(from, data.through)}
                 />
@@ -289,5 +355,20 @@ const styles = StyleSheet.create({
   quiet: { ...type.body, color: color.fg.muted, paddingHorizontal: space.xs },
   stack: { gap: space.md },
   barSlot: { height: BAR },
+  notice: {
+    position: "absolute",
+    left: space.lg,
+    right: space.lg,
+    minHeight: touchMin + space.sm,
+    borderRadius: radius.card,
+    paddingLeft: space.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    overflow: "hidden",
+  },
+  noticeText: { ...type.body, color: color.fg.default, flexShrink: 1, paddingVertical: space.md },
+  noticeAction: { minHeight: touchMin, justifyContent: "center", paddingHorizontal: space.lg },
+  noticeActionText: { ...type.label, color: color.fg.strong },
   bar: { height: BAR, borderRadius: radius.full, backgroundColor: color.accent.signal },
 });

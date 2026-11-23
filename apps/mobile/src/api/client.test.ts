@@ -104,6 +104,18 @@ describe("api client", () => {
     expect(urls.slice(0, 2)).toEqual(["/insights/month", "/insights/month?month=2026-10"]);
   });
 
+  it("marks a place «Не подписка» and takes the mark back (ЯМ6)", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 }));
+    const { api } = setup(fetchImpl as unknown as typeof fetch);
+    await expect(api.markNotSubscription("00000000000000b2")).resolves.toBeUndefined();
+    await expect(api.unmarkNotSubscription("00000000000000b2")).resolves.toBeUndefined();
+    const calls = (fetchImpl.mock.calls as unknown as [string, RequestInit][]).map(([url, init]) => [init.method, url.replace("https://api.example.test", ""), init.body]);
+    expect(calls).toEqual([
+      ["PUT", "/insights/not-subscriptions/00000000000000b2", undefined],
+      ["DELETE", "/insights/not-subscriptions/00000000000000b2", undefined],
+    ]);
+  });
+
   it("reads, adds, changes, orders and deletes categories (В5); an older server has none", async () => {
     const list = [{ key: "groceries", name: "Продукты", icon: "cart", system: false }];
     const fetchImpl = vi

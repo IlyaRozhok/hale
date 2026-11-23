@@ -629,7 +629,7 @@ describe("Activity filters", () => {
       await renderWith(<Activity now={now} route={{ params: { want: true, from: "2026-11-01", to: "2026-11-16", at: 1 } }} />, fakeApi({ transactions }));
       await waitFor(() => expect(transactions).toHaveBeenLastCalledWith(wanted));
       expect(await screen.findByRole("button", { name: "Фильтры: 2" })).toBeTruthy();
-      expect(await screen.findByText("Желаемое · 1–16 ноя: −₴3,600 · 9 операций")).toBeTruthy();
+      expect(await screen.findByText("Для себя · 1–16 ноя: −₴3,600 · 9 операций")).toBeTruthy();
     });
 
     it("«Сбросить» takes it off with the rest", async () => {
@@ -643,7 +643,7 @@ describe("Activity filters", () => {
       await windowGone();
       await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" }));
       expect(await screen.findByRole("button", { name: "Фильтры" })).toBeTruthy();
-      expect(screen.queryByText(/Желаемое/)).toBeNull();
+      expect(screen.queryByText(/Для себя/)).toBeNull();
 
       // The same again is applied again.
       await arrive({ want: true, from: "2026-11-01", to: "2026-11-16" });
@@ -657,7 +657,7 @@ describe("Activity filters", () => {
       await fireEvent.press(await screen.findByRole("button", { name: "Сбросить фильтры" }));
       await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend" }));
       expect(await screen.findByRole("button", { name: "Фильтры" })).toBeTruthy();
-      expect(screen.queryByText(/Желаемое/)).toBeNull();
+      expect(screen.queryByText(/Для себя/)).toBeNull();
     });
 
     it("«Показать» with another period keeps it", async () => {
@@ -670,7 +670,7 @@ describe("Activity filters", () => {
       await fireEvent.press(screen.getByRole("button", { name: "Показать" }));
       await windowGone();
       await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ ...wanted, from: "2026-11-03", to: "2026-11-09" }));
-      expect(await screen.findByText("Желаемое · 3–9 ноя: −₴1,200 · 3 операции")).toBeTruthy();
+      expect(await screen.findByText("Для себя · 3–9 ноя: −₴1,200 · 3 операции")).toBeTruthy();
     });
 
     it("a category or a day arriving later takes it off", async () => {
@@ -1045,7 +1045,7 @@ describe("Activity: filter by account (Д1)", () => {
         expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", account: "white", want: true, from: "2026-11-01", to: "2026-11-09" }),
       );
       expect(await screen.findByRole("button", { name: "Фильтры: 3" })).toBeTruthy();
-      expect(await screen.findByText("Белая карта · Желаемое · 1–9 ноя: −₴3,600 · 9 операций")).toBeTruthy();
+      expect(await screen.findByText("Белая карта · Для себя · 1–9 ноя: −₴3,600 · 9 операций")).toBeTruthy();
 
       await arrive({ day: "2026-11-02" });
       await waitFor(() => expect(transactions).toHaveBeenLastCalledWith({ cursor: undefined, group: "spend", from: "2026-11-02", to: "2026-11-02" }));

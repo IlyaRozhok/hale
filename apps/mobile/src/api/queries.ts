@@ -45,6 +45,19 @@ export function useInsights(month?: string, enabled = true) {
   return useQuery({ queryKey: [...INSIGHTS_KEY, month ?? "current"], queryFn: () => api.insights(month), enabled });
 }
 
+/**
+ * «Не подписка» (`mark`) and «Вернуть» (task ЯМ6), by a place's key. Afterwards «Итоги» of every month are asked for
+ * again (they no longer find the place), and so is the observation of «Сегодня», which names the subscriptions too.
+ */
+export function useNotSubscription() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, mark }: { key: string; mark: boolean }) => (mark ? api.markNotSubscription(key) : api.unmarkNotSubscription(key)),
+    onSuccess: () => Promise.all([INSIGHTS_KEY, OBSERVATION_KEY].map((queryKey) => client.invalidateQueries({ queryKey }))),
+  });
+}
+
 export function useCalendar(month: string, enabled = true) {
   const api = useApi();
   return useQuery({ queryKey: [...CALENDAR_KEY, month], queryFn: () => api.calendar(month), enabled });

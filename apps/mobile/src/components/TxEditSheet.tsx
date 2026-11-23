@@ -49,7 +49,7 @@ type Change = Pick<TransactionPatch, "type" | "category">;
  * one row «Ещё: тип операции»; each is changed with one tap for this operation alone. After a change a quiet card
  * asks «Всегда так для …?» (task В5): «Да, всегда» sends the same change for the similar ones, exactly what the
  * «Применить к похожим» switch did; no answer leaves only this operation changed. The rare types wait behind "Ещё".
- * A purchase in a category with a side has «Эта покупка» (task В6): «нужное» or «желаемое» for it alone, saved at
+ * A purchase in a category with a side has «Эта покупка» (task В6): «нужное» or «для себя» for it alone, saved at
  * once in a request of its own, with no question about the similar ones.
  */
 export function TxEditSheet({ tx, onClose, onAnswer }: Props) {

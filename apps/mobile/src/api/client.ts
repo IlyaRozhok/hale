@@ -163,6 +163,10 @@ export interface Api {
   ledgerCheck(): Promise<LedgerCheckDto | null>;
   /** A month's «Итоги» (task В2), the current Kyiv month without `month`; null from an older server that has none. */
   insights(month?: string): Promise<InsightsMonthDto | null>;
+  /** «Не подписка» (task ЯМ6): the place, by its key, is no longer found as a subscription; repeating changes nothing. */
+  markNotSubscription(key: string): Promise<void>;
+  /** «Вернуть»: the place may be found as a subscription again. */
+  unmarkNotSubscription(key: string): Promise<void>;
   /** The owner's categories in order (task В5); null from an older server that has none. */
   categories(): Promise<CategoryDto[] | null>;
   createCategory(input: CategoryInput): Promise<CategoryDto>;
@@ -341,6 +345,8 @@ export function createApi({ baseUrl, getToken, onUnauthorized, fetchImpl = fetch
         throw e;
       }
     },
+    markNotSubscription: async (key) => void (await request("PUT", `/insights/not-subscriptions/${encodeURIComponent(key)}`)),
+    unmarkNotSubscription: async (key) => void (await request("DELETE", `/insights/not-subscriptions/${encodeURIComponent(key)}`)),
     categories: async () => {
       try {
         return await request<CategoryDto[]>("GET", "/categories");

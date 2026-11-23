@@ -1,11 +1,11 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { Pressable, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { CategoryDto, InsightsMonthDto } from "@hale/contracts";
 import { Insights } from "./Insights";
 import { fakeApi, insightsFixture, makeClient, renderWith } from "../testing";
 import { ApiError } from "../api/client";
-import { TRANSACTION_FILTERS_KEY, useEditTransaction } from "../api/queries";
+import { OBSERVATION_KEY, TRANSACTION_FILTERS_KEY, useEditTransaction } from "../api/queries";
 import { visitsText } from "../components/PlacesCard";
 
 const now = () => new Date("2026-11-16T10:00:00Z");
@@ -355,7 +355,7 @@ describe("Insights", () => {
       expect(tab("Места").props.accessibilityState.selected).toBe(true);
       expect(screen.queryAllByTestId("insights-row")).toHaveLength(0);
       expect(placeRows()).toHaveLength(5);
-      expect(screen.queryByText("Желаемое")).toBeNull();
+      expect(screen.queryByText("Для себя")).toBeNull();
       expect(screen.queryByText("Платежи вне лимита")).toBeNull();
 
       await fireEvent.press(tab("Подписки"));
@@ -366,7 +366,7 @@ describe("Insights", () => {
       await fireEvent.press(tab("Категории"));
       expect(rows()).toHaveLength(9);
       expect(screen.getByText("Платежи вне лимита")).toBeTruthy();
-      expect(screen.getByText("Желаемое")).toBeTruthy();
+      expect(screen.getByText("Для себя")).toBeTruthy();
     });
 
     it("the chosen segment stands out without colour: the native control, dark, with no tint (no blue, no red)", async () => {
@@ -605,6 +605,190 @@ describe("Insights", () => {
     });
   });
 
+  describe("«Не подписка» (ЯМ6)", () => {
+    const ROZETKA = "00000000000000c3";
+    const found = (): Sub[] => [
+      sub("Netflix", 44_900, { key: "00000000000000a1" }),
+      sub("Spotify", 19_900, { key: "00000000000000a2" }),
+      sub("Rozetka", 129_900, { key: ROZETKA, lastDate: "2026-11-14" }),
+      sub("Rozetka", 49_900, { key: ROZETKA, lastDate: "2026-11-02" }),
+      sub("Apple", 37_900, { key: "00000000000000a4" }),
+    ];
+    /** A server that remembers the marks and answers without the marked places, its total a month summed again. */
+    const remembering = (canMark: boolean | "absent" = true) => {
+      const marked = new Set<string>();
+      const month = () => {
+        const items = found().filter((i) => !marked.has(i.key));
+        return insightsFixture({ subscriptions: { monthly: items.reduce((s, i) => s + i.amount, 0), items }, ...(canMark === "absent" ? {} : { canMarkNotSubscription: canMark }) });
+      };
+      return fakeApi({
+        insights: jest.fn(async () => month()),
+        markNotSubscription: jest.fn(async (key: string) => void marked.add(key)),
+        unmarkNotSubscription: jest.fn(async (key: string) => void marked.delete(key)),
+      });
+    };
+    const open = async (api: ReturnType<typeof fakeApi>, client = makeClient(), onOpenPlace?: jest.Mock) => {
+      await renderWith(<Insights now={now} onOpenPlace={onOpenPlace} />, api, client);
+      await screen.findByText("₴18,220");
+      await fireEvent.press(tab("Подписки"));
+      await screen.findByText("₴2,825 в месяц · 5 подписок");
+    };
+    const names = () => screen.getAllByTestId("subscription-row").map((r) => r.props.accessibilityLabel as string);
+    const row = (name: string) => screen.getAllByTestId("subscription-row").find((r) => (r.props.accessibilityLabel as string).startsWith(name))!;
+    const swipe = (n: number) => screen.getAllByTestId("subscription-swipe")[n]!;
+    /** A finger from the right of the row to `toX`, the row being 358 points wide. */
+    const drag = async (target: ReturnType<typeof swipe>, toX: number) => {
+      await fireEvent(target, "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 358, height: 52 } } });
+      await fireEvent(target, "touchStart", { nativeEvent: { pageX: 300, pageY: 400 } });
+      expect(target.props.onMoveShouldSetResponderCapture({ nativeEvent: { pageX: 290, pageY: 401 } })).toBe(true);
+      await fireEvent(target, "responderGrant", { nativeEvent: { pageX: 290, pageY: 401 } });
+      await fireEvent(target, "responderMove", { nativeEvent: { pageX: toX, pageY: 402 } });
+      await fireEvent(target, "responderRelease", { nativeEvent: { pageX: toX, pageY: 402 } });
+    };
+
+    it("an older server, or one that does not say it remembers: no swipe and no VoiceOver action", async () => {
+      for (const canMark of ["absent", false] as const) {
+        const { unmount } = await renderWith(<Insights now={now} />, remembering(canMark));
+        await screen.findByText("₴18,220");
+        await fireEvent.press(tab("Подписки"));
+        expect(screen.queryAllByTestId("subscription-swipe")).toHaveLength(0);
+        expect(screen.queryAllByText("Не подписка", { includeHiddenElements: true })).toHaveLength(0);
+        for (const r of screen.getAllByTestId("subscription-row")) expect(r.props.accessibilityActions).toBeUndefined();
+        await unmount();
+      }
+    });
+
+    it("a swipe left shows a calm grey «Не подписка»; it marks the place and every row of it leaves, the total summed again", async () => {
+      const api = remembering();
+      await open(api);
+      // Closed, the button is hidden from VoiceOver: the row's own action does it there.
+      expect(screen.queryByRole("button", { name: "Не подписка" })).toBeNull();
+      await drag(swipe(2), 180);
+      const button = await screen.findByRole("button", { name: "Не подписка" });
+      const fill = StyleSheet.flatten(screen.getByTestId("not-subscription-button").props.style) as { backgroundColor?: string };
+      expect(fill.backgroundColor).toBe(tokens.color.surface.overlay);
+      const text = StyleSheet.flatten(screen.getAllByText("Не подписка")[0]!.props.style) as { color?: string };
+      expect([tokens.color.status.danger, tokens.color.money.expense]).not.toContain(text.color);
+      expect(api.markNotSubscription).not.toHaveBeenCalled();
+      await fireEvent.press(button);
+      expect(api.markNotSubscription).toHaveBeenCalledWith(ROZETKA);
+      expect(await screen.findByText("₴1,027 в месяц · 3 подписки")).toBeTruthy();
+      expect(names()).toEqual(["Netflix: ₴449", "Spotify: ₴199", "Apple: ₴379"]);
+      expect(screen.getByText("Убрали из подписок")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Вернуть" })).toBeTruthy();
+    });
+
+    it("a full swipe marks at once, with no second tap", async () => {
+      const api = remembering();
+      await open(api);
+      await drag(swipe(0), 20);
+      await waitFor(() => expect(api.markNotSubscription).toHaveBeenCalledWith("00000000000000a1"));
+      expect(await screen.findByText("Убрали из подписок")).toBeTruthy();
+      await waitFor(() => expect(names()).not.toContain("Netflix: ₴449"));
+    });
+
+    it("a short swipe goes back and marks nothing", async () => {
+      const api = remembering();
+      await open(api);
+      await drag(swipe(1), 270);
+      expect(screen.queryByRole("button", { name: "Не подписка" })).toBeNull();
+      expect(api.markNotSubscription).not.toHaveBeenCalled();
+    });
+
+    it("VoiceOver: the row's action «Не подписка» does what the swipe does", async () => {
+      const api = remembering();
+      await open(api);
+      const r = row("Spotify");
+      expect(r.props.accessibilityActions).toEqual([{ name: "notSubscription", label: "Не подписка" }]);
+      await fireEvent(r, "accessibilityAction", { nativeEvent: { actionName: "notSubscription" } });
+      expect(api.markNotSubscription).toHaveBeenCalledWith("00000000000000a2");
+      expect(await screen.findByText("Убрали из подписок")).toBeTruthy();
+    });
+
+    it("«Вернуть» takes the mark back and the rows return as they were", async () => {
+      const api = remembering();
+      await open(api);
+      await fireEvent(row("Rozetka"), "accessibilityAction", { nativeEvent: { actionName: "notSubscription" } });
+      await screen.findByText("₴1,027 в месяц · 3 подписки");
+      await fireEvent.press(screen.getByRole("button", { name: "Вернуть" }));
+      expect(api.unmarkNotSubscription).toHaveBeenCalledWith(ROZETKA);
+      expect(await screen.findByText("₴2,825 в месяц · 5 подписок")).toBeTruthy();
+      expect(names()).toEqual([
+        "Netflix: ₴449",
+        "Spotify: ₴199",
+        "Rozetka: ₴1,299, последнее списание 14 ноя",
+        "Rozetka: ₴499, последнее списание 2 ноя",
+        "Apple: ₴379",
+      ]);
+      expect(screen.queryByText("Убрали из подписок")).toBeNull();
+    });
+
+    it("the floating line leaves by itself after 5 seconds", async () => {
+      jest.useFakeTimers();
+      try {
+        const api = remembering();
+        await open(api);
+        await fireEvent(row("Apple"), "accessibilityAction", { nativeEvent: { actionName: "notSubscription" } });
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(0);
+        });
+        expect(screen.getByText("Убрали из подписок")).toBeTruthy();
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(4_900);
+        });
+        expect(screen.getByText("Убрали из подписок")).toBeTruthy();
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(200);
+        });
+        expect(screen.queryByText("Убрали из подписок")).toBeNull();
+        expect(api.unmarkNotSubscription).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("a tap on the row still opens the place's operations (Я8)", async () => {
+      const onOpenPlace = jest.fn();
+      await open(remembering(), knowing(), onOpenPlace);
+      await fireEvent.press(row("Netflix"));
+      expect(onOpenPlace).toHaveBeenCalledWith("00000000000000a1", "Netflix");
+    });
+
+    it("the last subscription marked: the segment goes, the line with «Вернуть» stays", async () => {
+      const api = fakeApi({
+        insights: jest.fn()
+          .mockResolvedValueOnce(insightsFixture({ subscriptions: { monthly: 19_900, items: [sub("Spotify", 19_900)] }, canMarkNotSubscription: true }))
+          .mockResolvedValue(insightsFixture({ subscriptions: { monthly: 0, items: [] }, canMarkNotSubscription: true })),
+      });
+      await renderWith(<Insights now={now} />, api);
+      await screen.findByText("₴18,220");
+      await fireEvent.press(tab("Подписки"));
+      await fireEvent(row("Spotify"), "accessibilityAction", { nativeEvent: { actionName: "notSubscription" } });
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Подписки" })).toBeNull());
+      expect(screen.getByRole("button", { name: "Вернуть" })).toBeTruthy();
+    });
+
+    it("the mark refreshes «Итоги» and the observation of «Сегодня»", async () => {
+      const client = makeClient();
+      client.setQueryData(OBSERVATION_KEY, { kind: "subscriptions", category: null, text: "x" });
+      const api = remembering();
+      await open(api, client);
+      await fireEvent(row("Netflix"), "accessibilityAction", { nativeEvent: { actionName: "notSubscription" } });
+      await waitFor(() => expect(client.getQueryState(OBSERVATION_KEY)?.isInvalidated).toBe(true));
+      await waitFor(() => expect(api.insights.mock.calls.length).toBeGreaterThan(1));
+    });
+
+    it("when the server refuses, the row stays and a calm line says so, with no «Вернуть»", async () => {
+      const api = remembering();
+      api.markNotSubscription.mockRejectedValueOnce(new ApiError(500));
+      await open(api);
+      await fireEvent(row("Netflix"), "accessibilityAction", { nativeEvent: { actionName: "notSubscription" } });
+      expect(await screen.findByText("Не получилось убрать из подписок. Попробуйте ещё раз.")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Вернуть" })).toBeNull();
+      expect(names()).toContain("Netflix: ₴449");
+    });
+  });
+
   describe("own categories (В5)", () => {
     const LIST: CategoryDto[] = [
       { key: "groceries", name: "Еда", icon: "cart", system: false },
@@ -655,12 +839,12 @@ describe("Insights", () => {
   });
 
   describe("«Желаемое» (В6)", () => {
-    const NAME = "Желаемое: ₴3,600";
+    const NAME = "Для себя: ₴3,600";
 
     it("a row in the second list with only the server's «желаемое» and a chevron; no derived «нужное»", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ wanted: 360_000, previousWanted: 300_000, otherPayments: 1_870_500 })) }));
       const row = await screen.findByRole("button", { name: NAME });
-      expect(screen.getByText("Желаемое")).toBeTruthy();
+      expect(screen.getByText("Для себя")).toBeTruthy();
       expect(screen.getByText("₴3,600")).toBeTruthy();
       expect(screen.queryByText(/Нужное/)).toBeNull();
       expect(screen.queryByText(/₴14,620/)).toBeNull();
@@ -668,8 +852,8 @@ describe("Insights", () => {
       expect(screen.getByText("₴18,220")).toBeTruthy();
       expect(screen.queryByText(/Из них на желаемое/)).toBeNull();
       const t = texts();
-      expect(t.indexOf("Желаемое")).toBeGreaterThan(t.indexOf("Связь"));
-      expect(t.indexOf("Желаемое")).toBeLessThan(t.indexOf("Платежи вне лимита"));
+      expect(t.indexOf("Для себя")).toBeGreaterThan(t.indexOf("Связь"));
+      expect(t.indexOf("Для себя")).toBeLessThan(t.indexOf("Платежи вне лимита"));
       // Nine categories and this row carry a chevron.
       expect(screen.getAllByTestId("row-chevron")).toHaveLength(10);
       expect((StyleSheet.flatten(row.props.style) as { minHeight?: number }).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
@@ -685,24 +869,24 @@ describe("Insights", () => {
     it("no row from an older server's answer without the field", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture()) }));
       await screen.findByText("₴18,220");
-      expect(screen.queryByText(/желаемое/i)).toBeNull();
+      expect(screen.queryByText(/для себя/i)).toBeNull();
     });
 
     it("no row when nothing went on «желаемое»", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ wanted: 0 })) }));
       await screen.findByText("₴18,220");
-      expect(screen.queryByText(/желаемое/i)).toBeNull();
+      expect(screen.queryByText(/для себя/i)).toBeNull();
     });
 
     it("no row when «желаемое» is more than all that was spent (refunds on «нужное»)", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ spent: 100_000, wanted: 150_000 })) }));
       await screen.findByText("₴1,000");
-      expect(screen.queryByText(/желаемое/i)).toBeNull();
+      expect(screen.queryByText(/для себя/i)).toBeNull();
     });
 
     it("the row shows when «желаемое» is all that was spent", async () => {
       await renderWith(<Insights now={now} />, fakeApi({ insights: jest.fn(async () => insightsFixture({ spent: 100_000, wanted: 100_000 })) }));
-      expect(await screen.findByRole("button", { name: "Желаемое: ₴1,000" })).toBeTruthy();
+      expect(await screen.findByRole("button", { name: "Для себя: ₴1,000" })).toBeTruthy();
     });
   });
 });
