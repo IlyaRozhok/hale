@@ -46,7 +46,7 @@ describe("Settings, lifestyle cap", () => {
     expect(slider.props.value).toBe(100000);
     // Task Я5: the heading says what the number is, and one line says what it changes.
     expect(screen.getByText("Сколько тратить в месяц")).toBeTruthy();
-    expect(screen.getByText("Выше этого лимит на день не поднимется, даже если денег больше.")).toBeTruthy();
+    expect(screen.getByText("Даже если денег больше, дневной лимит не будет выше этой суммы, делённой на 30.")).toBeTruthy();
     expect(screen.queryByText(/[Пп]отол/)).toBeNull();
     expect(await screen.findByText("₴500")).toBeTruthy(); // the current cap's consequence is shown from the start
     await fireEvent(slider, "valueChange", 140000);

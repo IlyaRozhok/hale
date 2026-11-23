@@ -130,7 +130,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
         <>
           <Glass style={styles.stack}>
             <Text style={styles.heading}>Сколько тратить в месяц</Text>
-            <Text style={styles.muted}>Выше этого лимит на день не поднимется, даже если денег больше.</Text>
+            <Text style={styles.muted}>Даже если денег больше, дневной лимит не будет выше этой суммы, делённой на 30.</Text>
             <Text style={styles.value}>{`${formatMoney(cap * 100)} в месяц`}</Text>
             <Slider
               accessibilityLabel="Сколько тратить в месяц"
