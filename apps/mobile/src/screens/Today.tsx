@@ -141,6 +141,15 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
   useEffect(() => {
     if (listed === 0) closeIfOpen("questions");
   }, [listed]);
+  // The recipient and arrival sheets live inside the list: when it closes, however it closes, they are dropped too,
+  // so the list never reopens on top of an old, already answered question.
+  const listOpen = sheet === "questions";
+  useEffect(() => {
+    if (!listOpen) {
+      setLabeling(null);
+      setArriving(null);
+    }
+  }, [listOpen]);
 
   if (!data) {
     return (

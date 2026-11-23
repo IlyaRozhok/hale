@@ -1275,6 +1275,25 @@ describe("Today, questions", () => {
     expect(screen.getByLabelText("Вопросов нет")).toBeTruthy();
   });
 
+  it("a list closed by a refresh does not reopen with the old recipient's label sheet (Я9)", async () => {
+    const recipient = [{ id: "recipient_label:0123456789abcdef", kind: "recipient_label" as const, text: "Кто это: Иван?" }];
+    const usdc = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
+    const today = jest.fn(async () => todayFixture({ questions: recipient }));
+    const client = makeClient();
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today }), client);
+    await openQuestions();
+    await fireEvent.press(await screen.findByText("Кто это: Иван?"));
+    expect(await screen.findByText("Что это за перевод?")).toBeTruthy();
+    today.mockImplementation(async () => todayFixture());
+    await act(async () => void client.refetchQueries({ queryKey: ["today"] }));
+    await waitFor(() => expect(screen.queryByText("Осталось разобрать")).toBeNull());
+    today.mockImplementation(async () => todayFixture({ questions: usdc }));
+    await act(async () => void client.refetchQueries({ queryKey: ["today"] }));
+    await openQuestions();
+    expect(await screen.findByText("Пришло на Binance?")).toBeTruthy();
+    expect(screen.queryByText("Что это за перевод?")).toBeNull();
+  });
+
   it("brings the card back if the call fails", async () => {
     const questions = [{ id: "usdc_arrived:12", kind: "usdc_arrived" as const, text: "Пришло на Binance?" }];
     const api = fakeApi({
