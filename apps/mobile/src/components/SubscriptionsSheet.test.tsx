@@ -90,7 +90,45 @@ describe("the subscriptions sheet (В4)", () => {
     };
     await renderWith(<SubscriptionsSheet subscriptions={twice} onClose={() => undefined} />, fakeApi());
     await screen.findByText("₴400 в месяц · 2 подписки");
-    expect(rowLabels("subscription-row")).toEqual(["Apple: ₴200", "Apple: ₴200"]);
+    // One name twice: the date of the last charge tells them apart (Я8).
+    expect(rowLabels("subscription-row")).toEqual(["Apple: ₴200, последнее списание 3 окт", "Apple: ₴200, последнее списание 18 окт"]);
+  });
+
+  it("a name only once has no date under it; a raised one keeps its note under the date", async () => {
+    const mixed = {
+      monthly: 60_000,
+      items: [
+        item("Apple", 20_000, { lastDate: "2026-10-03", raisedBy: 1_000 }),
+        item("Apple", 20_000, { lastDate: "2026-10-18" }),
+        item("Spotify", 20_000),
+        item("Apple", 20_000, { missed: 2, lastDate: "2026-08-04" }),
+      ],
+    };
+    await renderWith(<SubscriptionsSheet subscriptions={mixed} onClose={() => undefined} />, fakeApi());
+    await screen.findByText("Spotify");
+    expect(rowLabels("subscription-row")).toEqual([
+      "Apple: ₴200, последнее списание 3 окт, подорожала на ₴10 в октябре",
+      "Apple: ₴200, последнее списание 18 окт",
+      "Spotify: ₴200",
+    ]);
+    expect(rowLabels("subscription-missed-row")).toEqual(["Apple: ₴200, последний раз 4 авг"]);
+  });
+
+  it("rows lead nowhere without a way to the operations", async () => {
+    await renderWith(<SubscriptionsSheet subscriptions={subscriptions} onClose={() => undefined} />, fakeApi());
+    await screen.findByText("ChatGPT");
+    expect(screen.queryByRole("button", { name: /ChatGPT/ })).toBeNull();
+    expect(screen.queryAllByTestId("row-chevron")).toHaveLength(0);
+  });
+
+  it("with a way to the operations, a row closes the sheet and opens its place's (Я8)", async () => {
+    const onClose = jest.fn();
+    const onOpenPlace = jest.fn();
+    await renderWith(<SubscriptionsSheet subscriptions={subscriptions} onClose={onClose} onOpenPlace={onOpenPlace} />, fakeApi());
+    expect(await screen.findAllByTestId("row-chevron")).toHaveLength(7);
+    await fireEvent.press(screen.getByRole("button", { name: "Spotify: ₴199" }));
+    expect(onClose).toHaveBeenCalled();
+    expect(onOpenPlace).toHaveBeenCalledWith("00000000000000a1", "Spotify");
   });
 
   it("closes with «Закрыть»", async () => {

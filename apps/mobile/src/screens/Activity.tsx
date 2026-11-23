@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RouteProp } from "@react-navigation/native";
 import { tokens } from "@hale/tokens";
 import type { AccountFilterKind, TransactionDto } from "@hale/contracts";
-import { useCategoryList, useDismissObservation, useObservation, useTransactions } from "../api/queries";
+import { useCategoryList, useDismissObservation, useObservation, useTransactionFilters, useTransactions } from "../api/queries";
 import { usePullRefresh } from "../usePullRefresh";
 import { dayHeader, formatSignedMoney, kyivDate, operationsText, periodLabel } from "../format";
 import { accountChoices, accountLabel, categoryLabel, categoryName, wantLabel } from "../labels";
@@ -43,10 +43,28 @@ const isTransferToSomeone = (t: TransactionDto) => t.amount < 0 && (t.recipientL
  * What a move to the operations may carry: `day` asks for that one day's spending (the limit calendar);
  * `category` with `from`..`to` for that category's spending over those days («Итоги», task В2); with `observation`
  * they came from the phrase of the day's observation (task В7), which is said again above the list; `want` with
- * `from`..`to` for the purchases of «желаемое» over those days (the row «Желаемое» of «Итоги», task В6). `at`
+ * `from`..`to` for the purchases of «желаемое» over those days (the row «Желаемое» of «Итоги», task В6); `other` with
+ * `from`..`to` for the payments outside the limit over those days, `place` (with its name, `placeName`) for every
+ * operation of one place (the row «Платежи вне лимита» and a subscription of «Итоги», task Я8). `at`
  * differs on every arrival, so the same one twice in a row is applied twice.
  */
-export type ActivityParams = { day?: string; category?: string; want?: boolean; from?: string; to?: string; at?: number; observation?: boolean } | undefined;
+export type ActivityParams =
+  | {
+      day?: string;
+      category?: string;
+      want?: boolean;
+      other?: boolean;
+      place?: string;
+      placeName?: string;
+      from?: string;
+      to?: string;
+      at?: number;
+      observation?: boolean;
+    }
+  | undefined;
+
+/** One place (Я8): its counterparty key, and its name as «Итоги» showed it, for the summary. */
+type Place = { key: string; name: string };
 
 type Props = {
   /** Test seam for the current moment. */
@@ -67,6 +85,10 @@ export function Activity({ now = () => new Date(), route }: Props) {
   const [period, setPeriod] = useState<Period | null>(null);
   // Only the purchases «Итоги» count as «желаемое» (В6): set by arriving from there, taken off by «Сбросить».
   const [want, setWant] = useState(false);
+  // The payments outside the limit, or one place (Я8): the same way, set by arriving from «Итоги», off with «Сбросить».
+  // Asked for only once the server has named them: an older one refuses them.
+  const [other, setOther] = useState(false);
+  const [place, setPlace] = useState<Place | null>(null);
   // One account (Д1), on every tab: offered only once the server has named the person's accounts.
   const [account, setAccount] = useState<AccountFilterKind | null>(null);
   // The last list of them the server named, kept while a page with new filters loads.
@@ -93,15 +115,20 @@ export function Activity({ now = () => new Date(), route }: Props) {
   // Arriving from a day of the limit calendar, or from a category of «Итоги»: that spending, and nothing
   // chosen before it. Done while rendering, so the list is never asked for with the old filters first.
   const params = route?.params;
-  const target: (Omit<Filters, "account"> & { want: boolean }) | null = params?.day
-    ? { category: null, want: false, period: { from: params.day, to: params.day } }
+  const nothingElse = { category: null, want: false, other: false, place: null };
+  const target: (Omit<Filters, "account"> & { want: boolean; other: boolean; place: Place | null }) | null = params?.day
+    ? { ...nothingElse, period: { from: params.day, to: params.day } }
     : params?.category && params.from && params.to
-      ? { category: params.category, want: false, period: { from: params.from, to: params.to } }
+      ? { ...nothingElse, category: params.category, period: { from: params.from, to: params.to } }
       : params?.want === true && params.from && params.to
-        ? { category: null, want: true, period: { from: params.from, to: params.to } }
-        : null;
+        ? { ...nothingElse, want: true, period: { from: params.from, to: params.to } }
+        : params?.other === true && params.from && params.to
+          ? { ...nothingElse, other: true, period: { from: params.from, to: params.to } }
+          : params?.place
+            ? { ...nothingElse, place: { key: params.place, name: params.placeName ?? "" }, period: null }
+            : null;
   const arrival = target
-    ? `${target.category ?? ""}:${target.want ? "want" : ""}:${target.period?.from}..${target.period?.to}@${params?.at ?? 0}`
+    ? `${target.category ?? ""}:${target.want ? "want" : ""}:${target.other ? "other" : ""}:${target.place?.key ?? ""}:${target.period?.from}..${target.period?.to}@${params?.at ?? 0}`
     : null;
   const [applied, setApplied] = useState<string | null>(null);
   if (target && arrival !== applied) {
@@ -109,6 +136,8 @@ export function Activity({ now = () => new Date(), route }: Props) {
     setTab("spend");
     setCategory(target.category);
     setWant(target.want);
+    setOther(target.other);
+    setPlace(target.place);
     setAccount(null);
     setPeriod(target.period);
     setSearching(false);
@@ -125,8 +154,13 @@ export function Activity({ now = () => new Date(), route }: Props) {
     setPeriod(f.period);
     setCategory(f.category);
     setAccount(f.account);
-    // The window has no «желаемое» of its own: «Сбросить» (nothing left chosen) takes it off with the rest.
-    if (f.period === null && f.category === null && f.account === null) setWant(false);
+    // The window has no «желаемое», payments outside the limit or place of its own: «Сбросить» (nothing left chosen)
+    // takes them off with the rest.
+    if (f.period === null && f.category === null && f.account === null) {
+      setWant(false);
+      setOther(false);
+      setPlace(null);
+    }
     setFromObservation(false);
   };
 
@@ -144,11 +178,18 @@ export function Activity({ now = () => new Date(), route }: Props) {
   const chosenCategory = withCategories ? category : null;
   // «Желаемое» is purchases only: like a category, it does not narrow income and waits there untouched.
   const chosenWant = withCategories && want;
+  // Я8: only once a first page has named them. Payments outside the limit are spending, so, like «желаемое», they wait
+  // untouched under «Доходы»; a place narrows every tab, as an account does.
+  const serverFilters = useTransactionFilters();
+  const chosenOther = withCategories && other && serverFilters.includes("other");
+  const chosenPlace = place !== null && serverFilters.includes("place") ? place : null;
   const filter = {
     group: tab,
     ...(account ? { account } : {}),
+    ...(chosenPlace ? { place: chosenPlace.key } : {}),
     ...(chosenCategory ? { category: chosenCategory } : {}),
     ...(chosenWant ? { want: true as const } : {}),
+    ...(chosenOther ? { other: true as const } : {}),
     ...(period ? { from: period.from, to: period.to } : {}),
     ...(search ? { q: search } : {}),
   };
@@ -181,8 +222,8 @@ export function Activity({ now = () => new Date(), route }: Props) {
     else acc.push({ date: tx.localDate, data: [tx] });
     return acc;
   }, []);
-  const filtered = account !== null || chosenCategory !== null || chosenWant || period !== null;
-  const activeFilters = (account !== null ? 1 : 0) + (chosenCategory !== null ? 1 : 0) + (chosenWant ? 1 : 0) + (period !== null ? 1 : 0);
+  const filtered = account !== null || chosenPlace !== null || chosenCategory !== null || chosenWant || chosenOther || period !== null;
+  const activeFilters = [account !== null, chosenPlace !== null, chosenCategory !== null, chosenWant, chosenOther, period !== null].filter(Boolean).length;
   const emptyText = search || filtered ? "Ничего не нашлось." : TABS.find((t) => t.tab === tab)!.empty;
   const summary = pages[0]?.summary ?? null;
   // Said only while the list is still the observation's: its category over its days.
@@ -194,8 +235,10 @@ export function Activity({ now = () => new Date(), route }: Props) {
   const noticedCategory = noticed !== null ? (seen?.category ?? null) : null;
   const summaryTitle = [
     account ? accountLabel(account) : null,
+    chosenPlace ? chosenPlace.name : null,
     chosenCategory ? categoryName(chosenCategory, categories) : null,
     chosenWant ? wantLabel(true) : null,
+    chosenOther ? "Платежи вне лимита" : null,
     period ? periodLabel(period.from, period.to) : null,
   ]
     .filter(Boolean)
