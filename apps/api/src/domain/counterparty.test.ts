@@ -54,24 +54,24 @@ describe("cardTail", () => {
 
 describe("unnamedTransferQuestion (Б10)", () => {
   it("names a masked card by its last digits", () => {
-    expect(unnamedTransferQuestion(" 545708****4563 ", 1, "₴5,000", "12.11")).toEqual({
+    expect(unnamedTransferQuestion(" 545708****4563 ", 1, "₴5,000", "12 ноя")).toEqual({
       subject: "Карта *4563",
-      text: "Перевод ₴5,000 на карту *4563 (12.11)",
+      text: "Перевод ₴5,000 на карту ··4563 (12 ноя)",
     });
-    expect(unnamedTransferQuestion("545708****4563", 3, "₴12,000", "12.11")).toEqual({
+    expect(unnamedTransferQuestion("545708****4563", 3, "₴12,000", "12 ноя")).toEqual({
       subject: "Карта *4563",
-      text: "3 перевода на карту *4563, ₴12,000, последний 12.11",
+      text: "3 перевода на карту ··4563, ₴12,000, последний 12 ноя",
     });
   });
 
   it("gives any other bank text as it is", () => {
-    expect(unnamedTransferQuestion("Переказ на картку", 1, "₴50", "15.11")).toEqual({
+    expect(unnamedTransferQuestion("Переказ на картку", 1, "₴50", "15 ноя")).toEqual({
       subject: "Переказ на картку",
-      text: "Перевод ₴50 (15.11): Переказ на картку",
+      text: "Перевод ₴50 (15 ноя): Переказ на картку",
     });
-    expect(unnamedTransferQuestion("Поповнення «На свято»", 5, "₴250", "15.11")).toEqual({
+    expect(unnamedTransferQuestion("Поповнення «На свято»", 5, "₴250", "15 ноя")).toEqual({
       subject: "Поповнення «На свято»",
-      text: "5 переводов, ₴250, последний 15.11: Поповнення «На свято»",
+      text: "5 переводов, ₴250, последний 15 ноя: Поповнення «На свято»",
     });
   });
 });

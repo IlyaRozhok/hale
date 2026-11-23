@@ -439,7 +439,7 @@ describe("cash paid in at a terminal", () => {
     const deposit = await bankTx(c, 200_000, "cash_in", "2026-11-10");
     const questions = (await today()).questions as { id: string; kind: string; text: string }[];
     expect(questions.filter((q) => q.kind === "cash_source")).toEqual([
-      { id: `cash_source:${deposit}:0`, kind: "cash_source", text: "Внесено ₴2,000 (10.11). Откуда наличные?" },
+      { id: `cash_source:${deposit}:0`, kind: "cash_source", text: "Внесено ₴2,000 (10 ноя). Откуда наличные?" },
     ]);
     await api.post(`/cash/deposits/${deposit}/from-wallet`).expect(201);
     expect((await wallet()).balance).toBe(300_000);
@@ -964,7 +964,7 @@ describe("the owner's card at another bank", () => {
     await start(100_000, "2026-11-09").expect(201);
     const t = await send(c, 1_560_000, "2026-11-09");
     expect(await questions()).toEqual([
-      { id: `cash_card:${t}`, kind: "cash_card", text: "Перевод ₴15,600 на 545708****4563 (09.11). Снял наличными?" },
+      { id: `cash_card:${t}`, kind: "cash_card", text: "Перевод ₴15,600 на карту ··4563 (9 ноя). Снял наличными?" },
     ]);
     expect((await wallet()).balance).toBe(100_000);
   });
@@ -1050,7 +1050,7 @@ describe("the owner's card at another bank", () => {
     await send(c, 300_000, "2026-12-11");
     at("2026-12-11T12:00:00Z");
     expect(await questions()).toEqual([
-      { id: `cash_card:${due}`, kind: "cash_card", text: "Перевод ₴2,000 на 545708****4563 (10.12). Снял наличными?" },
+      { id: `cash_card:${due}`, kind: "cash_card", text: "Перевод ₴2,000 на карту ··4563 (10 дек). Снял наличными?" },
     ]);
     expect((await wallet()).balance).toBe(1_560_000 + 100_000 + 200_000 + 300_000);
 
