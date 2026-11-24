@@ -1,12 +1,12 @@
 import { ConflictException, Inject, Injectable, Logger } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
-import type { BridgePreviewDto, CalendarDto, IncomeSchedule, OwnMoneyItemDto, SettingsPreviewDto, TodayDto } from "@hale/contracts";
+import { limitParts, type BridgePreviewDto, type CalendarDto, type IncomeSchedule, type LimitPartsDto, type OwnMoneyItemDto, type SettingsPreviewDto, type TodayDto } from "@hale/contracts";
 import { DataSource, type EntityManager } from "typeorm";
 import { currentStreak, dayStatus } from "../domain/calendar";
 import { leftForGoalsMonthly } from "../domain/goals";
 import { paymentsPerMonth } from "../domain/incomes";
 import { lastIncomeBoundary, loanReserve, type ReceivedIncome } from "../domain/loans";
-import { type DailyInput, type DailyState, type DayMark, computeDaily, dayMark, dueWindowEnd, sumDue } from "../domain/daily";
+import { type DailyInput, type DailyState, type DayMark, type LimitParts, computeDaily, dayMark, dueWindowEnd, sumDue } from "../domain/daily";
 import { cashCountShortfallSql, countsAsOwnSql, ownPart, SET_ASIDE_BY_DEFAULT_KIND, spentByDaySql, spentSql } from "../domain/ledger";
 import { runway } from "../domain/runway";
 import { CURRENCY_ALPHA, type Rates, addDays, kyivDate, toUah } from "../domain/money";
@@ -115,6 +115,12 @@ interface Resolved {
   replan: { id: number; creditPlan: number; basis: string } | null;
 }
 
+/**
+ * The day as the screen shows it: the live state with the limit shown, and the parts that limit is made of — from
+ * the same source as the limit, or null when that source has none (ЧЛ2).
+ */
+type Shown = Omit<DailyState, "parts"> & { parts: LimitPartsDto | null };
+
 const fmt = (kopecks: number) => `₴${Math.round(kopecks / 100).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
 
 /**
@@ -186,42 +192,54 @@ export class TodayService {
     }
     if (fresh || r.closePlan) {
       // The facts changed by the person's hand, or the bridge limit no longer applies: the day gets its fresh limit.
-      await m.query(
-        `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3)
-         ON CONFLICT (local_date) DO UPDATE SET daily_limit=EXCLUDED.daily_limit, mode=EXCLUDED.mode`,
-        [f.date, r.morning.dailyLimit, r.mark],
-      );
+      await this.writeDay(m, f.date, r.morning.parts, r.mark, true);
       return;
     }
-    await m.query(
-      `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3) ON CONFLICT (local_date) DO NOTHING`,
-      [f.date, r.morning.dailyLimit, r.mark],
-    );
+    await this.writeDay(m, f.date, r.morning.parts, r.mark, false);
     await m.query(`UPDATE daily_snapshots SET mode=$2 WHERE local_date=$1 AND mode<>$2`, [f.date, r.mark]);
+  }
+
+  /**
+   * The one statement that writes a day's limit, and with it what the limit is made of (ЧЛ2): both come from `parts`,
+   * the figures of the computation that gave the limit, so a row never holds a limit beside another computation's
+   * parts. `replace` rewrites an existing row (limit, mode and parts together); without it an existing row is left as
+   * it is, parts included.
+   */
+  private async writeDay(m: EntityManager, date: string, parts: LimitParts, mark: DayMark, replace: boolean): Promise<void> {
+    await m.query(
+      `INSERT INTO daily_snapshots (local_date, daily_limit, mode, parts) VALUES ($1,$2,$3,$4::jsonb)
+       ON CONFLICT (local_date) DO ${replace ? "UPDATE SET daily_limit=EXCLUDED.daily_limit, mode=EXCLUDED.mode, parts=EXCLUDED.parts" : "NOTHING"}`,
+      [date, parts.dailyLimit, mark, JSON.stringify(parts)],
+    );
   }
 
   /**
    * Reads only: no row of `daily_snapshots` or `bridge_plans` is written here. With the day's row present the
    * limit is the fixed one; without it (the first request after midnight, before any writer ran) the figures are
    * the ones `ensureSnapshot` will persist from the same facts, computed the same way and not saved.
+   * The parts of the limit (ЧЛ2) come from wherever the limit shown does: the row's limit — the row's parts (none when
+   * the row has none); the morning computation's limit — that computation's parts.
    */
   async getToday(): Promise<TodayDto> {
     const now = this.clock.now();
     const f = await this.load(kyivDate(now), now);
     const r = await this.resolve(this.ds.manager, f);
     // A plan that has ended takes the day's row with it when the writer runs: until then the row does not count.
-    const row = r.closePlan ? null : await this.storedLimit(this.ds.manager, f.date);
-    const limit = row ?? r.morning.dailyLimit;
+    const row = r.closePlan ? null : await this.storedDay(this.ds.manager, f.date);
+    const limit = row ? row.limit : r.morning.dailyLimit;
+    const parts = row ? row.parts : r.morning.parts;
     // In the shortage mode the engine's limit is the one a new day starts with: the plan's, or the recommended one.
     // While the day still runs on another limit, that one is named as tomorrow's; otherwise it is already in force.
     const shortageStart =
       r.mark === "bridge_start" ? (r.state.dailyLimit !== limit ? { nextLimit: r.state.dailyLimit } : {}) : undefined;
     const leftToday = limit - f.spentToday;
-    const state: DailyState = {
+    // The live computation's own parts explain its limit, not the one shown: they are replaced, never passed on.
+    const state: Shown = {
       ...r.state,
       dailyLimit: limit,
       leftToday,
       level: limit > 0 ? Math.min(1, Math.max(0, leftToday / limit)) : 0,
+      parts,
     };
     return this.dto(f, state, r.plan, shortageStart);
   }
@@ -270,7 +288,7 @@ export class TodayService {
   async previewCap(lifestyleCap: number): Promise<SettingsPreviewDto> {
     const now = this.clock.now();
     const f = await this.load(kyivDate(now), now);
-    const input = { ...f.input, lifestyleCapMonthly: lifestyleCap > 0 ? lifestyleCap : DEFAULT_LIFESTYLE_CAP };
+    const input = { ...f.input, lifestyleCapMonthly: lifestyleCap > 0 ? lifestyleCap : DEFAULT_LIFESTYLE_CAP, lifestyleCapDefault: !(lifestyleCap > 0) };
     const dailyLimit = this.compute({ ...f, input }, f.plan, 0, true).dailyLimit;
 
     const m = this.ds.manager;
@@ -379,8 +397,14 @@ export class TodayService {
   async chooseBridge(dailyAmount: number): Promise<TodayDto> {
     const now = this.clock.now();
     const f = await this.load(kyivDate(now), now);
-    const b = this.compute(f, f.plan, null, undefined, dailyAmount).bridge;
+    const chosen = this.compute(f, f.plan, null, undefined, dailyAmount);
+    const b = chosen.bridge;
     if (!b) throw new ConflictException("bridge mode is not active: free money is not negative");
+    // What the plan's limit is made of (ЧЛ2), stored with it: the morning's figures, as on any other day, when the
+    // morning already was a shortage (the limit is then the plan's sum too); after an ordinary morning the plan's sum
+    // can only come from the money as it is now, so the parts are that computation's.
+    const morning = this.compute(f, f.plan, null, true, dailyAmount);
+    const parts = (morning.mode === "bridge" ? morning : chosen).parts;
     // A plan the credit limit does not cover is confirmed too (owner's decision, task А22): the day still
     // gets its limit, and the app says how much is missing. `shortfall` stays in the state for that.
     await this.ds.transaction(async (m) => {
@@ -400,11 +424,7 @@ export class TodayService {
       const stored = await this.storedMarks(m, f.date);
       const begun = stored.stored === null ? { storedLimit: this.compute(f, f.plan, 0, true).dailyLimit } : {};
       const mark = dayMark({ live: "bridge", ...stored, ...begun, limit: dailyAmount });
-      await m.query(
-        `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1,$2,$3)
-         ON CONFLICT (local_date) DO UPDATE SET daily_limit=EXCLUDED.daily_limit, mode=EXCLUDED.mode`,
-        [f.date, dailyAmount, mark],
-      );
+      await this.writeDay(m, f.date, parts, mark, true);
     });
     // The plan is on record: the writer fixes the day on it before the answer is read.
     await this.ensureSnapshot();
@@ -463,12 +483,18 @@ export class TodayService {
     return { stored: own?.mode ?? null, previous: rows.find((r) => r.date < date)?.mode ?? null, storedLimit: own?.daily_limit ?? null };
   }
 
-  /** The limit fixed for the day, if its row is there. */
-  private async storedLimit(m: EntityManager, date: string): Promise<number | null> {
-    const row = (await m.query(`SELECT daily_limit::float8 AS daily_limit FROM daily_snapshots WHERE local_date=$1`, [date]))[0] as
-      | { daily_limit: number }
+  /**
+   * The limit fixed for the day and what it is made of, if its row is there: read in one statement, so the two are
+   * never from different writes. The parts are null for a row fixed before they were stored, and for parts that do not
+   * read as such or do not carry the row's limit (a row changed by hand): they would not explain the figure shown.
+   */
+  private async storedDay(m: EntityManager, date: string): Promise<{ limit: number; parts: LimitPartsDto | null } | null> {
+    const row = (await m.query(`SELECT daily_limit::float8 AS daily_limit, parts FROM daily_snapshots WHERE local_date=$1`, [date]))[0] as
+      | { daily_limit: number; parts: unknown }
       | undefined;
-    return row?.daily_limit ?? null;
+    if (!row) return null;
+    const parts = limitParts.safeParse(row.parts);
+    return { limit: row.daily_limit, parts: parts.success && parts.data.dailyLimit === row.daily_limit ? parts.data : null };
   }
 
   // --- reading the database ---------------------------------------------------
@@ -689,6 +715,7 @@ export class TodayService {
         borrowed: loanRule.borrowed,
         nextIncomeOn: next,
         lifestyleCapMonthly: settings.lifestyle_cap > 0 ? settings.lifestyle_cap : DEFAULT_LIFESTYLE_CAP,
+        lifestyleCapDefault: !(settings.lifestyle_cap > 0),
         foodFloor: settings.food_floor > 0 ? settings.food_floor : DEFAULT_FOOD_FLOOR,
       },
       spentToday,
@@ -896,7 +923,7 @@ export class TodayService {
   }
 
   // --- the response -------------------------------------------------------------
-  private async dto(f: Facts, state: DailyState, plan: Plan | null, shortageStart?: { nextLimit?: number }): Promise<TodayDto> {
+  private async dto(f: Facts, { parts, ...state }: Shown, plan: Plan | null, shortageStart?: { nextLimit?: number }): Promise<TodayDto> {
     const m = this.ds.manager;
     const questions: TodayDto["questions"] = [];
     // A crypto income's month (Д3а: a second payment's window is its own day, clamped to the month's length as its event
@@ -993,7 +1020,12 @@ export class TodayService {
 
     return {
       date: f.date,
-      state: { ...state, bridge: state.bridge ? { ...state.bridge, confirmed: plan !== null } : null, ...(shortageStart ? { shortageStart } : {}) },
+      state: {
+        ...state,
+        bridge: state.bridge ? { ...state.bridge, confirmed: plan !== null } : null,
+        ...(shortageStart ? { shortageStart } : {}),
+        ...(parts ? { parts } : {}),
+      },
       runway: { endOn: f.end, incomeOn: f.end === f.input.nextIncomeOn ? f.end : null, ...run, events },
       usdRate: f.usdRate,
       rateStale: f.rateStale,
