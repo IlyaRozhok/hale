@@ -4,20 +4,21 @@ import type { DailyStateDto } from "@hale/contracts";
 import { LimitBar } from "../../metal";
 import { limitState } from "../../limitState";
 import { formatMoney, streakLabel } from "../../format";
-import { Glass } from "../Glass";
 import { Icon } from "../Icon";
 import { LAYOUT } from "../layout";
 
-const { color, radius, space, touchMin, type } = tokens;
+const { color, space, touchMin, type } = tokens;
 
 /** An overspent day: there is a limit and more than it is spent. The screen keeps the phrase of the day quiet on it. */
 export const isOverLimit = (state: DailyStateDto): boolean => state.dailyLimit > 0 && state.leftToday < 0;
 
 /**
- * The limit card of «Сегодня»: «Сегодня можно», the amount left, the strip and the line under it.
+ * The limit section of «Сегодня»: «Сегодня можно», the amount left, the strip and the line under it. Since ЧЛ3 it is
+ * not a card: it stands on the screen itself, with no glass and no fill (the file keeps its name from ЧЛ1).
  *
- * Contract: everything is derived from `state`; the card holds no state of its own. The whole card is one button
- * that calls `onOpenCalendar`. Its states:
+ * Contract: everything is derived from `state`; the section holds no state of its own. The heading and the figure are
+ * plain text. What is under the figure calls `onOpenCalendar`: the strip and the line (one button for VoiceOver — the
+ * line; the strip is a second place to touch), or, with no limit, the note. Its states:
  * - a limit and money left — the strip and «потрачено ₴X из ₴L»;
  * - nothing left or overspent — «₴0» and only «завтра снова ₴L» (tasks Я2, ЯМ1);
  * - the day the shortage mode came on (`state.shortageStart`) — «Новый лимит ₴Y действует с завтра» instead of the line;
@@ -40,7 +41,7 @@ export function LimitCard({ state, streak, onOpenCalendar }: { state: DailyState
   const noLimitNote = state.mode === "bridge" ? "Лимит появится, когда вы подтвердите план." : "До следующего дохода свободных денег нет.";
   // Tasks Я2, ЯМ1: once nothing is left the line says only tomorrow's limit (the owner's mockup); what was spent is in the calendar.
   const spentLine = state.leftToday <= 0 ? `завтра снова ${formatMoney(state.dailyLimit)}` : `потрачено ${formatMoney(spent)} из ${formatMoney(state.dailyLimit)}`;
-  // Task ЯМ7: what touching the card does, then the streak when there is one.
+  // Task ЯМ7: what touching the line does, then the streak when there is one.
   const calendarHint = streak > 0 ? `Открывает календарь. ${streakLabel(streak)}` : "Открывает календарь";
   const limitLabel = hasLimit && nextLimitNote
     ? `${heading} ${formatMoney(over ? 0 : shownLeft)}. ${nextLimitNote}`
@@ -50,41 +51,79 @@ export function LimitCard({ state, streak, onOpenCalendar }: { state: DailyState
       ? `${heading} ${formatMoney(shownLeft)}, из ${formatMoney(state.dailyLimit)} на день`
       : `${heading} ${formatMoney(shownLeft)}. ${noLimitNote}`;
 
+  // Never below zero here, so it always starts with the sign: the sign is drawn half the size and quiet.
+  const figure = formatMoney(over ? 0 : shownLeft);
+
   return (
-    // The whole card is the way into the limit calendar.
-    <Pressable accessibilityRole="button" accessibilityLabel={limitLabel} accessibilityHint={calendarHint} onPress={onOpenCalendar} style={styles.heroPress}>
-      <Glass kind="card" style={styles.hero}>
-        <Text style={styles.eyebrow}>{heading}</Text>
-        <Text style={styles.amount}>{over ? formatMoney(0) : formatMoney(shownLeft)}</Text>
-        {!hasLimit && <Text style={styles.note}>{noLimitNote}</Text>}
-        {!hasLimit && spent > 0 && <Text style={styles.subtle}>Потрачено {formatMoney(spent)}</Text>}
-        {hasLimit && (
-          <>
-            <View style={styles.bar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <LimitBar level={level} state={dayState} />
-            </View>
-            {/* Task ЯМ7: a quiet chevron says the card opens something; the line wraps, the chevron stays centred at the right. */}
-            <View testID="limit-line" style={styles.spentLine}>
-              <Text style={[styles.subtle, styles.spentText]}>{nextLimitNote ?? spentLine}</Text>
-              <View testID="limit-chevron" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-                <Icon name="chevron" color={color.list.chevron} size={14} />
+    <View testID="limit-section" style={[styles.section, !hasLimit && styles.sectionNoLimit]}>
+      <Text style={styles.eyebrow}>{heading}</Text>
+      <Text style={styles.amount}>
+        <Text style={styles.sign}>{figure.slice(0, 1)}</Text>
+        {figure.slice(1)}
+      </Text>
+      {!hasLimit && (
+        <Pressable accessibilityRole="button" accessibilityLabel={limitLabel} accessibilityHint={calendarHint} onPress={onOpenCalendar} style={styles.notes}>
+          <Text style={styles.note}>{noLimitNote}</Text>
+          {spent > 0 && <Text style={styles.subtle}>Потрачено {formatMoney(spent)}</Text>}
+        </Pressable>
+      )}
+      {hasLimit && (
+        <>
+          {/* The strip opens the calendar too. VoiceOver gets one button, the line below. */}
+          <Pressable
+            testID="limit-bar"
+            accessible={false}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            onPress={onOpenCalendar}
+            style={styles.bar}
+          >
+            <LimitBar level={level} state={dayState} />
+          </Pressable>
+          {/* The row keeps the line at the left; ЧЛ4 puts the «Как посчитано» chip at its right, beside this button. */}
+          <View style={styles.lineRow}>
+            <Pressable accessibilityRole="button" accessibilityLabel={limitLabel} accessibilityHint={calendarHint} onPress={onOpenCalendar} style={styles.linePress}>
+              {/* Task ЯМ7: a quiet chevron says the line opens something; the line wraps, the chevron stays centred at the right. */}
+              <View testID="limit-line" style={styles.spentLine}>
+                <Text style={[styles.subtle, styles.spentText]}>{nextLimitNote ?? spentLine}</Text>
+                <View testID="limit-chevron" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                  <Icon name="chevron" color={color.list.chevron} size={14} />
+                </View>
               </View>
-            </View>
-          </>
-        )}
-      </Glass>
-    </Pressable>
+            </Pressable>
+          </View>
+        </>
+      )}
+    </View>
   );
 }
 
+/** The strip's canvas is taller than the strip by its glow, above and below (`LimitBar`). */
+const BAR_GLOW = 6;
+/** The mockup's distances: the figure to the strip, the strip to the line, one section to the next. */
+const FIGURE_TO_BAR = 14;
+const BAR_TO_LINE = 10;
+const SECTION_GAP = 26;
+/** The screen already puts `space.md` between its rows. */
+const ROW_GAP = space.md;
+/** The line's button is `touchMin` tall with the text in the middle: this much of it is air above and below the text. */
+const LINE_AIR = (touchMin - type.caption.lineHeight) / 2;
+
 const styles = StyleSheet.create({
-  heroPress: { minHeight: touchMin },
-  hero: { overflow: "hidden", borderRadius: radius.xl, paddingHorizontal: space.lg, paddingTop: space.lg, paddingBottom: space.lg, gap: 2 },
-  bar: { marginTop: space.md },
-  spentLine: { marginTop: space.xs, flexDirection: "row", alignItems: "center", gap: space.sm },
-  spentText: { flex: 1 },
+  // With a limit the air under the line's text and the screen's own gap already make the distance to the next section.
+  section: { marginTop: SECTION_GAP - ROW_GAP, marginBottom: Math.max(0, SECTION_GAP - ROW_GAP - LINE_AIR) },
+  sectionNoLimit: { marginBottom: SECTION_GAP - ROW_GAP },
   eyebrow: { ...type.body, color: color.fg.muted, height: LAYOUT.eyebrow + 4 },
-  amount: { ...type.amount, lineHeight: LAYOUT.amount, color: color.fg.default, fontVariant: ["tabular-nums"] },
+  amount: { ...type.hero, marginTop: space.xs, color: color.fg.default, fontVariant: ["tabular-nums"] },
+  // Its own spacing is the small gap between the sign and the figure.
+  sign: { fontSize: type.hero.fontSize / 2, letterSpacing: 3, color: color.fg.subtle },
+  bar: { paddingTop: FIGURE_TO_BAR - BAR_GLOW },
+  // The button reaches up over the strip's lower glow, so the text sits where the mockup has it and the target stays 44 pt.
+  lineRow: { flexDirection: "row", alignItems: "center", marginTop: BAR_TO_LINE - BAR_GLOW - LINE_AIR },
+  linePress: { flex: 1, minHeight: touchMin, justifyContent: "center" },
+  spentLine: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  spentText: { flex: 1 },
+  notes: { minHeight: touchMin, justifyContent: "center", marginTop: space.xs, gap: 2 },
   note: { ...type.body, color: color.fg.muted },
   subtle: { ...type.caption, color: color.fg.subtle },
 });

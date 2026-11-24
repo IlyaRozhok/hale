@@ -166,6 +166,8 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
         <TodayHeader date={data.date} questions={questions.length} onOpenQuestions={() => setSheet("questions")} onOpenSettings={openSettings} />
         <Freshness data={data} offlineSince={offlineSince} now={now()} />
         <LimitCard state={state} streak={data.streak ?? 0} onOpenCalendar={() => setSheet("calendar")} />
+        {phrase && <DayPhraseRow phrase={phrase} date={data.date} onAct={act} markShown={markShown} />}
+        {state.mode === "bridge" && state.bridge?.confirmed && <BridgePlanRow dailyLimit={state.dailyLimit} onPress={() => setSheet("bridge")} />}
 
         {runway && (
           <UntilIncomeCard
@@ -177,9 +179,6 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
             onPay={(id) => setPaying(data.upcoming.find((p) => p.id === id) ?? null)}
           />
         )}
-        {phrase && <DayPhraseRow phrase={phrase} date={data.date} onAct={act} markShown={markShown} />}
-
-        {state.mode === "bridge" && state.bridge?.confirmed && <BridgePlanRow dailyLimit={state.dailyLimit} onPress={() => setSheet("bridge")} />}
         {notes.map((b) => (
           <BadCaseCard key={b.id} text={b.text} />
         ))}

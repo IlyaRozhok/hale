@@ -105,6 +105,8 @@ export const type = {
   display: { fontSize: 34, lineHeight: 40, fontWeight: "700" },
   /** The day's sum on Today: dense, tabular figures. */
   amount: { fontSize: 52, lineHeight: 60, fontWeight: "600", letterSpacing: -1.5 },
+  /** The one large figure on Today, standing on the screen itself with no card around it: «Сегодня можно». */
+  hero: { fontSize: 60, lineHeight: 64, fontWeight: "500", letterSpacing: -2 },
 } as const;
 
 /** The liquid metal: a quarter of the pixels (it is soft), how fast the level moves, the pose when motion is reduced. */
