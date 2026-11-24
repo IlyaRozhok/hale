@@ -587,7 +587,7 @@ describe("Today, normal mode", () => {
       expect((await screen.findByRole("button", { name: /^Сегодня можно/ })).props.accessibilityHint).toBe("Открывает календарь. Серия: 5 дней в лимите");
     });
 
-    it("says the card opens the calendar while there is no streak (ЯМ7)", async () => {
+    it("says the line under the bar opens the calendar while there is no streak (ЯМ7)", async () => {
       await renderWith(<Today onOpenActivity={noop} />, fakeApi());
       expect((await screen.findByRole("button", { name: /^Сегодня можно/ })).props.accessibilityHint).toBe("Открывает календарь");
     });
@@ -1820,7 +1820,7 @@ describe("Today, settings and the calendar chevron (ЯМ7)", () => {
     expect(within(row).getByTestId("limit-chevron", HIDDEN)).toBeTruthy();
     expect(chevron().props.accessibilityElementsHidden).toBe(true);
     expect(chevron().props.importantForAccessibility).toBe("no-hide-descendants");
-    // No new words on the card.
+    // No new words in the section.
     expect(screen.queryByText(/календар/i)).toBeNull();
   });
 
@@ -1845,5 +1845,123 @@ describe("Today, settings and the calendar chevron (ЯМ7)", () => {
     await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 0, leftToday: 0, level: 0 }));
     await screen.findByText("Сегодня можно");
     expect(screen.queryByTestId("limit-chevron", HIDDEN)).toBeNull();
+  });
+});
+
+describe("Today, the limit without a card (ЧЛ3)", () => {
+  const withState = (over: Partial<DailyStateDto>) => {
+    const fixture = todayFixture();
+    return fakeApi({ today: jest.fn(async () => ({ ...fixture, state: { ...fixture.state, ...over } })) });
+  };
+  const calendarButton = () => screen.getByRole("button", { name: /^Сегодня можно/ });
+  const calendarOpen = () => screen.queryByText("Ноябрь 2026") !== null;
+
+  it("stands on the screen itself: nothing around it has a fill, a corner or glass", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+    await screen.findByText("Сегодня можно");
+    const section = screen.getByTestId("limit-section", HIDDEN);
+    expect(within(section).getByText("Сегодня можно")).toBeTruthy();
+    for (let node: typeof section | null = screen.getByText("потрачено ₴280 из ₴1,000"); node && node !== section.parent; node = node.parent) {
+      const style = StyleSheet.flatten(node.props.style) ?? {};
+      expect(style.backgroundColor).toBeUndefined();
+      expect(style.borderRadius).toBeUndefined();
+      expect(node.props.glassEffectStyle).toBeUndefined();
+    }
+  });
+
+  it("draws the figure large, with a «₴» half its size and quiet", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+    const figure = await screen.findByText("₴720");
+    expect(StyleSheet.flatten(figure.props.style)).toMatchObject({ fontSize: 60, letterSpacing: -2, color: tokens.color.fg.default });
+    const sign = within(figure).getByText("₴");
+    expect(StyleSheet.flatten(sign.props.style)).toMatchObject({ fontSize: 30, color: tokens.color.fg.subtle });
+  });
+
+  it("the heading and the figure are not the way into the calendar", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+    await fireEvent.press(await screen.findByText("Сегодня можно"));
+    await fireEvent.press(screen.getByText("₴720"));
+    expect(calendarOpen()).toBe(false);
+    expect(within(calendarButton()).queryByText("₴720")).toBeNull();
+    expect(within(calendarButton()).queryByText("Сегодня можно")).toBeNull();
+  });
+
+  it("the bar opens the calendar", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+    await screen.findByText("Сегодня можно");
+    await fireEvent.press(screen.getByTestId("limit-visual", HIDDEN));
+    expect(await screen.findByText("Ноябрь 2026")).toBeTruthy();
+  });
+
+  it("the line under the bar opens the calendar and is a touch target of 44 pt", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+    await fireEvent.press(await screen.findByText("потрачено ₴280 из ₴1,000"));
+    expect(await screen.findByText("Ноябрь 2026")).toBeTruthy();
+    expect(within(calendarButton()).getByText("потрачено ₴280 из ₴1,000")).toBeTruthy();
+    expect(StyleSheet.flatten(calendarButton().props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+  });
+
+  it("is one button for VoiceOver: the bar is a second place to touch, not a second button", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+    await screen.findByText("Сегодня можно");
+    expect(screen.getAllByRole("button", { name: /^Сегодня можно/ })).toHaveLength(1);
+  });
+
+  it.each([
+    ["nothing left", { dailyLimit: 95000, leftToday: -60100, level: 0 }, "завтра снова ₴950"],
+    ["the day the shortage came on", { ...bridgeState(), level: 0, dailyLimit: 100000, leftToday: -1000000, shortageStart: { nextLimit: 45000 } }, "Новый лимит ₴450 действует с завтра"],
+  ])("%s: the line opens the calendar, the figure does not", async (_name, state, line) => {
+    await renderWith(<Today onOpenActivity={noop} />, withState(state));
+    await screen.findByText(line);
+    await fireEvent.press(screen.getByText("₴0"));
+    expect(calendarOpen()).toBe(false);
+    await fireEvent.press(screen.getByText(line));
+    expect(await screen.findByText("Ноябрь 2026")).toBeTruthy();
+  });
+
+  it("with no limit the note under the figure still opens the calendar; there is no bar", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 0, leftToday: -60100, level: 0 }));
+    const note = await screen.findByText("До следующего дохода свободных денег нет.");
+    expect(screen.queryByTestId("limit-visual", HIDDEN)).toBeNull();
+    expect(calendarButton().props.accessibilityHint).toBe("Открывает календарь");
+    expect(calendarButton().props.accessibilityLabel).toBe("Сегодня можно ₴0. До следующего дохода свободных денег нет.");
+    expect(within(calendarButton()).getByText("Потрачено ₴601")).toBeTruthy();
+    expect(StyleSheet.flatten(calendarButton().props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+    await fireEvent.press(screen.getByText("₴0"));
+    expect(calendarOpen()).toBe(false);
+    await fireEvent.press(note);
+    expect(await screen.findByText("Ноябрь 2026")).toBeTruthy();
+  });
+
+  describe("the order of the screen", () => {
+    const PHRASE = "Вчера осталось ₴340. Лимит сегодня на ₴40 больше.";
+    const calendar = jest.fn(async (month: string) =>
+      calendarFixture({ month, today: "2026-11-02", days: month === "2026-11" ? [{ date: "2026-11-01", limit: 96_000, spent: 62_000, status: "within" as const }] : [] }),
+    );
+    const order = () => {
+      const texts = screen.getAllByText(/./).map((t) => t.props.children);
+      return (t: string) => {
+        const at = texts.findIndex((c) => c === t);
+        expect(at).toBeGreaterThanOrEqual(0);
+        return at;
+      };
+    };
+
+    it("the phrase of the day stands between the limit and «До дохода»", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ calendar }));
+      await screen.findByText(PHRASE);
+      const at = order();
+      expect(at("потрачено ₴280 из ₴1,000")).toBeLessThan(at(PHRASE));
+      expect(at(PHRASE)).toBeLessThan(at("До дохода"));
+    });
+
+    it("«План до дохода» stays right under the phrase, above «До дохода»", async () => {
+      const state = { ...bridgeState({ confirmed: true }), leftToday: 30000, level: 0.67 };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })), calendar }));
+      await screen.findByText("План до дохода");
+      const at = order();
+      expect(at("потрачено ₴150 из ₴450")).toBeLessThan(at("План до дохода"));
+      expect(at("План до дохода")).toBeLessThan(at("До дохода"));
+    });
   });
 });
