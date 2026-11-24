@@ -71,8 +71,9 @@ export function observationText(o: ObservationDto, categories: CategoryList, tod
 
 /**
  * The one thing worth saying today, the most important first: a decision that is waiting, an overdue
- * payment, a loan to return, then a payment at the door, then an observation (В7) in its place unless the day
- * is `quiet`, else how yesterday went. Null on a day with nothing to say.
+ * payment, a loan to return, the questions, then an observation (В7) in its place unless the day is `quiet`, else
+ * how yesterday went. Null on a day with nothing to say. A payment due today or tomorrow is not said here since
+ * ЧЛ6: the «Платежи» section of «Сегодня» says it.
  */
 export function dayPhrase(i: PhraseInput): Phrase | null {
   if (i.needsPlan) return { text: "Нужен план до дохода. Это пара минут: выберите сумму на день.", action: { kind: "bridge" } };
@@ -93,13 +94,6 @@ export function dayPhrase(i: PhraseInput): Phrase | null {
   if (i.questions > 0) {
     const words = ["вопрос ждёт", "вопроса ждут", "вопросов ждут"][pluralIndex(i.questions)];
     return { text: `${i.questions} ${words} ответа. Это пять секунд, и лимит станет точнее.`, action: { kind: "questions" } };
-  }
-
-  const tomorrow = shiftDate(i.today, 1);
-  const soon = byDate.find((p) => p.dueOn <= tomorrow);
-  if (soon) {
-    const when = soon.dueOn === i.today ? "Сегодня" : "Завтра";
-    return { text: `${when} платёж: ${soon.name}, ${formatMoney(soon.amount)}. Он уже учтён в лимите.`, action: { kind: "pay", payment: soon } };
   }
 
   const o = i.quiet ? null : i.observation;

@@ -28,6 +28,7 @@ import { DayPhraseRow } from "../components/today/DayPhraseRow";
 import { Freshness } from "../components/today/Freshness";
 import { LimitCard, isOverLimit } from "../components/today/LimitCard";
 import { LoadError } from "../components/today/LoadError";
+import { PaymentsSection } from "../components/today/PaymentsSection";
 import { QuestionsSheet, openQuestions } from "../components/today/QuestionsSheet";
 import { TodayHeader, TodayHeaderProfileOnly } from "../components/today/TodayHeader";
 import { UntilIncomeCard } from "../components/today/UntilIncomeCard";
@@ -40,6 +41,8 @@ type Props = {
   onOpenActivity: (day?: string) => void;
   /** Opens the operations on the category and days of the phrase's observation (task В7). */
   onOpenObservation?: (category: string, from: string, to: string) => void;
+  /** Opens the «План» tab, from «Ещё N» under the payments (task ЧЛ6); without it that row is plain text. */
+  onOpenPlan?: () => void;
   /** Test seam for the current moment. */
   now?: () => Date;
 };
@@ -49,7 +52,7 @@ type Props = {
  * while their call runs, the payment being marked paid, the settings) and the figures more than one section reads.
  * Each section lives in its own file in `components/today/` and says its contract there.
  */
-export function Today({ onOpenActivity, onOpenObservation, now = () => new Date() }: Props) {
+export function Today({ onOpenActivity, onOpenObservation, onOpenPlan, now = () => new Date() }: Props) {
   const insets = useSafeAreaInsets();
   const today = useToday();
   const pull = usePullRefresh(today.refetch);
@@ -145,6 +148,8 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
     // carries the same bad news, so the day stays quiet.
     quiet: data.pace !== undefined || over,
   });
+  /** «Оплачено» for a payment of `upcoming`; one it does not list opens nothing. */
+  const pay = (id: string) => setPaying(data.upcoming.find((p) => p.id === id) ?? null);
   const act = (action: PhraseAction) => {
     if (action.kind === "pay") setPaying(action.payment);
     else if (action.kind === "observation") {
@@ -177,9 +182,11 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
             daysLeft={state.daysLeft}
             today={data.date}
             onOpenPace={() => setSheet("pace")}
-            onPay={(id) => setPaying(data.upcoming.find((p) => p.id === id) ?? null)}
+            onPay={pay}
           />
         )}
+        {/* Draws nothing without a runway (an older server), an income date or payments. */}
+        <PaymentsSection runway={runway} upcoming={data.upcoming} today={data.date} onPay={pay} onOpenPlan={onOpenPlan} />
         {notes.map((b) => (
           <BadCaseCard key={b.id} text={b.text} />
         ))}

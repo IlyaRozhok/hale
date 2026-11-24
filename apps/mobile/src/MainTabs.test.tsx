@@ -7,10 +7,13 @@ import { fakeApi, renderWith } from "./testing";
 jest.mock("./screens/Today", () => {
   const { Pressable, Text } = jest.requireActual("react-native");
   return {
-    Today: ({ onOpenActivity }: { onOpenActivity: (day?: string) => void }) => (
-      <Pressable accessibilityRole="button" onPress={() => onOpenActivity("2026-11-20")}>
-        <Text>экран Сегодня</Text>
-      </Pressable>
+    Today: ({ onOpenActivity, onOpenPlan }: { onOpenActivity: (day?: string) => void; onOpenPlan?: () => void }) => (
+      <>
+        <Pressable accessibilityRole="button" onPress={() => onOpenActivity("2026-11-20")}>
+          <Text>экран Сегодня</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="ещё платежи" onPress={() => onOpenPlan?.()} />
+      </>
     ),
   };
 });
@@ -91,6 +94,13 @@ describe("MainTabs: the native tab bar", () => {
     expect(tab("План").props.accessibilityState.selected).toBe(true);
     await fireEvent.press(tab("Итоги"));
     expect(await screen.findByText("экран Итоги")).toBeTruthy();
+  });
+
+  it("«Ещё N» under the payments of «Сегодня» opens the «План» tab (ЧЛ6)", async () => {
+    await renderWith(<MainTabs />, cash());
+    await fireEvent.press(screen.getByRole("button", { name: "ещё платежи" }));
+    expect(await screen.findByText("экран План")).toBeTruthy();
+    expect(tab("План").props.accessibilityState.selected).toBe(true);
   });
 
   it("«Добавить» opens the add sheet over the current tab and does not leave it (Д5)", async () => {

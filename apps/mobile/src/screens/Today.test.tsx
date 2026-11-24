@@ -53,11 +53,14 @@ describe("Today, normal mode", () => {
     expect(screen.getByText("7 ноя · доход")).toBeTruthy();
     expect(screen.queryByText(/до зарплаты/)).toBeNull();
     expect(screen.queryByText(/сейчас$/)).toBeNull();
-    // The list of payments and the goals live in Plan: Today is the limit, one phrase, the runway
-    // and under it the one nearest payment.
+    // The whole list of payments and the goals live in Plan: Today is the limit, one phrase, the runway
+    // and under it the «Платежи» section with the nearest payments (ЧЛ6).
     expect(screen.queryByText("Скоро платить")).toBeNull();
-    expect(screen.getByText("Ближайший платёж")).toBeTruthy();
-    expect(screen.getByText("Квартплата · 6 ноя")).toBeTruthy();
+    expect(screen.queryByText("Ближайший платёж")).toBeNull();
+    expect(screen.getByText("Платежи")).toBeTruthy();
+    expect(screen.getByText("1 до дохода · ₴17,000")).toBeTruthy();
+    expect(screen.getByText("Квартплата")).toBeTruthy();
+    expect(screen.getByText("через 4 дня")).toBeTruthy();
     expect(screen.getByText("₴17,000")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Добавить операцию" })).toBeNull();
     expect(levelOf()).toBe("bar:ok:0.72");
@@ -71,6 +74,9 @@ describe("Today, normal mode", () => {
     expect(screen.queryByText(/^Запас/)).toBeNull();
     expect(screen.queryByText("До дохода")).toBeNull();
     expect(screen.queryByText(/останется/)).toBeNull();
+    // Nor the payments (ЧЛ6): they are the runway's.
+    expect(screen.queryByText("Платежи")).toBeNull();
+    expect(screen.queryByText("Квартплата")).toBeNull();
   });
 
   it("reads the same while no income date is known", async () => {
@@ -122,11 +128,25 @@ describe("Today, normal mode", () => {
       expect(await screen.findByText("Пришло на Binance?")).toBeTruthy();
     });
 
-    it("a payment due tomorrow is named, and a tap opens how it was paid", async () => {
+    it("a payment due tomorrow is not the phrase (ЧЛ6): the «Платежи» section says «завтра», and a tap there opens how it was paid", async () => {
       const upcoming = [{ id: "1", name: "Квартплата", amount: 1_700_000, dueOn: "2026-11-03", kind: "obligation", currency: "UAH" }];
-      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ upcoming })) }));
-      await fireEvent.press(await screen.findByText("Завтра платёж: Квартплата, ₴17,000. Он уже учтён в лимите."));
+      const runway = { ...todayFixture().runway!, events: [{ id: "1", date: "2026-11-03", name: "Квартплата", amount: 1_700_000 }] };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ upcoming, runway })) }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Квартплата, завтра, ₴17,000: отметить оплату" }));
       expect(await screen.findByRole("button", { name: "Оплачено" })).toBeTruthy();
+      expect(screen.queryByText(/Завтра платёж/)).toBeNull();
+      expect(screen.queryByText(/учтён в лимите/)).toBeNull();
+    });
+
+    it("a payment due today is not the phrase either: the section says «сегодня» in sand", async () => {
+      const upcoming = [{ id: "1", name: "Квартплата", amount: 1_700_000, dueOn: "2026-11-02", kind: "obligation", currency: "UAH" }];
+      const runway = { ...todayFixture().runway!, events: [{ id: "1", date: "2026-11-02", name: "Квартплата", amount: 1_700_000 }] };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ upcoming, runway })) }));
+      // «сегодня» is also the left end of the chart's axis: the one meant is the section's.
+      const section = within(await screen.findByTestId("payments-section"));
+      expect(section.getByText("2")).toBeTruthy();
+      expect(StyleSheet.flatten(section.getByText("сегодня").props.style).color).toBe(tokens.color.limit.low);
+      expect(screen.queryByText(/Сегодня платёж/)).toBeNull();
     });
 
     it("an overdue payment comes first of all", async () => {
@@ -136,19 +156,111 @@ describe("Today, normal mode", () => {
       expect(await screen.findByText("Квартплата ждёт с 28 окт. Отметьте, если уже оплачено.")).toBeTruthy();
     });
 
-    it("the nearest payment under the graph opens how it was paid", async () => {
+    it("an overdue payment in the section: its real day at the left and «ждёт с …» in sand, never «просрочен»", async () => {
+      // The runway puts an overdue payment on today; `upcoming` keeps the day it was due.
+      const upcoming = [
+        { id: "2", name: "Интернет", amount: 35_000, dueOn: "2026-11-04", kind: "obligation", currency: "UAH" },
+        { id: "1", name: "Квартплата", amount: 1_700_000, dueOn: "2026-10-28", kind: "obligation", currency: "UAH" },
+      ];
+      const events = [
+        { id: "2", date: "2026-11-04", name: "Интернет", amount: 35_000 },
+        { id: "1", date: "2026-11-02", name: "Квартплата", amount: 1_700_000 },
+      ];
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ upcoming, runway: { ...todayFixture().runway!, events } })) }));
+      const waits = await screen.findByText("ждёт с 28 окт");
+      expect(StyleSheet.flatten(waits.props.style).color).toBe(tokens.color.limit.low);
+      const section = within(screen.getByTestId("payments-section"));
+      expect(section.getByText("2 до дохода · ₴17,350")).toBeTruthy();
+      expect(section.getByText("28")).toBeTruthy();
+      expect(section.getByText("окт")).toBeTruthy();
+      const names = section.getAllByText(/^(Квартплата|Интернет)$/).map((t) => t.props.children);
+      expect(names).toEqual(["Квартплата", "Интернет"]);
+      expect(screen.queryByText(/просроч/i)).toBeNull();
+      await fireEvent.press(section.getByRole("button", { name: "Квартплата, ждёт с 28 окт, ₴17,000: отметить оплату" }));
+      expect(await screen.findByRole("button", { name: "Оплачено" })).toBeTruthy();
+    });
+
+    it("a row of «Платежи» opens how that payment was paid", async () => {
       await renderWith(<Today onOpenActivity={noop} />, fakeApi());
-      await fireEvent.press(await screen.findByRole("button", { name: "Ближайший платёж: Квартплата, 6 ноя, ₴17,000: отметить оплату" }));
+      await fireEvent.press(await screen.findByRole("button", { name: "Квартплата, через 4 дня, ₴17,000: отметить оплату" }));
       expect(await screen.findByRole("button", { name: "Оплачено" })).toBeTruthy();
       // The sheet is for that payment: its amount and day stand under the name.
       expect(screen.getByText(/^₴17,000 · /)).toBeTruthy();
     });
 
-    it("no payments before the income: no row under the graph", async () => {
+    it("no payments before the income: no «Платежи» section", async () => {
       const runway = { ...todayFixture().runway!, events: [] };
       await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ runway, upcoming: [] })) }));
       await screen.findByText("До дохода");
       expect(screen.queryByText("Ближайший платёж")).toBeNull();
+      expect(screen.queryByText("Платежи")).toBeNull();
+      expect(screen.queryByTestId("payments-section")).toBeNull();
+    });
+
+    it("no income date: no «Платежи» section; the payment is still reached through its day on the graph", async () => {
+      const runway = { ...todayFixture().runway!, incomeOn: null };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ runway })) }));
+      const chart = await screen.findByTestId("runway-chart");
+      expect(screen.queryByText("Платежи")).toBeNull();
+      await fireEvent(chart, "layout", { nativeEvent: { layout: { width: 400, height: 112 } } });
+      await fireEvent(chart, "responderGrant", { nativeEvent: { locationX: 320 } });
+      expect(screen.getByRole("button", { name: "Квартплата, ₴17,000: отметить оплату" })).toBeTruthy();
+    });
+
+    it("«Платежи» stands right after «До дохода» and before the notes", async () => {
+      const badCases = [{ id: "low:1", text: "Заметка о деньгах." }];
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ badCases })) }));
+      await screen.findByText("Платежи");
+      const texts = screen.getAllByText(/./).map((t) => t.props.children);
+      expect(texts.indexOf("7 ноя · доход")).toBeGreaterThan(-1);
+      expect(texts.indexOf("Платежи")).toBeGreaterThan(texts.indexOf("7 ноя · доход"));
+      expect(texts.indexOf("Заметка о деньгах.")).toBeGreaterThan(texts.indexOf("₴17,000"));
+    });
+
+    it("a payment `upcoming` does not list is shown but opens nothing", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ upcoming: [] })) }));
+      expect(await screen.findByLabelText("Квартплата, через 4 дня, ₴17,000")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /Квартплата, через 4 дня/ })).toBeNull();
+    });
+
+    describe("more than three payments", () => {
+      const events = [
+        { id: "1", date: "2026-11-03", name: "Квартплата", amount: 1_700_000 },
+        { id: "2", date: "2026-11-04", name: "Интернет", amount: 35_000 },
+        { id: "3", date: "2026-11-05", name: "Рассрочка", amount: 445_000 },
+        { id: "4", date: "2026-11-06", name: "Телефон", amount: 25_000 },
+        { id: "5", date: "2026-11-06", name: "Спортзал", amount: 100_000 },
+      ];
+      const many = () =>
+        todayFixture({
+          runway: { ...todayFixture().runway!, events },
+          upcoming: events.map((e) => ({ id: e.id, name: e.name, amount: e.amount, dueOn: e.date, kind: "obligation", currency: "UAH" })),
+        });
+
+      it("three are rows, the header counts them all, and «Ещё N · ₴сумма» opens the plan", async () => {
+        const onOpenPlan = jest.fn();
+        await renderWith(<Today onOpenActivity={noop} onOpenPlan={onOpenPlan} />, fakeApi({ today: jest.fn(async () => many()) }));
+        expect(await screen.findByText("5 до дохода · ₴23,050")).toBeTruthy();
+        const section = within(screen.getByTestId("payments-section"));
+        expect(section.getAllByRole("button", { name: /: отметить оплату$/ })).toHaveLength(3);
+        expect(section.queryByText("Телефон")).toBeNull();
+        expect(section.queryByText("Спортзал")).toBeNull();
+        await fireEvent.press(section.getByRole("button", { name: "Ещё 2 · ₴1,250" }));
+        expect(onOpenPlan).toHaveBeenCalledTimes(1);
+      });
+
+      it("without a way to the plan «Ещё» is plain text", async () => {
+        await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => many()) }));
+        expect(await screen.findByText("Ещё 2 · ₴1,250")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: /^Ещё/ })).toBeNull();
+      });
+
+      it("the second row opens «Оплачено» for its own payment", async () => {
+        await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => many()) }));
+        await fireEvent.press(await screen.findByRole("button", { name: "Интернет, через 2 дня, ₴350: отметить оплату" }));
+        expect(await screen.findByRole("button", { name: "Оплачено" })).toBeTruthy();
+        expect(screen.getByText(/^₴350 · /)).toBeTruthy();
+      });
     });
 
     it("a payment further away is reached through its day on the graph", async () => {
@@ -634,7 +746,10 @@ describe("Today, normal mode", () => {
     });
 
     it("has no red anywhere, and a legend of two: within and over the limit (А24)", async () => {
-      await openIt();
+      // Every text on the screen is looked at, the ones behind the calendar too. «Платежи» there says «завтра» in sand
+      // for a payment at the door (ЧЛ6), so this day has no payments: the test is about the calendar's own colours.
+      const runway = { ...todayFixture().runway!, events: [] };
+      await openIt({ today: jest.fn(async () => todayFixture({ date: "2026-11-05", streak: 2, runway })) });
       expect(screen.getByText("в лимите")).toBeTruthy();
       expect(screen.getByText("больше лимита")).toBeTruthy();
       expect(screen.queryByText(/сверх|150%/)).toBeNull();

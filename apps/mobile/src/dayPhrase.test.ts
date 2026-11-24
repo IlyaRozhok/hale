@@ -49,15 +49,14 @@ describe("dayPhrase", () => {
     expect(dayPhrase(input({ questions: 5 }))).toEqual({ text: "5 вопросов ждут ответа. Это пять секунд, и лимит станет точнее.", action: { kind: "questions" } });
   });
 
-  it("then a payment due today or tomorrow, already inside the limit", () => {
+  it("a payment due today or tomorrow is not the phrase any more (ЧЛ6): the «Платежи» section says it", () => {
     const soon = pay({ dueOn: "2026-11-12" });
-    expect(dayPhrase(input({ upcoming: [soon], yesterday: yesterday() }))).toEqual({
-      text: "Завтра платёж: Квартплата, ₴17,000. Он уже учтён в лимите.",
-      action: { kind: "pay", payment: soon },
-    });
-    expect(dayPhrase(input({ upcoming: [pay({ dueOn: "2026-11-11" })] }))!.text).toBe("Сегодня платёж: Квартплата, ₴17,000. Он уже учтён в лимите.");
-    // Two days away is not news yet.
-    expect(dayPhrase(input({ upcoming: [pay({ dueOn: "2026-11-13" })] }))).toBeNull();
+    // The day falls through to how yesterday went, or to nothing.
+    expect(dayPhrase(input({ upcoming: [soon], yesterday: yesterday() }))).toEqual({ text: "Вчера осталось ₴340.", action: { kind: "calendar" } });
+    expect(dayPhrase(input({ upcoming: [pay({ dueOn: "2026-11-11" })] }))).toBeNull();
+    expect(dayPhrase(input({ upcoming: [soon] }))).toBeNull();
+    // An overdue one is still said.
+    expect(dayPhrase(input({ upcoming: [soon, pay({ id: "2", dueOn: "2026-11-10" })] }))!.text).toBe("Квартплата ждёт с 10 ноя. Отметьте, если уже оплачено.");
   });
 
   it("then how yesterday went: what was left, and that the limit grew or the streak goes on", () => {
@@ -141,13 +140,14 @@ describe("dayPhrase", () => {
       expect(dayPhrase(input({ observation: o }))!.action).toEqual({ kind: "observation", observation: o });
     });
 
-    it("comes last: a plan, a payment, a loan or a question is said instead", () => {
+    it("comes last: a plan, an overdue payment, a loan or a question is said instead", () => {
       const o = spike();
       expect(dayPhrase(input({ needsPlan: true, observation: o }))!.action.kind).toBe("bridge");
       expect(dayPhrase(input({ upcoming: [pay({ dueOn: "2026-11-06" })], observation: o }))!.action.kind).toBe("pay");
       expect(dayPhrase(input({ loansDue: [{ id: 3, amount: 500_000, dueOn: "2026-11-11" }], observation: o }))!.action.kind).toBe("loans");
       expect(dayPhrase(input({ questions: 1, observation: o }))!.action.kind).toBe("questions");
-      expect(dayPhrase(input({ upcoming: [pay({ dueOn: "2026-11-12" })], observation: o }))!.action.kind).toBe("pay");
+      // A payment at the door is the «Платежи» section's to say (ЧЛ6): it no longer takes the observation's place.
+      expect(dayPhrase(input({ upcoming: [pay({ dueOn: "2026-11-12" })], observation: o }))!.action.kind).toBe("observation");
     });
 
     it("is not said on a day that already has bad news (Я2): yesterday is said instead, or nothing", () => {
