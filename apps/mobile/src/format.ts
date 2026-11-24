@@ -234,6 +234,16 @@ export function pluralIndex(n: number): 0 | 1 | 2 {
   return u >= 2 && u <= 4 ? 1 : 2;
 }
 
+/** Whole phrases, one per plural form, so they can be translated as they are. */
+const DAYS = ["{n} день", "{n} дня", "{n} дней"] as const;
+const DAYS_TO_INCOME = ["До дохода {n} день.", "До дохода {n} дня.", "До дохода {n} дней."] as const;
+
+/** "1 день", "4 дня", "10 дней". */
+export const daysText = (n: number): string => DAYS[pluralIndex(n)].replace("{n}", String(n));
+
+/** The «До дохода» section named aloud with its count of days: "До дохода 4 дня." */
+export const daysToIncomeLabel = (n: number): string => DAYS_TO_INCOME[pluralIndex(n)].replace("{n}", String(n));
+
 export const operationsText = (n: number): string => `${n} ${["операция", "операции", "операций"][pluralIndex(n)]}`;
 
 /** A name as shown: its first letter capital, the rest as it was (a rule's bank text comes in lower case, Я6). */

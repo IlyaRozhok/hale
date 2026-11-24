@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View, type GestureResponderEvent, type Lay
 import { tokens } from "@hale/tokens";
 import type { RunwayDto } from "@hale/contracts";
 import { dayMonth, formatMoney } from "../format";
-import { nearestDay, runwayChart } from "../runwayChart";
+import { nearestDay, runwayChart, runwayLabels, textWidth, type LabelBox } from "../runwayChart";
 import { runwayGesture, type RunwayGesture } from "../runwayGesture";
 import { Icon } from "./Icon";
 import { RunwayLine } from "./RunwayLine";
@@ -15,6 +15,18 @@ const PAD = 10;
 const EDGE = 6;
 /** Closer than this to the right edge, the zero label turns to the left so it stays inside. */
 const LABEL = 96;
+/**
+ * The labels on the chart (task ЧЛ5) are placed before they are drawn, so their widths are reckoned from the text's
+ * length, a little wide: a label reckoned too narrow would have its name cut for nothing.
+ */
+const PAY_FONT = 11;
+const PAY_LINE = 14;
+const PAY_CHAR = 6.6;
+const PAY_GAP = 4;
+/** The widest a payment's label gets; a longer name ends in an ellipsis, the amount stays whole. */
+const PAY_MAX = 172;
+const END_CHAR = 7.4;
+const ZERO_CHAR = 7;
 
 const dateOf = (iso: string) => {
   const { day, month } = dayMonth(iso);
@@ -26,6 +38,11 @@ const dateOf = (iso: string) => {
  * no dates but its two ends; a touch tells a day's date, money and payment, and with `onPay` the
  * payment there can be pressed to mark it paid. While no day is touched, the same place under the
  * graph names the nearest payment of the stretch, if there is one.
+ *
+ * On the chart itself (task ЧЛ5): the name and the amount of the two largest payments by their points, and at the
+ * end of the line what is left by the income (only with an income date and a reserve not below zero; below zero the
+ * sand «ноль» label speaks). `runwayLabels` finds their places; they take no touch and are hidden from assistive
+ * tech, which gets the whole picture in words: on the head, or on the chart when the head is not shown.
  */
 export function Runway({
   runway,
@@ -102,6 +119,38 @@ export function Runway({
     </>
   );
   const crossX = chart.cross === null ? null : EDGE + chart.cross;
+  const zeroText = crossX !== null && runway.zeroOn ? `ноль ${dateOf(runway.zeroOn)}` : null;
+  /** The «ноль» label turns to the left of the crossing near the right edge. */
+  const zeroTurned = crossX !== null && crossX > width - LABEL;
+  const inner = Math.max(0, width - EDGE * 2);
+  const endText = runway.incomeOn && runway.reserve >= 0 ? formatMoney(runway.reserve) : null;
+  const labels = useMemo(() => {
+    // Where the «ноль» label is written, in the chart's own points, so nothing is put over it.
+    const zeroWidth = zeroText === null ? 0 : textWidth(zeroText, ZERO_CHAR, inner);
+    const zero: LabelBox[] =
+      zeroText === null || chart.cross === null
+        ? []
+        : [
+            zeroTurned
+              ? { left: chart.cross - space.sm - zeroWidth, top: chart.zeroY + 2, width: zeroWidth, height: type.caption.lineHeight }
+              : { left: chart.cross + space.sm, top: chart.zeroY - 18, width: zeroWidth, height: type.caption.lineHeight },
+          ];
+    return runwayLabels({
+      chart,
+      points: runway.points,
+      events: runway.events,
+      width: inner,
+      height: HEIGHT,
+      paymentWidth: (e) => textWidth(`${e.name} ${formatMoney(-e.amount)}`, PAY_CHAR, PAY_MAX) + PAY_GAP,
+      paymentHeight: PAY_LINE,
+      end: endText === null ? null : { width: textWidth(endText, END_CHAR, inner), height: type.caption.lineHeight },
+      taken: zero,
+    });
+  }, [chart, runway.points, runway.events, inner, endText, zeroText, zeroTurned]);
+  const named = labels.payments.flatMap((l) => {
+    const event = runway.events.find((e) => e.id === l.id);
+    return event ? [{ ...l, event }] : [];
+  });
   return (
     <View style={styles.root}>
       {showHead && (
@@ -115,6 +164,10 @@ export function Runway({
           <View
             testID="runway-chart"
             style={styles.chart}
+            // Without the head nothing else says the picture in words: the chart is then one thing to read.
+            accessible={!showHead}
+            accessibilityRole={showHead ? undefined : "image"}
+            accessibilityLabel={showHead ? undefined : label}
             onLayout={(e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width))}
             onStartShouldSetResponder={() => true}
             onResponderGrant={onGrant}
@@ -128,16 +181,37 @@ export function Runway({
             {width > 0 && <RunwayLine chart={chart} width={width} height={HEIGHT} edge={EDGE} selected={selected} />}
             {crossX !== null && runway.zeroOn && (
               <Text
-                style={[styles.cross, crossX > width - LABEL ? { right: width - crossX + space.sm, top: chart.zeroY + 2 } : { left: crossX + space.sm, top: chart.zeroY - 18 }]}
+                style={[styles.cross, zeroTurned ? { right: width - crossX + space.sm, top: chart.zeroY + 2 } : { left: crossX + space.sm, top: chart.zeroY - 18 }]}
                 pointerEvents="none"
               >
-                {`ноль ${dateOf(runway.zeroOn)}`}
+                {zeroText}
               </Text>
+            )}
+            {width > 0 && (named.length > 0 || labels.end) && (
+              <View testID="runway-labels" style={StyleSheet.absoluteFill} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                {named.map(({ event, side, box }) => (
+                  <View
+                    key={event.id}
+                    testID={`runway-label-${event.id}`}
+                    style={[styles.payLabel, { top: box.top, maxWidth: box.width }, side === "right" ? { left: EDGE + box.left } : { right: width - EDGE - box.left - box.width }]}
+                  >
+                    <Text style={styles.payLabelName} numberOfLines={1}>
+                      {event.name}
+                    </Text>
+                    <Text style={styles.payLabelAmount}>{formatMoney(-event.amount)}</Text>
+                  </View>
+                ))}
+                {labels.end && endText !== null && (
+                  <Text testID="runway-end" style={[styles.endLabel, { top: labels.end.top, right: EDGE, width: labels.end.width }]} numberOfLines={1}>
+                    {endText}
+                  </Text>
+                )}
+              </View>
             )}
           </View>
           <View style={styles.axis}>
             <Text style={styles.tick}>сегодня</Text>
-            <Text style={styles.tick}>{runway.incomeOn ? `доход ${dateOf(runway.endOn)}` : dateOf(runway.endOn)}</Text>
+            <Text style={styles.tick}>{runway.incomeOn ? `${dateOf(runway.endOn)} · доход` : dateOf(runway.endOn)}</Text>
           </View>
           {/* Under the graph, so the line is never covered: the touched day, and its payments to press. */}
           {point && (
@@ -182,21 +256,27 @@ export function Runway({
 }
 
 const styles = StyleSheet.create({
-  root: { gap: space.sm, paddingHorizontal: space.xs },
+  root: { gap: space.sm },
   head: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: space.md },
   title: { ...type.label, color: color.fg.muted },
   figure: { ...type.title, color: color.fg.default, fontVariant: ["tabular-nums"] },
   short: { color: color.limit.low },
-  chart: { height: HEIGHT },
-  axis: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: EDGE },
+  // The chart reaches past the section's edges by the room its end dots need, so the line itself starts and ends
+  // where the texts above and below do.
+  chart: { height: HEIGHT, marginHorizontal: -EDGE },
+  axis: { flexDirection: "row", justifyContent: "space-between" },
   tick: { ...type.caption, color: color.fg.subtle },
   cross: { ...type.caption, position: "absolute", color: color.limit.low },
-  note: { paddingHorizontal: EDGE, paddingTop: space.xs },
+  payLabel: { position: "absolute", flexDirection: "row", alignItems: "center", gap: PAY_GAP, height: PAY_LINE },
+  payLabelName: { ...type.caption, fontSize: PAY_FONT, lineHeight: PAY_LINE, color: color.fg.muted, flexShrink: 1 },
+  payLabelAmount: { ...type.caption, fontSize: PAY_FONT, lineHeight: PAY_LINE, color: color.fg.muted, fontVariant: ["tabular-nums"] },
+  endLabel: { ...type.caption, position: "absolute", textAlign: "right", color: color.fg.default, fontVariant: ["tabular-nums"] },
+  note: { paddingTop: space.xs },
   noteRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md },
   noteHead: { ...type.label, color: color.fg.default, fontVariant: ["tabular-nums"] },
   noteLine: { ...type.caption, color: color.fg.muted, fontVariant: ["tabular-nums"] },
   pay: { minHeight: touchMin },
-  next: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.sm, paddingHorizontal: EDGE, paddingTop: space.xs },
+  next: { minHeight: touchMin, flexDirection: "row", alignItems: "center", gap: space.sm, paddingTop: space.xs },
   nextText: { flex: 1 },
   nextCaption: { ...type.caption, color: color.fg.subtle },
   nextName: { ...type.label, color: color.fg.default },

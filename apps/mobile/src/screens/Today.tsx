@@ -174,6 +174,7 @@ export function Today({ onOpenActivity, onOpenObservation, now = () => new Date(
             runway={runway}
             pace={pace}
             runwayLimit={runwayLimit}
+            daysLeft={state.daysLeft}
             today={data.date}
             onOpenPace={() => setSheet("pace")}
             onPay={(id) => setPaying(data.upcoming.find((p) => p.id === id) ?? null)}
