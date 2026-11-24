@@ -2,9 +2,9 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { PaceDto, RunwayDto } from "@hale/contracts";
 import { daysText, daysToIncomeLabel, formatMoney } from "../../format";
-import { Icon } from "../Icon";
 import { paceLineText } from "../PaceSheet";
 import { Runway } from "../Runway";
+import { SECTION_MARGIN, SectionHead } from "./SectionHead";
 
 const { color, space, touchMin, type } = tokens;
 
@@ -57,6 +57,8 @@ export function UntilIncomeCard({
   const reserveLine = !pace && calmLine === null ? `Запас к доходу ${formatMoney(runway.reserve)}` : null;
   const days = daysLeft !== undefined && Number.isInteger(daysLeft) && daysLeft > 0 ? daysLeft : null;
   const headLabel = days !== null ? daysToIncomeLabel(days) : "До дохода.";
+  // «До дохода» on the left, the days to the income on the right; with a chevron when the top opens the pace.
+  const caption = days !== null ? daysText(days) : null;
 
   return (
     <View testID="until-income" style={styles.section}>
@@ -69,7 +71,7 @@ export function UntilIncomeCard({
           onPress={onOpenPace}
           style={styles.untilTop}
         >
-          {incomeOn && <UntilHead days={days} chevron />}
+          {incomeOn && <SectionHead title="До дохода" caption={caption} chevron />}
           <Text style={styles.paceText}>{paceLine}</Text>
           {/* One whole sentence (texts are not assembled from pieces), so the amount is not set in bold as in the mockup. */}
           {stepLine && <Text style={styles.untilUnder}>{stepLine}</Text>}
@@ -81,7 +83,7 @@ export function UntilIncomeCard({
             accessibilityLabel={[headLabel, calmLine && calmUnder ? `${calmLine}, ${calmUnder}.` : `${reserveLine}.`].join(" ")}
             style={styles.untilTop}
           >
-            <UntilHead days={days} chevron={false} />
+            <SectionHead title="До дохода" caption={caption} />
             {calmLine && <Text style={styles.calmText}>{calmLine}</Text>}
             {calmUnder && <Text style={styles.untilUnder}>{calmUnder}</Text>}
             {reserveLine && <Text style={[styles.calmText, runway.reserve < 0 && styles.reserveShort]}>{reserveLine}</Text>}
@@ -93,29 +95,9 @@ export function UntilIncomeCard({
   );
 }
 
-/** «До дохода» on the left, the days to the income on the right; with a chevron when the top opens the pace. */
-function UntilHead({ days, chevron }: { days: number | null; chevron: boolean }) {
-  return (
-    <View style={styles.untilHead}>
-      <Text style={styles.untilTitle}>До дохода</Text>
-      <View style={styles.untilSide}>
-        {days !== null && <Text style={styles.untilDays}>{daysText(days)}</Text>}
-        {chevron && <Icon name="chevron" color={color.list.chevron} size={14} />}
-      </View>
-    </View>
-  );
-}
-
-/** The mockup's distance from one section to the next; the screen already puts `space.md` between its rows. */
-const SECTION_GAP = 26;
-
 const styles = StyleSheet.create({
-  section: { marginTop: SECTION_GAP - space.md, gap: space.md },
+  section: { marginTop: SECTION_MARGIN, gap: space.md },
   untilTop: { minHeight: touchMin, gap: space.xs },
-  untilHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: space.md },
-  untilSide: { flexDirection: "row", alignItems: "center", gap: 2 },
-  untilTitle: { ...type.label, fontSize: 15, fontWeight: "600", color: color.fg.default },
-  untilDays: { ...type.label, fontWeight: "400", color: color.fg.muted, fontVariant: ["tabular-nums"] },
   paceText: { ...type.title, fontSize: 18, color: color.limit.low },
   calmText: { ...type.title, fontSize: 18, color: color.fg.default, fontVariant: ["tabular-nums"] },
   untilUnder: { ...type.body, color: color.fg.muted, fontVariant: ["tabular-nums"] },

@@ -14,6 +14,8 @@ import {
   longDate,
   dayMonthLong,
   inMonth,
+  dueWords,
+  inDaysText,
   dueLabel, formatMoney, formatOriginal, kyivDate, formatStamp, formatUsd, isIsoDate, parseBalance, parseHryvnias, shiftDate, shortDate, taxQuarterOfDue,
 } from "./format";
 
@@ -279,5 +281,31 @@ describe("daysText, daysToIncomeLabel", () => {
     expect(daysToIncomeLabel(1)).toBe("До дохода 1 день.");
     expect(daysToIncomeLabel(3)).toBe("До дохода 3 дня.");
     expect(daysToIncomeLabel(18)).toBe("До дохода 18 дней.");
+  });
+});
+
+describe("dueWords, inDaysText (ЧЛ6)", () => {
+  it("«через N дней» is one whole phrase per plural form, never glued from pieces", () => {
+    expect(inDaysText(1)).toBe("через 1 день");
+    expect(inDaysText(4)).toBe("через 4 дня");
+    expect(inDaysText(8)).toBe("через 8 дней");
+    expect(inDaysText(11)).toBe("через 11 дней");
+    expect(inDaysText(21)).toBe("через 21 день");
+    expect(inDaysText(22)).toBe("через 22 дня");
+  });
+
+  it("says when a payment is due: today, tomorrow, in so many days", () => {
+    expect(dueWords("2026-11-24", "2026-11-24")).toBe("сегодня");
+    expect(dueWords("2026-11-25", "2026-11-24")).toBe("завтра");
+    expect(dueWords("2026-11-26", "2026-11-24")).toBe("через 2 дня");
+    expect(dueWords("2026-11-28", "2026-11-24")).toBe("через 4 дня");
+    expect(dueWords("2026-12-02", "2026-11-24")).toBe("через 8 дней");
+    expect(dueWords("2026-12-15", "2026-11-24")).toBe("через 21 день");
+  });
+
+  it("an overdue payment waits since its day, and is never called «просрочен»", () => {
+    expect(dueWords("2026-11-06", "2026-11-24")).toBe("ждёт с 6 ноя");
+    expect(dueWords("2026-11-23", "2026-11-24")).toBe("ждёт с 23 ноя");
+    expect(dueWords("2026-10-30", "2026-11-24")).not.toMatch(/просроч/i);
   });
 });

@@ -50,21 +50,20 @@ describe("Runway", () => {
     expect(StyleSheet.flatten(screen.getByText("₴3,100").props.style).color).toBe(tokens.color.fg.default);
     expect(screen.getByText("сегодня")).toBeTruthy();
     expect(screen.getByText("15 ноя · доход")).toBeTruthy();
-    // No list of dates under the graph: they come by touch. The one payment named is the nearest.
+    // No list of dates under the graph: they come by touch.
     expect(screen.queryByText(/12 ноя/)).toBeNull();
     expect(screen.queryByText(/14 ноя/)).toBeNull();
   });
 
-  it("leaves its reserve to the screen when asked (ЯМ1): the chart, the axis and the nearest payment stay", async () => {
+  it("leaves its reserve to the screen when asked (ЯМ1): the chart and the axis stay", async () => {
     await render(<Runway runway={run()} today="2026-11-11" showHead={false} />);
     expect(screen.queryByText("Запас к доходу")).toBeNull();
     expect(screen.queryByText("₴3,100")).toBeNull();
     expect(screen.getByTestId("runway-chart")).toBeTruthy();
     expect(screen.getByText("15 ноя · доход")).toBeTruthy();
-    expect(screen.getByText("Ближайший платёж")).toBeTruthy();
   });
 
-  describe("the nearest payment", () => {
+  describe("under the graph (ЧЛ6)", () => {
     const two = () =>
       run({
         events: [
@@ -74,53 +73,37 @@ describe("Runway", () => {
         ],
       });
 
-    it("stands under the graph as one quiet row: the caption, the name with the day, the amount", async () => {
-      await render(<Runway runway={two()} today="2026-11-11" />);
-      expect(screen.getByText("Ближайший платёж")).toBeTruthy();
-      expect(screen.getByText("Квартплата · 13 ноя")).toBeTruthy();
-      const amount = screen.getByText("₴3,000");
-      expect(StyleSheet.flatten(amount.props.style).fontVariant).toEqual(["tabular-nums"]);
-      // One row, the earliest: the others are reached through the graph.
+    it("no «Ближайший платёж» row: the payments are listed by the «Платежи» section of the screen", async () => {
+      await render(<Runway runway={two()} today="2026-11-11" onPay={jest.fn()} />);
+      await measure();
+      expect(screen.queryByText("Ближайший платёж")).toBeNull();
+      // No payment is named in words under the graph, and nothing is there to press, while no day is touched.
+      expect(screen.queryByText(/Квартплата/)).toBeNull();
       expect(screen.queryByText(/Интернет/)).toBeNull();
       expect(screen.queryByText(/Телефон/)).toBeNull();
-      // Nothing to press unless the screen can mark a payment paid.
+      expect(screen.queryByText("₴3,000")).toBeNull();
       expect(screen.queryByRole("button")).toBeNull();
     });
 
-    it("a payment standing on today is named so", async () => {
-      await render(<Runway runway={run({ events: [{ id: "7", date: "2026-11-11", name: "Квартплата", amount: 300_000 }] })} today="2026-11-11" />);
-      expect(screen.getByText("Квартплата · сегодня")).toBeTruthy();
-    });
-
-    it("no payments before the income: no row", async () => {
-      await render(<Runway runway={run({ events: [] })} today="2026-11-11" onPay={jest.fn()} />);
-      expect(screen.getByTestId("runway-chart")).toBeTruthy();
-      expect(screen.queryByText("Ближайший платёж")).toBeNull();
+    it("a payment standing on today is not named there either", async () => {
+      await render(<Runway runway={run({ events: [{ id: "7", date: "2026-11-11", name: "Квартплата", amount: 300_000 }] })} today="2026-11-11" onPay={jest.fn()} />);
+      await measure();
+      expect(screen.queryByText(/Квартплата ·/)).toBeNull();
       expect(screen.queryByRole("button")).toBeNull();
     });
 
-    it("gives its place to the touched day and comes back when the day is let go", async () => {
+    it("the touched day's note stands there, and nothing is left when the day is let go", async () => {
       await render(<Runway runway={run()} today="2026-11-11" onPay={jest.fn()} />);
       await measure();
-      expect(screen.getByText("Ближайший платёж")).toBeTruthy();
       await touch(100);
       expect(screen.getByText("12 ноя · ₴12,260")).toBeTruthy();
-      expect(screen.queryByText("Ближайший платёж")).toBeNull();
-      expect(screen.queryByText(/Квартплата/)).toBeNull();
       await touch(100);
       expect(screen.queryByText(/12 ноя/)).toBeNull();
-      expect(screen.getByText("Ближайший платёж")).toBeTruthy();
-      expect(screen.getByText("Квартплата · 13 ноя")).toBeTruthy();
-    });
-
-    it("pressed, opens how that payment was paid", async () => {
-      const onPay = jest.fn();
-      await render(<Runway runway={two()} today="2026-11-11" onPay={onPay} />);
-      const row = screen.getByRole("button", { name: "Ближайший платёж: Квартплата, 13 ноя, ₴3,000: отметить оплату" });
-      expect(StyleSheet.flatten(row.props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
-      await fireEvent.press(row);
-      expect(onPay).toHaveBeenCalledTimes(1);
-      expect(onPay).toHaveBeenCalledWith("7");
+      expect(screen.queryByText("Ближайший платёж")).toBeNull();
+      expect(screen.queryByText(/Квартплата/)).toBeNull();
+      // The touched day with a payment still offers to mark it paid.
+      await touch(190);
+      expect(screen.getByRole("button", { name: "Квартплата, ₴3,000: отметить оплату" })).toBeTruthy();
     });
   });
 
@@ -181,7 +164,6 @@ describe("Runway", () => {
       await giveUp();
       // The day's note is «12 ноя · ₴…»; the axis ends in «15 ноя · доход» (ЧЛ5).
       expect(screen.queryByText(/ноя · ₴/)).toBeNull();
-      expect(screen.getByText("Ближайший платёж")).toBeTruthy();
     });
 
     it("a scroll that starts on the chosen day does not put the day away", async () => {

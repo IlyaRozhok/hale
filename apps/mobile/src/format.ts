@@ -47,21 +47,30 @@ export function lastDays(today: string, days: number): { from: string; to: strin
   return { from: shiftDate(today, 1 - days), to: today };
 }
 
-function plural(n: number, one: string, few: string, many: string): string {
-  const m10 = n % 10;
-  const m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
-  return many;
-}
+const daysBetween = (from: string, to: string) => Math.round((toUtc(to) - toUtc(from)) / DAY_MS);
+
+/** Whole phrases, one per plural form, so they can be translated as they are. */
+const IN_DAYS = ["через {n} день", "через {n} дня", "через {n} дней"] as const;
+const WAITS_SINCE = "ждёт с {date}";
+
+/** "через 1 день", "через 4 дня", "через 8 дней". */
+export const inDaysText = (n: number): string => IN_DAYS[pluralIndex(n)].replace("{n}", String(n));
 
 /** "сегодня", "завтра", "через 4 дня"; a past date is just the short date, "1 ноя". */
 export function dueLabel(dueOn: string, today: string): string {
-  const days = Math.round((toUtc(dueOn) - toUtc(today)) / DAY_MS);
-  if (days < 0) return shortDate(dueOn);
+  return daysBetween(today, dueOn) < 0 ? shortDate(dueOn) : dueWords(dueOn, today);
+}
+
+/**
+ * When a payment is due, in words (task ЧЛ6): "сегодня", "завтра", "через 4 дня"; one that is past its day
+ * "ждёт с 6 ноя". The word «просрочен» is never said.
+ */
+export function dueWords(dueOn: string, today: string): string {
+  const days = daysBetween(today, dueOn);
+  if (days < 0) return WAITS_SINCE.replace("{date}", shortDate(dueOn));
   if (days === 0) return "сегодня";
   if (days === 1) return "завтра";
-  return `через ${days} ${plural(days, "день", "дня", "дней")}`;
+  return inDaysText(days);
 }
 
 /** A number as two digits: 5 -> "05". */
