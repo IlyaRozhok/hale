@@ -4,6 +4,8 @@ import {
   cardTransferTitle,
   dayHeader,
   dayMonth,
+  daysText,
+  daysToIncomeLabel,
   firstCapital,
   formatDollars,
   formatSignedMoney,
@@ -260,5 +262,22 @@ describe("dates in words (В4)", () => {
     expect(firstCapital("ёлка")).toBe("Ёлка");
     expect(firstCapital("2 кофе")).toBe("2 кофе");
     expect(firstCapital("")).toBe("");
+  });
+});
+
+describe("daysText, daysToIncomeLabel", () => {
+  it("a count of days as one whole phrase in the right form", () => {
+    expect(daysText(1)).toBe("1 день");
+    expect(daysText(4)).toBe("4 дня");
+    expect(daysText(10)).toBe("10 дней");
+    expect(daysText(11)).toBe("11 дней");
+    expect(daysText(21)).toBe("21 день");
+    expect(daysText(22)).toBe("22 дня");
+  });
+
+  it("the same for the section's spoken name", () => {
+    expect(daysToIncomeLabel(1)).toBe("До дохода 1 день.");
+    expect(daysToIncomeLabel(3)).toBe("До дохода 3 дня.");
+    expect(daysToIncomeLabel(18)).toBe("До дохода 18 дней.");
   });
 });

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen, within } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { RunwayDto } from "@hale/contracts";
@@ -40,6 +40,7 @@ const touch = (x: number, type: "responderGrant" | "responderMove" = "responderG
 /** Whether the chart lets the page take the touch now (the page asks when it wants to scroll). */
 const yields = () => screen.getByTestId("runway-chart").props.onResponderTerminationRequest() as boolean;
 const giveUp = () => fireEvent(screen.getByTestId("runway-chart"), "responderTerminate");
+const HIDDEN = { includeHiddenElements: true };
 const measure = () => fireEvent(screen.getByTestId("runway-chart"), "layout", { nativeEvent: { layout: { width: 400, height: 112 } } });
 
 describe("Runway", () => {
@@ -48,7 +49,7 @@ describe("Runway", () => {
     expect(screen.getByText("Запас к доходу")).toBeTruthy();
     expect(StyleSheet.flatten(screen.getByText("₴3,100").props.style).color).toBe(tokens.color.fg.default);
     expect(screen.getByText("сегодня")).toBeTruthy();
-    expect(screen.getByText("доход 15 ноя")).toBeTruthy();
+    expect(screen.getByText("15 ноя · доход")).toBeTruthy();
     // No list of dates under the graph: they come by touch. The one payment named is the nearest.
     expect(screen.queryByText(/12 ноя/)).toBeNull();
     expect(screen.queryByText(/14 ноя/)).toBeNull();
@@ -59,7 +60,7 @@ describe("Runway", () => {
     expect(screen.queryByText("Запас к доходу")).toBeNull();
     expect(screen.queryByText("₴3,100")).toBeNull();
     expect(screen.getByTestId("runway-chart")).toBeTruthy();
-    expect(screen.getByText("доход 15 ноя")).toBeTruthy();
+    expect(screen.getByText("15 ноя · доход")).toBeTruthy();
     expect(screen.getByText("Ближайший платёж")).toBeTruthy();
   });
 
@@ -178,7 +179,8 @@ describe("Runway", () => {
       await touch(300, "responderMove", 60);
       expect(screen.queryByText(/14 ноя/)).toBeNull();
       await giveUp();
-      expect(screen.queryByText(/ноя ·/)).toBeNull();
+      // The day's note is «12 ноя · ₴…»; the axis ends in «15 ноя · доход» (ЧЛ5).
+      expect(screen.queryByText(/ноя · ₴/)).toBeNull();
       expect(screen.getByText("Ближайший платёж")).toBeTruthy();
     });
 
@@ -241,6 +243,130 @@ describe("Runway", () => {
   it("says the whole picture in words for assistive tech", async () => {
     await render(<Runway runway={shortRun()} today="2026-11-11" />);
     expect(screen.getByLabelText("Запас к доходу −₴2,400. Деньги до нуля 14 ноя. Платежи: Квартплата 13 ноя, ₴3,000.")).toBeTruthy();
+  });
+
+  describe("the labels on the chart (ЧЛ5)", () => {
+    const three = () =>
+      run({
+        events: [
+          { id: "9", date: "2026-11-14", name: "Интернет", amount: 40_000 },
+          { id: "7", date: "2026-11-13", name: "Квартплата", amount: 300_000 },
+          { id: "8", date: "2026-11-12", name: "Телефон", amount: 20_000 },
+        ],
+      });
+
+    it("names a payment by its point: the name and the amount with a minus, quiet and on one line", async () => {
+      await render(<Runway runway={run()} today="2026-11-11" />);
+      // Nothing is placed before the chart knows its width.
+      expect(screen.queryByTestId("runway-label-7", HIDDEN)).toBeNull();
+      await measure();
+      const label = screen.getByTestId("runway-label-7", HIDDEN);
+      const name = within(label).getByText("Квартплата", HIDDEN);
+      const amount = within(label).getByText("−₴3,000", HIDDEN);
+      expect(name.props.numberOfLines).toBe(1);
+      expect(StyleSheet.flatten(name.props.style).color).toBe(tokens.color.fg.muted);
+      expect(StyleSheet.flatten(amount.props.style).color).toBe(tokens.color.fg.muted);
+      expect(StyleSheet.flatten(amount.props.style).fontVariant).toEqual(["tabular-nums"]);
+      // Inside the chart, and never wider than its box: a long name is cut, the amount is not.
+      const box = StyleSheet.flatten(label.props.style);
+      expect(box.position).toBe("absolute");
+      expect(box.maxWidth).toBeGreaterThan(0);
+      expect(box.maxWidth).toBeLessThanOrEqual(400);
+      expect(StyleSheet.flatten(name.props.style).flexShrink).toBe(1);
+    });
+
+    it("no more than the two largest payments are named", async () => {
+      await render(<Runway runway={three()} today="2026-11-11" />);
+      await measure();
+      expect(screen.getByTestId("runway-label-7", HIDDEN)).toBeTruthy();
+      expect(screen.getByTestId("runway-label-9", HIDDEN)).toBeTruthy();
+      expect(screen.queryByTestId("runway-label-8", HIDDEN)).toBeNull();
+    });
+
+    it("the end of the line says what is left by the income, in the text's own colour, at the right edge", async () => {
+      await render(<Runway runway={run()} today="2026-11-11" showHead={false} />);
+      await measure();
+      const end = screen.getByTestId("runway-end", HIDDEN);
+      expect(end.props.children).toBe("₴3,100");
+      const style = StyleSheet.flatten(end.props.style);
+      expect(style.color).toBe(tokens.color.fg.default);
+      expect(style.fontVariant).toEqual(["tabular-nums"]);
+      expect(style.position).toBe("absolute");
+      expect(style.textAlign).toBe("right");
+    });
+
+    it("below zero the sand «ноль» speaks alone: no figure at the end", async () => {
+      await render(<Runway runway={shortRun()} today="2026-11-11" showHead={false} />);
+      await measure();
+      expect(screen.getByText("ноль 14 ноя", HIDDEN)).toBeTruthy();
+      expect(screen.queryByTestId("runway-end", HIDDEN)).toBeNull();
+      // The payment is still named.
+      expect(screen.getByTestId("runway-label-7", HIDDEN)).toBeTruthy();
+    });
+
+    it("with no income date there is no figure at the end either, while the payment is still named", async () => {
+      await render(<Runway runway={run({ incomeOn: null })} today="2026-11-11" />);
+      await measure();
+      expect(screen.getByTestId("runway-label-7", HIDDEN)).toBeTruthy();
+      expect(screen.queryByTestId("runway-end", HIDDEN)).toBeNull();
+    });
+
+    it("an amount is never cut: the figure at the end has no width of its own and no label grows with the system text", async () => {
+      for (const reserve of [0, 500, 50_000, 99_900, 310_000]) {
+        const points = run().points.map((p, i, all) => (i === all.length - 1 ? { ...p, balance: reserve } : p));
+        const { unmount } = await render(<Runway runway={run({ reserve, points })} today="2026-11-11" showHead={false} />);
+        await measure();
+        const end = screen.getByTestId("runway-end", HIDDEN);
+        const style = StyleSheet.flatten(end.props.style);
+        // Held by its right edge only: whatever the text really measures, it is drawn whole.
+        expect(style.width).toBeUndefined();
+        expect(style.maxWidth).toBeUndefined();
+        expect(style.right).toBeGreaterThanOrEqual(0);
+        expect(end.props.numberOfLines).toBeUndefined();
+        expect(end.props.allowFontScaling).toBe(false);
+        await unmount();
+      }
+      await render(<Runway runway={run()} today="2026-11-11" />);
+      await measure();
+      const label = screen.getByTestId("runway-label-7", HIDDEN);
+      const name = within(label).getByText("Квартплата", HIDDEN);
+      const amount = within(label).getByText("−₴3,000", HIDDEN);
+      expect(name.props.allowFontScaling).toBe(false);
+      expect(amount.props.allowFontScaling).toBe(false);
+      // Only the name gives way in a narrow box.
+      expect(amount.props.numberOfLines).toBeUndefined();
+      expect(StyleSheet.flatten(amount.props.style).flexShrink).toBe(0);
+    });
+
+    it("a short name in capitals gets the room it needs", async () => {
+      // What these texts measure at 11 pt (San Francisco): the box must not be narrower, or the name is cut for nothing.
+      for (const [name, amount, needs] of [["ЖКХ", 99_900, 65.1], ["WWW", 50_000, 71.1], ["ШЩЖЮМ", 888_888_800, 127.7]] as const) {
+        const { unmount } = await render(<Runway runway={run({ events: [{ id: "7", date: "2026-11-12", name, amount }] })} today="2026-11-11" />);
+        await measure();
+        expect(StyleSheet.flatten(screen.getByTestId("runway-label-7", HIDDEN).props.style).maxWidth).toBeGreaterThanOrEqual(needs);
+        await unmount();
+      }
+    });
+
+    it("the labels take no touch and are not read one by one", async () => {
+      await render(<Runway runway={run()} today="2026-11-11" showHead={false} />);
+      await measure();
+      const labels = screen.getByTestId("runway-labels", HIDDEN);
+      expect(labels.props.pointerEvents).toBe("none");
+      expect(labels.props.accessibilityElementsHidden).toBe(true);
+      expect(labels.props.importantForAccessibility).toBe("no-hide-descendants");
+      expect(screen.queryByText("Квартплата")).toBeNull();
+      expect(screen.queryByText("₴3,100")).toBeNull();
+      // A touch on the label's own place still picks the day under it.
+      await touch(200);
+      expect(screen.getByText("13 ноя · ₴10,260")).toBeTruthy();
+      expect(screen.getByText("Квартплата −₴3,000")).toBeTruthy();
+    });
+
+    it("without its head the chart itself says the whole picture in words", async () => {
+      await render(<Runway runway={shortRun()} today="2026-11-11" showHead={false} />);
+      expect(screen.getByLabelText("Запас к доходу −₴2,400. Деньги до нуля 14 ноя. Платежи: Квартплата 13 ноя, ₴3,000.")).toBeTruthy();
+    });
   });
 
   it("on the income's day there is nothing to draw: only the figure", async () => {

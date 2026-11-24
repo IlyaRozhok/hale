@@ -47,9 +47,10 @@ describe("Today, normal mode", () => {
     expect(screen.getByText("₴720")).toBeTruthy();
     expect(screen.getByText("потрачено ₴280 из ₴1,000")).toBeTruthy();
     expect(screen.getByText("До дохода")).toBeTruthy();
+    expect(screen.getByText("17 дней")).toBeTruthy();
     expect(screen.getByText("К доходу останется ₴13,280")).toBeTruthy();
     expect(screen.queryByText("Запас к доходу")).toBeNull();
-    expect(screen.getByText("доход 7 ноя")).toBeTruthy();
+    expect(screen.getByText("7 ноя · доход")).toBeTruthy();
     expect(screen.queryByText(/до зарплаты/)).toBeNull();
     expect(screen.queryByText(/сейчас$/)).toBeNull();
     // The list of payments and the goals live in Plan: Today is the limit, one phrase, the runway
@@ -797,7 +798,9 @@ describe("Today, «До дохода»: the pace and the reserve in one card (А
       const first = await screen.findByText(line);
       expect(StyleSheet.flatten(first.props.style).color).toBe(tokens.color.limit.low);
       expect(screen.getByText("До дохода")).toBeTruthy();
-      expect(screen.getByText("7 ноя")).toBeTruthy();
+      // The header counts the days; the income's date stands under the axis (ЧЛ5).
+      expect(screen.getByText("18 дней")).toBeTruthy();
+      expect(screen.queryByText("7 ноя")).toBeNull();
       const step = screen.getByText(STEP);
       expect(StyleSheet.flatten(step.props.style).color).toBe(tokens.color.fg.muted);
       expect(screen.queryByText("Запас к доходу")).toBeNull();
@@ -805,7 +808,7 @@ describe("Today, «До дохода»: the pace and the reserve in one card (А
       expect(screen.queryByText(/^К доходу останется/)).toBeNull();
       // The chart and the nearest payment stay in the same card.
       expect(screen.getByTestId("runway-chart")).toBeTruthy();
-      expect(screen.getByText("доход 7 ноя")).toBeTruthy();
+      expect(screen.getByText("7 ноя · доход")).toBeTruthy();
     });
 
     it("the card stands under the limit card, the pace above the step, the chart under both", async () => {
@@ -818,9 +821,9 @@ describe("Today, «До дохода»: the pace and the reserve in one card (А
       expect(at(line)).toBeLessThan(at("сегодня"));
     });
 
-    it("«7 ноя ›» opens «Темп трат» with the two sentences; «Закрыть» closes it", async () => {
+    it("«18 дней ›» opens «Темп трат» with the two sentences; «Закрыть» closes it", async () => {
       await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => hardWithin()) }));
-      await fireEvent.press(await screen.findByText("7 ноя"));
+      await fireEvent.press(await screen.findByText("18 дней"));
       expect(await screen.findByText("Темп трат")).toBeTruthy();
       expect(screen.getByText("Последние 7 дней уходило около ₴4,600 в день. В таком темпе денег хватит до 4 ноя, а доход — 7 ноя.")).toBeTruthy();
       expect(screen.getByText("Если держаться лимита ₴2,300 в день, хватит до дохода и останется ₴13,280.")).toBeTruthy();
@@ -831,7 +834,7 @@ describe("Today, «До дохода»: the pace and the reserve in one card (А
 
     it("the top of the card tells assistive tech what it says and what it opens", async () => {
       await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => hardWithin()) }));
-      const head = await screen.findByRole("button", { name: `До дохода, 7 ноя. ${line} ${STEP}` });
+      const head = await screen.findByRole("button", { name: `До дохода 18 дней. ${line} ${STEP}` });
       expect(head.props.accessibilityHint).toBe(OPENS);
       expect(StyleSheet.flatten(head.props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
     });
@@ -858,7 +861,7 @@ describe("Today, «До дохода»: the pace and the reserve in one card (А
       const todayOnly = { ...pace, runOutOn: "2026-11-02", hint: undefined };
       await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => hardWithin({ pace: todayOnly })) }));
       expect(await screen.findByText("В таком темпе денег хватит только на сегодня.")).toBeTruthy();
-      await fireEvent.press(screen.getByText("7 ноя"));
+      await fireEvent.press(screen.getByText("18 дней"));
       expect(await screen.findByText(/хватит только на сегодня, а доход — 7 ноя\.$/)).toBeTruthy();
     });
 
@@ -868,7 +871,7 @@ describe("Today, «До дохода»: the pace and the reserve in one card (А
       expect(await screen.findByText(line)).toBeTruthy();
       expect(screen.queryByText(/останется/)).toBeNull();
       expect(screen.getByText("До дохода")).toBeTruthy();
-      await fireEvent.press(screen.getByText("7 ноя"));
+      await fireEvent.press(screen.getByText("18 дней"));
       expect(await screen.findByText("Темп трат")).toBeTruthy();
       expect(screen.queryByText(/останется/)).toBeNull();
     });
@@ -921,7 +924,7 @@ describe("Today, «До дохода»: the pace and the reserve in one card (А
       expect(screen.queryByText(/В таком темпе/)).toBeNull();
       expect(screen.queryByText("Запас к доходу")).toBeNull();
       expect(screen.queryByRole("button", { name: /До дохода/ })).toBeNull();
-      await fireEvent.press(screen.getByText("7 ноя"));
+      await fireEvent.press(screen.getByText("18 дней"));
       await settle();
       expect(screen.queryByText("Темп трат")).toBeNull();
     });
@@ -942,7 +945,7 @@ describe("Today, «До дохода»: the pace and the reserve in one card (А
       expect(screen.queryByText("Запас к доходу")).toBeNull();
       expect(screen.queryByText("−₴2,400")).toBeNull();
       expect(screen.queryByText(/останется/)).toBeNull();
-      expect(screen.getByLabelText("До дохода, 7 ноя. Запас к доходу −₴2,400.")).toBeTruthy();
+      expect(screen.getByLabelText("До дохода 18 дней. Запас к доходу −₴2,400.")).toBeTruthy();
     });
 
     it("with no limit to hold, no «останется»: the reserve as it always was", async () => {
@@ -955,7 +958,39 @@ describe("Today, «До дохода»: the pace and the reserve in one card (А
 
     it("the top of the card is read as one piece", async () => {
       await renderWith(<Today onOpenActivity={noop} />, fakeApi());
-      expect(await screen.findByLabelText("До дохода, 7 ноя. К доходу останется ₴13,280, если держаться лимита ₴1,000 в день.")).toBeTruthy();
+      expect(await screen.findByLabelText("До дохода 18 дней. К доходу останется ₴13,280, если держаться лимита ₴1,000 в день.")).toBeTruthy();
+    });
+
+    it("the header counts the days the limit is spread over, in the right form (ЧЛ5)", async () => {
+      for (const [daysLeft, text] of [[1, "1 день"], [4, "4 дня"], [10, "10 дней"]] as const) {
+        const state = { ...todayFixture().state, daysLeft };
+        const { unmount } = await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })) }));
+        const days = await screen.findByText(text);
+        expect(StyleSheet.flatten(days.props.style).color).toBe(tokens.color.fg.muted);
+        await unmount();
+      }
+    });
+
+    it("no count of days when the server names none: the header stays, the label reads without it", async () => {
+      const state = { ...todayFixture().state, daysLeft: 0 };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })) }));
+      expect(await screen.findByText("До дохода")).toBeTruthy();
+      expect(screen.queryByText(/^\d+ (день|дня|дней)$/)).toBeNull();
+      expect(screen.getByLabelText("До дохода. К доходу останется ₴13,280, если держаться лимита ₴1,000 в день.")).toBeTruthy();
+    });
+
+    it("the section is not a card: no fill, 26 of air above its header, the header in the text's own colour", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+      const section = StyleSheet.flatten((await screen.findByTestId("until-income")).props.style);
+      expect(section.backgroundColor).toBeUndefined();
+      expect(section.borderRadius).toBeUndefined();
+      expect(section.paddingHorizontal).toBeUndefined();
+      // The screen puts 12 between its rows; the section adds the rest.
+      expect(section.marginTop).toBe(26 - tokens.space.md);
+      const title = StyleSheet.flatten(screen.getByText("До дохода").props.style);
+      expect(title.fontSize).toBe(15);
+      expect(title.fontWeight).toBe("600");
+      expect(title.color).toBe(tokens.color.fg.default);
     });
 
     it("with no income date, the reserve for 30 days as before, with no «До дохода»", async () => {
