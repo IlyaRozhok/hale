@@ -59,7 +59,7 @@ A question to the owner is one, specific, with options and your recommendation. 
 - Fewer numbers and words on the screen. A new line on «Сегодня» has to earn its place.
 - Words: «доход», not «зарплата». Address the user as «вы». Amounts look like `₴1,240`, with a real minus sign «−».
 - Colours only from `@hale/tokens`; `pnpm check:colors` catches raw colours.
-- Liquid glass only on the limit card and on floating things (menu, «+», sheets). Everything else is text and solid cards.
+- Liquid glass only on floating things (menu, «+», sheets). Everything else is text and solid surfaces; «Сегодня» has no cards.
 - The interface is in Russian now; Ukrainian and English arrive at stage Е, so do not assemble new texts from pieces.
 - Money on the server is whole kopecks (`Minor`), dates are the Kyiv day. Calculations are pure functions in `domain/` with tests; services call them and do not repeat them.
 - The app must work with an older server: a new response field is optional.
