@@ -304,10 +304,48 @@ describe("Runway", () => {
       expect(screen.getByTestId("runway-label-7", HIDDEN)).toBeTruthy();
     });
 
-    it("with no income date there is no figure at the end either", async () => {
+    it("with no income date there is no figure at the end either, while the payment is still named", async () => {
       await render(<Runway runway={run({ incomeOn: null })} today="2026-11-11" />);
       await measure();
+      expect(screen.getByTestId("runway-label-7", HIDDEN)).toBeTruthy();
       expect(screen.queryByTestId("runway-end", HIDDEN)).toBeNull();
+    });
+
+    it("an amount is never cut: the figure at the end has no width of its own and no label grows with the system text", async () => {
+      for (const reserve of [0, 500, 50_000, 99_900, 310_000]) {
+        const points = run().points.map((p, i, all) => (i === all.length - 1 ? { ...p, balance: reserve } : p));
+        const { unmount } = await render(<Runway runway={run({ reserve, points })} today="2026-11-11" showHead={false} />);
+        await measure();
+        const end = screen.getByTestId("runway-end", HIDDEN);
+        const style = StyleSheet.flatten(end.props.style);
+        // Held by its right edge only: whatever the text really measures, it is drawn whole.
+        expect(style.width).toBeUndefined();
+        expect(style.maxWidth).toBeUndefined();
+        expect(style.right).toBeGreaterThanOrEqual(0);
+        expect(end.props.numberOfLines).toBeUndefined();
+        expect(end.props.allowFontScaling).toBe(false);
+        await unmount();
+      }
+      await render(<Runway runway={run()} today="2026-11-11" />);
+      await measure();
+      const label = screen.getByTestId("runway-label-7", HIDDEN);
+      const name = within(label).getByText("Квартплата", HIDDEN);
+      const amount = within(label).getByText("−₴3,000", HIDDEN);
+      expect(name.props.allowFontScaling).toBe(false);
+      expect(amount.props.allowFontScaling).toBe(false);
+      // Only the name gives way in a narrow box.
+      expect(amount.props.numberOfLines).toBeUndefined();
+      expect(StyleSheet.flatten(amount.props.style).flexShrink).toBe(0);
+    });
+
+    it("a short name in capitals gets the room it needs", async () => {
+      // What these texts measure at 11 pt (San Francisco): the box must not be narrower, or the name is cut for nothing.
+      for (const [name, amount, needs] of [["ЖКХ", 99_900, 65.1], ["WWW", 50_000, 71.1], ["ШЩЖЮМ", 888_888_800, 127.7]] as const) {
+        const { unmount } = await render(<Runway runway={run({ events: [{ id: "7", date: "2026-11-12", name, amount }] })} today="2026-11-11" />);
+        await measure();
+        expect(StyleSheet.flatten(screen.getByTestId("runway-label-7", HIDDEN).props.style).maxWidth).toBeGreaterThanOrEqual(needs);
+        await unmount();
+      }
     });
 
     it("the labels take no touch and are not read one by one", async () => {

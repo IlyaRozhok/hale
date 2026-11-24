@@ -107,6 +107,8 @@ describe("runwayLabels", () => {
       expect(b.left + b.width).toBeLessThanOrEqual(width);
       expect(b.top + b.height).toBeLessThanOrEqual(H);
       expect(onLine(b, chart.line)).toBe(false);
+      // Never across the zero line.
+      expect(b.top < chart.zeroY && b.top + b.height > chart.zeroY).toBe(false);
       for (const t of taken) expect(overlap(b, t)).toBe(false);
     }
     boxes.forEach((a, i) => boxes.slice(i + 1).forEach((b) => expect(overlap(a, b)).toBe(false)));
@@ -184,6 +186,12 @@ describe("runwayLabels", () => {
 
   it("when two labels cannot both fit, the smaller payment goes unnamed", () => {
     const r = place([30_000, 12_000, 11_000, 500], [ev("rent", 11, 17_000), ev("loan", 12, 900)], { width: 150, labelWidth: 120 });
+    expect(r.labels.payments.map((p) => p.id)).toEqual(["rent"]);
+    sound(r);
+  });
+
+  it("a payment that takes the money below zero is not named across the zero line", () => {
+    const r = place([5_000, 4_000, 3_000, -5_000, -10_000], [ev("rent", 13, 7_000)], { end: false });
     expect(r.labels.payments.map((p) => p.id)).toEqual(["rent"]);
     sound(r);
   });

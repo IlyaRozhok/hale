@@ -17,15 +17,20 @@ const EDGE = 6;
 const LABEL = 96;
 /**
  * The labels on the chart (task ЧЛ5) are placed before they are drawn, so their widths are reckoned from the text's
- * length, a little wide: a label reckoned too narrow would have its name cut for nothing.
+ * length. The reckoning is by the widest letters (capitals at 11 pt are about 8 pt each): a box too wide only adds
+ * air, one too narrow would cut a name for nothing. So that the reckoning holds, these labels do not grow with the
+ * system text size; they are hidden from assistive tech, and the same facts are in the chart's spoken label, in the
+ * line above the chart and in the note of a touched day, which do grow.
  */
 const PAY_FONT = 11;
 const PAY_LINE = 14;
-const PAY_CHAR = 6.6;
+const PAY_CHAR = 8;
 const PAY_GAP = 4;
 /** The widest a payment's label gets; a longer name ends in an ellipsis, the amount stays whole. */
-const PAY_MAX = 172;
-const END_CHAR = 7.4;
+const PAY_MAX = 180;
+/** The figure at the end is drawn whole whatever it measures; this is only the room kept free for it. */
+const END_CHAR = 8.5;
+const END_AIR = 4;
 const ZERO_CHAR = 7;
 
 const dateOf = (iso: string) => {
@@ -143,7 +148,7 @@ export function Runway({
       height: HEIGHT,
       paymentWidth: (e) => textWidth(`${e.name} ${formatMoney(-e.amount)}`, PAY_CHAR, PAY_MAX) + PAY_GAP,
       paymentHeight: PAY_LINE,
-      end: endText === null ? null : { width: textWidth(endText, END_CHAR, inner), height: type.caption.lineHeight },
+      end: endText === null ? null : { width: textWidth(endText, END_CHAR, inner) + END_AIR, height: type.caption.lineHeight },
       taken: zero,
     });
   }, [chart, runway.points, runway.events, inner, endText, zeroText, zeroTurned]);
@@ -195,14 +200,18 @@ export function Runway({
                     testID={`runway-label-${event.id}`}
                     style={[styles.payLabel, { top: box.top, maxWidth: box.width }, side === "right" ? { left: EDGE + box.left } : { right: width - EDGE - box.left - box.width }]}
                   >
-                    <Text style={styles.payLabelName} numberOfLines={1}>
+                    <Text style={styles.payLabelName} numberOfLines={1} allowFontScaling={false}>
                       {event.name}
                     </Text>
-                    <Text style={styles.payLabelAmount}>{formatMoney(-event.amount)}</Text>
+                    {/* The amount never gives way and is never cut: only the name shrinks. */}
+                    <Text style={styles.payLabelAmount} allowFontScaling={false}>
+                      {formatMoney(-event.amount)}
+                    </Text>
                   </View>
                 ))}
                 {labels.end && endText !== null && (
-                  <Text testID="runway-end" style={[styles.endLabel, { top: labels.end.top, right: EDGE, width: labels.end.width }]} numberOfLines={1}>
+                  // Held by its right edge alone, with no width of its own: an amount is never drawn with an ellipsis.
+                  <Text testID="runway-end" style={[styles.endLabel, { top: labels.end.top, right: EDGE }]} allowFontScaling={false}>
                     {endText}
                   </Text>
                 )}
@@ -269,7 +278,7 @@ const styles = StyleSheet.create({
   cross: { ...type.caption, position: "absolute", color: color.limit.low },
   payLabel: { position: "absolute", flexDirection: "row", alignItems: "center", gap: PAY_GAP, height: PAY_LINE },
   payLabelName: { ...type.caption, fontSize: PAY_FONT, lineHeight: PAY_LINE, color: color.fg.muted, flexShrink: 1 },
-  payLabelAmount: { ...type.caption, fontSize: PAY_FONT, lineHeight: PAY_LINE, color: color.fg.muted, fontVariant: ["tabular-nums"] },
+  payLabelAmount: { ...type.caption, fontSize: PAY_FONT, lineHeight: PAY_LINE, color: color.fg.muted, fontVariant: ["tabular-nums"], flexShrink: 0 },
   endLabel: { ...type.caption, position: "absolute", textAlign: "right", color: color.fg.default, fontVariant: ["tabular-nums"] },
   note: { paddingTop: space.xs },
   noteRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.md },

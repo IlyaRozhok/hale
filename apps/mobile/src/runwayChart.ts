@@ -103,8 +103,8 @@ const boxesMeet = (a: LabelBox, b: LabelBox) => a.left < b.left + b.width && b.l
 
 /**
  * Where the chart's labels stand (task ЧЛ5): the reserve at the end of the line and the two largest payments by
- * their points. A label is always inside the chart, off the line, off the other labels and off whatever `taken`
- * says is already written there (the «ноль» label). One that finds no such place is left out: the reserve is placed
+ * their points. A label is always inside the chart, off the line and the zero line, off the other labels and off
+ * whatever `taken` says is already written there (the «ноль» label). One that finds no such place is left out: the reserve is placed
  * first, then the larger payment, so it is the smaller payment that goes unnamed.
  *
  * Of equal amounts the earlier day is named, then the server's order. A payment's label tries, in turn: right of
@@ -141,7 +141,9 @@ export function runwayLabels({
     const span = lineSpan(line, left - LABEL_REACH, left + w + LABEL_REACH);
     if (!span) return null;
     if (where === "above") {
-      const top = Math.min(prefer ?? Infinity, span.top - LABEL_GAP - h);
+      let top = Math.min(prefer ?? Infinity, span.top - LABEL_GAP - h);
+      // Over a line that is below zero the label would lie across the zero line: it goes above that line instead.
+      if (top < zeroY && top + h > zeroY) top = zeroY - LABEL_REACH - h;
       const box = { left, top, width: w, height: h };
       return fits(box) ? box : null;
     }
