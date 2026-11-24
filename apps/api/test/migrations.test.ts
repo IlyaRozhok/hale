@@ -20,6 +20,7 @@ import { AccountCountsAsOwn1796774400000 } from "../src/db/migrations/0038-accou
 import { IncomeSources1796860800000 } from "../src/db/migrations/0039-income-sources";
 import { NotSubscriptions1796947200000 } from "../src/db/migrations/0040-not-subscriptions";
 import { GoalPlace1797033600000 } from "../src/db/migrations/0041-goal-place";
+import { LimitParts1797120000000 } from "../src/db/migrations/0042-limit-parts";
 import { CLASSIFIER_VERSION } from "../src/domain/classify";
 import { JobRunner } from "../src/mono/jobs/job-runner";
 import { ReclassifyService } from "../src/transactions/reclassify.service";
@@ -777,6 +778,38 @@ describe("migrations", () => {
     expect(await ds.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'goals' AND column_name IN ('currency', 'account_id', 'manual_balance_id')`)).toEqual([]);
     expect(await ds.query(goals)).toEqual(was);
     expect(await ds.query(`SELECT balance::float8 AS b FROM accounts WHERE id=$1`, [jar])).toEqual([{ b: 4000000 }]);
+    await ds.destroy();
+  });
+
+  it("0042 gives the day's row a place for the parts of its limit: existing days stay as they were, without parts (ЧЛ2)", async () => {
+    const url = await createTestDatabase();
+    const before = new DataSource({ type: "postgres", url, migrations: migrations.slice(0, migrations.indexOf(LimitParts1797120000000)) });
+    await before.initialize();
+    await before.runMigrations();
+    await before.query(
+      `INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ('2026-11-22', 100000, 'normal'), ('2026-11-23', 45000, 'bridge_start'), ('2026-11-24', 60000, 'bridge')`,
+    );
+    const days = `SELECT local_date::text AS date, daily_limit::float8 AS "limit", mode FROM daily_snapshots ORDER BY local_date`;
+    const was = await before.query(days);
+    await before.destroy();
+
+    const ds = createDataSource(url);
+    await ds.initialize();
+    await ds.runMigrations();
+    expect(await ds.query(days)).toEqual(was);
+    expect(await ds.query(`SELECT parts FROM daily_snapshots ORDER BY local_date`)).toEqual([{ parts: null }, { parts: null }, { parts: null }]);
+    expect(
+      await ds.query(`SELECT data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name='daily_snapshots' AND column_name='parts'`),
+    ).toEqual([{ data_type: "jsonb", is_nullable: "YES", column_default: null }]);
+    // A day fixed from now on carries its parts; one written without them is still accepted.
+    await ds.query(`INSERT INTO daily_snapshots (local_date, daily_limit, mode, parts) VALUES ('2026-11-25', 70000, 'normal', '{"dailyLimit":70000}')`);
+    await ds.query(`INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ('2026-11-26', 70000, 'normal')`);
+
+    // Down: the column goes; every day keeps its limit and mode.
+    const kept = await ds.query(days);
+    for (let i = migrations.indexOf(LimitParts1797120000000); i < migrations.length; i++) await ds.undoLastMigration();
+    expect(await ds.query(`SELECT column_name FROM information_schema.columns WHERE table_name='daily_snapshots' AND column_name='parts'`)).toEqual([]);
+    expect(await ds.query(days)).toEqual(kept);
     await ds.destroy();
   });
 });

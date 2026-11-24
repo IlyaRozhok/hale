@@ -310,3 +310,106 @@ describe("dayMark", () => {
     expect(dayMark({ live: "bridge", stored: null, previous: "other" })).toBe("bridge");
   });
 });
+
+describe("computeDaily parts of the limit (ЧЛ2)", () => {
+  // 10 days to the income; free money is what `cardsMoney` says; the cap is ₴1,000 a day.
+  const plain = (o: Partial<DailyInput> = {}) =>
+    input({ obligationsDue: 0, nextIncomeOn: "2026-11-12", foodFloor: 45_000, lifestyleCapMonthly: 3_000_000, ...o });
+  /** The limit as it was computed before the parts existed: the figures must not move. */
+  const before = (i: DailyInput, free: number, days: number) =>
+    free < 0 ? (i.bridgeDaily ?? i.foodFloor) : Math.floor(Math.min(Math.max(free / days, i.foodFloor), i.lifestyleCapMonthly / 30));
+
+  it("own money less each reserve is the free money, and the parts carry the engine's days and limit", () => {
+    const cases: Partial<DailyInput>[] = [
+      {},
+      { cardsMoney: 4_000_000, fopMoney: 700_000, binanceMoney: 123_456, taxReserve: 310_000, obligationsDue: 529_500, goalDue: 40_000, borrowed: 200_000 },
+      { cardsMoney: -500_000, obligationsDue: 300_000 },
+      { cardsMoney: 100, obligationsDue: 0, nextIncomeOn: null },
+      { cardsMoney: 30_000_000, obligationsDue: 0, bridgeDaily: 60_000 },
+      { bridgeDaily: 60_000, spentToday: 5_000 },
+    ];
+    for (const c of cases) {
+      const s = computeDaily(input(c));
+      const p = s.parts;
+      expect(p.own - p.taxReserve - p.obligationsDue - p.goalDue - p.borrowed).toBe(p.free);
+      expect(p.free).toBe(s.free);
+      expect(p.daysLeft).toBe(s.daysLeft);
+      expect(p.dailyLimit).toBe(s.dailyLimit);
+      expect(p.share).toBe(Math.floor(p.free / p.daysLeft));
+    }
+    expect(computeDaily(input(cases[1])).parts).toMatchObject({
+      own: 4_823_456, taxReserve: 310_000, obligationsDue: 529_500, goalDue: 40_000, borrowed: 200_000, free: 3_743_956,
+    });
+  });
+
+  it("the limit is the one computed before the parts existed, on a grid around every boundary", () => {
+    for (const cardsMoney of [-1, 0, 1, 9, 449_990, 450_000, 450_005, 999_999, 1_000_000, 1_000_007, 5_000_000]) {
+      for (const foodFloor of [0, 1, 45_000, 100_000, 100_001, 250_000]) {
+        for (const lifestyleCapMonthly of [1, 29, 30, 1_349_999, 1_350_000, 3_000_000, 3_000_029, 10_000_000]) {
+          for (const nextIncomeOn of ["2026-11-02", "2026-11-05", "2026-11-12", null]) {
+            for (const bridgeDaily of [null, 60_000]) {
+              const i = plain({ cardsMoney, foodFloor, lifestyleCapMonthly, nextIncomeOn, bridgeDaily });
+              const s = computeDaily(i);
+              expect(s.dailyLimit).toBe(before(i, s.free, s.daysLeft));
+              expect(s.parts.dailyLimit).toBe(s.dailyLimit);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it("share: free money over the days, between the recommended sum and the cap", () => {
+    const p = computeDaily(plain({ cardsMoney: 700_000 })).parts;
+    expect(p).toMatchObject({ rule: "share", share: 70_000, dailyLimit: 70_000, daysLeft: 10 });
+  });
+  it("share on a tie: a cap equal to the share lowers nothing, a recommended sum equal to it raises nothing", () => {
+    expect(computeDaily(plain({ cardsMoney: 1_000_000 })).parts).toMatchObject({ rule: "share", share: 100_000, dailyLimit: 100_000 });
+    expect(computeDaily(plain({ cardsMoney: 450_000 })).parts).toMatchObject({ rule: "share", share: 45_000, dailyLimit: 45_000 });
+    // The cap's kopeck fraction is dropped as the share's is: ₴30,000.29 a month is the same ₴1,000 a day.
+    expect(computeDaily(plain({ cardsMoney: 1_000_005, lifestyleCapMonthly: 3_000_029 })).parts).toMatchObject({ rule: "share", dailyLimit: 100_000 });
+  });
+  it("cap: the cap is below the share", () => {
+    const p = computeDaily(plain({ cardsMoney: 2_000_000 })).parts;
+    expect(p).toMatchObject({ rule: "cap", share: 200_000, dailyLimit: 100_000 });
+  });
+  it("floor: the share is below the recommended sum and the cap is not", () => {
+    const p = computeDaily(plain({ cardsMoney: 100_000 })).parts;
+    expect(p).toMatchObject({ rule: "floor", share: 10_000, dailyLimit: 45_000 });
+    // A cap equal to the recommended sum lowers nothing: the recommended sum raised the share.
+    expect(computeDaily(plain({ cardsMoney: 100_000, lifestyleCapMonthly: 1_350_000 })).parts).toMatchObject({ rule: "floor", dailyLimit: 45_000 });
+  });
+  it("cap wins whenever it is below the larger of the share and the recommended sum", () => {
+    const cap = { lifestyleCapMonthly: 900_000 }; // ₴300 a day, below the recommended ₴450
+    // Below both: the share ₴2,000, the recommended ₴450.
+    expect(computeDaily(plain({ ...cap, cardsMoney: 2_000_000 })).parts).toMatchObject({ rule: "cap", share: 200_000, dailyLimit: 30_000 });
+    // Below the recommended sum, above the share: still the cap, and the limit is then above the share (no reserve is left).
+    expect(computeDaily(plain({ ...cap, cardsMoney: 100_000 })).parts).toMatchObject({ rule: "cap", share: 10_000, dailyLimit: 30_000 });
+  });
+  it("floor in the shortage without a confirmed plan; plan with one", () => {
+    const none = computeDaily(input()).parts;
+    expect(none).toMatchObject({ rule: "floor", dailyLimit: 45_000, free: -1_197_000, share: Math.floor(-1_197_000 / 18) });
+    expect(computeDaily(input({ bridgeDaily: 30_000 })).parts).toMatchObject({ rule: "plan", dailyLimit: 30_000 });
+    // A plan of exactly the recommended sum is still the plan: the person confirmed it.
+    expect(computeDaily(input({ bridgeDaily: 45_000 })).parts).toMatchObject({ rule: "plan", dailyLimit: 45_000 });
+    // The cap does not apply in the shortage, as before.
+    expect(computeDaily(input({ lifestyleCapMonthly: 300_000 })).parts).toMatchObject({ rule: "floor", dailyLimit: 45_000 });
+  });
+  it("a plan left over while the money is above zero is not the rule", () => {
+    expect(computeDaily(plain({ cardsMoney: 700_000, bridgeDaily: 30_000 })).parts).toMatchObject({ rule: "share", dailyLimit: 70_000 });
+  });
+  it("marks the cap nobody chose, whatever the rule", () => {
+    expect(computeDaily(plain({ cardsMoney: 2_000_000 })).parts.capDefault).toBeUndefined();
+    expect(computeDaily(plain({ cardsMoney: 2_000_000, lifestyleCapDefault: true })).parts).toMatchObject({ rule: "cap", capDefault: true });
+    expect(computeDaily(plain({ cardsMoney: 700_000, lifestyleCapDefault: true })).parts).toMatchObject({ rule: "share", capDefault: true });
+  });
+  it("days are the engine's: 1 on the income day, 30 and a mark without an income date", () => {
+    expect(computeDaily(plain({ nextIncomeOn: "2026-11-02" })).parts).toMatchObject({ daysLeft: 1 });
+    expect(computeDaily(plain({ nextIncomeOn: "2026-11-02" })).parts.noIncomeDate).toBeUndefined();
+    expect(computeDaily(plain({ nextIncomeOn: null })).parts).toMatchObject({ daysLeft: 30, noIncomeDate: true });
+    expect(computeDaily(plain({ nextIncomeOn: "2026-11-01" })).parts).toMatchObject({ daysLeft: 30, noIncomeDate: true });
+  });
+  it("what is spent today is not a part: the same morning gives the same parts", () => {
+    expect(computeDaily(plain({ cardsMoney: 700_000, spentToday: 12_300 })).parts).toEqual(computeDaily(plain({ cardsMoney: 700_000 })).parts);
+  });
+});

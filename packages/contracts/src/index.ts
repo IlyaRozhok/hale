@@ -425,6 +425,40 @@ export interface BridgeStateDto {
   confirmed: boolean;
 }
 
+/**
+ * What the day's limit is made of (task ЧЛ2), in kopecks: the figures of the one computation that gave `dailyLimit`.
+ * They are stored with the day's limit when it is fixed and do not move with spending or a sync, so they can differ
+ * from the live `state.free` and `state.daysLeft`; own money is the morning's (what was spent today added back),
+ * except on a day a shortage plan is confirmed after an ordinary morning, when it is the money at that moment.
+ * - `own − taxReserve − obligationsDue − goalDue − borrowed = free`. `obligationsDue` includes loans with a return
+ *   date and no taxes (those are `taxReserve`); `goalDue` is always 0 for now.
+ * - `daysLeft` — the days `free` is spread over: 1 on the income day itself, 30 with `noIncomeDate`.
+ * - `share = floor(free / daysLeft)`; below zero in the shortage.
+ * - `rule` — what gave `dailyLimit`, compared in whole kopecks a day: `cap` — the month's cap / 30 is below the larger
+ *   of the share and the recommended sum (when `share < dailyLimit` under `cap`, the cap is above the share and
+ *   leaves no reserve); `share` — the share as it is (a tie with the cap or the recommended sum is the share);
+ *   `floor` — the recommended sum: the share is below it, or it is the shortage without a confirmed plan;
+ *   `plan` — the shortage with a confirmed plan, its sum.
+ * - `capDefault` — the cap in the computation was the default (₴100,000 a month), not one the person set.
+ * What was spent today and what is left are not here: they are live, `state.dailyLimit − state.leftToday` and
+ * `state.leftToday`. `dailyLimit` here always equals `state.dailyLimit`.
+ */
+export const limitParts = z.object({
+  own: z.number(),
+  taxReserve: z.number(),
+  obligationsDue: z.number(),
+  goalDue: z.number(),
+  borrowed: z.number(),
+  free: z.number(),
+  daysLeft: z.number().int().positive(),
+  share: z.number(),
+  rule: z.enum(["share", "cap", "floor", "plan"]),
+  dailyLimit: z.number(),
+  capDefault: z.literal(true).optional(),
+  noIncomeDate: z.literal(true).optional(),
+});
+export type LimitPartsDto = z.infer<typeof limitParts>;
+
 export interface DailyStateDto {
   mode: "normal" | "bridge";
   daysLeft: number;
@@ -442,6 +476,11 @@ export interface DailyStateDto {
    * from an older server.
    */
   shortageStart?: { nextLimit?: number };
+  /**
+   * What `dailyLimit` is made of (task ЧЛ2). Absent from an older server and on a day whose limit was fixed before
+   * the parts were stored: there is then nothing to explain the figure with.
+   */
+  parts?: LimitPartsDto;
 }
 
 /**

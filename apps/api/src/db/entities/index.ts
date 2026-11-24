@@ -192,6 +192,8 @@ export class DailySnapshot {
   @PrimaryColumn({ type: "date" }) local_date!: string;
   @money() daily_limit!: number;
   @Column({ type: "text" }) mode!: string;
+  /** What `daily_limit` is made of (ЧЛ2), written with it; null for a day fixed before the parts were stored. */
+  @Column({ type: "jsonb", nullable: true }) parts!: unknown;
 }
 
 @Entity("fx_rates")

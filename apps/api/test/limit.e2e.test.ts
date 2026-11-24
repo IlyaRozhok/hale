@@ -111,6 +111,13 @@ const tick = () => app.get(NotificationsService).tick();
 const row = async (): Promise<string | null> =>
   ((await ds.query(`SELECT row_to_json(d)::text AS r FROM daily_snapshots d WHERE local_date=$1`, [TODAY])) as { r: string }[])[0]?.r ?? null;
 
+/**
+ * Today's limit and mode, as Postgres prints them. Since ЧЛ2 the row also holds what its limit is made of (`parts`,
+ * covered by limit-parts.e2e.test.ts), so the tests that spell the row out name these columns.
+ */
+const fixedRow = async (): Promise<string | null> =>
+  ((await ds.query(`SELECT row_to_json(d)::text AS r FROM (SELECT local_date, daily_limit, mode FROM daily_snapshots WHERE local_date=$1) d`, [TODAY])) as { r: string }[])[0]?.r ?? null;
+
 /** A row the day cannot have come by honestly: any recompute replaces it. */
 const plant = () =>
   ds.query(`INSERT INTO daily_snapshots (local_date, daily_limit, mode) VALUES ($1, 1, 'normal') ON CONFLICT (local_date) DO UPDATE SET daily_limit=1, mode='normal'`, [TODAY]);
@@ -463,9 +470,9 @@ describe("what a recompute must keep", () => {
     await tx(card, -1_100_000, "spend");
     await setBalance(card, 2_900_000);
     await ensure();
-    expect(await row()).toBe(`{"local_date":"2026-11-02","daily_limit":100000,"mode":"bridge_start"}`);
+    expect(await fixedRow()).toBe(`{"local_date":"2026-11-02","daily_limit":100000,"mode":"bridge_start"}`);
     await api.post("/plan/payments", { kind: "obligation", name: "Страховка", amount: 10_000, currency: "UAH", due_on: "2026-11-05" }).expect(201);
-    expect(await row()).toBe(`{"local_date":"2026-11-02","daily_limit":99000,"mode":"bridge_start"}`);
+    expect(await fixedRow()).toBe(`{"local_date":"2026-11-02","daily_limit":99000,"mode":"bridge_start"}`);
     const r = await today();
     expect(r.state.shortageStart).toEqual({ nextLimit: 45_000 });
     expect(await calendarToday()).toMatchObject({ limit: 99_000, shortageStart: true });
@@ -478,7 +485,7 @@ describe("what a recompute must keep", () => {
     await payment("Rent", 1_700_000, "2026-11-06");
     await api.post("/bridge", { dailyAmount: 100_000 }).expect(201);
     await api.post("/plan/payments", { kind: "obligation", name: "Phone", amount: 100_000, currency: "UAH", due_on: "2026-11-10" }).expect(201);
-    expect(await row()).toBe(`{"local_date":"2026-11-02","daily_limit":100000,"mode":"bridge_start"}`);
+    expect(await fixedRow()).toBe(`{"local_date":"2026-11-02","daily_limit":100000,"mode":"bridge_start"}`);
     expect((await ds.query(`SELECT credit_plan::int AS c FROM bridge_plans`))[0].c).toBe(767_500 + 1_800_000);
     expect((await today()).state.dailyLimit).toBe(100_000);
   });

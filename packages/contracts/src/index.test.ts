@@ -6,6 +6,7 @@ import {
   insightsMonthDto,
   insightsMonthQuery,
   isoDate,
+  limitParts,
   observationRef,
   observationTodayDto,
   scheduledPaymentInput,
@@ -167,5 +168,17 @@ describe("observations (В7)", () => {
     expect(observationRef.safeParse({ kind: "spike", category: " " }).success).toBe(false);
     expect(observationRef.safeParse({ kind: "subscriptions", category: "cafe" }).success).toBe(false);
     expect(observationRef.safeParse({ kind: "other", category: null }).success).toBe(false);
+  });
+  it("reads the parts of the day's limit, with or without their marks, and nothing that is not them (ЧЛ2)", () => {
+    const parts = { own: 1_000_000, taxReserve: 0, obligationsDue: 0, goalDue: 0, borrowed: 0, free: 1_000_000, daysLeft: 10, share: 100_000, rule: "share", dailyLimit: 100_000 };
+    expect(limitParts.parse(parts)).toEqual(parts);
+    expect(limitParts.parse({ ...parts, rule: "cap", capDefault: true, noIncomeDate: true })).toEqual({ ...parts, rule: "cap", capDefault: true, noIncomeDate: true });
+    // The shortage: own and free money below zero, and the share with them.
+    expect(limitParts.safeParse({ ...parts, own: -100_000, free: -100_000, share: -10_000, rule: "plan" }).success).toBe(true);
+    expect(limitParts.safeParse(null).success).toBe(false);
+    expect(limitParts.safeParse({ ...parts, rule: "other" }).success).toBe(false);
+    expect(limitParts.safeParse({ ...parts, daysLeft: 0 }).success).toBe(false);
+    expect(limitParts.safeParse({ ...parts, dailyLimit: undefined }).success).toBe(false);
+    expect(limitParts.safeParse({ ...parts, capDefault: false }).success).toBe(false);
   });
 });

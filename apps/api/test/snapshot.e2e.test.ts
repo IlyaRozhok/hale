@@ -94,6 +94,12 @@ const ensure = () => app.get(TodayService).ensureSnapshot();
 /** Every column of every row, as Postgres prints them. */
 const snapshots = async (): Promise<string[]> =>
   ((await ds.query(`SELECT row_to_json(d)::text AS r FROM daily_snapshots d ORDER BY local_date`)) as { r: string }[]).map((x) => x.r);
+/**
+ * Each day's limit and mode, as Postgres prints them. Since ЧЛ2 a row also holds what its limit is made of
+ * (`parts`, covered by limit-parts.e2e.test.ts), so the tests that spell a row out name these columns.
+ */
+const fixedDays = async (): Promise<string[]> =>
+  ((await ds.query(`SELECT row_to_json(d)::text AS r FROM (SELECT local_date, daily_limit, mode FROM daily_snapshots) d ORDER BY local_date`)) as { r: string }[]).map((x) => x.r);
 const plans = async (): Promise<string[]> =>
   ((await ds.query(`SELECT row_to_json(p)::text AS r FROM bridge_plans p ORDER BY id`)) as { r: string }[]).map((x) => x.r);
 
@@ -153,10 +159,10 @@ describe("ensureSnapshot writes the day", () => {
   it("creates the row once, shares it between concurrent calls and never rewrites its limit", async () => {
     const card = await ordinary();
     await Promise.all([1, 2, 3, 4, 5].map(() => ensure()));
-    expect(await snapshots()).toEqual([`{"local_date":"2026-11-01","daily_limit":100000,"mode":"normal"}`, `{"local_date":"2026-11-02","daily_limit":100000,"mode":"normal"}`]);
+    expect(await fixedDays()).toEqual([`{"local_date":"2026-11-01","daily_limit":100000,"mode":"normal"}`, `{"local_date":"2026-11-02","daily_limit":100000,"mode":"normal"}`]);
     await setBalance(card, 5_000_000); // more money: a fresh limit would be ₴2,000, the fixed one stays
     await ensure();
-    expect((await snapshots())[1]).toBe(`{"local_date":"2026-11-02","daily_limit":100000,"mode":"normal"}`);
+    expect((await fixedDays())[1]).toBe(`{"local_date":"2026-11-02","daily_limit":100000,"mode":"normal"}`);
   });
 
   it("marks the day the shortage came on, as the read used to, and the calendar finds it", async () => {
@@ -165,14 +171,14 @@ describe("ensureSnapshot writes the day", () => {
     await tx(card, -1_100_000, "spend");
     await setBalance(card, 2_900_000);
     await ensure();
-    expect((await snapshots())[1]).toBe(`{"local_date":"2026-11-02","daily_limit":100000,"mode":"bridge_start"}`);
+    expect((await fixedDays())[1]).toBe(`{"local_date":"2026-11-02","daily_limit":100000,"mode":"bridge_start"}`);
     expect((await today()).state.shortageStart).toEqual({ nextLimit: 45_000 });
     expect((await calendar()).days.at(-1)).toEqual({ date: "2026-11-02", limit: 100_000, spent: 1_100_000, status: "today", shortageStart: true });
 
     // The shortage ends the same day: the mark goes, as before.
     await setBalance(card, 4_500_000);
     await ensure();
-    expect((await snapshots())[1]).toBe(`{"local_date":"2026-11-02","daily_limit":100000,"mode":"normal"}`);
+    expect((await fixedDays())[1]).toBe(`{"local_date":"2026-11-02","daily_limit":100000,"mode":"normal"}`);
     expect((await today()).state.shortageStart).toBeUndefined();
   });
 
@@ -204,10 +210,10 @@ describe("ensureSnapshot writes the day", () => {
     await tx(card, -1_100_000, "spend");
     await setBalance(card, 2_900_000);
     await api.post("/bridge", { dailyAmount: 60_000 }).expect(201);
-    expect((await snapshots())[1]).toBe(`{"local_date":"2026-11-02","daily_limit":60000,"mode":"bridge_start"}`);
+    expect((await fixedDays())[1]).toBe(`{"local_date":"2026-11-02","daily_limit":60000,"mode":"bridge_start"}`);
     await api.delete("/bridge").expect(200);
     // Fixed afresh as the day began: with today's spending added back the morning is ordinary (as before Б3).
-    expect((await snapshots())[1]).toBe(`{"local_date":"2026-11-02","daily_limit":100000,"mode":"bridge_start"}`);
+    expect((await fixedDays())[1]).toBe(`{"local_date":"2026-11-02","daily_limit":100000,"mode":"bridge_start"}`);
   });
 });
 
