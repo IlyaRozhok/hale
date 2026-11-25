@@ -2115,3 +2115,105 @@ describe("Today, the limit without a card (ЧЛ3)", () => {
     });
   });
 });
+
+describe("Today: the month (ЧЛ7)", () => {
+  it("shows the month's sum, average and shares from «Итоги», last on the screen: under «Платежи» and the notes", async () => {
+    const badCases = [{ id: "low:1", text: "Заметка о деньгах." }];
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ badCases })) }));
+    // Only the loaded month says its sum.
+    expect(await screen.findByText("₴18,220")).toBeTruthy();
+    const section = within(screen.getByTestId("month-section"));
+    expect(section.getByText("Ноябрь")).toBeTruthy();
+    expect(section.getByText("в среднем ₴1,139 в день")).toBeTruthy();
+    expect(section.getByText("1% к октябрю")).toBeTruthy();
+    expect(section.getAllByRole("button")).toHaveLength(5);
+    expect(section.getByRole("button", { name: "Продукты, ₴8,800, 48% трат" })).toBeTruthy();
+    const texts = screen.getAllByText(/./).map((t) => t.props.children);
+    expect(texts.indexOf("Ноябрь")).toBeGreaterThan(texts.indexOf("₴17,000"));
+    // A note is a warning: the month does not push it down.
+    expect(texts.indexOf("Заметка о деньгах.")).toBeGreaterThan(texts.indexOf("₴17,000"));
+    expect(texts.indexOf("Ноябрь")).toBeGreaterThan(texts.indexOf("Заметка о деньгах."));
+  });
+
+  it("asks for «Итоги» of the current month once, on a day with no observation at all", async () => {
+    const api = fakeApi();
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await screen.findByText("₴18,220");
+    expect(api.insights).toHaveBeenCalledTimes(1);
+    expect(api.insights).toHaveBeenCalledWith(undefined);
+  });
+
+  it("a pressed share says its phrase; the names under the bar are there for the eye", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+    await fireEvent.press(await screen.findByRole("button", { name: /^Кафе и рестораны, ₴3,200/ }));
+    expect(screen.getByText("Кафе и рестораны — ₴3,200, на ₴1,100 больше, чем в октябре за те же дни")).toBeTruthy();
+    expect(screen.getByText("Продукты", HIDDEN)).toBeTruthy();
+  });
+
+  it("the header opens «Итоги» when the screen is given a way there", async () => {
+    const onOpenInsights = jest.fn();
+    await renderWith(<Today onOpenActivity={noop} onOpenInsights={onOpenInsights} />, fakeApi());
+    await fireEvent.press(await screen.findByRole("button", { name: /^Ноябрь\. / }));
+    expect(onOpenInsights).toHaveBeenCalledTimes(1);
+  });
+
+  it("an older server has no «Итоги»: no section, the rest of the screen as it was", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ insights: jest.fn(async () => null) }));
+    expect(await screen.findByText("Платежи")).toBeTruthy();
+    expect(screen.getByText("Сегодня можно")).toBeTruthy();
+    expect(screen.queryByTestId("month-section")).toBeNull();
+  });
+
+  it("a failed request for «Итоги»: no section and no error on the screen", async () => {
+    const insights = jest.fn(async () => {
+      throw new NetworkError();
+    });
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ insights }));
+    expect(await screen.findByText("Платежи")).toBeTruthy();
+    await waitFor(() => expect(insights).toHaveBeenCalled());
+    expect(screen.queryByTestId("month-section")).toBeNull();
+    expect(screen.queryByText(/Не получилось/)).toBeNull();
+  });
+
+  it("«Сегодня» does not wait for «Итоги»: with the request still out the limit and the payments are there", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ insights: jest.fn(() => new Promise(() => undefined)) }));
+    expect(await screen.findByText("Сегодня можно")).toBeTruthy();
+    expect(screen.getByText("Платежи")).toBeTruthy();
+    expect(screen.queryByTestId("month-section")).toBeNull();
+  });
+
+  it("a month with nothing spent has no section", async () => {
+    const insights = jest.fn(async () => insightsFixture({ spent: 0, previousSpent: 0, categories: [] }));
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi({ insights }));
+    expect(await screen.findByText("Платежи")).toBeTruthy();
+    await waitFor(() => expect(insights).toHaveBeenCalled());
+    expect(screen.queryByTestId("month-section")).toBeNull();
+  });
+
+  it("the subscriptions' observation reads the same request: «Итоги» are asked for once", async () => {
+    const subs = { kind: "subscriptions" as const, period: null, category: null, spent: null, usual: null, amount: 51_900, from: "2026-11-19", to: "2026-12-01" };
+    const subscriptions = { monthly: 51_900, items: [{ key: "00000000000000a1", name: "Netflix", amount: 34_900, lastDate: "2026-10-22", raisedBy: 0, missed: 0 }] };
+    const insights = jest.fn(async () => insightsFixture({ subscriptions }));
+    const api = fakeApi({ observation: jest.fn(async () => subs), observationShown: jest.fn(async () => subs), insights });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await screen.findByText("₴18,220");
+    await waitFor(() => expect(api.observation).toHaveBeenCalled());
+    expect(insights).toHaveBeenCalledTimes(1);
+  });
+
+  it("a pull refreshes the month too, and the spinner does not wait for it", async () => {
+    let n = 0;
+    const insights = jest.fn(() => (n++ === 0 ? Promise.resolve(insightsFixture()) : new Promise<never>(() => undefined)));
+    const api = fakeApi({ insights });
+    await renderWith(<Today onOpenActivity={noop} />, api);
+    await screen.findByText("₴18,220");
+    await act(async () => {
+      screen.getByTestId("today-scroll").props.refreshControl.props.onRefresh();
+    });
+    await waitFor(() => expect(insights).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId("today-scroll").props.refreshControl.props.refreshing).toBe(false));
+    expect(api.today).toHaveBeenCalledTimes(2);
+    // The month already on the screen stays while the new one is on its way.
+    expect(screen.getByText("₴18,220")).toBeTruthy();
+  });
+});

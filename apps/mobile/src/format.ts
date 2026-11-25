@@ -201,6 +201,11 @@ const MONTHS_IN = ["январе", "феврале", "марте", "апреле
 /** A month in the prepositional case, for «в октябре». month is 1..12. */
 export const inMonth = (month: number): string => MONTHS_IN[month - 1]!;
 
+const MONTHS_TO = ["январю", "февралю", "марту", "апрелю", "маю", "июню", "июлю", "августу", "сентябрю", "октябрю", "ноябрю", "декабрю"];
+
+/** A month in the dative case, for «к октябрю». month is 1..12. */
+export const toMonth = (month: number): string => MONTHS_TO[month - 1]!;
+
 /** "2026-11-03" as "3 ноября 2026". */
 export function dateLabel(iso: string): string {
   return `${dayOf(iso)} ${MONTHS_FULL[monthOf(iso)]} ${iso.slice(0, 4)}`;

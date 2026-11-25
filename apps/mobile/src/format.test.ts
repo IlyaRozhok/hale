@@ -14,6 +14,7 @@ import {
   longDate,
   dayMonthLong,
   inMonth,
+  toMonth,
   dueWords,
   inDaysText,
   dueLabel, formatMoney, formatOriginal, kyivDate, formatStamp, formatUsd, isIsoDate, parseBalance, parseHryvnias, shiftDate, shortDate, taxQuarterOfDue,
@@ -255,6 +256,12 @@ describe("dates in words (В4)", () => {
   it("a month in the prepositional case", () => {
     expect(inMonth(10)).toBe("октябре");
     expect(inMonth(5)).toBe("мае");
+  });
+
+  it("a month in the dative case, for «к октябрю» (ЧЛ7)", () => {
+    expect(toMonth(10)).toBe("октябрю");
+    expect(toMonth(5)).toBe("маю");
+    expect(toMonth(12)).toBe("декабрю");
   });
 
   it("starts a shown name with a capital letter, the rest as it was (Я6)", () => {

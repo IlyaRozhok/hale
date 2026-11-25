@@ -16,6 +16,8 @@ export const palette = {
   /** Hues are few and muted: an ordinary expense is not an error, and an error is no alarm. */
   coral: "#E39A8F",
   sage: "#8CC7A1",
+  /** The sage from bright to dark, for the shares of one bar (task ЧЛ7); the first step is the sage itself. */
+  sageSteps: ["#8CC7A1", "#73AA89", "#5A8C71", "#446E59", "#325143"],
   rose: "#F08585",
   crimson: "#E25C5C",
   /** Muted sand for "almost used up", and a deep wine the overspent strip starts from. */
@@ -47,3 +49,5 @@ export const whiteAlpha = (opacity: number): string => `rgba(255, 255, 255, ${op
 export const blackAlpha = (opacity: number): string => `rgba(10, 11, 13, ${opacity})`;
 
 export const sandAlpha = (opacity: number): string => `rgba(214, 178, 110, ${opacity})`;
+
+export const sageAlpha = (opacity: number): string => `rgba(140, 199, 161, ${opacity})`;

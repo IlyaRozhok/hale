@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import { Icon } from "../Icon";
@@ -12,14 +13,15 @@ export const SECTION_MARGIN = SECTION_GAP - space.md;
 /**
  * The header of a section of «Сегодня» (tasks ЧЛ5, ЧЛ6): the title on the left, a quiet caption on the right, and a
  * chevron after it when the header belongs to something that opens. Plain texts: the section around it decides what
- * is read aloud and what is pressed.
+ * is read aloud and what is pressed. `side` stands at the right in place of the caption when a section has more
+ * than words there (the month's pill, task ЧЛ7).
  */
-export function SectionHead({ title, caption, chevron = false }: { title: string; caption?: string | null; chevron?: boolean }) {
+export function SectionHead({ title, caption, chevron = false, side }: { title: string; caption?: string | null; chevron?: boolean; side?: ReactNode }) {
   return (
     <View style={styles.head}>
       <Text style={styles.title}>{title}</Text>
       <View style={styles.side}>
-        {caption != null && <Text style={styles.caption}>{caption}</Text>}
+        {side ?? (caption != null && <Text style={styles.caption}>{caption}</Text>)}
         {chevron && <Icon name="chevron" color={color.list.chevron} size={14} />}
       </View>
     </View>

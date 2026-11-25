@@ -1,4 +1,4 @@
-import { palette as p, blackAlpha, sandAlpha, whiteAlpha } from "./palette";
+import { palette as p, blackAlpha, sageAlpha, sandAlpha, whiteAlpha } from "./palette";
 
 /** Semantic Silver tokens. Surfaces are opaque; what is translucent is the scrim and the glass. */
 export const color = {
@@ -75,6 +75,8 @@ export const color = {
     /** The one colour accent, used sparingly: money in and the count on the bell. */
     signal: p.sage,
     fgOnSignal: p.black,
+    /** The faint sage behind a small pill whose words are the accent itself (the month on «Сегодня», task ЧЛ7). */
+    signalSoft: sageAlpha(0.12),
   },
   // Hue only on amounts, and always with a sign, so colour is never the only signal.
   money: {
@@ -89,6 +91,11 @@ export const color = {
     target: p.silver[400],
     grid: p.graphite[700],
     track: p.graphite[500],
+    /**
+     * The shares of one bar (the month on «Сегодня», task ЧЛ7): five steps of the one sage, the largest share the
+     * brightest. Told apart by lightness, and each share also has its name beside the bar.
+     */
+    shares: p.sageSteps,
   },
 } as const;
 
