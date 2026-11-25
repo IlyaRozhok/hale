@@ -27,6 +27,8 @@ function TodayTab({ navigation }: { navigation: NavigationProp<ParamListBase> })
       onOpenObservation={(category, from, to) => navigation.navigate("Activity", { category, from, to, observation: true, at: Date.now() })}
       // «Ещё N» under the payments (ЧЛ6): the tab opens as it was left, with no scroll to its «До дохода».
       onOpenPlan={() => navigation.navigate("Plan")}
+      // The header of the month (ЧЛ7): «Итоги» open as they were left.
+      onOpenInsights={() => navigation.navigate("Insights")}
     />
   );
 }

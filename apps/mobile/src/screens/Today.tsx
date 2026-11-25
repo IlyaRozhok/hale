@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Modal, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { tokens } from "@hale/tokens";
@@ -28,6 +28,7 @@ import { DayPhraseRow } from "../components/today/DayPhraseRow";
 import { Freshness } from "../components/today/Freshness";
 import { LimitCard, isOverLimit } from "../components/today/LimitCard";
 import { LoadError } from "../components/today/LoadError";
+import { MonthSection } from "../components/today/MonthSection";
 import { PaymentsSection } from "../components/today/PaymentsSection";
 import { QuestionsSheet, openQuestions } from "../components/today/QuestionsSheet";
 import { TodayHeader, TodayHeaderProfileOnly } from "../components/today/TodayHeader";
@@ -43,6 +44,8 @@ type Props = {
   onOpenObservation?: (category: string, from: string, to: string) => void;
   /** Opens the «План» tab, from «Ещё N» under the payments (task ЧЛ6); without it that row is plain text. */
   onOpenPlan?: () => void;
+  /** Opens the «Итоги» tab, from the header of the month (task ЧЛ7); without it that header is plain text. */
+  onOpenInsights?: () => void;
   /** Test seam for the current moment. */
   now?: () => Date;
 };
@@ -52,10 +55,19 @@ type Props = {
  * while their call runs, the payment being marked paid, the settings) and the figures more than one section reads.
  * Each section lives in its own file in `components/today/` and says its contract there.
  */
-export function Today({ onOpenActivity, onOpenObservation, onOpenPlan, now = () => new Date() }: Props) {
+export function Today({ onOpenActivity, onOpenObservation, onOpenPlan, onOpenInsights, now = () => new Date() }: Props) {
   const insets = useSafeAreaInsets();
   const today = useToday();
-  const pull = usePullRefresh(today.refetch);
+  // «Итоги» of the current month, for the month section (ЧЛ7) and the subscriptions' list of the phrase: one request
+  // for both. The screen never waits for it: no answer, a failed one or an older server's is just no month section.
+  const insights = useInsights();
+  const refetchInsights = insights.refetch;
+  // A pull asks for the month again as well; the spinner follows «Сегодня» alone.
+  const refetchAll = useCallback(() => {
+    void refetchInsights();
+    return today.refetch();
+  }, [refetchInsights, today.refetch]);
+  const pull = usePullRefresh(refetchAll);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
   const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | "loans" | "subscriptions" | "pace" | null>(null);
   const [paying, setPaying] = useState<TodayDto["upcoming"][number] | null>(null);
@@ -84,7 +96,6 @@ export function Today({ onOpenActivity, onOpenObservation, onOpenPlan, now = () 
   const markShown = useMarkObservationShown();
   const dismissObservation = useDismissObservation();
   // The subscriptions' list opens from the phrase with the figures «Итоги» show it with.
-  const insights = useInsights(undefined, observation.data?.kind === "subscriptions");
   const subscriptions = insights.data?.subscriptions ?? null;
   const top = insets.top + space.sm;
   const closeSheet = () => setSheet(null);
@@ -190,6 +201,11 @@ export function Today({ onOpenActivity, onOpenObservation, onOpenPlan, now = () 
         {notes.map((b) => (
           <BadCaseCard key={b.id} text={b.text} />
         ))}
+        {/*
+          The month comes last, under the notes: a note is a warning and stays where it was, right under the payments.
+          Draws nothing without «Итоги» (loading, failed, an older server) or in a month with nothing spent.
+        */}
+        <MonthSection insights={insights.data} categories={categories} onOpenInsights={onOpenInsights} />
       </ScrollView>
 
       {/* A loan to return opens the same list as in Plan (task Б7). */}

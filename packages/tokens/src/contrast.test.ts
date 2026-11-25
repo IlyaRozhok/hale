@@ -158,6 +158,31 @@ describe("limit calendar colours", () => {
   });
 });
 
+describe("the shares of a bar (ЧЛ7)", () => {
+  const lum = (hex: string) => contrastRatio(hex, "#000000");
+  const { shares } = color.data;
+
+  it("are five steps of the one sage, from the accent itself down to the darkest", () => {
+    expect(shares).toEqual(["#8CC7A1", "#73AA89", "#5A8C71", "#446E59", "#325143"]);
+    expect(shares[0]).toBe(color.accent.signal);
+    for (let i = 1; i < shares.length; i++) expect(lum(shares[i]!)).toBeLessThan(lum(shares[i - 1]!));
+  });
+  it("every step shows on the screen, and neighbours differ enough to see where one share ends", () => {
+    for (const step of shares) expect(contrastRatio(step, color.surface.base)).toBeGreaterThanOrEqual(2);
+    for (let i = 1; i < shares.length; i++) expect(contrastRatio(shares[i]!, shares[i - 1]!)).toBeGreaterThanOrEqual(1.3);
+  });
+});
+
+describe("the sage pill (ЧЛ7)", () => {
+  it("is a faint tint of the accent, and the accent's words still read on it over the screen", () => {
+    expect(color.accent.signalSoft).toBe("rgba(140, 199, 161, 0.12)");
+    // 12% of the sage over the screen's graphite.
+    const mix = (i: number) => Math.round(parseInt(color.accent.signal.slice(i, i + 2), 16) * 0.12 + parseInt(color.surface.base.slice(i, i + 2), 16) * 0.88);
+    const backing = `#${[1, 3, 5].map((i) => mix(i).toString(16).padStart(2, "0")).join("")}`;
+    expect(contrastRatio(color.accent.signal, backing)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
 describe("metal settings", () => {
   it("are in the tokens", () => {
     expect(tokens.metal).toEqual({ renderScale: 2, levelTau: 0.35, stillTime: 4, barHeight: 6, barSpeed: 0.25 });
