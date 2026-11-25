@@ -27,12 +27,14 @@ import { BridgeSheet } from "../components/today/BridgeSheet";
 import { DayPhraseRow } from "../components/today/DayPhraseRow";
 import { Freshness } from "../components/today/Freshness";
 import { LimitCard, isOverLimit } from "../components/today/LimitCard";
+import { LimitSheet } from "../components/today/LimitSheet";
 import { LoadError } from "../components/today/LoadError";
 import { MonthSection } from "../components/today/MonthSection";
 import { PaymentsSection } from "../components/today/PaymentsSection";
 import { QuestionsSheet, openQuestions } from "../components/today/QuestionsSheet";
 import { TodayHeader, TodayHeaderProfileOnly } from "../components/today/TodayHeader";
 import { UntilIncomeCard } from "../components/today/UntilIncomeCard";
+import { limitSheet } from "../limitSheet";
 import { usePullRefresh } from "../usePullRefresh";
 import { Settings } from "./Settings";
 
@@ -69,7 +71,7 @@ export function Today({ onOpenActivity, onOpenObservation, onOpenPlan, onOpenIns
   }, [refetchInsights, today.refetch]);
   const pull = usePullRefresh(refetchAll);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
-  const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | "loans" | "subscriptions" | "pace" | null>(null);
+  const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | "loans" | "subscriptions" | "pace" | "limit" | null>(null);
   const [paying, setPaying] = useState<TodayDto["upcoming"][number] | null>(null);
   // Task ЯМ7 (the owner's «Все А»): settings open from the profile button in the header, not from «План».
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -142,6 +144,9 @@ export function Today({ onOpenActivity, onOpenObservation, onOpenPlan, onOpenIns
   const runway = data.runway ?? null;
   // The limit the runway is drawn for: on the day the shortage came on it is tomorrow's new one, not the morning's (А23).
   const runwayLimit = nextLimit ?? state.dailyLimit;
+  // Task ЧЛ4: what the limit is made of. Null from an older server (no `state.parts`) and with no limit: then the
+  // limit section has no «Как посчитано» and its figure opens nothing.
+  const limitParts = limitSheet(state, runway, data.date);
   const phrase = dayPhrase({
     today: data.date,
     dailyLimit: state.dailyLimit,
@@ -181,7 +186,7 @@ export function Today({ onOpenActivity, onOpenObservation, onOpenPlan, onOpenIns
       >
         <TodayHeader date={data.date} questions={questions.length} onOpenQuestions={() => setSheet("questions")} onOpenSettings={openSettings} />
         <Freshness data={data} offlineSince={offlineSince} now={now()} />
-        <LimitCard state={state} streak={data.streak ?? 0} onOpenCalendar={() => setSheet("calendar")} />
+        <LimitCard state={state} streak={data.streak ?? 0} onOpenCalendar={() => setSheet("calendar")} onOpenParts={limitParts ? () => setSheet("limit") : undefined} />
         {phrase && <DayPhraseRow phrase={phrase} date={data.date} onAct={act} markShown={markShown} />}
         {state.mode === "bridge" && state.bridge?.confirmed && <BridgePlanRow dailyLimit={state.dailyLimit} onPress={() => setSheet("bridge")} />}
 
@@ -221,6 +226,10 @@ export function Today({ onOpenActivity, onOpenObservation, onOpenPlan, onOpenIns
             onOpenActivity(date);
           }}
         />
+      )}
+      {sheet === "limit" && limitParts && (
+        // The line about the plan leads to the plan's own sheet, which takes this one's place.
+        <LimitSheet sheet={limitParts} onClose={closeSheet} onOpenPlan={state.bridge ? () => setSheet("bridge") : undefined} />
       )}
       <BridgeSheet open={sheet === "bridge"} data={data} onClose={closeSheet} onDone={() => closeIfOpen("bridge")} />
       <QuestionsSheet
