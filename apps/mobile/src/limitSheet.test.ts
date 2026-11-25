@@ -129,13 +129,141 @@ describe("limitSheet: the terms", () => {
     expect(s.spent.value).toBe("−₴3,401");
     expect(s.total.amount).toBe(0);
     expect(s.total.value).toBe("₴0");
-    expect(s.notes).toEqual(["Лимит на сегодня потрачен. Завтра снова ₴2,800."]);
+    // Only what the screen says on such a day, «завтра снова ₴L»: no new words about the day.
+    expect(s.notes).toEqual(["Завтра снова ₴2,800."]);
   });
 
-  it("exactly the limit spent: «₴0» and no phrase, the sum holds", () => {
+  it("exactly the limit spent: «₴0» and the same note, as the screen has «завтра снова» there too", () => {
     const s = sheet(parts(), { leftToday: 0, level: 0 });
     expect(s.total.value).toBe("₴0");
+    expect(s.notes).toEqual(["Завтра снова ₴2,800."]);
+  });
+
+  it("a refund today: «Вернулось сегодня» with a plus, not spending with a plus", () => {
+    const s = sheet(parts(), { leftToday: 300_000, level: 1 });
+    expect(`${s.spent.label} ${s.spent.value}`).toBe("Вернулось сегодня +₴200");
+    expect(s.total.value).toBe("₴3,000");
+    expect(JSON.stringify(s)).not.toMatch(/Потрачено/);
+    // A refund too small to show is no refund on the screen either.
+    const tiny = sheet(parts(), { leftToday: 280_030, level: 1 });
+    expect(`${tiny.spent.label} ${tiny.spent.value}`).toBe("Потрачено сегодня ₴0");
+  });
+});
+
+/** «−₴1,240» as whole hryvnias, −1240. */
+const shown = (value: string): number => Number(value.replace("−", "-").replace(/[₴,+]/g, ""));
+/** The upper column as it is read: the own money less every shown term, and what the row under them says is left. */
+const column = (s: LimitSheet) => ({
+  left: shown(s.own.value) + s.terms.reduce((sum, t) => sum + shown(t.value), 0),
+  free: s.free.short ? -shown(s.free.value) : shown(s.free.value),
+});
+
+describe("limitSheet: the shown column adds up in whole hryvnias", () => {
+  it("kopecks that round apart: the own money is the sum of the rows under it", () => {
+    // ₴1,000.49 − ₴300.50 = ₴699.99: each rounded on its own would read 1,000 − 301 = 700.
+    const p = parts({ own: 100_049, taxReserve: 0, obligationsDue: 30_050, free: 69_999, daysLeft: 1, share: 69_999, dailyLimit: 69_999 });
+    const s = sheet(p, { leftToday: 41_949 });
+    expect(rows(s)).toEqual([
+      "Свои деньги на утро ₴1,001",
+      "платежи и возврат займов до дохода −₴301",
+      "свободно ₴700",
+      "Свободное — на 1 день по ₴700 в день",
+      "Потрачено сегодня −₴281",
+      "Сегодня можно ₴419",
+    ]);
+    expect(column(s).left).toBe(column(s).free);
+    // The bar still has the kopecks.
+    expect(s.own.amount).toBe(100_049);
+  });
+
+  it("the shortage with kopecks: own money and free below zero", () => {
+    const p = parts({ own: -30_051, taxReserve: 20_050, obligationsDue: 20_050, free: -70_151, share: -7_795, rule: "floor", dailyLimit: 45_000 });
+    const s = sheet(p, { mode: "bridge", leftToday: 45_000 });
+    expect(rows(s).slice(0, 4)).toEqual([
+      "Свои деньги на утро −₴300",
+      "отложено на налоги −₴201",
+      "платежи и возврат займов до дохода −₴201",
+      "не хватает до дохода ₴702",
+    ]);
+    expect(column(s).left).toBe(column(s).free);
+  });
+
+  it("holds for many kopeck combinations, and every term and the free money read as everywhere in the app", () => {
+    let seed = 20261124;
+    const next = (max: number) => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed % max;
+    };
+    for (let i = 0; i < 2_000; i++) {
+      const taxReserve = next(3) === 0 ? 0 : next(900_000);
+      const obligationsDue = next(4) === 0 ? 0 : next(3_000_000);
+      const goalDue = next(5) === 0 ? next(200_000) : 0;
+      const borrowed = next(4) === 0 ? next(700_000) : 0;
+      const own = next(6_000_000) - 1_000_000;
+      const free = own - taxReserve - obligationsDue - goalDue - borrowed;
+      const daysLeft = 1 + next(20);
+      const p = parts({ own, taxReserve, obligationsDue, goalDue, borrowed, free, daysLeft, share: Math.floor(free / daysLeft), rule: "floor", dailyLimit: 45_000 });
+      const s = sheet(p, { leftToday: 45_000 });
+      expect(column(s).left).toBe(column(s).free);
+      expect(shown(s.free.value)).toBe(Math.round(Math.abs(free) / 100));
+      for (const t of s.terms) expect(shown(t.value)).toBe(-Math.round(t.amount / 100));
+      // Nothing reads «₴0» among the terms.
+      expect(s.terms.every((t) => shown(t.value) !== 0)).toBe(true);
+      expect(Math.abs(shown(s.own.value) - Math.round(own / 100))).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it("a term that would read «₴0» is left out", () => {
+    const s = sheet(parts({ own: 5_340_030, taxReserve: 640_000, goalDue: 30 }));
+    expect(s.terms.map((t) => t.key)).toEqual(["tax", "due"]);
+    expect(s.own.value).toBe("₴53,400");
+  });
+
+  it("free money that reads «₴0»: «свободно ₴0», no days row, no «не хватает ₴0»", () => {
+    for (const free of [40, -40]) {
+      const p = parts({ own: 2_820_000 + free, free, share: Math.floor(free / 9), rule: "floor", dailyLimit: 45_000 });
+      const s = sheet(p, { leftToday: 45_000 });
+      expect(`${s.free.label} ${s.free.value}`).toBe("свободно ₴0");
+      expect(s.free.short).toBe(false);
+      expect(s.days).toBeNull();
+      expect(s.bar).toBe(false);
+      expect(column(s).left).toBe(0);
+    }
+  });
+});
+
+describe("limitSheet: a runway that already looks at the next income", () => {
+  it("the cap's reserve is not named: it is not the reserve of the stored days", () => {
+    // The income came after the limit was fixed: the runway runs to the one after it.
+    const p = parts({ own: 1_140_000, obligationsDue: 0, free: 500_000, daysLeft: 1, share: 500_000, rule: "cap", dailyLimit: 333_333 });
+    const s = sheet(p, { leftToday: 333_333 }, runway({ incomeOn: "2026-12-25", reserve: 8_700_000 }));
     expect(s.notes).toEqual([]);
+    expect(JSON.stringify(s)).not.toMatch(/запас/);
+  });
+
+  it("the income's own day (one day left, the income today) is still the same income", () => {
+    const p = parts({ own: 1_140_000, obligationsDue: 0, free: 500_000, daysLeft: 1, share: 500_000, rule: "cap", dailyLimit: 333_333 });
+    const s = sheet(p, { leftToday: 333_333 }, runway({ incomeOn: TODAY, reserve: 166_667 }));
+    expect(s.notes).toEqual(["Потолок ниже расчёта, поэтому к доходу останется запас ₴1,667."]);
+    expect(s.days!.end).toBeNull();
+  });
+
+  it("the day the missing money is needed is not named either", () => {
+    const p = parts({ own: 3_000_000, free: 180_000, daysLeft: 5, share: 36_000, rule: "floor", dailyLimit: 45_000 });
+    expect(sheet(p, { leftToday: 45_000 }, runway({ incomeOn: "2026-12-25", zeroOn: "2026-12-20", reserve: -100_000 })).notes).toEqual([]);
+    // The same income: named.
+    expect(sheet(p, { leftToday: 45_000 }, runway({ incomeOn: "2026-11-29", zeroOn: "2026-11-27", reserve: -100_000 })).notes).toEqual([
+      "Лимит выше, чем позволяют свободные деньги: недостающее понадобится к 27 ноя.",
+    ]);
+  });
+
+  it("with no income date the 30 days of the runway are the stored days", () => {
+    const p = parts({ own: 3_000_000, free: 180_000, daysLeft: 30, share: 6_000, rule: "floor", dailyLimit: 45_000, noIncomeDate: true });
+    expect(sheet(p, { leftToday: 45_000 }, runway({ incomeOn: null, zeroOn: "2026-11-28" })).notes).toEqual([
+      "Лимит выше, чем позволяют свободные деньги: недостающее понадобится к 28 ноя.",
+    ]);
+    // An income date appeared since the morning: the runway is another stretch.
+    expect(sheet(p, { leftToday: 45_000 }, runway({ incomeOn: "2026-12-10", zeroOn: "2026-11-28" })).notes).toEqual([]);
   });
 });
 

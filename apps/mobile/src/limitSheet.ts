@@ -37,12 +37,18 @@ const ABOVE_SHARE = "Лимит выше, чем позволяют свобод
 const PLAN = "Свободных денег до дохода нет. Лимит — сумма из плана до дохода.";
 const PLAN_ROW = "План до дохода";
 const SPENT = "Потрачено сегодня";
+/** A day on which more came back than was spent (a refund for an earlier purchase): a line of its own, with a plus. */
+const RETURNED = "Вернулось сегодня";
 const TOTAL = "Сегодня можно";
 const NEXT_LIMIT = "Новый лимит {sum} действует с завтра";
-const NOTHING_LEFT = "Лимит на сегодня потрачен. Завтра снова {sum}.";
+/** The screen's own «завтра снова ₴L» on a day with nothing left, and no other words about that day. */
+const NOTHING_LEFT = "Завтра снова {sum}.";
 
 /** More days than this are said in one line, with no cells (the spec's author). */
 const MAX_CELLS = 14;
+
+/** Kopecks as the whole hryvnias `formatMoney` shows, with their sign. */
+const hryvnias = (kopecks: number): number => Math.sign(kopecks) * Math.round(Math.abs(kopecks) / 100);
 
 const fill = (text: string, values: Record<string, string>): string => text.replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? "");
 
@@ -52,16 +58,19 @@ export interface LimitSheetRow {
   value: string;
 }
 
-/** What is taken off the own money. `amount` is kopecks above zero; `value` shows it with a minus. */
+/** What is taken off the own money. `amount` is kopecks (the bar's width); `value` shows it with a minus. */
 export interface LimitSheetTerm extends LimitSheetRow {
   key: "tax" | "due" | "goal" | "borrowed";
   amount: number;
 }
 
 export interface LimitSheet {
-  /** «Свои деньги на утро»; kopecks, may be below zero. */
+  /**
+   * «Свои деньги на утро». `amount` is `parts.own` in kopecks and may be below zero; `value` is the sum of the shown
+   * rows under it, so it can differ from `formatMoney(amount)` by a hryvnia or two.
+   */
   own: LimitSheetRow & { amount: number };
-  /** Zeros are left out. */
+  /** Those that would read «₴0» are left out. */
   terms: LimitSheetTerm[];
   /** What is left of the own money: «свободно», or how much is missing as a figure above zero. `amount` is `parts.free`. */
   free: LimitSheetRow & { amount: number; short: boolean };
@@ -77,6 +86,7 @@ export interface LimitSheet {
    * `plan`: the line leads to the plan until the income; `text` is then said above it.
    */
   rule: { label: string; value: string | null; text: string | null; plan: boolean } | null;
+  /** «Потрачено сегодня −₴760», as the screen's line says it; or «Вернулось сегодня +₴200». `amount` is the limit less what is left. */
   spent: LimitSheetRow & { amount: number };
   /** The figure of the screen: what is left today, never below zero. */
   total: LimitSheetRow & { amount: number };
@@ -91,7 +101,17 @@ type Runway = Pick<RunwayDto, "reserve" | "zeroOn" | "incomeOn">;
  * fixed before the parts were stored (no `state.parts`), a day with no limit, or parts that do not add up to the
  * figure on the screen (the contract says they always do; a sheet about money never shows a sum that does not hold).
  *
- * `runway` is the screen's own (`TodayDto.runway`), null from a server without it; `today` is the Kyiv day.
+ * `runway` is the screen's own (`TodayDto.runway`), null from a server without it; `today` is the Kyiv day. It is
+ * live while the parts are the morning's: once it looks at another stretch than the stored days (the income came
+ * after the limit was fixed), neither its reserve nor its zero day is named beside them.
+ *
+ * What is shown adds up as shown (the lead's decision, 25 November):
+ * - The upper column holds in whole hryvnias. Every term and the free money read exactly as `formatMoney` shows them
+ *   everywhere in the app; a term that would read «₴0» is left out; the own money is the sum of the shown rows under
+ *   it, so it may differ from `formatMoney(parts.own)` by a hryvnia or two. Free money that would read «₴0» is
+ *   «свободно ₴0» with no days row.
+ * - The lower pair is exactly the screen's: the limit, «Потрачено сегодня» as the screen's line «потрачено ₴X из ₴L»
+ *   says it, and «Сегодня можно» as the screen's figure. It is not derived, so it can be ₴1 apart, as on the screen.
  */
 export function limitSheet(state: DailyStateDto, runway: Runway | null, today: string): LimitSheet | null {
   const p = state.parts;
@@ -108,20 +128,29 @@ export function limitSheet(state: DailyStateDto, runway: Runway | null, today: s
     ["goal", GOAL, p.goalDue],
     ["borrowed", BORROWED, p.borrowed],
   ];
-  const terms = taken.filter(([, , amount]) => amount !== 0).map(([key, label, amount]) => ({ key, label, amount, value: formatSignedMoney(-amount) }));
-  const short = p.free < 0;
+  const terms = taken.filter(([, , amount]) => hryvnias(amount) !== 0).map(([key, label, amount]) => ({ key, label, amount, value: formatSignedMoney(-amount) }));
+  // What the free money reads as, in whole hryvnias: the rows are decided by it, so nothing reads «не хватает ₴0».
+  const freeShown = hryvnias(p.free);
+  const short = freeShown < 0;
+  // The own money as the sum of the rows shown under it.
+  const ownShown = freeShown + terms.reduce((sum, t) => sum + hryvnias(t.amount), 0);
   const limit = formatMoney(p.dailyLimit);
 
   let days: LimitSheet["days"] = null;
-  if (!plan && p.free > 0) {
-    // The income's day under the last cell, only while the runway still looks at the same income as the stored days.
-    const incomeOn = !p.noIncomeDate && runway?.incomeOn && runway.incomeOn === shiftDate(today, p.daysLeft) ? runway.incomeOn : null;
+  // Whether the runway runs over the same stretch as the stored days: to the same income (on the income's own day
+  // one day is left and the income is today), or, with no income date, still with none.
+  const incomeOn = runway?.incomeOn ?? null;
+  const sameStretch =
+    runway !== null &&
+    (p.noIncomeDate ? incomeOn === null : incomeOn !== null && (incomeOn === shiftDate(today, p.daysLeft) || (p.daysLeft === 1 && incomeOn === today)));
+  if (!plan && freeShown > 0) {
     days = {
       label: fill(DAYS[pluralIndex(p.daysLeft)], { n: String(p.daysLeft) }),
       value: fill(PER_DAY, { sum: formatMoney(p.share) }),
       cells: p.daysLeft <= MAX_CELLS ? p.daysLeft : null,
       start: CELL_TODAY,
-      end: incomeOn ? fill(CELL_INCOME, { date: shortDate(incomeOn, today) }) : null,
+      // The income's day under the last cell.
+      end: sameStretch && incomeOn !== null && incomeOn > today ? fill(CELL_INCOME, { date: shortDate(incomeOn, today) }) : null,
       note: p.noIncomeDate ? NO_INCOME_DATE : null,
     };
   }
@@ -134,26 +163,27 @@ export function limitSheet(state: DailyStateDto, runway: Runway | null, today: s
   const notes: string[] = [];
   const nextLimit = state.shortageStart?.nextLimit;
   if (nextLimit !== undefined) notes.push(fill(NEXT_LIMIT, { sum: formatMoney(nextLimit) }));
-  else if (state.leftToday < 0) notes.push(fill(NOTHING_LEFT, { sum: limit }));
+  else if (state.leftToday <= 0) notes.push(fill(NOTHING_LEFT, { sum: limit }));
   if (p.rule === "cap" && p.share > p.dailyLimit) {
     // The cap is below the share: what is not spent stays. The figure is the runway's own, not a second computation.
-    if (runway && runway.incomeOn && !p.noIncomeDate && runway.reserve > 0) notes.push(fill(CAP_RESERVE, { sum: formatMoney(runway.reserve) }));
+    if (runway && sameStretch && incomeOn !== null && runway.reserve > 0) notes.push(fill(CAP_RESERVE, { sum: formatMoney(runway.reserve) }));
   } else if ((p.rule === "cap" || p.rule === "floor") && p.share < p.dailyLimit) {
     // The limit is above the share (the recommended sum, or a cap between the two): nothing is left over.
-    if (runway?.zeroOn && runway.zeroOn > today) notes.push(fill(ABOVE_SHARE, { date: shortDate(runway.zeroOn, today) }));
+    if (runway?.zeroOn && sameStretch && runway.zeroOn > today) notes.push(fill(ABOVE_SHARE, { date: shortDate(runway.zeroOn, today) }));
   }
   if (p.rule === "cap" && p.capDefault) notes.push(CAP_DEFAULT_NOTE);
 
   const spent = state.dailyLimit - state.leftToday;
+  const returned = hryvnias(-spent) > 0;
   const total = Math.max(0, state.leftToday);
   return {
-    own: { label: plan ? OWN : OWN_MORNING, amount: p.own, value: formatMoney(p.own) },
+    own: { label: plan ? OWN : OWN_MORNING, amount: p.own, value: formatMoney(ownShown * 100) },
     terms,
-    free: { label: short ? SHORT[horizon] : FREE, amount: p.free, value: formatMoney(Math.abs(p.free)), short },
-    bar: !plan && p.free > 0 && terms.every((t) => t.amount > 0),
+    free: { label: short ? SHORT[horizon] : FREE, amount: p.free, value: formatMoney(Math.abs(freeShown) * 100), short },
+    bar: !plan && freeShown > 0 && terms.every((t) => t.amount > 0),
     days,
     rule,
-    spent: { label: SPENT, amount: spent, value: formatSignedMoney(-spent) },
+    spent: { label: returned ? RETURNED : SPENT, amount: spent, value: formatSignedMoney(-spent) },
     total: { label: TOTAL, amount: total, value: formatMoney(total) },
     notes,
   };
