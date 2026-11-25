@@ -103,7 +103,8 @@ type Runway = Pick<RunwayDto, "reserve" | "zeroOn" | "incomeOn">;
  *
  * `runway` is the screen's own (`TodayDto.runway`), null from a server without it; `today` is the Kyiv day. It is
  * live while the parts are the morning's: once it looks at another stretch than the stored days (the income came
- * after the limit was fixed), neither its reserve nor its zero day is named beside them.
+ * after the limit was fixed), neither its reserve nor its zero day is named beside them. Nor is the reserve named
+ * on the income's own day, when the runway is a single point.
  *
  * What is shown adds up as shown (the lead's decision, 25 November):
  * - The upper column holds in whole hryvnias. Every term and the free money read exactly as `formatMoney` shows them
@@ -137,13 +138,14 @@ export function limitSheet(state: DailyStateDto, runway: Runway | null, today: s
   const limit = formatMoney(p.dailyLimit);
 
   let days: LimitSheet["days"] = null;
-  // Whether the runway runs over the same stretch as the stored days: to the same income (on the income's own day
-  // one day is left and the income is today), or, with no income date, still with none.
+  // Whether the runway runs over the same stretch as the stored days: to the same income, a day ahead at least, or,
+  // with no income date, still with none. On the income's own day (one day left, the income today) the runway is a
+  // single point whose reserve is the live free money with today's limit not taken off: it does not count, so no
+  // reserve is named on that day.
   const incomeOn = runway?.incomeOn ?? null;
-  const sameStretch =
-    runway !== null &&
-    (p.noIncomeDate ? incomeOn === null : incomeOn !== null && (incomeOn === shiftDate(today, p.daysLeft) || (p.daysLeft === 1 && incomeOn === today)));
-  if (!plan && freeShown > 0) {
+  const sameStretch = runway !== null && (p.noIncomeDate ? incomeOn === null : incomeOn !== null && incomeOn === shiftDate(today, p.daysLeft));
+  // The days row needs free money and a share that read above «₴0»: a few hryvnias over many days have no «по ₴0 в день».
+  if (!plan && freeShown > 0 && hryvnias(p.share) > 0) {
     days = {
       label: fill(DAYS[pluralIndex(p.daysLeft)], { n: String(p.daysLeft) }),
       value: fill(PER_DAY, { sum: formatMoney(p.share) }),

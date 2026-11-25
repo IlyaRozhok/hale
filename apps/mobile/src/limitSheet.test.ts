@@ -241,11 +241,29 @@ describe("limitSheet: a runway that already looks at the next income", () => {
     expect(JSON.stringify(s)).not.toMatch(/запас/);
   });
 
-  it("the income's own day (one day left, the income today) is still the same income", () => {
+  it("the income's own day: the runway is one point and its reserve is the live free money, so no reserve is named", () => {
+    // What the server sends on that day (`domain/runway.ts`): today's limit is not taken off `reserve`.
     const p = parts({ own: 1_140_000, obligationsDue: 0, free: 500_000, daysLeft: 1, share: 500_000, rule: "cap", dailyLimit: 333_333 });
-    const s = sheet(p, { leftToday: 333_333 }, runway({ incomeOn: TODAY, reserve: 166_667 }));
-    expect(s.notes).toEqual(["Потолок ниже расчёта, поэтому к доходу останется запас ₴1,667."]);
-    expect(s.days!.end).toBeNull();
+    const morning = sheet(p, { free: 500_000, leftToday: 333_333 }, runway({ incomeOn: TODAY, reserve: 500_000 }));
+    expect(morning.notes).toEqual([]);
+    expect(JSON.stringify(morning)).not.toMatch(/запас/);
+    expect(morning.days!.end).toBeNull();
+    // After ₴1,000 spent: still none.
+    const later = sheet(p, { free: 400_000, leftToday: 233_333 }, runway({ incomeOn: TODAY, reserve: 400_000 }));
+    expect(later.notes).toEqual([]);
+    // The default cap's own note is not about the runway and stays.
+    expect(sheet({ ...p, capDefault: true }, { leftToday: 333_333 }, runway({ incomeOn: TODAY, reserve: 500_000 })).notes).toEqual([
+      "Свой потолок можно задать в настройках, в строке «Сколько тратить в месяц».",
+    ]);
+  });
+
+  it("free money of a few hryvnias over many days: no «по ₴0 в день» row", () => {
+    // ₴3 over 9 days is 33 kopecks a day.
+    const p = parts({ own: 2_820_300, free: 300, share: 33, rule: "floor", dailyLimit: 45_000 });
+    const s = sheet(p, { leftToday: 45_000 });
+    expect(`${s.free.label} ${s.free.value}`).toBe("свободно ₴3");
+    expect(s.days).toBeNull();
+    expect(JSON.stringify(s)).not.toMatch(/по ₴0/);
   });
 
   it("the day the missing money is needed is not named either", () => {
