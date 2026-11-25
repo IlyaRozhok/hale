@@ -14,8 +14,6 @@ const SECTION_GAP = 26;
 const FIGURE_TO_BAR = 14;
 /** `BAR_TO_LINE` in `components/today/LimitCard.tsx`: the strip to the text of the line. */
 const BAR_TO_LINE = 10;
-/** `BAR_GLOW` in `components/today/LimitCard.tsx` (`GLOW` in `metal/LimitBar.tsx`): the strip is drawn this far in from both ends. */
-const BAR_GLOW = 6;
 /** `STRIP` in `metal/LimitBar.tsx`: how thick the strip is. */
 const STRIP = 4;
 /** `LINE_AIR` in `components/today/LimitCard.tsx`: the air of the line's `touchMin` button above and below its text. */
@@ -91,7 +89,10 @@ const styles = StyleSheet.create({
   limitLabel: { height: LAYOUT.eyebrow + 4, justifyContent: "center" },
   // `styles.amount` in `LimitCard.tsx`: one line of `type.hero`.
   limitFigure: { marginTop: space.xs, height: type.hero.lineHeight, justifyContent: "center" },
-  limitStrip: { marginTop: FIGURE_TO_BAR, marginHorizontal: BAR_GLOW, height: STRIP, borderRadius: STRIP / 2 },
+  // The strip without its glow (`BAR_GLOW` in `LimitCard.tsx`, `GLOW` in `metal/LimitBar.tsx`): the glow is already
+  // taken out of the distances above and below, and the strip is as wide as the section — the canvas there has
+  // `marginHorizontal: -GLOW`, so only the glow hangs over the edges.
+  limitStrip: { marginTop: FIGURE_TO_BAR, height: STRIP, borderRadius: STRIP / 2 },
   // `styles.subtle` in `LimitCard.tsx`: one line of `type.caption`.
   limitLine: { marginTop: BAR_TO_LINE, height: type.caption.lineHeight, justifyContent: "center" },
   // `styles.phraseRow` in `components/today/DayPhraseRow.tsx`.

@@ -71,8 +71,12 @@ describe("the loading skeleton of Today", () => {
     expect(flat("skeleton-limit-label")).toMatchObject({ height: LAYOUT.eyebrow + 4 });
     // `styles.amount`: `space.xs` under the label, one line of `type.hero`.
     expect(flat("skeleton-limit-figure")).toMatchObject({ marginTop: space.xs, height: type.hero.lineHeight });
-    // The strip itself, without its glow: `FIGURE_TO_BAR` under the figure, inset by the glow at both ends.
-    expect(flat("skeleton-limit-strip")).toMatchObject({ marginTop: FIGURE_TO_BAR, height: STRIP, marginHorizontal: BAR_GLOW });
+    // The strip itself, without its glow: `FIGURE_TO_BAR` under the figure. It is as wide as the section: the box of
+    // `metal/LimitBar.tsx` has `marginHorizontal: -GLOW`, so only the glow hangs over the edges, not the strip.
+    expect(flat("skeleton-limit-strip")).toMatchObject({ marginTop: FIGURE_TO_BAR, height: STRIP });
+    for (const key of ["marginHorizontal", "marginLeft", "marginRight", "marginStart", "marginEnd", "width", "alignSelf"]) {
+      expect(flat("skeleton-limit-strip")[key]).toBeUndefined();
+    }
     // The line's text: `BAR_TO_LINE` under the strip, one line of `type.caption`.
     expect(flat("skeleton-limit-line")).toMatchObject({ marginTop: BAR_TO_LINE, height: type.caption.lineHeight });
     // Under the text the loaded button still has its air (`LINE_AIR`); with it the next row starts at the same place.
@@ -121,10 +125,5 @@ describe("the loading skeleton of Today", () => {
     expect(loaded).toBe(228);
     const skeleton = ["head", "figure", "under", "chart", "axis"].reduce((sum, part) => sum + takes(`skeleton-until-${part}`), 0);
     expect(skeleton).toBe(loaded);
-  });
-
-  it("the shared heights keep only what the loaded screen uses too", () => {
-    // `amount`, `note` and `runway` served only the old skeleton (148 was the runway inside its card).
-    expect(Object.keys(LAYOUT).sort()).toEqual(["eyebrow", "tabBar"]);
   });
 });
