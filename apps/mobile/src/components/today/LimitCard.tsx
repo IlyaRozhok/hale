@@ -7,7 +7,7 @@ import { formatMoney, streakLabel } from "../../format";
 import { Icon } from "../Icon";
 import { LAYOUT } from "../layout";
 
-const { color, space, touchMin, type } = tokens;
+const { color, radius, space, touchMin, type } = tokens;
 
 /** An overspent day: there is a limit and more than it is spent. The screen keeps the phrase of the day quiet on it. */
 export const isOverLimit = (state: DailyStateDto): boolean => state.dailyLimit > 0 && state.leftToday < 0;
@@ -16,16 +16,30 @@ export const isOverLimit = (state: DailyStateDto): boolean => state.dailyLimit >
  * The limit section of «Сегодня»: «Сегодня можно», the amount left, the strip and the line under it. Since ЧЛ3 it is
  * not a card: it stands on the screen itself, with no glass and no fill (the file keeps its name from ЧЛ1).
  *
- * Contract: everything is derived from `state`; the section holds no state of its own. The heading and the figure are
- * plain text. What is under the figure calls `onOpenCalendar`: the strip and the line (one button for VoiceOver — the
- * line; the strip is a second place to touch), or, with no limit, the note. Its states:
+ * Contract: everything is derived from `state`; the section holds no state of its own. The heading is plain text.
+ * What is under the figure calls `onOpenCalendar`: the strip and the line (one button for VoiceOver — the line; the
+ * strip is a second place to touch), or, with no limit, the note.
+ * With `onOpenParts` and a limit (task ЧЛ4) the chip «Как посчитано» at the right of the line calls it, and so does
+ * the figure (one button for VoiceOver — the chip; the figure is a second place to touch). The screen gives it only
+ * when there is something to explain the figure with; without it there is no chip and the figure is plain text.
+ * Its states:
  * - a limit and money left — the strip and «потрачено ₴X из ₴L»;
  * - nothing left or overspent — «₴0» and only «завтра снова ₴L» (tasks Я2, ЯМ1);
  * - the day the shortage mode came on (`state.shortageStart`) — «Новый лимит ₴Y действует с завтра» instead of the line;
  * - no limit — a note why, and «Потрачено ₴X» when something was spent.
  * `streak` only extends the accessibility hint.
  */
-export function LimitCard({ state, streak, onOpenCalendar }: { state: DailyStateDto; streak: number; onOpenCalendar: () => void }) {
+export function LimitCard({
+  state,
+  streak,
+  onOpenCalendar,
+  onOpenParts,
+}: {
+  state: DailyStateDto;
+  streak: number;
+  onOpenCalendar: () => void;
+  onOpenParts?: () => void;
+}) {
   const level = state.leftToday > 0 ? Math.min(1, Math.max(0, state.level)) : 0;
   const hasLimit = state.dailyLimit > 0;
   const over = isOverLimit(state);
@@ -53,14 +67,25 @@ export function LimitCard({ state, streak, onOpenCalendar }: { state: DailyState
 
   // Never below zero here, so it always starts with the sign: the sign is drawn half the size and quiet.
   const figure = formatMoney(over ? 0 : shownLeft);
+  const openParts = hasLimit ? onOpenParts : undefined;
+  const amount = (
+    <Text style={styles.amount}>
+      <Text style={styles.sign}>{figure.slice(0, 1)}</Text>
+      {figure.slice(1)}
+    </Text>
+  );
 
   return (
     <View testID="limit-section" style={[styles.section, !hasLimit && styles.sectionNoLimit]}>
       <Text style={styles.eyebrow}>{heading}</Text>
-      <Text style={styles.amount}>
-        <Text style={styles.sign}>{figure.slice(0, 1)}</Text>
-        {figure.slice(1)}
-      </Text>
+      {openParts ? (
+        // A second place to touch for the chip below: VoiceOver reads the figure as text and has the chip as the button.
+        <Pressable testID="limit-figure" accessible={false} onPress={openParts} style={styles.figurePress}>
+          {amount}
+        </Pressable>
+      ) : (
+        amount
+      )}
       {!hasLimit && (
         <Pressable accessibilityRole="button" accessibilityLabel={limitLabel} accessibilityHint={calendarHint} onPress={onOpenCalendar} style={styles.notes}>
           <Text style={styles.note}>{noLimitNote}</Text>
@@ -80,23 +105,35 @@ export function LimitCard({ state, streak, onOpenCalendar }: { state: DailyState
           >
             <LimitBar level={level} state={dayState} />
           </Pressable>
-          {/* The row keeps the line at the left; ЧЛ4 puts the «Как посчитано» chip at its right, beside this button. */}
+          {/* The line at the left; with something to explain, the «Как посчитано» chip at its right (ЧЛ4). */}
           <View style={styles.lineRow}>
             <Pressable accessibilityRole="button" accessibilityLabel={limitLabel} accessibilityHint={calendarHint} onPress={onOpenCalendar} style={styles.linePress}>
               {/* Task ЯМ7: a quiet chevron says the line opens something; the line wraps, the chevron stays centred at the right. */}
               <View testID="limit-line" style={styles.spentLine}>
-                <Text style={[styles.subtle, styles.spentText]}>{nextLimitNote ?? spentLine}</Text>
+                <Text style={[styles.subtle, openParts ? styles.spentTextBesideChip : styles.spentText]}>{nextLimitNote ?? spentLine}</Text>
                 <View testID="limit-chevron" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
                   <Icon name="chevron" color={color.list.chevron} size={14} />
                 </View>
               </View>
             </Pressable>
+            {openParts && (
+              <Pressable accessibilityRole="button" accessibilityLabel={PARTS_LABEL} accessibilityHint={PARTS_HINT} onPress={openParts} style={styles.chipPress}>
+                <View style={styles.chip}>
+                  <Text style={styles.chipText}>{PARTS_LABEL}</Text>
+                  <Icon name="chevron" color={color.list.chevron} size={12} />
+                </View>
+              </Pressable>
+            )}
           </View>
         </>
       )}
     </View>
   );
 }
+
+/** Whole phrases, so they can be translated as they are. */
+const PARTS_LABEL = "Как посчитано";
+const PARTS_HINT = "Открывает расчёт лимита";
 
 /** The strip's canvas is taller than the strip by its glow, above and below (`LimitBar`). */
 const BAR_GLOW = 6;
@@ -119,10 +156,18 @@ const styles = StyleSheet.create({
   sign: { fontSize: type.hero.fontSize / 2, letterSpacing: 3, color: color.fg.subtle },
   bar: { paddingTop: FIGURE_TO_BAR - BAR_GLOW },
   // The button reaches up over the strip's lower glow, so the text sits where the mockup has it and the target stays 44 pt.
-  lineRow: { flexDirection: "row", alignItems: "center", marginTop: BAR_TO_LINE - BAR_GLOW - LINE_AIR },
+  lineRow: { flexDirection: "row", alignItems: "center", gap: space.sm, marginTop: BAR_TO_LINE - BAR_GLOW - LINE_AIR },
   linePress: { flex: 1, minHeight: touchMin, justifyContent: "center" },
   spentLine: { flexDirection: "row", alignItems: "center", gap: space.sm },
   spentText: { flex: 1 },
+  // Beside the chip the line is as wide as its words, so its chevron stays with them and not against the chip.
+  spentTextBesideChip: { flexShrink: 1 },
+  // Only the figure itself is touched, not the empty row at its right; its line is taller than `touchMin`.
+  figurePress: { minHeight: touchMin, alignSelf: "flex-start" },
+  // The button is `touchMin` tall; the pill inside it is as small as in the mockup.
+  chipPress: { minHeight: touchMin, justifyContent: "center" },
+  chip: { flexDirection: "row", alignItems: "center", gap: 2, borderWidth: 1, borderColor: color.data.grid, borderRadius: radius.full, paddingLeft: 10, paddingRight: 6, paddingVertical: space.xs },
+  chipText: { ...type.caption, color: color.fg.muted },
   notes: { minHeight: touchMin, justifyContent: "center", marginTop: space.xs, gap: 2 },
   note: { ...type.body, color: color.fg.muted },
   subtle: { ...type.caption, color: color.fg.subtle },

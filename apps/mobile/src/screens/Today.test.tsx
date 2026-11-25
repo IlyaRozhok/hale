@@ -2217,3 +2217,117 @@ describe("Today: the month (ЧЛ7)", () => {
     expect(screen.getByText("₴18,220")).toBeTruthy();
   });
 });
+
+describe("Today, the sheet «Как посчитан лимит» (ЧЛ4)", () => {
+  /** The fixture's morning: ₴5,000 free over the 5 days to the income, ₴1,000 a day. */
+  const parts: NonNullable<DailyStateDto["parts"]> = {
+    own: 2_370_000,
+    taxReserve: 170_000,
+    obligationsDue: 1_700_000,
+    goalDue: 0,
+    borrowed: 0,
+    free: 500_000,
+    daysLeft: 5,
+    share: 100_000,
+    rule: "share",
+    dailyLimit: 100_000,
+  };
+  const withState = (over: Partial<DailyStateDto>) => {
+    const fixture = todayFixture();
+    return fakeApi({ today: jest.fn(async () => ({ ...fixture, state: { ...fixture.state, ...over } })) });
+  };
+  const chip = () => screen.getByRole("button", { name: "Как посчитано" });
+  const sheetOpen = () => screen.queryByText("Как посчитан лимит") !== null;
+  const calendarOpen = () => screen.queryByText("Ноябрь 2026") !== null;
+
+  it("the «Как посчитано» button stands beside the line and opens the sheet", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, withState({ parts }));
+    const line = await screen.findByText("потрачено ₴280 из ₴1,000");
+    expect(chip().props.accessibilityHint).toBe("Открывает расчёт лимита");
+    expect(StyleSheet.flatten(chip().props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+    expect(within(screen.getByTestId("limit-section", HIDDEN)).getByText("Как посчитано")).toBeTruthy();
+    // The line gives the button its place: it no longer stretches, and its chevron stays beside its words.
+    expect(StyleSheet.flatten(line.props.style)).toMatchObject({ flexShrink: 1 });
+    expect(StyleSheet.flatten(line.props.style).flex).toBeUndefined();
+    expect(sheetOpen()).toBe(false);
+    await fireEvent.press(chip());
+    expect(await screen.findByText("Как посчитан лимит")).toBeTruthy();
+    expect(screen.getByLabelText("Свои деньги на утро ₴23,700")).toBeTruthy();
+    expect(screen.getByLabelText("платежи и возврат займов до дохода −₴17,000")).toBeTruthy();
+    expect(screen.getByLabelText("Свободное — на 5 дней по ₴1,000 в день")).toBeTruthy();
+    expect(screen.getByLabelText("Потрачено сегодня −₴280")).toBeTruthy();
+    // The total is the figure of the screen.
+    expect(screen.getByLabelText("Сегодня можно ₴720")).toBeTruthy();
+    expect(calendarOpen()).toBe(false);
+    await fireEvent.press(screen.getByRole("button", { name: "Закрыть" }));
+    await waitFor(() => expect(sheetOpen()).toBe(false));
+  });
+
+  it("the figure opens the sheet too, and is not a second button for VoiceOver", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, withState({ parts }));
+    await fireEvent.press(await screen.findByText("₴720"));
+    expect(await screen.findByText("Как посчитан лимит")).toBeTruthy();
+    expect(calendarOpen()).toBe(false);
+    expect(screen.getAllByRole("button", { name: "Как посчитано" })).toHaveLength(1);
+    const press = screen.getByTestId("limit-figure", HIDDEN);
+    expect(press.props.accessible).toBe(false);
+    expect(StyleSheet.flatten(press.props.style).minHeight).toBeGreaterThanOrEqual(tokens.touchMin);
+  });
+
+  it("the heading is not a way into the sheet; the bar and the line still open the calendar", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, withState({ parts }));
+    await fireEvent.press(await screen.findByText("Сегодня можно"));
+    expect(sheetOpen()).toBe(false);
+    expect(screen.getAllByRole("button", { name: /^Сегодня можно/ })).toHaveLength(1);
+    await fireEvent.press(screen.getByText("потрачено ₴280 из ₴1,000"));
+    expect(await screen.findByText("Ноябрь 2026")).toBeTruthy();
+    expect(sheetOpen()).toBe(false);
+  });
+
+  it("an older server sends no parts: no button, the figure is plain, no sheet", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+    await screen.findByText("потрачено ₴280 из ₴1,000");
+    expect(screen.queryByText("Как посчитано")).toBeNull();
+    expect(screen.queryByTestId("limit-figure", HIDDEN)).toBeNull();
+    await fireEvent.press(screen.getByText("₴720"));
+    expect(sheetOpen()).toBe(false);
+  });
+
+  it("with no limit there is nothing to explain: no button even with parts", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, withState({ dailyLimit: 0, leftToday: 0, level: 0, parts: { ...parts, own: 1_870_000, free: 0, share: 0, rule: "floor", dailyLimit: 0 } }));
+    await screen.findByText("До следующего дохода свободных денег нет.");
+    expect(screen.queryByText("Как посчитано")).toBeNull();
+    await fireEvent.press(screen.getByText("₴0"));
+    expect(sheetOpen()).toBe(false);
+  });
+
+  it("an overspent day: the button stays beside «завтра снова», and the sheet's total is the screen's «₴0»", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, withState({ leftToday: -60_100, level: 0, parts }));
+    await screen.findByText("завтра снова ₴1,000");
+    await fireEvent.press(chip());
+    expect(await screen.findByText("Как посчитан лимит")).toBeTruthy();
+    expect(screen.getByLabelText("Потрачено сегодня −₴1,601")).toBeTruthy();
+    expect(screen.getByLabelText("Сегодня можно ₴0")).toBeTruthy();
+  });
+
+  it("the day the shortage came on: the sheet says the new limit from tomorrow", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, withState({ ...bridgeState(), level: 0, dailyLimit: 100000, leftToday: -1000000, shortageStart: { nextLimit: 45000 }, parts }));
+    await screen.findByText("Новый лимит ₴450 действует с завтра");
+    await fireEvent.press(chip());
+    expect(await screen.findByText("Как посчитан лимит")).toBeTruthy();
+    expect(screen.getAllByText("Новый лимит ₴450 действует с завтра")).toHaveLength(2);
+    expect(screen.getByLabelText("Сегодня можно ₴0")).toBeTruthy();
+  });
+
+  it("a confirmed plan: the sheet's line about the plan opens «План до дохода» in its place", async () => {
+    const plan = { ...parts, own: 673_000, free: -1_197_000, share: -239_400, rule: "plan" as const, dailyLimit: 45_000 };
+    await renderWith(<Today onOpenActivity={noop} />, withState({ ...bridgeState({ confirmed: true }), parts: plan }));
+    await screen.findByText("Сегодня можно");
+    await fireEvent.press(chip());
+    expect(await screen.findByText("Свободных денег до дохода нет. Лимит — сумма из плана до дохода.")).toBeTruthy();
+    expect(screen.queryByText(/на утро/)).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "План до дохода ₴450 в день" }));
+    expect(await screen.findByText("Не хватает до дохода")).toBeTruthy();
+    expect(sheetOpen()).toBe(false);
+  });
+});
