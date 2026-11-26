@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Animated, Easing, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 
 /**
@@ -10,7 +10,8 @@ import { Animated, Easing, StyleSheet, type StyleProp, type ViewStyle } from "re
  * an animation has ended nothing is left running.
  */
 function useEntranceValue(play: number, ms: number, delay = 0): Animated.Value {
-  const value = useRef(new Animated.Value(play > 0 ? 0 : 1)).current;
+  // Made once: a plain `useRef(new Animated.Value(…))` would build a value on every render and throw it away.
+  const [value] = useState(() => new Animated.Value(play > 0 ? 0 : 1));
   const running = useRef<Animated.CompositeAnimation | null>(null);
   // Before the picture is drawn: a new key over a part already on the screen starts it from zero in the same frame.
   useLayoutEffect(() => {
@@ -67,9 +68,15 @@ export function Wipe({
   over?: ReactNode;
 }) {
   const shown = useEntranceValue(play, ms);
-  const windowX = shown.interpolate({ inputRange: [0, 1], outputRange: [-span, 0] });
-  const contentX = shown.interpolate({ inputRange: [0, 1], outputRange: [span, 0] });
-  const overOpacity = shown.interpolate({ inputRange: [0, OVER_FROM, 1], outputRange: [0, 0, 1] });
+  // Built once for a span, not on every render: a render while the animation runs makes no new animated nodes.
+  const { windowX, contentX, overOpacity } = useMemo(
+    () => ({
+      windowX: shown.interpolate({ inputRange: [0, 1], outputRange: [-span, 0] }),
+      contentX: shown.interpolate({ inputRange: [0, 1], outputRange: [span, 0] }),
+      overOpacity: shown.interpolate({ inputRange: [0, OVER_FROM, 1], outputRange: [0, 0, 1] }),
+    }),
+    [shown, span],
+  );
   return (
     <>
       <Animated.View testID={testID} style={[style, styles.window, { transform: [{ translateX: windowX }] }]}>
