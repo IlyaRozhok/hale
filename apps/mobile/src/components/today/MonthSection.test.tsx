@@ -1,8 +1,15 @@
 import { fireEvent, render, screen, within } from "@testing-library/react-native";
-import { StyleSheet } from "react-native";
+import { Animated, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
+import { monthSection } from "../../monthSection";
 import { insightsFixture, passTime, watchMotion } from "../../testing";
 import { MonthSection } from "./MonthSection";
+
+// The section asks what to show once every time it is drawn: the mock counts how often that is (ЧЛ8а).
+jest.mock("../../monthSection", () => {
+  const real = jest.requireActual<typeof import("../../monthSection")>("../../monthSection");
+  return { ...real, monthSection: jest.fn(real.monthSection) };
+});
 
 const { color, touchMin } = tokens;
 const HIDDEN = { includeHiddenElements: true };
@@ -215,6 +222,23 @@ describe("MonthSection, the entrance (ЧЛ8)", () => {
     expect(screen.queryByTestId("month-count")).toBeNull();
     expect(flat(screen.getByText("₴18,220")).color).toBe(color.fg.default);
     expect(screen.getByLabelText(SUM_LABEL)).toBeTruthy();
+  });
+
+  it("while the sum counts only its figure is drawn again: not the section, its bar or the names (ЧЛ8а)", async () => {
+    const interpolate = jest.spyOn(Animated.Value.prototype, "interpolate");
+    const drawn = () => (monthSection as jest.Mock).mock.calls.length;
+    await render(<MonthSection insights={insightsFixture()} categories={null} entrance={1} />);
+    const before = { drawn: drawn(), nodes: interpolate.mock.calls.length };
+    // The figure moves on with the frames...
+    await passTime(300);
+    expect(screen.getByTestId("month-count")).toHaveTextContent(/^₴1\d,\d{3}$/);
+    await passTime(300);
+    await passTime(400);
+    expect(screen.queryByTestId("month-count")).toBeNull();
+    // ...and on the way the section was not drawn once, and the bar built no new animated nodes.
+    expect(drawn()).toBe(before.drawn);
+    expect(interpolate.mock.calls.length).toBe(before.nodes);
+    interpolate.mockRestore();
   });
 
   it("with a key the bar starts wholly covered and is uncovered from the left over a second; its shares keep their widths", async () => {

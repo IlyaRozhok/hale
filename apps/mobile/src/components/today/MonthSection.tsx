@@ -49,7 +49,6 @@ export function MonthSection({
 }) {
   const [chosen, setChosen] = useState<string | null>(null);
   const month = monthSection(insights, categories);
-  const counted = useCountUp(month?.total ?? 0, entrance);
   // The bar is never wider than the screen: its window travels that far, so it starts wholly covered.
   const screen = useWindowDimensions().width;
   if (!month) return null;
@@ -60,7 +59,6 @@ export function MonthSection({
   const headLabel = month.comparison ? `${month.title}. ${month.comparison.label}` : month.title;
   const head = <SectionHead title={month.title} side={month.comparison && <Pill comparison={month.comparison} />} chevron={onOpenInsights !== undefined} />;
   const sum = formatMoney(month.total);
-  const counting = counted === null ? null : formatMoney(counted);
   const last = month.shares.length - 1;
 
   return (
@@ -75,19 +73,8 @@ export function MonthSection({
         </View>
       )}
       <View accessible accessibilityLabel={SUM_LABEL.replace("{sum}", sum).replace("{average}", month.average)} style={styles.sumRow}>
-        {/* The figure with a quiet «₴» half its size, as the day's limit has it. */}
-        {/* While the figure counts, the sum keeps its place with clear ink and the count is drawn over it. */}
-        <Text style={[styles.sum, counting !== null && styles.clear]}>
-          <Text style={[styles.sign, counting !== null && styles.clear]}>₴</Text>
-          {sum.slice(1)}
-        </Text>
+        <Sum total={month.total} entrance={entrance} />
         <Text style={styles.average}>{month.average}</Text>
-        {counting !== null && (
-          <Text testID="month-count" style={[styles.sum, styles.count]} numberOfLines={1}>
-            <Text style={styles.sign}>₴</Text>
-            {counting.slice(1)}
-          </Text>
-        )}
       </View>
       <Wipe testID="month-bar" play={entrance} ms={ENTRANCE.barMs} span={screen} style={styles.barWindow} innerStyle={styles.bar}>
         {month.shares.map((s, i) => (
@@ -124,6 +111,33 @@ export function MonthSection({
         {current ? current.phrase : HINT}
       </Text>
     </View>
+  );
+}
+
+/**
+ * The month's sum: the figure with a quiet «₴» half its size, as the day's limit has it. While it counts (task ЧЛ8),
+ * the sum keeps its place with clear ink and the count is drawn over it, out of the flow.
+ *
+ * Its own component (task ЧЛ8а): the count sets state on every frame for 0.9 s, and only these texts are drawn again
+ * then — not the section with its bar and names.
+ */
+function Sum({ total, entrance }: { total: number; entrance: number }) {
+  const counted = useCountUp(total, entrance);
+  const sum = formatMoney(total);
+  const counting = counted === null ? null : formatMoney(counted);
+  return (
+    <>
+      <Text style={[styles.sum, counting !== null && styles.clear]}>
+        <Text style={[styles.sign, counting !== null && styles.clear]}>₴</Text>
+        {sum.slice(1)}
+      </Text>
+      {counting !== null && (
+        <Text testID="month-count" style={[styles.sum, styles.count]} numberOfLines={1}>
+          <Text style={styles.sign}>₴</Text>
+          {counting.slice(1)}
+        </Text>
+      )}
+    </>
   );
 }
 

@@ -2399,10 +2399,18 @@ describe("Today, the entrance (ЧЛ8)", () => {
       await screen.findByText("Сегодня можно");
       await over();
 
-      // New figures from a background refetch appear in place.
+      // New figures from a background refetch appear in place. Its answer is held open, so the screen is drawn with
+      // the request on its way before the data comes, as on the phone: an answer at once would skip that render.
       const state = { ...todayFixture().state, leftToday: 50_000, level: 0.5 };
-      today.mockImplementationOnce(async () => todayFixture({ state }));
+      let answer: (v: ReturnType<typeof todayFixture>) => void = noop;
+      today.mockImplementationOnce(() => new Promise((r) => (answer = r)));
       await act(async () => void client.refetchQueries({ queryKey: ["today"] }));
+      // The query tells the screen on a timer: let it, so the request on its way is drawn before the answer.
+      await passTime(1);
+      expect(client.isFetching({ queryKey: ["today"] })).toBe(1);
+      expect(control().refreshing).toBe(false);
+      expect(key()).toBe(0);
+      await act(async () => answer(todayFixture({ state })));
       expect(await screen.findByText("₴500")).toBeTruthy();
       expect(key()).toBe(0);
       expect(counting()).toBe(false);
