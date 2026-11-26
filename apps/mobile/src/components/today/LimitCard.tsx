@@ -75,19 +75,11 @@ export function LimitCard({
   // Never below zero here, so it always starts with the sign: the sign is drawn half the size and quiet.
   const left = over ? 0 : shownLeft;
   const openParts = hasLimit ? onOpenParts : undefined;
-  const amount = <Amount left={left} entrance={entrance} />;
 
   return (
     <View testID="limit-section" style={[styles.section, !hasLimit && styles.sectionNoLimit]}>
       <Text style={styles.eyebrow}>{heading}</Text>
-      {openParts ? (
-        // A second place to touch for the chip below: VoiceOver reads the figure as text and has the chip as the button.
-        <Pressable testID="limit-figure" accessible={false} onPress={openParts} style={styles.figurePress}>
-          {amount}
-        </Pressable>
-      ) : (
-        amount
-      )}
+      <Amount left={left} entrance={entrance} onPress={openParts} />
       {!hasLimit && (
         <Pressable accessibilityRole="button" accessibilityLabel={limitLabel} accessibilityHint={calendarHint} onPress={onOpenCalendar} style={styles.notes}>
           <Text style={styles.note}>{noLimitNote}</Text>
@@ -139,12 +131,16 @@ export function LimitCard({
  *
  * Its own component (task ЧЛ8а): the count sets state on every frame for 0.9 s, and only these texts are drawn again
  * then — not the section with its strip and line.
+ *
+ * With `onPress` the figure is a button; the button is made here, under the count, and not around this component:
+ * the handler comes and goes with the data, and the count must stay at one place in the tree, or it would start again
+ * from zero while the entrance key is still live.
  */
-function Amount({ left, entrance }: { left: number; entrance: number }) {
+function Amount({ left, entrance, onPress }: { left: number; entrance: number; onPress?: () => void }) {
   const counted = useCountUp(left, entrance);
   const figure = formatMoney(left);
   const counting = counted === null ? null : formatMoney(counted);
-  return (
+  const amount = (
     <View>
       <Text style={[styles.amount, counting !== null && styles.clear]}>
         <Text style={[styles.sign, counting !== null && styles.clear]}>{figure.slice(0, 1)}</Text>
@@ -157,6 +153,13 @@ function Amount({ left, entrance }: { left: number; entrance: number }) {
         </Text>
       )}
     </View>
+  );
+  if (!onPress) return amount;
+  return (
+    // A second place to touch for the chip below: VoiceOver reads the figure as text and has the chip as the button.
+    <Pressable testID="limit-figure" accessible={false} onPress={onPress} style={styles.figurePress}>
+      {amount}
+    </Pressable>
   );
 }
 
