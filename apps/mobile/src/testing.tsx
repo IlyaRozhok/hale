@@ -7,6 +7,7 @@ import type { CalendarDto, GoalDto, InsightsMonthDto, LoanHistoryDto, LoanRowDto
 import { ApiProvider } from "./api/context";
 import type { Api } from "./api/client";
 import { dateLabel, kyivDate } from "./format";
+import { useReduceMotion } from "./metal/useMetalActive";
 
 /** Anonymised normal-mode response: ₴10,325 own money, a ₴30,000 credit limit, rent in four days. */
 export function todayFixture(over: Partial<TodayDto> = {}): TodayDto {
@@ -286,6 +287,44 @@ export function holdSheetOpenings(): { finish: () => Promise<void>; restore: () 
         while (finished < held.length) held[finished++]!({ finished: true });
       });
     },
+    restore: () => spy.mockRestore(),
+  };
+}
+
+/**
+ * Turns motion on (task ЧЛ8): in tests it counts as reduced (jest.setup), so «Сегодня» plays no entrance. Gives back
+ * what puts it off again; call that when the test ends.
+ */
+export function allowMotion(): () => void {
+  const reduced = useReduceMotion as jest.Mock;
+  reduced.mockReturnValue(false);
+  return () => void reduced.mockReturnValue(true);
+}
+
+/**
+ * Lets `ms` pass with what it brings (a counting figure's frames) applied as the screen's own updates: real time, or
+ * jest's when the test runs on fake timers.
+ */
+export async function passTime(ms: number): Promise<void> {
+  await act(async () => {
+    if ("clock" in setTimeout) jest.advanceTimersByTime(ms);
+    else await new Promise<void>((done) => setTimeout(done, ms));
+  });
+}
+
+/**
+ * Watches the entrance's animations (task ЧЛ8). In jest a native-driven animation never moves its value, so a test
+ * reads where a part starts (its style) and what it was asked to do: `asked()` lists every animation started since,
+ * as `{ duration, delay }`; all of them go to 1 on the native driver, or the test fails.
+ */
+export function watchMotion(): { asked: () => { duration: number; delay: number }[]; restore: () => void } {
+  const spy = jest.spyOn(Animated, "timing");
+  return {
+    asked: () =>
+      spy.mock.calls.map(([, config]) => {
+        expect(config).toMatchObject({ toValue: 1, useNativeDriver: true });
+        return { duration: config.duration ?? -1, delay: config.delay ?? 0 };
+      }),
     restore: () => spy.mockRestore(),
   };
 }

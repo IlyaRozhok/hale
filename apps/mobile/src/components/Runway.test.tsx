@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react-native
 import { StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { RunwayDto } from "@hale/contracts";
+import { watchMotion } from "../testing";
 import { Runway } from "./Runway";
 
 const run = (over: Partial<RunwayDto> = {}): RunwayDto => ({
@@ -356,5 +357,49 @@ describe("Runway", () => {
     expect(screen.getByText("₴3,100")).toBeTruthy();
     expect(screen.queryByTestId("runway-chart")).toBeNull();
     expect(screen.queryByText("сегодня")).toBeNull();
+  });
+});
+
+describe("Runway, the entrance (ЧЛ8)", () => {
+  const flatStyle = (node: { props: { style?: unknown } }) => StyleSheet.flatten(node.props.style as never) as Record<string, unknown>;
+  const draw = () => screen.getByTestId("runway-draw");
+  const shift = () => Number(JSON.stringify((flatStyle(draw()).transform as { translateX: unknown }[])[0]!.translateX));
+  /** What is written on the chart stands in one layer over the line; its opacity is the layer's. */
+  const over = () => screen.getByTestId("runway-draw-over", HIDDEN);
+  const written = () => Number(JSON.stringify(flatStyle(over()).opacity));
+  let motion: ReturnType<typeof watchMotion>;
+  beforeEach(() => {
+    motion = watchMotion();
+  });
+  afterEach(() => motion.restore());
+
+  it("without an entrance key the line and what is written on it are simply there and nothing is animated", async () => {
+    await render(<Runway runway={run()} today="2026-11-11" />);
+    await measure();
+    expect(shift()).toBe(0);
+    expect(written()).toBe(1);
+    // The window is the canvas's own size: it cuts nothing off the line.
+    expect(flatStyle(draw())).toMatchObject({ width: 400, height: 112, overflow: "hidden" });
+    expect(motion.asked()).toEqual([]);
+  });
+
+  it("with a key the line starts wholly covered and is drawn from the left over 1.4 s; what is written starts unseen", async () => {
+    await render(<Runway runway={shortRun()} today="2026-11-11" entrance={1} />);
+    await measure();
+    expect(shift()).toBe(-400);
+    expect(written()).toBe(0);
+    expect(motion.asked()).toEqual([{ duration: 1400, delay: 0 }]);
+    // The names by the points and the «ноль» label are in the layer that fades in, and take no touch.
+    expect(within(over()).getByTestId("runway-label-7", HIDDEN)).toBeTruthy();
+    expect(within(over()).getByText("ноль 14 ноя", HIDDEN)).toBeTruthy();
+    expect(over().props.pointerEvents).toBe("none");
+  });
+
+  it("the chart takes a touch while the line draws itself, and a touch does not start it again", async () => {
+    await render(<Runway runway={run()} today="2026-11-11" entrance={1} />);
+    await measure();
+    await touch(200);
+    expect(screen.getByText("13 ноя · ₴10,260")).toBeTruthy();
+    expect(motion.asked()).toHaveLength(1);
   });
 });

@@ -1,3 +1,8 @@
+// «Сегодня» plays its entrance only with motion allowed (task ЧЛ8). In tests motion counts as reduced, as it does in
+// the app until the setting is known: every screen is in its final state at once. A test of the entrance itself
+// turns motion on with `allowMotion()` of testing.tsx.
+jest.mock("./metal/useMetalActive", () => ({ ...jest.requireActual("./metal/useMetalActive"), useReduceMotion: jest.fn(() => true) }));
+
 // Skia is native: icons render as plain views in tests.
 jest.mock("./components/Icon", () => {
   const { View } = jest.requireActual("react-native");

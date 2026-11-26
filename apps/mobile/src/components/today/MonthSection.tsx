@@ -1,10 +1,13 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { InsightsMonthDto } from "@hale/contracts";
+import { ENTRANCE } from "../../entrance";
 import { formatMoney } from "../../format";
 import type { CategoryList } from "../../labels";
 import { monthSection, type MonthSection as Month } from "../../monthSection";
+import { useCountUp } from "../../useEntrance";
+import { Wipe } from "../Entrance";
 import { Icon } from "../Icon";
 import { SECTION_MARGIN, SectionHead } from "./SectionHead";
 
@@ -28,19 +31,27 @@ const SUM_LABEL = "Потрачено {sum}, {average}";
  *   under the bar; pressed again, the choice is gone.
  * - One accent, the sage in five steps. Sand is only the arrow at a category well above the month before; the pill
  *   is sage only when the month is below the one before. Nothing here is red.
+ * - `entrance` is the section's own entrance key (task ЧЛ8; 0 or absent — no motion): with a new one the sum counts
+ *   up to its amount and the bar grows from the left. The sum itself is laid out and read aloud from the first
+ *   frame — the counting figure is drawn over it. The names under the bar choose a share all the while.
  */
 export function MonthSection({
   insights,
   categories,
   onOpenInsights,
+  entrance = 0,
 }: {
   /** `GET /insights/month` for the current month: undefined while loading or after an error, null from an older server. */
   insights: InsightsMonthDto | null | undefined;
   categories: CategoryList;
   onOpenInsights?: () => void;
+  entrance?: number;
 }) {
   const [chosen, setChosen] = useState<string | null>(null);
   const month = monthSection(insights, categories);
+  const counted = useCountUp(month?.total ?? 0, entrance);
+  // The bar is never wider than the screen: its window travels that far, so it starts wholly covered.
+  const screen = useWindowDimensions().width;
   if (!month) return null;
   // A choice the data no longer has (the month refreshed) counts as none.
   const current = month.shares.find((s) => s.key === chosen) ?? null;
@@ -49,6 +60,7 @@ export function MonthSection({
   const headLabel = month.comparison ? `${month.title}. ${month.comparison.label}` : month.title;
   const head = <SectionHead title={month.title} side={month.comparison && <Pill comparison={month.comparison} />} chevron={onOpenInsights !== undefined} />;
   const sum = formatMoney(month.total);
+  const counting = counted === null ? null : formatMoney(counted);
   const last = month.shares.length - 1;
 
   return (
@@ -64,13 +76,20 @@ export function MonthSection({
       )}
       <View accessible accessibilityLabel={SUM_LABEL.replace("{sum}", sum).replace("{average}", month.average)} style={styles.sumRow}>
         {/* The figure with a quiet «₴» half its size, as the day's limit has it. */}
-        <Text style={styles.sum}>
-          <Text style={styles.sign}>₴</Text>
+        {/* While the figure counts, the sum keeps its place with clear ink and the count is drawn over it. */}
+        <Text style={[styles.sum, counting !== null && styles.clear]}>
+          <Text style={[styles.sign, counting !== null && styles.clear]}>₴</Text>
           {sum.slice(1)}
         </Text>
         <Text style={styles.average}>{month.average}</Text>
+        {counting !== null && (
+          <Text testID="month-count" style={[styles.sum, styles.count]} numberOfLines={1}>
+            <Text style={styles.sign}>₴</Text>
+            {counting.slice(1)}
+          </Text>
+        )}
       </View>
-      <View style={styles.bar}>
+      <Wipe testID="month-bar" play={entrance} ms={ENTRANCE.barMs} span={screen} style={styles.barWindow} innerStyle={styles.bar}>
         {month.shares.map((s, i) => (
           <Pressable
             key={s.key}
@@ -85,7 +104,7 @@ export function MonthSection({
             <View testID={`month-strip-${s.key}`} style={[styles.strip, { backgroundColor: color.data.shares[i] }, i === 0 && styles.stripFirst, i === last && styles.stripLast]} />
           </Pressable>
         ))}
-      </View>
+      </Wipe>
       <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.legend}>
         {month.shares.map((s, i) => (
           <Pressable key={s.key} testID={`month-legend-${s.key}`} onPress={() => choose(s.key)} style={[styles.item, dim(s.key)]}>
@@ -139,9 +158,13 @@ const styles = StyleSheet.create({
   sum: { fontSize: 30, lineHeight: 34, fontWeight: "500", letterSpacing: -1, color: color.fg.default, fontVariant: ["tabular-nums"] },
   // Its own spacing is the small gap between the sign and the figure.
   sign: { fontSize: 15, letterSpacing: 2, color: color.fg.subtle },
+  clear: { color: "transparent" },
+  // The sum is the tallest thing in its row and stands at the row's left top: the count is drawn right over it.
+  count: { position: "absolute", left: 0, top: 0 },
   average: { ...type.label, fontWeight: "400", color: color.fg.muted, fontVariant: ["tabular-nums"], flexShrink: 1, textAlign: "right" },
   // The strip sits 12 pt under the sum and 12 pt over the names' rows; the buttons' air overlaps what is around them.
-  bar: { flexDirection: "row", gap: 2, marginTop: space.md - BAR_AIR, marginBottom: -BAR_AIR },
+  barWindow: { marginTop: space.md - BAR_AIR, marginBottom: -BAR_AIR },
+  bar: { flexDirection: "row", gap: 2 },
   share: { flexBasis: 0, flexShrink: 1, minWidth: 3, minHeight: touchMin, justifyContent: "center" },
   strip: { height: STRIP },
   stripFirst: { borderTopLeftRadius: STRIP_RADIUS, borderBottomLeftRadius: STRIP_RADIUS },

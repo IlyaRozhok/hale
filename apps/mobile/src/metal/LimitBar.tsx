@@ -6,6 +6,7 @@ import { tokens } from "@hale/tokens";
 import type { LimitState } from "../limitState";
 import { useMetalClock } from "./useMetalClock";
 import { useAppActive, useReduceMotion } from "./useMetalActive";
+import { growLevel } from "./level";
 
 const { color } = tokens;
 /** The strip is thin; the canvas is taller so the spark's glow is not clipped. */
@@ -22,6 +23,8 @@ type Props = {
   /** Share of the daily limit left, 0..1. */
   level: number;
   state: LimitState;
+  /** The screen's entrance key (task ЧЛ8): with a new one above zero the strip grows to its length once. */
+  entrance?: number;
 };
 
 /**
@@ -29,28 +32,31 @@ type Props = {
  * spark at its end: green while plenty is left, sand when little. Once nothing is left the strip
  * fills and deepens to red, with a red spark (owner's choice). Only the spark glows, and it
  * breathes slowly; still in the background and under reduce-motion.
+ *
+ * With an entrance key the strip grows from nothing to its length over a second, the spark at its end, and then
+ * stands. A day over the limit does not grow its red strip: it is there at once.
  */
-export function LimitBar({ level, state }: Props) {
+export function LimitBar({ level, state, entrance = 0 }: Props) {
   const [width, setWidth] = useState(0);
   const reduced = useReduceMotion();
   const active = useAppActive();
-  const { time, shown } = useMetalClock(state === "over" ? 1 : level, active && !reduced, reduced);
+  const { time, shown, grown } = useMetalClock(state === "over" ? 1 : level, active && !reduced, reduced, state === "over" ? 0 : entrance);
   const onLayout = (e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width));
   return (
     <View style={styles.box} onLayout={onLayout} pointerEvents="none">
       {width > 0 && (
         <Canvas style={{ width, height: HEIGHT }}>
-          <Strip width={width} state={state} time={time} level={shown} />
+          <Strip width={width} state={state} time={time} level={shown} grown={grown} />
         </Canvas>
       )}
     </View>
   );
 }
 
-function Strip({ width, state, time, level }: { width: number; state: LimitState; time: SharedValue<number>; level: SharedValue<number> }) {
+function Strip({ width, state, time, level, grown }: { width: number; state: LimitState; time: SharedValue<number>; level: SharedValue<number>; grown: SharedValue<number> }) {
   const y = GLOW;
   const inner = width - GLOW * 2;
-  const filled = useDerivedValue(() => Math.max(STRIP, inner * level.value));
+  const filled = useDerivedValue(() => Math.max(STRIP, inner * level.value * growLevel(grown.value)));
   const tipX = useDerivedValue(() => GLOW + filled.value - SPARK);
   const glow = useDerivedValue(() => 0.45 + 0.25 * Math.sin((time.value * 2 * Math.PI) / BREATH));
   const spark = SPARK_COLOR[state];

@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { RunwayDto, TodayDto } from "@hale/contracts";
+import { watchMotion } from "../../testing";
 import { PaymentsSection } from "./PaymentsSection";
 
 const TODAY = "2026-11-24";
@@ -128,5 +129,60 @@ describe("PaymentsSection (ЧЛ6)", () => {
     await fireEvent.press(more);
     expect(onOpenPlan).toHaveBeenCalledTimes(1);
     expect(onPay).not.toHaveBeenCalled();
+  });
+});
+
+describe("PaymentsSection, the entrance (ЧЛ8)", () => {
+  const appear = (id: string) => screen.getByTestId(`payment-appear-${id}`);
+  const opacity = (id: string) => Number(JSON.stringify(flat(appear(id)).opacity));
+  const ALL = ["1", "2", "3", "more"];
+  let motion: ReturnType<typeof watchMotion>;
+  beforeEach(() => {
+    motion = watchMotion();
+  });
+  afterEach(() => motion.restore());
+
+  it("without an entrance key every row is simply there and nothing is animated", async () => {
+    await render(<PaymentsSection runway={run(five)} upcoming={listed(five)} today={TODAY} />);
+    ALL.forEach((id) => expect(opacity(id)).toBe(1));
+    expect(motion.asked()).toEqual([]);
+  });
+
+  it("with a key the rows start unseen and fade in one after another, «Ещё N» last, all well within a second", async () => {
+    await render(<PaymentsSection runway={run(five)} upcoming={listed(five)} today={TODAY} entrance={1} />);
+    ALL.forEach((id) => expect(opacity(id)).toBe(0));
+    const asked = motion.asked();
+    expect(asked.map((a) => a.delay)).toEqual([0, 70, 140, 210]);
+    asked.forEach((a) => expect(a.duration).toBe(260));
+    expect(Math.max(...asked.map((a) => a.delay + a.duration))).toBeLessThan(700);
+  });
+
+  it("the rows are buttons with their names from the first frame", async () => {
+    const onPay = jest.fn();
+    const onOpenPlan = jest.fn();
+    await render(<PaymentsSection runway={run(five)} upcoming={listed(five)} today={TODAY} onPay={onPay} onOpenPlan={onOpenPlan} entrance={1} />);
+    await fireEvent.press(screen.getByRole("button", { name: "Квартплата, завтра, ₴17,000: отметить оплату" }));
+    expect(onPay).toHaveBeenCalledWith("1");
+    await fireEvent.press(screen.getByRole("button", { name: "Ещё 2 · ₴3,500" }));
+    expect(onOpenPlan).toHaveBeenCalledTimes(1);
+  });
+
+  it("a re-render and the key going back to 0 start nothing; a new key plays again from the start", async () => {
+    const props = { runway: run(three), upcoming: listed(three), today: TODAY };
+    const { rerender } = await render(<PaymentsSection {...props} entrance={1} />);
+    expect(motion.asked()).toHaveLength(3);
+    await rerender(<PaymentsSection {...props} entrance={1} />);
+    await rerender(<PaymentsSection {...props} entrance={0} />);
+    expect(motion.asked()).toHaveLength(3);
+    await rerender(<PaymentsSection {...props} entrance={2} />);
+    expect(motion.asked()).toHaveLength(6);
+    expect(opacity("1")).toBe(0);
+  });
+
+  it("a section first drawn with no key (a payment appeared later) does not play", async () => {
+    const { rerender } = await render(<PaymentsSection runway={run([])} upcoming={[]} today={TODAY} entrance={0} />);
+    await rerender(<PaymentsSection runway={run(three)} upcoming={listed(three)} today={TODAY} entrance={0} />);
+    expect(opacity("1")).toBe(1);
+    expect(motion.asked()).toEqual([]);
   });
 });

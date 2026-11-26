@@ -4,6 +4,7 @@ import type { DailyStateDto } from "@hale/contracts";
 import { LimitBar } from "../../metal";
 import { limitState } from "../../limitState";
 import { formatMoney, streakLabel } from "../../format";
+import { useCountUp } from "../../useEntrance";
 import { Icon } from "../Icon";
 import { LAYOUT } from "../layout";
 
@@ -28,17 +29,23 @@ export const isOverLimit = (state: DailyStateDto): boolean => state.dailyLimit >
  * - the day the shortage mode came on (`state.shortageStart`) — «Новый лимит ₴Y действует с завтра» instead of the line;
  * - no limit — a note why, and «Потрачено ₴X» when something was spent.
  * `streak` only extends the accessibility hint.
+ * `entrance` is the screen's entrance key (task ЧЛ8; 0 or absent — no motion): with a new one the figure counts up to
+ * its amount and the strip grows to its length. The amount itself is laid out and read aloud from the first frame —
+ * the counting figure is drawn over it — so nothing moves around it and VoiceOver never hears a figure on the way.
+ * «₴0» has nothing to count, and a day over the limit does not grow its red strip.
  */
 export function LimitCard({
   state,
   streak,
   onOpenCalendar,
   onOpenParts,
+  entrance = 0,
 }: {
   state: DailyStateDto;
   streak: number;
   onOpenCalendar: () => void;
   onOpenParts?: () => void;
+  entrance?: number;
 }) {
   const level = state.leftToday > 0 ? Math.min(1, Math.max(0, state.level)) : 0;
   const hasLimit = state.dailyLimit > 0;
@@ -66,13 +73,25 @@ export function LimitCard({
       : `${heading} ${formatMoney(shownLeft)}. ${noLimitNote}`;
 
   // Never below zero here, so it always starts with the sign: the sign is drawn half the size and quiet.
-  const figure = formatMoney(over ? 0 : shownLeft);
+  const left = over ? 0 : shownLeft;
+  const figure = formatMoney(left);
   const openParts = hasLimit ? onOpenParts : undefined;
+  const counted = useCountUp(left, entrance);
+  const counting = counted === null ? null : formatMoney(counted);
   const amount = (
-    <Text style={styles.amount}>
-      <Text style={styles.sign}>{figure.slice(0, 1)}</Text>
-      {figure.slice(1)}
-    </Text>
+    <View>
+      {/* While the figure counts, the amount keeps its place with clear ink and the count is drawn over it. */}
+      <Text style={[styles.amount, counting !== null && styles.clear]}>
+        <Text style={[styles.sign, counting !== null && styles.clear]}>{figure.slice(0, 1)}</Text>
+        {figure.slice(1)}
+      </Text>
+      {counting !== null && (
+        <Text testID="limit-count" style={[styles.amount, styles.count]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" numberOfLines={1}>
+          <Text style={styles.sign}>{counting.slice(0, 1)}</Text>
+          {counting.slice(1)}
+        </Text>
+      )}
+    </View>
   );
 
   return (
@@ -103,7 +122,7 @@ export function LimitCard({
             onPress={onOpenCalendar}
             style={styles.bar}
           >
-            <LimitBar level={level} state={dayState} />
+            <LimitBar level={level} state={dayState} entrance={entrance} />
           </Pressable>
           {/* The line at the left; with something to explain, the «Как посчитано» chip at its right (ЧЛ4). */}
           <View style={styles.lineRow}>
@@ -154,6 +173,8 @@ const styles = StyleSheet.create({
   amount: { ...type.hero, marginTop: space.xs, color: color.fg.default, fontVariant: ["tabular-nums"] },
   // Its own spacing is the small gap between the sign and the figure.
   sign: { fontSize: type.hero.fontSize / 2, letterSpacing: 3, color: color.fg.subtle },
+  clear: { color: "transparent" },
+  count: { position: "absolute", left: 0, top: 0 },
   bar: { paddingTop: FIGURE_TO_BAR - BAR_GLOW },
   // The button reaches up over the strip's lower glow, so the text sits where the mockup has it and the target stays 44 pt.
   lineRow: { flexDirection: "row", alignItems: "center", gap: space.sm, marginTop: BAR_TO_LINE - BAR_GLOW - LINE_AIR },
