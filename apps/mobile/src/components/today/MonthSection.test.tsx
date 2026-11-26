@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
-import { insightsFixture } from "../../testing";
+import { insightsFixture, passTime, watchMotion } from "../../testing";
 import { MonthSection } from "./MonthSection";
 
 const { color, touchMin } = tokens;
@@ -169,5 +169,74 @@ describe("MonthSection (ЧЛ7)", () => {
     const texts = screen.getAllByText(/./, HIDDEN);
     expect(texts.length).toBeGreaterThan(10);
     for (const t of texts) expect(loud).not.toContain(flat(t).color);
+  });
+});
+
+describe("MonthSection, the entrance (ЧЛ8)", () => {
+  const shift = (node: { props: { style?: unknown } }) => Number(JSON.stringify((flat(node).transform as { translateX: unknown }[])[0]!.translateX));
+  const bar = () => screen.getByTestId("month-bar");
+  const SUM_LABEL = "Потрачено ₴18,220, в среднем ₴1,139 в день";
+  let motion: ReturnType<typeof watchMotion>;
+  beforeEach(() => {
+    jest.useFakeTimers();
+    motion = watchMotion();
+  });
+  afterEach(() => {
+    motion.restore();
+    jest.useRealTimers();
+  });
+
+  it("without an entrance key the sum and the bar are simply there and nothing is animated", async () => {
+    await render(<MonthSection insights={insightsFixture()} categories={null} />);
+    expect(screen.queryByTestId("month-count")).toBeNull();
+    expect(flat(screen.getByText("₴18,220")).color).toBe(color.fg.default);
+    expect(shift(bar())).toBe(0);
+    expect(motion.asked()).toEqual([]);
+    await passTime(2000);
+    expect(screen.queryByTestId("month-count")).toBeNull();
+  });
+
+  it("with a key the sum counts up from zero over its own place for 0.9 s and ends as the sum itself", async () => {
+    await render(<MonthSection insights={insightsFixture()} categories={null} entrance={1} />);
+    // The sum keeps its place from the first frame, with clear ink; the count is drawn over it and is not in the flow.
+    expect(flat(screen.getByText("₴18,220")).color).toBe("transparent");
+    const count = () => screen.getByTestId("month-count");
+    expect(count()).toHaveTextContent("₴0");
+    expect(flat(count())).toMatchObject({ position: "absolute", left: 0, top: 0, fontSize: 30, color: color.fg.default });
+    // VoiceOver has the sum itself all the while, never a figure on the way.
+    expect(screen.getByLabelText(SUM_LABEL)).toBeTruthy();
+    await passTime(450);
+    // On the way: a whole figure below the sum, in the money's own format.
+    expect(count()).toHaveTextContent(/^₴1\d,\d{3}$/);
+    expect(screen.getByLabelText(SUM_LABEL)).toBeTruthy();
+    await passTime(430);
+    expect(screen.queryByTestId("month-count")).not.toBeNull();
+    await passTime(40);
+    expect(screen.queryByTestId("month-count")).toBeNull();
+    expect(flat(screen.getByText("₴18,220")).color).toBe(color.fg.default);
+    expect(screen.getByLabelText(SUM_LABEL)).toBeTruthy();
+  });
+
+  it("with a key the bar starts wholly covered and is uncovered from the left over a second; its shares keep their widths", async () => {
+    await render(<MonthSection insights={insightsFixture()} categories={null} entrance={1} />);
+    expect(flat(bar()).overflow).toBe("hidden");
+    // The window is off by the screen's width, which the bar is never wider than.
+    expect(shift(bar())).toBe(-750);
+    expect(motion.asked()).toEqual([{ duration: 1000, delay: 0 }]);
+    expect(KEYS.map((k) => flat(share(k)).flexGrow)).toEqual([880_000, 320_000, 215_000, 164_000, 268_000]);
+  });
+
+  it("the names under the bar choose a share while it plays", async () => {
+    await render(<MonthSection insights={insightsFixture()} categories={null} entrance={1} />);
+    await fireEvent.press(legend("cafe"));
+    expect(share("cafe").props.accessibilityState).toEqual({ selected: true });
+  });
+
+  it("a section first drawn with no key (the month came on a background refetch) does not play", async () => {
+    const { rerender } = await render(<MonthSection insights={undefined} categories={null} entrance={0} />);
+    await rerender(<MonthSection insights={insightsFixture()} categories={null} entrance={0} />);
+    expect(screen.queryByTestId("month-count")).toBeNull();
+    expect(shift(bar())).toBe(0);
+    expect(motion.asked()).toEqual([]);
   });
 });

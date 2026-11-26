@@ -23,6 +23,7 @@ const { color, space, touchMin, type } = tokens;
  * - With no income date there is no top at all and `Runway` draws its own head.
  * - `runwayLimit` is the limit the runway is drawn for: on the day the shortage came on it is tomorrow's (А23).
  * - `onPay` gets the id of the payment touched on the chart.
+ * - `entrance` is the screen's entrance key (task ЧЛ8), passed on to the chart, whose line draws itself.
  */
 export function UntilIncomeCard({
   runway,
@@ -32,6 +33,7 @@ export function UntilIncomeCard({
   today,
   onOpenPace,
   onPay,
+  entrance = 0,
 }: {
   runway: RunwayDto;
   pace: PaceDto | null;
@@ -42,6 +44,7 @@ export function UntilIncomeCard({
   today: string;
   onOpenPace: () => void;
   onPay: (id: string) => void;
+  entrance?: number;
 }) {
   // «останется» only when something is left at the limit; otherwise, and with no income date, the runway names its
   // reserve as before.
@@ -90,7 +93,7 @@ export function UntilIncomeCard({
           </View>
         )
       )}
-      <Runway runway={runway} today={today} showHead={incomeOn === null} onPay={onPay} />
+      <Runway runway={runway} today={today} showHead={incomeOn === null} onPay={onPay} entrance={entrance} />
     </View>
   );
 }

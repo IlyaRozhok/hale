@@ -2,6 +2,7 @@
 // 'worklet' directives, on the Reanimated UI thread.
 
 import { tokens } from "@hale/tokens";
+import { ENTRANCE } from "../entrance";
 
 /** Time (seconds) the shader is frozen at when motion is reduced: a pleasant, fixed pose. */
 export const STILL_TIME = tokens.metal.stillTime;
@@ -46,4 +47,28 @@ export function stepLevel(current: number, target: number, dtSeconds: number, re
   const k = 1 - Math.exp(-dtSeconds / LEVEL_TAU);
   const next = from + (to - from) * k;
   return Math.abs(to - next) < 1e-4 ? to : next;
+}
+
+/** Seconds the strip takes to grow to its length when the screen opens (task ЧЛ8). */
+export const GROW_SECONDS = ENTRANCE.barMs / 1000;
+
+/** The longest frame the growth counts: a slow first frame must not eat the beginning of it. */
+const GROW_FRAME = 0.05;
+
+/**
+ * The share of its length the strip shows `seconds` after its entrance began: 0 at the start, 1 from
+ * `GROW_SECONDS` on. Ease-out, so it never overshoots. Anything that is not a time counts as grown.
+ */
+export function growLevel(seconds: number): number {
+  "worklet";
+  if (Number.isNaN(seconds) || seconds >= GROW_SECONDS) return 1;
+  if (seconds <= 0) return 0;
+  return 1 - (1 - seconds / GROW_SECONDS) ** 3;
+}
+
+/** One frame of the growth: the time since the entrance began, moved on by `dtSeconds` and stopped at the end. */
+export function stepGrow(seconds: number, dtSeconds: number): number {
+  "worklet";
+  if (!Number.isFinite(dtSeconds) || dtSeconds <= 0) return seconds;
+  return Math.min(GROW_SECONDS, seconds + Math.min(dtSeconds, GROW_FRAME));
 }

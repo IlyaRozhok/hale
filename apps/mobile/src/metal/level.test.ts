@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { STILL_TIME, clampLevel, shaderTime, stepLevel, waveLevel } from "./level";
+import { GROW_SECONDS, STILL_TIME, clampLevel, growLevel, shaderTime, stepGrow, stepLevel, waveLevel } from "./level";
 
 describe("clampLevel", () => {
   it("keeps values inside 0..1", () => {
@@ -76,5 +76,48 @@ describe("stepLevel", () => {
     expect(stepLevel(0.2, 3, 1 / 60, true)).toBe(1);
     expect(stepLevel(0.2, 0.9, NaN, false)).toBe(0.2);
     expect(stepLevel(0.2, 0.9, -1, false)).toBe(0.2);
+  });
+});
+
+// Task ЧЛ8: the strip grows to its length once, when «Сегодня» opens.
+describe("growLevel", () => {
+  it("takes a second, as the spec's bars do", () => {
+    expect(GROW_SECONDS).toBe(1);
+  });
+
+  it("goes from nothing to the whole length, never past it and never back", () => {
+    expect(growLevel(0)).toBe(0);
+    expect(growLevel(GROW_SECONDS)).toBe(1);
+    expect(growLevel(GROW_SECONDS + 5)).toBe(1);
+    expect(growLevel(-1)).toBe(0);
+    expect(growLevel(NaN)).toBe(1);
+    let before = 0;
+    for (let t = 0; t <= GROW_SECONDS; t += 1 / 60) {
+      const now = growLevel(t);
+      expect(now).toBeGreaterThanOrEqual(before);
+      expect(now).toBeLessThanOrEqual(1);
+      before = now;
+    }
+  });
+
+  it("eases out: more than half the way in half the time", () => {
+    expect(growLevel(GROW_SECONDS / 2)).toBeGreaterThan(0.5);
+  });
+});
+
+describe("stepGrow", () => {
+  it("moves on by the frame's time and stops at the end", () => {
+    expect(stepGrow(0, 1 / 60)).toBeCloseTo(1 / 60);
+    expect(stepGrow(GROW_SECONDS - 0.001, 1 / 60)).toBe(GROW_SECONDS);
+    expect(stepGrow(GROW_SECONDS, 1 / 60)).toBe(GROW_SECONDS);
+  });
+
+  it("a long first frame does not eat the growth", () => {
+    expect(stepGrow(0, 0.8)).toBeLessThanOrEqual(0.05);
+  });
+
+  it("stands still for a frame with no time", () => {
+    expect(stepGrow(0.3, 0)).toBe(0.3);
+    expect(stepGrow(0.3, NaN)).toBe(0.3);
   });
 });

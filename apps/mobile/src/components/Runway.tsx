@@ -2,9 +2,11 @@ import { useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent, type LayoutChangeEvent } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { RunwayDto } from "@hale/contracts";
+import { ENTRANCE } from "../entrance";
 import { dayMonth, formatMoney } from "../format";
 import { nearestDay, runwayChart, runwayLabels, textWidth, type LabelBox } from "../runwayChart";
 import { runwayGesture, type RunwayGesture } from "../runwayGesture";
+import { Wipe } from "./Entrance";
 import { RunwayLine } from "./RunwayLine";
 
 const { color, space, touchMin, type } = tokens;
@@ -47,18 +49,24 @@ const dateOf = (iso: string) => {
  * end of the line what is left by the income (only with an income date and a reserve not below zero; below zero the
  * sand «ноль» label speaks). `runwayLabels` finds their places; they take no touch and are hidden from assistive
  * tech, which gets the whole picture in words: on the head, or on the chart when the head is not shown.
+ *
+ * `entrance` is an entrance key (task ЧЛ8; 0 or absent — no motion): with a new one the line draws itself from
+ * today to the last day, and what is written on the chart fades in as the line comes to its end. The chart takes a
+ * touch all the while.
  */
 export function Runway({
   runway,
   today,
   onPay,
   showHead = true,
+  entrance = 0,
 }: {
   runway: RunwayDto;
   today: string;
   onPay?: (paymentId: string) => void;
   /** False when the screen says the reserve itself, in the words of «До дохода» (task ЯМ1). */
   showHead?: boolean;
+  entrance?: number;
 }) {
   const [width, setWidth] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
@@ -143,6 +151,44 @@ export function Runway({
     const event = runway.events.find((e) => e.id === l.id);
     return event ? [{ ...l, event }] : [];
   });
+  // What is written on the chart: it fades in as the line comes to its end (task ЧЛ8).
+  const written = (
+    <>
+      {crossX !== null && runway.zeroOn && (
+        <Text
+          style={[styles.cross, zeroTurned ? { right: width - crossX + space.sm, top: chart.zeroY + 2 } : { left: crossX + space.sm, top: chart.zeroY - 18 }]}
+          pointerEvents="none"
+        >
+          {zeroText}
+        </Text>
+      )}
+      {width > 0 && (named.length > 0 || labels.end) && (
+        <View testID="runway-labels" style={StyleSheet.absoluteFill} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          {named.map(({ event, side, box }) => (
+            <View
+              key={event.id}
+              testID={`runway-label-${event.id}`}
+              style={[styles.payLabel, { top: box.top, maxWidth: box.width }, side === "right" ? { left: EDGE + box.left } : { right: width - EDGE - box.left - box.width }]}
+            >
+              <Text style={styles.payLabelName} numberOfLines={1} allowFontScaling={false}>
+                {event.name}
+              </Text>
+              {/* The amount never gives way and is never cut: only the name shrinks. */}
+              <Text style={styles.payLabelAmount} allowFontScaling={false}>
+                {formatMoney(-event.amount)}
+              </Text>
+            </View>
+          ))}
+          {labels.end && endText !== null && (
+            // Held by its right edge alone, with no width of its own: an amount is never drawn with an ellipsis.
+            <Text testID="runway-end" style={[styles.endLabel, { top: labels.end.top, right: EDGE }]} allowFontScaling={false}>
+              {endText}
+            </Text>
+          )}
+        </View>
+      )}
+    </>
+  );
   return (
     <View style={styles.root}>
       {showHead && (
@@ -170,39 +216,10 @@ export function Runway({
               gesture.current = null;
             }}
           >
-            {width > 0 && <RunwayLine chart={chart} width={width} height={HEIGHT} edge={EDGE} selected={selected} />}
-            {crossX !== null && runway.zeroOn && (
-              <Text
-                style={[styles.cross, zeroTurned ? { right: width - crossX + space.sm, top: chart.zeroY + 2 } : { left: crossX + space.sm, top: chart.zeroY - 18 }]}
-                pointerEvents="none"
-              >
-                {zeroText}
-              </Text>
-            )}
-            {width > 0 && (named.length > 0 || labels.end) && (
-              <View testID="runway-labels" style={StyleSheet.absoluteFill} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-                {named.map(({ event, side, box }) => (
-                  <View
-                    key={event.id}
-                    testID={`runway-label-${event.id}`}
-                    style={[styles.payLabel, { top: box.top, maxWidth: box.width }, side === "right" ? { left: EDGE + box.left } : { right: width - EDGE - box.left - box.width }]}
-                  >
-                    <Text style={styles.payLabelName} numberOfLines={1} allowFontScaling={false}>
-                      {event.name}
-                    </Text>
-                    {/* The amount never gives way and is never cut: only the name shrinks. */}
-                    <Text style={styles.payLabelAmount} allowFontScaling={false}>
-                      {formatMoney(-event.amount)}
-                    </Text>
-                  </View>
-                ))}
-                {labels.end && endText !== null && (
-                  // Held by its right edge alone, with no width of its own: an amount is never drawn with an ellipsis.
-                  <Text testID="runway-end" style={[styles.endLabel, { top: labels.end.top, right: EDGE }]} allowFontScaling={false}>
-                    {endText}
-                  </Text>
-                )}
-              </View>
+            {width > 0 && (
+              <Wipe testID="runway-draw" play={entrance} ms={ENTRANCE.lineMs} span={width} style={{ width, height: HEIGHT }} over={written}>
+                <RunwayLine chart={chart} width={width} height={HEIGHT} edge={EDGE} selected={selected} />
+              </Wipe>
             )}
           </View>
           <View style={styles.axis}>

@@ -35,6 +35,7 @@ import { QuestionsSheet, openQuestions } from "../components/today/QuestionsShee
 import { TodayHeader, TodayHeaderProfileOnly } from "../components/today/TodayHeader";
 import { UntilIncomeCard } from "../components/today/UntilIncomeCard";
 import { limitSheet } from "../limitSheet";
+import { useEntrance } from "../useEntrance";
 import { usePullRefresh } from "../usePullRefresh";
 import { Settings } from "./Settings";
 
@@ -70,6 +71,12 @@ export function Today({ onOpenActivity, onOpenObservation, onOpenPlan, onOpenIns
     return today.refetch();
   }, [refetchInsights, today.refetch]);
   const pull = usePullRefresh(refetchAll);
+  // The entrance (task ЧЛ8): its key is new once when the data is first shown and once after a pull that brought
+  // data, and 0 the rest of the time — on a background refetch, a sheet, a re-render, under reduce motion. The tab
+  // stays mounted while another is open, so coming back to it is none of these moments. The month has a key of its
+  // own: its request is separate and may answer later than the rest.
+  const entrance = useEntrance({ shown: today.data !== undefined, stamp: today.dataUpdatedAt, pulling: pull.refreshing, fetching: today.isFetching });
+  const monthEntrance = useEntrance({ shown: insights.data != null, stamp: insights.dataUpdatedAt, pulling: pull.refreshing, fetching: insights.isFetching });
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
   const [sheet, setSheet] = useState<"bridge" | "questions" | "calendar" | "loans" | "subscriptions" | "pace" | "limit" | null>(null);
   const [paying, setPaying] = useState<TodayDto["upcoming"][number] | null>(null);
@@ -186,7 +193,13 @@ export function Today({ onOpenActivity, onOpenObservation, onOpenPlan, onOpenIns
       >
         <TodayHeader date={data.date} questions={questions.length} onOpenQuestions={() => setSheet("questions")} onOpenSettings={openSettings} />
         <Freshness data={data} offlineSince={offlineSince} now={now()} />
-        <LimitCard state={state} streak={data.streak ?? 0} onOpenCalendar={() => setSheet("calendar")} onOpenParts={limitParts ? () => setSheet("limit") : undefined} />
+        <LimitCard
+          state={state}
+          streak={data.streak ?? 0}
+          onOpenCalendar={() => setSheet("calendar")}
+          onOpenParts={limitParts ? () => setSheet("limit") : undefined}
+          entrance={entrance}
+        />
         {phrase && <DayPhraseRow phrase={phrase} date={data.date} onAct={act} markShown={markShown} />}
         {state.mode === "bridge" && state.bridge?.confirmed && <BridgePlanRow dailyLimit={state.dailyLimit} onPress={() => setSheet("bridge")} />}
 
@@ -199,10 +212,11 @@ export function Today({ onOpenActivity, onOpenObservation, onOpenPlan, onOpenIns
             today={data.date}
             onOpenPace={() => setSheet("pace")}
             onPay={pay}
+            entrance={entrance}
           />
         )}
         {/* Draws nothing without a runway (an older server), an income date or payments. */}
-        <PaymentsSection runway={runway} upcoming={data.upcoming} today={data.date} onPay={pay} onOpenPlan={onOpenPlan} />
+        <PaymentsSection runway={runway} upcoming={data.upcoming} today={data.date} onPay={pay} onOpenPlan={onOpenPlan} entrance={entrance} />
         {notes.map((b) => (
           <BadCaseCard key={b.id} text={b.text} />
         ))}
@@ -210,7 +224,7 @@ export function Today({ onOpenActivity, onOpenObservation, onOpenPlan, onOpenIns
           The month comes last, under the notes: a note is a warning and stays where it was, right under the payments.
           Draws nothing without «Итоги» (loading, failed, an older server) or in a month with nothing spent.
         */}
-        <MonthSection insights={insights.data} categories={categories} onOpenInsights={onOpenInsights} />
+        <MonthSection insights={insights.data} categories={categories} onOpenInsights={onOpenInsights} entrance={monthEntrance} />
       </ScrollView>
 
       {/* A loan to return opens the same list as in Plan (task Б7). */}

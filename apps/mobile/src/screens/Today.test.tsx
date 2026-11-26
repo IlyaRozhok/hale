@@ -3,13 +3,15 @@ import { Alert, StyleSheet } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { BridgeStateDto, DailyStateDto } from "@hale/contracts";
 import { Today } from "./Today";
-import { calendarFixture, fakeApi, insightsFixture, loanFixture, loanHistoryFixture, makeClient, renderWith, todayFixture } from "../testing";
+import { allowMotion, passTime, watchMotion, calendarFixture, fakeApi, insightsFixture, loanFixture, loanHistoryFixture, makeClient, renderWith, todayFixture } from "../testing";
 import { ApiError, NetworkError } from "../api/client";
 
 jest.mock("../metal", () => {
   const { View } = require("react-native");
   return {
-    LimitBar: ({ level, state }: { level: number; state: string }) => <View testID="limit-visual" accessibilityHint={`bar:${state}:${level}`} />,
+    LimitBar: ({ level, state, entrance = 0 }: { level: number; state: string; entrance?: number }) => (
+      <View testID="limit-visual" accessibilityHint={`bar:${state}:${level}`} accessibilityValue={{ text: `entrance:${entrance}` }} />
+    ),
   };
 });
 jest.mock("@react-native-community/slider", () => {
@@ -2329,5 +2331,157 @@ describe("Today, the sheet «Как посчитан лимит» (ЧЛ4)", () =
     await fireEvent.press(screen.getByRole("button", { name: "План до дохода ₴450 в день" }));
     expect(await screen.findByText("Не хватает до дохода")).toBeTruthy();
     expect(sheetOpen()).toBe(false);
+  });
+});
+
+describe("Today, the entrance (ЧЛ8)", () => {
+  const control = () => screen.getByTestId("today-scroll").props.refreshControl.props as { refreshing: boolean; onRefresh: () => void };
+  /** The entrance key the limit's strip was last given: 0 when nothing plays. */
+  const key = () => Number((screen.getByTestId("limit-visual", HIDDEN).props.accessibilityValue as { text: string }).text.split(":")[1]);
+  const counting = () => screen.queryByTestId("limit-count", HIDDEN) !== null;
+  const monthCounting = () => screen.queryByTestId("month-count", HIDDEN) !== null;
+  const rowOpacity = () => Number(JSON.stringify(StyleSheet.flatten(screen.getByTestId("payment-appear-1").props.style).opacity));
+  /** Waits until the entrance is over: the key is back to 0 and every figure has counted. */
+  const over = async () => {
+    await passTime(1800);
+    expect(key()).toBe(0);
+  };
+
+  describe("with motion", () => {
+    let reduceAgain: () => void;
+    let motion: ReturnType<typeof watchMotion>;
+    beforeEach(() => {
+      reduceAgain = allowMotion();
+      motion = watchMotion();
+      jest.useFakeTimers();
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+      motion.restore();
+      reduceAgain();
+    });
+
+    it("plays once when the data first comes: the figure counts, the strip, the line and the rows get the key; then all is still", async () => {
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+      await screen.findByText("Сегодня можно");
+      expect(key()).toBe(1);
+      expect(counting()).toBe(true);
+      expect(rowOpacity()).toBe(0);
+      // The one payment's row, the month's bar over a second and, once the chart knows its width, the line over 1.4 s.
+      await fireEvent(screen.getByTestId("runway-chart"), "layout", { nativeEvent: { layout: { width: 342, height: 112 } } });
+      expect(motion.asked().map((a) => a.duration).sort((a, b) => a - b)).toEqual([260, 1000, 1400]);
+      // The amount itself is on the screen from the first frame, and it is what VoiceOver is told.
+      // It keeps its place with clear ink while the count is drawn over it, out of the flow and hidden from VoiceOver.
+      expect(StyleSheet.flatten(screen.getByText("₴720").props.style).color).toBe("transparent");
+      const count = screen.getByTestId("limit-count", HIDDEN);
+      expect(count).toHaveTextContent(/^₴\d{1,3}$/);
+      expect(StyleSheet.flatten(count.props.style)).toMatchObject({ position: "absolute", left: 0, top: 0, fontSize: tokens.type.hero.fontSize });
+      expect(count.props.accessibilityElementsHidden).toBe(true);
+      expect(screen.getByRole("button", { name: "Сегодня можно ₴720, из ₴1,000 на день" })).toBeTruthy();
+      await passTime(1000);
+      expect(counting()).toBe(false);
+      expect(StyleSheet.flatten(screen.getByText("₴720").props.style).color).toBe(tokens.color.fg.default);
+      expect(key()).toBe(1);
+      await passTime(800);
+      expect(key()).toBe(0);
+      // Nothing was started again on the way, and nothing is left running.
+      expect(motion.asked()).toHaveLength(3);
+      const frames = jest.spyOn(globalThis, "requestAnimationFrame");
+      await passTime(500);
+      expect(frames).not.toHaveBeenCalled();
+      frames.mockRestore();
+    });
+
+    it("does not play on a background refetch, a failed pull, a sheet or a re-render; plays again after a pull that brought data", async () => {
+      const today = jest.fn(async () => todayFixture());
+      const client = makeClient();
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today }), client);
+      await screen.findByText("Сегодня можно");
+      await over();
+
+      // New figures from a background refetch appear in place.
+      const state = { ...todayFixture().state, leftToday: 50_000, level: 0.5 };
+      today.mockImplementationOnce(async () => todayFixture({ state }));
+      await act(async () => void client.refetchQueries({ queryKey: ["today"] }));
+      expect(await screen.findByText("₴500")).toBeTruthy();
+      expect(key()).toBe(0);
+      expect(counting()).toBe(false);
+
+      // A sheet opened and closed.
+      await fireEvent.press(screen.getByRole("button", { name: /^Сегодня можно/ }));
+      expect(key()).toBe(0);
+      expect(counting()).toBe(false);
+
+      // A pull that fails.
+      today.mockImplementationOnce(async () => {
+        throw new NetworkError();
+      });
+      await act(async () => control().onRefresh());
+      await waitFor(() => expect(control().refreshing).toBe(false));
+      expect(key()).toBe(0);
+      expect(counting()).toBe(false);
+
+      // A pull that brings data: the key is new in the very render that has the data.
+      let finish: (v: ReturnType<typeof todayFixture>) => void = noop;
+      today.mockImplementationOnce(() => new Promise((r) => (finish = r)));
+      await act(async () => control().onRefresh());
+      expect(key()).toBe(0);
+      await act(async () => finish(todayFixture()));
+      expect(screen.getByText("₴720")).toBeTruthy();
+      expect(key()).toBe(2);
+      expect(counting()).toBe(true);
+      await over();
+      expect(counting()).toBe(false);
+    });
+
+    it("the month plays its own entrance when it comes later than the rest, and again after a pull", async () => {
+      let month: (v: ReturnType<typeof insightsFixture>) => void = noop;
+      const insights = jest.fn(() => new Promise<ReturnType<typeof insightsFixture>>((r) => (month = r)));
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ insights }));
+      await screen.findByText("Сегодня можно");
+      await over();
+      const before = motion.asked().length;
+      await act(async () => month(insightsFixture()));
+      expect(await screen.findByText("₴18,220")).toBeTruthy();
+      expect(monthCounting()).toBe(true);
+      // Only the month's bar grows; the rest of the screen stands still.
+      expect(motion.asked().slice(before)).toEqual([{ duration: 1000, delay: 0 }]);
+      expect(key()).toBe(0);
+      expect(counting()).toBe(false);
+      await passTime(1800);
+      expect(monthCounting()).toBe(false);
+
+      // The month's answer to a pull comes after the spinner is gone: it still plays, once.
+      await act(async () => control().onRefresh());
+      await waitFor(() => expect(control().refreshing).toBe(false));
+      expect(monthCounting()).toBe(false);
+      await act(async () => month(insightsFixture()));
+      await waitFor(() => expect(monthCounting()).toBe(true));
+      await passTime(1000);
+      expect(monthCounting()).toBe(false);
+    });
+
+    it("a day over the limit shows «₴0» with nothing to count", async () => {
+      const state = { ...todayFixture().state, leftToday: -15_000, level: 0 };
+      await renderWith(<Today onOpenActivity={noop} />, fakeApi({ today: jest.fn(async () => todayFixture({ state })) }));
+      await screen.findByText("Сегодня можно");
+      expect(screen.getByText("₴0")).toBeTruthy();
+      expect(counting()).toBe(false);
+    });
+  });
+
+  it("under reduce motion nothing plays: everything is in its place at once, also after a pull", async () => {
+    await renderWith(<Today onOpenActivity={noop} />, fakeApi());
+    await screen.findByText("Сегодня можно");
+    expect(key()).toBe(0);
+    expect(counting()).toBe(false);
+    expect(rowOpacity()).toBe(1);
+    await screen.findByText("₴18,220");
+    expect(monthCounting()).toBe(false);
+    await act(async () => control().onRefresh());
+    await waitFor(() => expect(control().refreshing).toBe(false));
+    expect(key()).toBe(0);
+    expect(counting()).toBe(false);
+    expect(monthCounting()).toBe(false);
   });
 });

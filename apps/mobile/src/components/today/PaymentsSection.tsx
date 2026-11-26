@@ -1,8 +1,10 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { tokens } from "@hale/tokens";
 import type { RunwayDto, TodayDto } from "@hale/contracts";
+import { ENTRANCE } from "../../entrance";
 import { dayMonth, formatMoney } from "../../format";
 import { paymentsSection, type PaymentRow } from "../../paymentsSection";
+import { Appear } from "../Entrance";
 import { Icon } from "../Icon";
 import { SECTION_MARGIN, SectionHead } from "./SectionHead";
 
@@ -19,6 +21,8 @@ const { color, space, touchMin, type } = tokens;
  *   given; otherwise it is plain text.
  * - With more than three payments the last row is «Ещё N · ₴сумма»; with `onOpenPlan` it is a button that calls it.
  * - The due words are sand for today, tomorrow and a payment that waits; nothing here is red.
+ * - `entrance` is the screen's entrance key (task ЧЛ8; 0 or absent — no motion): with a new one the rows fade in one
+ *   after another, «Ещё N» last. They are buttons, with their names for VoiceOver, from the first frame.
  */
 export function PaymentsSection({
   runway,
@@ -26,6 +30,7 @@ export function PaymentsSection({
   today,
   onPay,
   onOpenPlan,
+  entrance = 0,
 }: {
   runway: RunwayDto | null | undefined;
   upcoming: TodayDto["upcoming"];
@@ -33,9 +38,11 @@ export function PaymentsSection({
   today: string;
   onPay?: (id: string) => void;
   onOpenPlan?: () => void;
+  entrance?: number;
 }) {
   const section = paymentsSection(runway, upcoming, today);
   if (!section) return null;
+  const appear = (i: number) => ({ play: entrance, ms: ENTRANCE.rowMs, delay: i * ENTRANCE.rowStepMs });
   return (
     <View testID="payments-section" style={styles.section}>
       <View accessible accessibilityRole="header" accessibilityLabel={`Платежи, ${section.caption}`}>
@@ -43,19 +50,24 @@ export function PaymentsSection({
       </View>
       <View>
         {section.rows.map((row, i) => (
-          <Row key={row.id} row={row} divided={i > 0} onPay={row.payable ? onPay : undefined} />
+          <Appear key={row.id} testID={`payment-appear-${row.id}`} {...appear(i)}>
+            <Row row={row} divided={i > 0} onPay={row.payable ? onPay : undefined} />
+          </Appear>
         ))}
-        {section.more &&
-          (onOpenPlan ? (
-            <Pressable accessibilityRole="button" accessibilityLabel={section.more.text} accessibilityHint="Открывает план" onPress={onOpenPlan} style={[styles.row, styles.divided]}>
-              <Text style={styles.more}>{section.more.text}</Text>
-              <Icon name="chevron" color={color.list.chevron} size={14} />
-            </Pressable>
-          ) : (
-            <View style={[styles.row, styles.divided]}>
-              <Text style={styles.more}>{section.more.text}</Text>
-            </View>
-          ))}
+        {section.more && (
+          <Appear testID="payment-appear-more" {...appear(section.rows.length)}>
+            {onOpenPlan ? (
+              <Pressable accessibilityRole="button" accessibilityLabel={section.more.text} accessibilityHint="Открывает план" onPress={onOpenPlan} style={[styles.row, styles.divided]}>
+                <Text style={styles.more}>{section.more.text}</Text>
+                <Icon name="chevron" color={color.list.chevron} size={14} />
+              </Pressable>
+            ) : (
+              <View style={[styles.row, styles.divided]}>
+                <Text style={styles.more}>{section.more.text}</Text>
+              </View>
+            )}
+          </Appear>
+        )}
       </View>
     </View>
   );
